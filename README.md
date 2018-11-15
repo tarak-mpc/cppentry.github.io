@@ -1,120 +1,120 @@
-> March, 2016: If you're on an old version of Jekyll Now and run into a) build warnings or b) syntax highlighting issues caused by [Jekyll 3 and GitHub Pages updates](https://github.com/blog/2100-github-pages-now-faster-and-simpler-with-jekyll-3-0), just :sparkles:[update your _config.yml](https://github.com/barryclark/jekyll-now/pull/445/files):sparkles: and you'll be set!
+StrayBirds
+==========
 
-# Jekyll Now
+基于 GitHub Pages 搭建的极简博客，所有操作都可以直接通过浏览器完成。
 
-**Jekyll** is a static site generator that's perfect for GitHub hosted blogs ([Jekyll Repository](https://github.com/jekyll/jekyll))
+## 示例
 
-**Jekyll Now** makes it easier to create your Jekyll blog, by eliminating a lot of the up front setup.
+可以通过访问 [StrayBirds](http://minixalpha.github.io/StrayBirds/) 看到最终
+的效果，下面是截图:
 
-- You don't need to touch the command line
-- You don't need to install/configure ruby, rvm/rbenv, ruby gems :relaxed:
-- You don't need to install runtime dependencies like markdown processors, Pygments, etc
-- If you're on Windows, this will make setting up Jekyll a lot easier
-- It's easy to try out, you can just delete your forked repository if you don't like it
+![ui-demo](/images/ui_demo.png)
 
-In a few minutes you'll be set up with a minimal, responsive blog like the one below giving you more time to spend on writing epic blog posts!
+## 教程
 
-![Jekyll Now Theme Screenshot](/images/jekyll-now-theme-screenshot.jpg "Jekyll Now Theme Screenshot")
+### 使用方法
 
-## Quick Start
+1. 注册 GitHub，得到用户名，例如 minixbeta
+2. 到 [StrayBirds](https://github.com/minixalpha/StrayBirds) 页面，单击右上
+角的 Fork
+3. 到你 Fork 后的项目中，将 `_config.yml` 中的 username 修改为你的用户名 minixbeta
+4. 访问你的博客 http://minixbeta.github.io/StrayBirds/
 
-### Step 1) Fork Jekyll Now to your User Repository
+![create_project](/images/create_project.gif)
 
-Fork this repo, then rename the repository to yourgithubusername.github.io.
+**注意如果你是第一次使用 GitHub Pages，可能不会马上生效，等一段时间即可**
 
-Your Jekyll blog will often be viewable immediately at <https://yourgithubusername.github.io> (if it's not, you can often force it to build by completing step 2)
+**按照配置中说的方法修改项目名称可能会加快这一进程**
 
-![Step 1](/images/step1.gif "Step 1")
+### 配置
 
-### Step 2) Customize and view your site
+* 修改主题
 
-Enter your site name, description, avatar and many other options by editing the _config.yml file. You can easily turn on Google Analytics tracking, Disqus commenting and social icons here too.
+在 `_confg.yml` 下修改 theme 的值。
 
-Making a change to _config.yml (or any file in your repository) will force GitHub Pages to rebuild your site with jekyll. Your rebuilt site will be viewable a few seconds later at <https://yourgithubusername.github.io> - if not, give it ten minutes as GitHub suggests and it'll appear soon
+**注意修改主题后，并不会马上生效，GitHub 还要反应一段时间，所以请耐心等待**
 
-> There are 3 different ways that you can make changes to your blog's files:
+**修改主题后, 按照配置中说的方法修改项目名称可能会加快这一进程**
 
-> 1. Edit files within your new username.github.io repository in the browser at GitHub.com (shown below).
-> 2. Use a third party GitHub content editor, like [Prose by Development Seed](http://prose.io). It's optimized for use with Jekyll making markdown editing, writing drafts, and uploading images really easy.
-> 3. Clone down your repository and make updates locally, then push them to your GitHub repository.
+可选主题包括：
 
-![_config.yml](/images/config.png "_config.yml")
+- hack
+	![hack-demo](/images/hack-demo.png)
+- leap-day
+	![leap-day-demo](/images/leap-day-demo.png)
+- merlot
+	![merlot-demo](/images/merlot-demo.png)
+- midnight
+	![midnight-demo](/images/midnight-demo.png)
+- minimal
+	![minimal-demo](/images/minimal-demo.png)
+- modernist
+	![modernist-demo](/images/modernist-demo.png)
+- slate
+	![slate-demo](/images/slate-demo.png)
+- time-machine
+	![time-machine-demo](/images/time-machine-demo.png) 
+- kunka
+	![kunka-demo](/images/kunka-demo.png)
 
-### Step 3) Publish your first blog post
+* 修改项目名
 
-Edit `/_posts/2014-3-3-Hello-World.md` to publish your first blog post. This [Markdown Cheatsheet](http://www.jekyllnow.com/Markdown-Style-Guide/) might come in handy.
+例如将 StrayBirds 修改为 blog，那么你需要做的是
 
-![First Post](/images/first-post.png "First Post")
+1. 在项目的 Setting 中将 Repository name 从 StrayBirds 修改为 blog
+2. 将 `_config.yml` 中的 baseurl 修改为 /blog
+3. 通过 http://minixbeta.github.io/blog/ 来访问你的新博客
 
-> You can add additional posts in the browser on GitHub.com too! Just hit the + icon in `/_posts/` to create new content. Just make sure to include the [front-matter](http://jekyllrb.com/docs/frontmatter/) block at the top of each new blog post and make sure the post's filename is in this format: year-month-day-title.md
+![create_post](/images/change_project_name.gif)
 
-## Local Development
 
-1. Install Jekyll and plug-ins in one fell swoop. `gem install github-pages` This mirrors the plug-ins used by GitHub Pages on your local machine including Jekyll, Sass, etc.
-2. Clone down your fork `git clone https://github.com/yourusername/yourusername.github.io.git`
-3. Serve the site and watch for markup/sass changes `jekyll serve`
-4. View your website at http://127.0.0.1:4000/
-5. Commit any changes and push everything to the master branch of your GitHub user repository. GitHub Pages will then rebuild and serve your website.
+* 修改评论系统用户名
 
-## Moar!
+我们的评论系统使用的是 [Disqus](https://disqus.com/)，如果你想在这份博客模板中使用，需要先去注册一下，然后得到一个用户名，例如 minixalpha。然后在 `_config.yml` 中将 disqusname 修改为 minixalpha。
 
-I've created a more detailed walkthrough, [**Build A Blog With Jekyll And GitHub Pages**](http://www.smashingmagazine.com/2014/08/01/build-blog-jekyll-github-pages/) over at the Smashing Magazine website. Check it out if you'd like a more detailed walkthrough and some background on Jekyll. :metal:
+**千万注意: 如果你开启评论系统一定要修改这个值，不然就评论到我的评论系统中去了**
 
-It covers:
+### 添加文章
 
-- A more detailed walkthrough of setting up your Jekyll blog
-- Common issues that you might encounter while using Jekyll
-- Importing from Wordpress, using your own domain name, and blogging in your favorite editor
-- Theming in Jekyll, with Liquid templating examples
-- A quick look at Jekyll 2.0’s new features, including Sass/Coffeescript support and Collections
+在 `_post` 目录下添加形如 `2014-10-26-title.md` 的文章，用 markdown 格式
+撰写博客。
 
-## Jekyll Now Features
+例如：
 
-✓ Command-line free _fork-first workflow_, using GitHub.com to create, customize and post to your blog  
-✓ Fully responsive and mobile optimized base theme (**[Theme Demo](http://jekyllnow.com)**)  
-✓ Sass/Coffeescript support using Jekyll 2.0  
-✓ Free hosting on your GitHub Pages user site  
-✓ Markdown blogging  
-✓ Syntax highlighting  
-✓ Disqus commenting  
-✓ Google Analytics integration  
-✓ SVG social icons for your footer  
-✓ 3 http requests, including your avatar  
+```
+---
+layout: post
+title: Java 中的并发
+comments: true
+category: 技术
+---
 
-✘ No installing dependencies
-✘ No need to set up local development  
-✘ No configuring plugins  
-✘ No need to spend time on theming  
-✘ More time to code other things ... wait ✓!  
 
-## Questions?
+## 如何创建一个线程
 
-[Open an Issue](https://github.com/barryclark/jekyll-now/issues/new) and let's chat!
+按 Java 语言规范中的说法，创建线程只有一种方式，就是创建一个 Thread 对象。而从 HotSpot 虚拟机的角度看，创建一个虚拟机线程
+有两种方式，一种是创建 Thread 对象，另一种是创建 一个本地线程，加入到虚拟机线程中。
 
-## Other forkable themes
+...
 
-You can use the [Quick Start](https://github.com/barryclark/jekyll-now#quick-start) workflow with other themes that are set up to be forked too! Here are some of my favorites:
+```
 
-- [Hyde](https://github.com/poole/hyde) by MDO
-- [Lanyon](https://github.com/poole/lanyon) by MDO
-- [mojombo.github.io](https://github.com/mojombo/mojombo.github.io) by Tom Preston-Werner
-- [Left](https://github.com/holman/left) by Zach Holman
-- [Minimal Mistakes](https://github.com/mmistakes/minimal-mistakes) by Michael Rose
-- [Skinny Bones](https://github.com/mmistakes/skinny-bones-jekyll) by Michael Rose
+其中 `layout` 表示布局，不用改变，`title` 表示文章题目，`comments` 表示是否要开户评论。
 
-## Credits
+![create_post](/images/create_post.gif)
 
-- [Jekyll](https://github.com/jekyll/jekyll) - Thanks to its creators, contributors and maintainers.
-- [SVG icons](https://github.com/neilorangepeel/Free-Social-Icons) - Thanks, Neil Orange Peel. They're beautiful.
-- [Solarized Light Pygments](https://gist.github.com/edwardhotchkiss/2005058) - Thanks, Edward.
-- [Joel Glovier](http://joelglovier.com/writing/) - Great Jekyll articles. I used Joel's feed.xml in this repository.
-- [David Furnes](https://github.com/dfurnes), [Jon Uy](https://github.com/jonuy), [Luke Patton](https://github.com/lkpttn) - Thanks for the design/code reviews.
-- [Bart Kiers](https://github.com/bkiers), [Florian Simon](https://github.com/vermluh), [Henry Stanley](https://github.com/henryaj), [Hun Jae Lee](https://github.com/hunjaelee), [Javier Cejudo](https://github.com/javiercejudo), [Peter Etelej](https://github.com/etelej), [Ben Abbott](https://github.com/jaminscript), [Ray Nicholus](https://github.com/rnicholus), [Erin Grand](https://github.com/eringrand), [Léo Colombaro](https://github.com/LeoColomb), [Dean Attali](https://github.com/daattali), [Clayton Errington](https://github.com/cjerrington), [Colton Fitzgerald](https://github.com/coltonfitzgerald), [Trace Mayer](https://github.com/sunnankar) - Thanks for your [fantastic contributions](https://github.com/barryclark/jekyll-now/commits/master) to the project!
+## 感谢
 
-## Contributing
+Thanks to authors of the themes:
 
-Issues and Pull Requests are greatly appreciated. If you've never contributed to an open source project before I'm more than happy to walk you through how to create a pull request.
+* [hack](https://github.com/sundaykofax/baby-legs), Licence: None
+* [leap-day](https://github.com/mattgraham/leapday), Licence: [Creative Commons Attribution](http://creativecommons.org/licenses/by/3.0/)
+* [merlot](https://github.com/cameronmcefee/headsmart/tree/gh-pages), Licence: None
+* [midnight](https://github.com/briandoll/change-inside-surroundings.vim/tree/gh-pages), Licence: None
+* [minimal](https://github.com/orderedlist/minimal), Licence: [Creative Commons Attribution-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-sa/3.0/)
+* [modernist](https://github.com/orderedlist/modernist), Licence: [Creative Commons Attribution-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-sa/3.0/)
+* [slate](https://github.com/jasoncostello/slate), Licence: MIT
+* [time-machine](https://github.com/jonrohan/time-machine-theme), Licence: None
+* [kunka](https://github.com/pizn/kunka), Licence: MIT, author: [zhanxin.info](http://www.zhanxin.info/)
 
-You can start by [opening an issue](https://github.com/barryclark/jekyll-now/issues/new) describing the problem that you're looking to resolve and we'll go from there.
-
-I want to keep Jekyll Now as minimal as possible. Every line of code should be one that's useful to 90% of the people using it. Please bear that in mind when submitting feature requests. If it's not something that most people will use, it probably won't get merged. :guardsman:
+All the themes are intergrated in the blog template, with some modifies.
