@@ -1,0 +1,228 @@
+---
+layout:     post
+title:      【HDFS】hdfs文件系统的删除操作
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>常用的rm和rmr 命令有什么区别，怎么实现的？然后Trash是啥,通过1.0.3的代码研究一下。<br></p>
+<p></p><pre><code class="language-java">elif [ "$COMMAND" = "fs" ] ; then
+  CLASS=org.apache.hadoop.fs.FsShell
+  HADOOP_OPTS="$HADOOP_OPTS $HADOOP_CLIENT_OPTS"
+elif [ "$COMMAND" = "dfs" ] ; then
+  CLASS=org.apache.hadoop.fs.FsShell
+  HADOOP_OPTS="$HADOOP_OPTS $HADOOP_CLIENT_OPTS"</code></pre><br>
+从hadoop的命令执行脚本可以看到，命令行处理类是org.apache.hadoop.fs.FsShell，进去看一眼：<br><p></p><pre><code class="language-java">      } else if ("-rm".equals(cmd)) {
+        exitCode = doall(cmd, argv, i);
+      } else if ("-rmr".equals(cmd)) {
+        exitCode = doall(cmd, argv, i);
+rm和rmr都进入到doall方法：
+        } else if ("-rm".equals(cmd)) {
+          delete(argv[i], false, rmSkipTrash);
+        } else if ("-rmr".equals(cmd)) {
+          delete(argv[i], true, rmSkipTrash);</code></pre><br>
+rm和rmr区别很简单就是执行删除的时候要不要递归删除子目录和文件，当然目录删除只能用rmr<br><p></p><pre><code class="language-java">  void delete(String srcf, final boolean recursive, final boolean skipTrash) 
+                                                            throws IOException {
+    Path srcPattern = new Path(srcf);
+    new DelayedExceptionThrowing() {
+      @Override
+      void process(Path p, FileSystem srcFs) throws IOException {
+        delete(p, srcFs, recursive, skipTrash);
+      }
+    }.globAndProcess(srcPattern, srcPattern.getFileSystem(getConf()));
+  }</code></pre><br><p>看到没有，中间的参数是recursive，这里搞了一个抽象类DelayedExceptionThrowing，干啥用的先不管，看名字就是异常检测之类的，往后看或者不看也知道肯定要回调process方法。<br>
+执行delete，这还是在客户端本地的代码先进行一些基本的合理性检查，比如如果你要删除的是目录，但是使用了rm命令，那肯定是不行；如果这个文件不存在也没法给你删，会抛出异常。<br>
+然后看你是不是选择了跳过trash，跳过trash给你直接调用hdfs的删除方法，默认应该都是使用Trash.<br></p>
+<p><br></p>
+<p></p><pre><code class="language-java">if(!skipTrash) {
+      try {
+	      Trash trashTmp = new Trash(srcFs, getConf());
+        if (trashTmp.moveToTrash(src)) {
+          System.out.println("Moved to trash: " + src);
+          return;
+        }
+      } catch (IOException e) {
+        Exception cause = (Exception) e.getCause();
+        String msg = "";
+        if(cause != null) {
+          msg = cause.getLocalizedMessage();
+        }
+        System.err.println("Problem with Trash." + msg +". Consider using -skipTrash option");        
+        throw e;
+      }
+    }
+</code></pre>看上面，先搞一个trash对象出来，然后执行moveToTrash方法，后边一堆catch，不管了。这个trash咋工作的，下一篇再研究，看看跳过trash的操作：<br><pre><code class="language-java">    if (srcFs.delete(src, true)) {
+      System.out.println("Deleted " + src);
+    } else {
+      throw new IOException("Delete failed " + src);
+    }</code></pre>分布式文件系统实现这个抽象方法，由hdfs的客户端发起rpc调用：
+<p></p><pre><code class="language-java">  public boolean delete(String src, boolean recursive) throws IOException {
+    checkOpen();
+    try {
+      return namenode.delete(src, recursive);
+    } catch(RemoteException re) {
+      throw re.unwrapRemoteException(AccessControlException.class);
+    }
+  }</code></pre>checkopen是检查客户端有木有被意外关闭，这个先不管，继续看namenode怎么执行删除操作的。
+<p></p><pre><code class="language-java">  public boolean delete(String src, boolean recursive) throws IOException {
+    if (stateChangeLog.isDebugEnabled()) {
+      stateChangeLog.debug("*DIR* Namenode.delete: src=" + src
+          + ", recursive=" + recursive);
+    }
+    boolean ret = namesystem.delete(src, recursive);
+    if (ret) 
+      myMetrics.incrNumDeleteFileOps();
+    return ret;
+  }</code></pre>namenode还是交给自己的大管家FSNamesystem去具体操作：
+<p></p><pre><code class="language-java">    public boolean delete(String src, boolean recursive) throws IOException {
+      if ((!recursive) &amp;&amp; (!dir.isDirEmpty(src))) {
+        throw new IOException(src + " is non empty");
+      }
+      boolean status = deleteInternal(src, true);
+      getEditLog().logSync();
+      if (status &amp;&amp; auditLog.isInfoEnabled() &amp;&amp; isExternalInvocation()) {
+        logAuditEvent(UserGroupInformation.getCurrentUser(),
+                      Server.getRemoteIp(),
+                      "delete", src, null, null);
+      }
+      return status;
+    }</code></pre>看到没有，调用deleteInternal方法继续执行具体的删除操作，删完之后将edit更新，同时如果开启了审计日志，还要记录这个删除的操作。审计日志是个好东西啊，查找所有的操作就靠它了，但是有些人不知道没有打开过它或者揉到一般日志里，单独拿出来比较好啊，扯远了。注意啊，所有的操作记录一定要在操作完成之后再记录，前后顺序不要颠倒，虽然正常情况下不会有差别，但是操作失败了，还写个屁啊。
+<p></p><pre><code class="language-java">  synchronized boolean deleteInternal(String src, 
+      boolean enforcePermission) throws IOException {
+    if (NameNode.stateChangeLog.isDebugEnabled()) {
+      NameNode.stateChangeLog.debug("DIR* NameSystem.delete: " + src);
+    }
+    if (isInSafeMode())
+      throw new SafeModeException("Cannot delete " + src, safeMode);
+    if (enforcePermission &amp;&amp; isPermissionEnabled) {
+      checkPermission(src, false, null, FsAction.WRITE, null, FsAction.ALL);
+    }
+
+    return dir.delete(src);
+  }</code></pre>看到没有，safemode的时候是不能执行删除操作的。<br>
+目录文件这些玩意大管家是交给dir这个副手管理的，所以dir去删
+<p></p><pre><code class="language-java">boolean delete(String src) {
+    if (NameNode.stateChangeLog.isDebugEnabled()) {
+      NameNode.stateChangeLog.debug("DIR* FSDirectory.delete: "+src);
+    }
+    waitForReady();这个是线程一致性安全性检查
+    long now = FSNamesystem.now();
+    int filesRemoved = unprotectedDelete(src, now);
+    if (filesRemoved &lt;= 0) {
+      return false;
+    }
+    incrDeletedFileCount(filesRemoved);
+    fsImage.getEditLog().logDelete(src, now);
+    return true;
+  }</code></pre>waitForReady是说dir这个东西准备好了，因为很多操作要dir去干，它通过一个ready标志来标明它是否准备好了，还是它在忙乎。具体干就是unprotectedDelete这个方法了<br>
+http://blog.csdn.net/tracymkgld/article/details/17553173解释了getExistingPathINodes的原理。
+<p></p><pre><code class="language-java">  int unprotectedDelete(String src, long modificationTime) {
+    src = normalizePath(src);
+    synchronized (rootDir) {
+      INode[] inodes =  rootDir.getExistingPathINodes(src);
+      //把文件涉及的inode都找到。/a/b/c/d这样的文件，就是要找到a、b、c、d这四个inode
+      INode targetNode = inodes[inodes.length-1];
+      //显然最后一个就是我们要的目标inode
+      if (targetNode == null) { // non-existent src
+        NameNode.stateChangeLog.debug("DIR* FSDirectory.unprotectedDelete: "
+            +"failed to remove "+src+" because it does not exist");
+        return 0;
+      } else if (inodes.length == 1) { // src is the root
+        NameNode.stateChangeLog.warn("DIR* FSDirectory.unprotectedDelete: " +
+            "failed to remove " + src +
+            " because the root is not allowed to be deleted");//看到没有想删除root是不可以的，但是删除root下的所有东西是可以的，这种事故我日也碰到过，算是灾难性的
+			return 0;} else {
+        try {
+          // Remove the node from the namespace
+          removeChild(inodes, inodes.length-1);//例如/a/b/c/d这样的文件，d可以是文件也可以是目录，怎么删掉孩子？
+//其实就是找到c，让c（inodeDirectory）在他的孩子们List&lt;Inode&gt; children中把这个inode即d对应的inode抹去，抹去前还是要用二分查找法先找到它，保证的确是它的孩子？这个有无确实的必要？
+          // set the parent's modification time
+          inodes[inodes.length-2].setModificationTime(modificationTime);
+//然后让c修改自己的mtime,注意这里看到没有文件删除会影响其父inode的mtime！！这对冷数据分析是有帮助的。
+//到这里为止都是namespace的操作，或者叫inode的操作，真正的数据删除操作开始了
+          // GC all the blocks underneath the node.
+          ArrayList&lt;Block&gt; v = new ArrayList&lt;Block&gt;();
+          int filesRemoved = targetNode.collectSubtreeBlocksAndClear(v);
+//把要删除的块放到v里
+          namesystem.removePathAndBlocks(src, v);
+//namenode的FSNamesystem开始执行删除块操作，到底怎么删除的，接着往下看。
+          if (NameNode.stateChangeLog.isDebugEnabled()) {
+            NameNode.stateChangeLog.debug("DIR* FSDirectory.unprotectedDelete: "
+              +src+" is removed");
+          }
+          return filesRemoved;
+        } catch (IOException e) {
+          NameNode.stateChangeLog.warn("DIR* FSDirectory.unprotectedDelete: " +
+              "failed to remove " + src + " because " + e.getMessage());
+          return 0;
+        }
+      }
+    }
+  }</code></pre>collectSubtreeBlocksAndClear是个抽象类，inodeDirectory和InodeFile都实现这个方法，具体看一眼，先看inodeDirectory的：
+<p></p><pre><code class="language-java">  int collectSubtreeBlocksAndClear(List&lt;Block&gt; v) {
+    int total = 1;
+    if (children == null) {
+      return total;
+    }
+    for (INode child : children) {//children就是这个目录用List方式保存的所有子inode
+      total += child.collectSubtreeBlocksAndClear(v);//很显然，这是个递归调用。
+    }
+    parent = null;
+    children = null;
+    return total;
+  }</code></pre>再看InodeFile怎么搞的：
+<p></p><pre><code class="language-java">int collectSubtreeBlocksAndClear(List&lt;Block&gt; v) {
+    parent = null;//每个inodefile都一个目录爹
+    for (Block blk : blocks) {//protected BlockInfo blocks[] = null;
+//blocks管理者这个文件对应的数据块信息。（数据块信息包括块id,所处dn列表，副本数以及其它信息。）
+ v.add(blk); } blocks = null; return 1; }
+现在明白了哈collectSubtreeBlocksAndClear方法就是把你要删除的目录下边各层的所有文件（注意不是目录，因为目录没有blk嘛，只要在namespace中清理，目录就不存在了啊）对应的BlockInfo（继承自Block）拿到手。拿到手就删吧，看看到底咋删我擦：
+  void removePathAndBlocks(String src, List&lt;Block&gt; blocks) throws IOException {
+    leaseManager.removeLeaseWithPrefixPath(src);//去掉这些文件的租约，关于租约回头再说。
+    for(Block b : blocks) {
+      blocksMap.removeINode(b);//大管家有个blockmap，cache住hdfs上所有的块信息，peta将其分散化，namenodecache这么多blockmap内存受不鸟啊
+//
+      corruptReplicas.removeFromCorruptReplicasMap(b);//要删除的块，它如果是坏块，一定会出现在corruptReplicas中，这时候药膳文件了，也不用显示坏块了。
+	addToInvalidates(b);//顾名思议，要把这些块标记为无效块，即可删除块。
+    }
+  }</code></pre>看看addToIvalidates方法
+<p></p><pre><code class="language-java">private void addToInvalidates(Block b) {
+    for (Iterator&lt;DatanodeDescriptor&gt; it = 
+                                blocksMap.nodeIterator(b); it.hasNext();) {
+      DatanodeDescriptor node = it.next();
+      addToInvalidates(b, node);//要删除的块，要根据blockInfo去找它所有的dn，
+    }
+  }
+  void addToInvalidatesNoLog(Block b, DatanodeInfo n) {
+    Collection&lt;Block&gt; invalidateSet = recentInvalidateSets.get(n.getStorageID());
+    if (invalidateSet == null) {
+      invalidateSet = new HashSet&lt;Block&gt;();
+      recentInvalidateSets.put(n.getStorageID(), invalidateSet);
+    }//构建失效块的缓存，跟下边的pendingDeletionBlocksCount共同标明当前有哪些块需要删除！
+
+    if (invalidateSet.add(b)) {
+      pendingDeletionBlocksCount++;
+    }
+  }
+  // Keeps a Collection for every named machine containing
+  // blocks that have recently been invalidated and are thought to live
+  // on the machine in question.
+  // Mapping: StorageID -&gt; ArrayList&lt;Block&gt;
+  //
+  private Map&lt;String, Collection&lt;Block&gt;&gt; recentInvalidateSets = 
+    new TreeMap&lt;String, Collection&lt;Block&gt;&gt;();</code></pre><br>
+看上面，看到没有，recentInvalidateSets 用于保存那些失效的块，或者叫待删除的块，就是要告诉dn去删掉这些块。同时有个计数器pendingDeletionBlocksCount辅助。<br>
+到这里可以看到客户端执行所谓的删除操作都干了啥？<br>
+1、找到要删除的inode,从根开始匹配，同时找到所有它的上级inode，一直追溯到 “/”，其实找到它的父亲一个就够了<br>
+但是后面设计quota的管理，所有有必要找到所有上级inode<br>
+2、父inode在管理的children里清理掉这个inode，修改父inode的mtime<br><br><br>
+3、从inode往下递归，找到所有子文件的所有block，清理目标文件及下边的租约问题。<br>
+4、从namenode的blockmap中清理掉要删除的blk记录<br>
+5、检查这些块是不是在namenode的坏块map里，有的话去掉。<br>
+6、把要删除的block信息加到失效blockcache中，同时增加待删除block计数<br>
+其中1、2是namespace相关的操作，3、4、5、6是文件管理类的操作，在peta中就是fms的操作。<br>
+所谓删除，其实namenode并没有找到这些块然后马上命令datanode去删除数据块，而只是对namespace做了一些操作，然后把相应文件的块丢到一个框里（recentInvalidateSets），然后追加有多少块要删的记录。<br>
+未完...<br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><br><p><br></p>
+            </div>
+                </div>

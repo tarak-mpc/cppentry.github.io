@@ -1,0 +1,36 @@
+---
+layout:     post
+title:      HDFS写流程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>1，几种hdfs读取命令的区别：</p>
+<pre><code>hdfs dfs -ls /       //读取的hdfs系统的根目录，
+hdfs dfs -ls  hdfs://hadoop:9000/    //hdfs://hadoop:9000/来自配置文件core-site.xml的
+hdfs dfs -ls  //读取当前操作用户的路径例如 /user/用户/
+</code></pre>
+<p>2.写流程图：<br>
+<img src="https://img-blog.csdnimg.cn/20181026201546718.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MTY2ODU0OQ==,size_27,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<pre><code>hdfs dfs -put xx.tet /      // 一个简单的写入
+</code></pre>
+<p>1）Client调用FileSystem.create(filePath),去与NN节点进行RPC通信，检查该路径是否存在，是否有权限创建该文件。</p>
+<p>假如OK，就创建一个新的文件，但是不关联任何的block，返回一个FSDataOutputStream对象；<br>
+假如不OK就返回错误信息，下面代码报错就是没有权限创建该文件，</p>
+<pre><code>root@hadoop hadoop-2.6.0-cdh5.7.0]# bin/hdfs dfs -put README.txt /
+put: Permission denied: user=root, access=WRITE, inode="/":hadoop:supergroup:drwxr-xr-x
+[root@hadoop hadoop-2.6.0-cdh5.7.0]# 
+</code></pre>
+<p>2)client调用FSDataOutputStream方法先将数据分块，写入data queue。data queue由data Streamer读取，并通知元数据节点分配数据节点，用来存储数据块，分配的数据节点放在一个pipeline里。data Streamer将数据块写入pipeline中的第一个DN,第一个DN写完就传输给第二个DN，第二个DN写完就传输给第三个DN，当第三DN写完，就返回一个ack packet给第二个DN,当第二个DN接受到第三个的DN的ack packet，就发送ack packet<br>
+给第一个DN,当第一个DN接受到第二个的DN的ack packet，就返回ack packet<br>
+给FSDataOutputStream对象,标识第一个块的三个副本写完；<br>
+然后其余的块一次这样写。<br>
+3）当文件全部写完，client调用FSDataOutputStream对象的close方法，关闭输出流。<br>
+4）再次调用FlieSystem.complete(),告诉NN节点写入成功。<br>
+5)如果数据节点在写入过程失败，关闭pipeline，将ack queue中的数据块放入data queue的开始，<br>
+当前的数据块在已经写入的数据节点中被元数据节点赋予新的标识，则错误的数据节点重启后能够察觉其数据块是过时的，会被删除，失败的数据节点从pipeline中移除，另外的数据块则写入pipeline中的另外两个DN，元数据节点则被通知数据块复制块数不足，将创建第三备份。</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

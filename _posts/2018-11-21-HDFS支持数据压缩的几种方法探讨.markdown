@@ -1,0 +1,33 @@
+---
+layout:     post
+title:      HDFS支持数据压缩的几种方法探讨
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+HDFS支持数据压缩存在以下几种方法：<br><br>
+1、在HDFS之上将数据压缩好后，再存储到HDFS<br>
+2、在HDFS内部支持数据压缩，这里又可以分为几种方法：<br>
+    2.1、压缩工作在DataNode上完成，这里又分两种方法：<br>
+           2.1.1、数据接收完后，再压缩<br>
+                     这个方法对HDFS的改动最小，但效果最低，只需要在block文件close后，调用压缩工具，将block文件压缩一下，然后再打开block文件时解压一下即可，几行代码就可以搞定<br>
+           2.1.2、边接收数据边压缩，使用第三方提供的压缩库<br>
+                     效率和复杂度折中方法，Hook住系统的write和read操作，在数据写入磁盘之前，先压缩一下，但write和read对外的接口行为不变，比如：原始大小为100KB的数据，压缩后大小为10KB，当写入100KB后，仍对调用者返回100KB，而不是10KB<br>
+    2.2、压缩工作交给DFSClient做，DataNode只接收和存储<br>
+           这个方法效果最高，压缩分散地推给了HDFS客户端，但DataNode需要知道什么时候一个block块接收完成了。<br><p>推荐最终实现采用2.2这个方法，该方法需要修改的HDFS代码量也不大，但效果最高。</p>
+<p><br></p>
+<p>这里举一个例子：<br>
+　先说文件的压缩有两大好处：1、可以减少存储文件所需要的磁盘空间；2、可以加速数据在网络和磁盘上的传输。尤其是在处理大数据时，这两大好处是相当重要的。<br><br>
+　　下面是一个使用gzip工具压缩文件的例子。将文件/user/hadoop/aa.txt进行压缩，压缩后为/user/hadoop/text.gz</p>
+<div class="blockcode">
+<div id="code_pgT">
+<ol><li>package com.hdfs;<br></li><li><br></li><li>import java.io.IOException;<br></li><li>import java.io.InputStream;<br></li><li>import java.io.OutputStream;<br></li><li>import java.net.URI;<br></li><li><br></li><li>import org.apache.hadoop.conf.Configuration;<br></li><li>import org.apache.hadoop.fs.FSDataInputStream;<br></li><li>import org.apache.hadoop.fs.FSDataOutputStream;<br></li><li>import org.apache.hadoop.fs.FileSystem;<br></li><li>import org.apache.hadoop.fs.Path;<br></li><li>import org.apache.hadoop.io.IOUtils;<br></li><li>import org.apache.hadoop.io.compress.CompressionCodec;<br></li><li>import org.apache.hadoop.io.compress.CompressionCodecFactory;<br></li><li>import org.apache.hadoop.io.compress.CompressionInputStream;<br></li><li>import org.apache.hadoop.io.compress.CompressionOutputStream;<br></li><li>import org.apache.hadoop.util.ReflectionUtils;<br></li><li><br></li><li>public class CodecTest {<br></li><li>    //压缩文件<br></li><li>    public static void compress(String codecClassName) throws Exception{<br></li><li>        Class&lt;?&gt; codecClass = Class.forName(codecClassName);<br></li><li>        Configuration conf = new Configuration();<br></li><li>        FileSystem fs = FileSystem.get(conf);<br></li><li>        CompressionCodec codec = (CompressionCodec)ReflectionUtils.newInstance(codecClass, conf);<br></li><li>        //指定压缩文件路径<br></li><li>        FSDataOutputStream outputStream = fs.create(new Path("/user/hadoop/text.gz"));<br></li><li>        //指定要被压缩的文件路径<br></li><li>        FSDataInputStream in = fs.open(new Path("/user/hadoop/aa.txt"));<br></li><li>        //创建压缩输出流<br></li><li>        CompressionOutputStream out = codec.createOutputStream(outputStream);  <br></li><li>        IOUtils.copyBytes(in, out, conf); <br></li><li>        IOUtils.closeStream(in);<br></li><li>        IOUtils.closeStream(out);<br></li><li>    }<br></li><li>    <br></li><li>    //解压缩<br></li><li>    public static void uncompress(String fileName) throws Exception{<br></li><li>        Class&lt;?&gt; codecClass = Class.forName("org.apache.hadoop.io.compress.GzipCodec");<br></li><li>        Configuration conf = new Configuration();<br></li><li>        FileSystem fs = FileSystem.get(conf);<br></li><li>        CompressionCodec codec = (CompressionCodec)ReflectionUtils.newInstance(codecClass, conf);<br></li><li>        FSDataInputStream inputStream = fs.open(new Path("/user/hadoop/text.gz"));<br></li><li>         //把text文件里到数据解压，然后输出到控制台  <br></li><li>        InputStream in = codec.createInputStream(inputStream);  <br></li><li>        IOUtils.copyBytes(in, System.out, conf);<br></li><li>        IOUtils.closeStream(in);<br></li><li>    }<br></li><li>    <br></li><li>    //使用文件扩展名来推断二来的codec来对文件进行解压缩<br></li><li>    public static void uncompress1(String uri) throws IOException{<br></li><li>        Configuration conf = new Configuration();<br></li><li>        FileSystem fs = FileSystem.get(URI.create(uri), conf);<br></li><li>        <br></li><li>        Path inputPath = new Path(uri);<br></li><li>        CompressionCodecFactory factory = new CompressionCodecFactory(conf);<br></li><li>        CompressionCodec codec = factory.getCodec(inputPath);<br></li><li>        if(codec == null){<br></li><li>            System.out.println("no codec found for " + uri);<br></li><li>            System.exit(1);<br></li><li>        }<br></li><li>        String outputUri = CompressionCodecFactory.removeSuffix(uri, codec.getDefaultExtension());<br></li><li>        InputStream in = null;<br></li><li>        OutputStream out = null;<br></li><li>        try {<br></li><li>            in = codec.createInputStream(fs.open(inputPath));<br></li><li>            out = fs.create(new Path(outputUri));<br></li><li>            IOUtils.copyBytes(in, out, conf);<br></li><li>        } finally{<br></li><li>            IOUtils.closeStream(out);<br></li><li>            IOUtils.closeStream(in);<br></li><li>        }<br></li><li>    }<br></li><li>    <br></li><li>    public static void main(String[] args) throws Exception {<br></li><li>        //compress("org.apache.hadoop.io.compress.GzipCodec");<br></li><li>        //uncompress("text");<br></li><li>        uncompress1("hdfs://master:9000/user/hadoop/text.gz");<br></li><li>    }<br></li><li><br></li><li>}</li></ol></div>
+<em>复制代码</em></div>
+首先执行77行进行压缩，压缩后执行第78行进行解压缩，这里解压到标准输出，所以执行78行会再控制台看到文件/user/hadoop/aa.txt的内容。如果执行79行的话会将文件解压到/user/hadoop/text,他是根据/user/hadoop/text.gz的扩展名判断使用哪个解压工具进行解压的。解压后的路径就是去掉扩展名。<br><br>
+　　进行文件压缩后，在执行命令./hadoop fs -ls /user/hadoop/查看文件信息，如下：
+<div id="code_DYY">
+<ol><li>[hadoop@master bin]$ ./hadoop fs -ls /user/hadoop/<br></li><li>Found 7 items<br></li><li>-rw-r--r--   3 hadoop supergroup   76805248 2013-06-17 23:55 /user/hadoop/aa.mp4<br></li><li>-rw-r--r--   3 hadoop supergroup        520 2013-06-17 22:29 /user/hadoop/aa.txt<br></li><li>drwxr-xr-x   - hadoop supergroup          0 2013-06-16 17:19 /user/hadoop/input<br></li><li>drwxr-xr-x   - hadoop supergroup          0 2013-06-16 19:32 /user/hadoop/output<br></li><li>drwxr-xr-x   - hadoop supergroup          0 2013-06-18 17:08 /user/hadoop/test<br></li><li>drwxr-xr-x   - hadoop supergroup          0 2013-06-18 19:45 /user/hadoop/test1<br></li><li>-rw-r--r--   3 hadoop supergroup         46 2013-06-19 20:09 /user/hadoop/text.gz</li></ol></div>
+<br><p></p>
+            </div>
+                </div>

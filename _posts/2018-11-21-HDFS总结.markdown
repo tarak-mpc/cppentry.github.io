@@ -1,0 +1,178 @@
+---
+layout:     post
+title:      HDFS总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<pre><code class="language-java">1               概述
+HDFS是Hadoop技术框架中的分布式文件系统。行使部署在多台独立物理机器上的文件进行管理功能。
+本文重点介绍HDFS适用的场景，MapReduce的读写大致过程,核心FSNameSystem层次结构以及根据一个示例来介绍HDFS在web开发中的应用。
+2               HDFS特点及适用场景2.1 HDFS特点
+[1] 适合运行在通用硬件，错误检测和快速、自动的恢复能力好
+[2] 支持大文件存储，能提供比较高的数据传输带宽与数据访问吞吐量
+[3] 计算环境移动到数据存储的地方，而不是把数据传输到计算环境运行的地方，有效减少网络的拥塞、提高系统的吞吐量。
+2.2 HDFS适用场景
+[1] 网站用户行为分析
+    [2] 生态系统数据分析
+    [3] 气象数据分析
+2.3 HDFS 不适用场景
+      [1] 低时间延迟数据访问的应用。例如几十毫秒范围，
+原因：hdfs是为高数据吞吐量应用优化的，这样就造成可能会以高时间延迟为代价
+              [2] 大量小文件
+原因 ： namenode将文件系统的元数据存储在内存中，因此文件系统所能存储的文件总数受限于namecode内存容量。根据经验，每个文件，目录和数据块的存储信息大约占150字节，如果一百万个文件，且每个文件占一个数据块，那至少需要300MB的内存，但是如果存储十亿个文件，那么需要的内存将是非常大的
+[3] 多用户写入，任意修改文件：现在hdfs文件可能只有一个writer,而且写操作总是写在文件的末尾.
+3 HDFS框架结构和读写简析
+HDFS采用master/slave架构。一个HDFS集群是由一个Namenode和一定数目的Datanodes组成。Namenode是一个中心服务器，负责管理文件系统的名字空间(namespace)以及客户端对文件的访问。集群中的Datanode一般是一个节点一个，负责管理它所在节点上的存储。HDFS暴露了文件系统的名字空间，用户能够以文件的形式在上面存储数据。从内部看，一个文件其实被分成一个或多个数据块，这些块存储在一组Datanode上。Namenode执行文件系统的名字空间操作，比如打开、关闭、重命名文件或目录。它也负责确定数据块到具体Datanode节点的映射。Datanode负责处理文件系统客户端的读写请求。在Namenode的统一调度下进行数据块的创建、删除和复制。
+3.1.1 Namenode和Datanode
+Namenode作用:管理文件系统的命名空间，(比如打开，关闭，重命名)维护文件系统树和整棵树内所有的文件和目录,确定文件块和DataNode的映射。
+Datanode作用：记录每个文件中各个块所在的数据节点信息。通知执行块的创建，删除和复制操作。
+3.1.2 HDFS文件读取简析
+流程图如下：
+        
+前提：
+一个 A.txt文件，A.txt文件的内容分别被拆分成B.txt,C.txt两块内容，B.txt文件被备份在datanode1,datanode2,datanode3中，C.txt被备份在datanode4,datanode5,datanode6中。
+场景 ：
+用户要读取A.txt文件内容。
+执行过程：
+用户在客户端发起请求，HDFS接受请求后使用DistributedFileStytem调用namenode,从而确定用户请求文件块的对应位置，namenode返回存有请求文本块副本的datanode地址，这些地址是根据datanode与客户端的距离排序过的。封装datanode地址的结果放在FSDataInputStream中返回给客户端，(注，FSDataInputStream对象封装DFSInputStream对象，此对象负责管理datanode和namenode的I/O).然后客户端对流文件持续进行read()操作，DFSDataInputStream会连接距离客户端最近的datanode，比如此时datanode1离客户端最近，那么读取datanode1的数据并返回到客户端，当读取到块的末端时，FSDataInputStream关闭datanode1的连接，并读取存放副本2.txt的离客户端最近的datanode中的数据，当客户端完成读取，调用FSDataInputStream的close()方法。从而用户完成了读取A.txt的操作。
+出现异常情况:
+1 DFSDataInputStream在和datanode通信遇到错误
+2 当datanode的数据不完整或者是一个损坏的块
+出现异常的时候HDFS所做的处理：
+1 在通信遇到错误时，尝试从这个块的另一个最临近的datanode读取数据，同时记住故障的datanode,以保证以后不会反复读取该节点上的后续的块。
+2 在发现数据不完整或者是损坏的时候，HDFS会试图从其他datanode读取副本其他副本并在读取之前通知nomenode.
+这种方式下的优点：
+1 namenode告知客户端每个块中最佳datanode,并让客户端直接联系该datanode检索数据，效率高。
+2 namenode仅需要响应块位置的请求，而且这些信息存储在内存中，执行速度快。
+3.1.3 HDFS文件写入简析
+ 
+客户端通过DistributedFileSystem对象调用create()函数船检文件，DistributedFileSystem内部会对namemode创建一个RPC调用，在文件系统的命名空间总创建一个文件，此时此文件没有任何数据，然后namenode会执行不同检查确保此文件不存在并且该客户有创建的权限，如果鉴权通过，则向此文件中记录一条记录，并向客户端返回FSDataOutputStream对象，然后FSDataOutputStream对象封装一个DFSDataOutputStream对象。(处理datanode和nameNode的IO流)客户端借由此对象写入数据，鉴权未通过下，抛出异常到客户端。
+客户端写入数据后，会对数据流调用close()方法，然后DFSDataOutputStream对象会将客户端写入的数据分成一个个数据包，并写到内部队列，即数据队列，DataStreamer处理数据队列，它会根据datanode列表来要求namenode分配合适的新块来存储数据备份。而这一组被namonode选择出来的datanode叫做管线。DataStreamer将数据包流式按照管线上的datanode顺序传输到每一个待分配的datanode上，datanode会依次执行写入操作。而DFSDataOutputStream也会维护一个内部数据包队列等待管线上的datanode写入确认，当所有的待分配的datanode被写入成功后，会将写入的确认信息返回到DFSOutputStream中，然后DFSOutputStream才会将数据包删除。当DFSDataOutputStream得到datanode确认回执后，联系namenode发送文件写入完成信号。整个写入操作完成。
+出现异常情况: 写入中，datanode出现故障。
+出现异常的时候HDFS所做的处理：HDFS会关闭管线，把队列中的任何数据包都添加回数据队列的最前端，确保故障节点下游的datanode不会漏掉任何一个数据包。然后管线中删除故障数据节点，同时为正常的并将数据写入其余正常的datanode，如果namenode 发现复本不足，会在另一个节点创建新的复本，随后后续的数据块继续接受正常处理。(默认副本是3)
+3.1.4 读写操作核心处理类FSNameSystem简介
+NameNode节点是就是HDFS的大脑。想了解HDFS文件系统，必须了解大脑结构，而NameNode类中，关于HDFS文件系统的存储和管理都交给了FSNamesystem负责,因此下面主要介绍FSNamesystem的逻辑组成和类图。了解FSNamesystem, 那么HDFS的文件系统就了解了90%。
+FSNamesystem层次结构下一些概念：
+INode:  它用来存放文件及目录的基本信息：名称，父节点、修改时间，访问时间以及UGI信息等。 
+INodeFile: 继承自INode，除INode信息外，还有组成这个文件的Blocks列表，重复因子，Block大小 
+INodeDirectory：继承自INode，此外还有一个INode列表来组成文件或目录树结构 
+Block(BlockInfo)：组成文件的物理存储，有BlockId，size ，以及时间戳 
+BlocksMap: 保存数据块到INode和DataNode的映射关系 
+FSDirectory：保存文件树结构，HDFS整个文件系统是通过FSDirectory来管理 
+FSImage：保存的是文件系统的目录树 
+FSEditlog:  文件树上的操作日志 
+FSNamesystem: HDFS文件系统管理
+这些概念之间的层次关系:
+ 
+我们都知道，在NameNode内存中存在两张很重要的映射表： 
+
+   1. 文件系统的命名空间(文件目录树) 主要是 文件和Block映射关系 (保存在FSDirectory) 
+   2. Block 和 INodeFile &amp; DataNode的映射关系 (保存在FSNamesystem) 
+
+
+在上图中，左边黑线部分是1 数据结构的层次关系；红线部分是 2 关系的层次结构 
+(其中block &amp; DataNode这个共用) 
+
+下面详细的介绍上图所表示的关系： 
+
+文件系统 FSNamesystem 
+FSNamesystem 主要有两个对象：文件系统(FSDirectory)根节点rootDir 和BlocksMap映射表 (Block -&gt; { INode, datanodes, self ref } ) 
+
+文件系统目录FSDirectory 
+保存文件目录结构(INodeDirectory树)，实现FSImage和FSEditLog操作实现。 
+
+INode ( INodeFile &amp; INodeDirectory ) 
+在HDFS中，无论目录还是文件，都是INode。INode有两个派生类INodeFile和INodeDirectory。 
+INodeFile是INode文件类，INodeDirectory是INode目录类。每一 INodeDirectory孩子节点都是由INodeDirectory目录或INodeFile文件列表构成。这样就形成了一棵INode树形结构。 
+NameNode内存中保存着HDFS整个文件系统形成的树，这棵树保存在FSDirectory对象内。 
+
+Block &amp; BlocksMap &amp; BlockInfo 
+HDFS物理存储单元是Block(缺省的Block大小为64M)，每个Block会有几个副本(缺省是3个)，这些Block都是存储在不同数据节点上的。映射关系保存在BlocksMap。 
+
+Block &amp; INodeFile 
+每个INodeFile都有一个Block列表组成。每一个block有多个副本(缺省3个副本), 各副本保存在不同的数据节点上。 这样在文件与Block和DataNode之间形成一个映射关系表。这张关系表就保存在FSDirectory对象 . 
+
+FSImage &amp; FSEditlog(FSDirectory) 
+由于目录树(FSDirectory)在NameNode内存中保存，机器也有掉电的时候。若只保存在内存那势必会造成数据的丢失。因此，系统会周期性的保存文件目录树到NameNode本地文件系统，生成FSImage。主要由FSImage和FSEditLog，这两个类负责目录树持久化。 
+当 HDFS系统非常庞大时，FSImage也会非常大，这样不能文件系统发生任何操作时，就更新到FSImage，所以一段时间内文件系统的操作日志会记录到FSEditLog。到一定时间会把操作日志FSEditLog同步到FSImage，这样就形成完整的文件目录树。
+FSNameSystem 主要类关系图
+ 
+这个类图可以分成三个部分 
+Bock相关的部分(BlocksMap &amp; BlockInof &amp; Block) 
+INode相关的部分(INode &amp; INodeDirectory &amp; INodeFile &amp; INodeDirectoryWithQuota) 
+FSImage &amp; FSEditLog (Storage &amp; StorageInfo) 
+
+其中 
+BlockInfo是Block的加强类，增加了INodeFile的引用和DataNode列表 
+INodeFirectoryWithQuota 是INodeDirectory的增强类，增加了Quota限制功能。
+3.1.4.1 HDFS 在WEB开发中的应用
+1 使用背景：
+互联网的应用每时每刻都在产生数据，这些数据长期的积累了长期，使得这些数据文件总量非常庞大，存储这些数据需要投入巨大的硬件资源，但是如果能在已有空闲磁盘集群下可以利用起来，可以不再需要大规模采集服务器存储数据或购买容量庞大的磁盘，减少了硬件成本。在这里就可以使用到分布式存储这种方案来解决这个问题。
+HDFS 就是一个开源在apache 上的分布式文件系统框架，它提供了命令行模式和api 模式来操作，HDFS 文件系统部署在多台节点上后，我们可以上传任意的文件到HDFS 中，无需关心文件究竟存储在哪个节点上。只要通过api 访问文件即可(流操作)。
+下面我们用一个实际的产品来解决，在HDFS 中默认的块大小为64M，也就是说一个文件在大小不超过64M 的情况下不会被切割，整个文件会被完整的上传到某个节点中，通常我们在互联网门户中图片存储是个非常常见的应用，大量用户的图片自然占用了大量的存储空间，使用分布式文件系统正好满足相册的技术机构。每个图片一般经过压缩后最大几M，每个图片在使用HDFS 的也就是一个对应一个Block。下面我们考虑如下一个问题：
+web 应用关心的是个对外的接口，这个接口只需要指定HDFS 的管理地址，但web 应用中每个请求访问一个图片，是否需要web 程序通过HDFS 将数据从不同节点上拉过来然后再传向客户端，这样是不是影响效率？如果存放数据的节点直接向浏览器发送数据是不是更好？
+带着上面的问题我们就从架构开始设计一套系统。
+我们可以在每台数据节点上都部署上apache 服务器，并发布同样的web 程序。当一个请求发现在某个节点上时，我们只需要直接将url重定向到节点所在的机器域名并请求同样的uri， 就可以使得当前这个节点的apache 服务器同浏览器建立连接，并直接发送数据。
+目前比较流行的web 架构是J2EE，在这里我们就采用J2EE 的架构来搭建一个原型。
+2 整体架构
+ 
+我们拥有100 台机器，每台机器都部署了DataNode 节点和Apache Web 服务器，对外提供一个固定的域名服务器，客户通过浏览器直接访问的是该服务器，在该server 中发布程序接受来自浏览器的请求，通过调用HDFS 的接口，来判断请求的文件所存放的节点是否为当前节点，如果不是则根据得到的节点地址去重定向请求到存储该文件的节点的Apache 服务器上。
+由于HDFS 中默认切割块为64M，通常图片文件大小不过几M，文件的存放就在一个Block 中，如果Block 数组大于1，因为浏览器不支持分段获取数据，那么我们需要直接从远程将数据拉到对外服务器中合并成完整的流，然后推送到浏览器中。
+String f iledisplay = (String) request.getParameter("f ilePath";
+Path path = new Path(f iledisplay);
+Configuration conf = new Configuration();
+FileSystem fs = path.getFileSystem(conf);
+long length = f ile.getLen();
+BlockLocation[] blkLocations = fs.getFileBlockLocations(f ile, 0, length);
+
+如上面代码所示这里拿到到的BlockLocation包含了该块的信息：
+private String[] hosts; //hostnames of datanodes
+private String[] names; //hostnameortNumber of datanodes
+private String[] topologyPaths; // full path name in network topology
+private long offset; //offset of the of the block in the f ile
+private long length;
+
+通过此可以拿到DataNode 节点信息，让后将请求重定向到DataNode 所在的机器的Apache 服务器中就行。
+3          结构流程
+ 
+4 Action实现
+String filedisplay = (String) request.getParameter("filePath";
+Path path = new Path(filedisplay);
+Configuration conf = new Configuration();
+FileSystem fs = path.getFileSystem(conf);
+InputStream ins = fs.open(path);
+OutputStream outp = null;
+try {
+outp = response.getOutputStream();
+byte[] b = new byte[1024];
+int i = 0;
+while ((i = ins.read(b)) &gt; 0) {
+outp.write(b, 0, i);
+}
+outp.flush();
+} catch (Exception e) {
+e.printStackTrace();
+} finally {
+if (ins != null) {
+ins.close();
+ins = null;
+}
+if (outp != null) {
+outp.close();
+outp = null;
+}
+}
+通过以上步骤，jsp中将请求的URI匹配。即可获取文件的流并下载。
+5上述案例总结：
+Hdfs在和传统工程结合应用的时候，主要发挥查询大数据文件的功能，而且这个文件一般是静态文件，不经常做变更。
+4 参考资料
+http://www.iteye.com/topic/933553
+http://baike.baidu.com/view/3061630.htm
+&lt;&lt;hadoop开发者第二期&gt;&gt;
+5 需要进一步研究的地方
+[1] 文件块的划分原理
+[2] 大文件在读和写的过程中NameNode,DataNode和FSNameSystem详细交互过程以及异常下处理机制的细节。
+</code></pre><br>            </div>
+                </div>

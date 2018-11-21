@@ -1,0 +1,196 @@
+---
+layout:     post
+title:      从头开始的HDFS伪分布式环境的搭建
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<pre><code>HDFS，Hadoop Distributed FileSystem是hadoop分布式文件系统，HDFS是hadoop的核心之一，主要负责数据的存储这一方面。当数据量非常大的时候，一台机器其实是存不下的，而且，数据仅存一份的话，容易发生数据丢失等问题。所以我们需要把数据存在很多台机器上，而HDFS就是一个很好的数据存储的位置。我们要使用HDFS就要先搭建HDFS环境，而搭建HDFS其实就是搭一个集群，就是要用hadoop的方式把这个集群中的机器有机的结合起来。
+我没有很多台真正的机器，所以使用了VMWARE 14虚拟机，创建了3台linux系统，将3台linux系统搭建成一个HDFS来模拟真正的HDFS环境搭建，其实本质都是一样的。
+虚拟机中的linux系统，我采用的是CentOS-6.5-x86_64-minimal版本，这是一个无桌面的版本，纯命令行操作系统。
+</code></pre>
+
+<ul>
+<li><p>创建虚拟机步骤如下：</p>
+
+<p>1)点击创建新的虚拟机。 <br>
+2)选择典型（因为自己用，要是有特殊需求，可以点自定义），然后下一步。 <br>
+3)选择稍后安装操作系统，然后下一步。 <br>
+4)客户机操作系统选择linux，版本选择CentOS 6 64位，然后下一步。 <br>
+5)虚拟机名称根据自己喜欢设置成什么，位置是你这台linux操作系统存放的位置，建议不要放在C盘，并且放在固态硬盘下（因为速度快），然后下一步。 <br>
+6)最大磁盘大小就用默认的20G就可以，然后选择将虚拟磁盘拆分成多个文件（M），然后下一步。 <br>
+7)直接点击完成，在VMWARE下我的计算机下会出现你刚创建成果的虚拟机。 <br>
+8)不要开启虚拟机！不要开启虚拟机！不要开启虚拟机！ <br>
+9)右键刚创建出来的虚拟机，选择设置，点击CD/DVD(IDE)，选择使用ISO映像文件，然后找到电脑本地CentOS-6.5-x86_64-minimal.iso的存放位置，选中，点击确定。 <br>
+10)然后点击开启此虚拟机。 <br>
+11)选择Install or upgrade an existing system，点击回车，等待。 <br>
+12)然后依次选择Skip、OK，等待。 <br>
+13)点击右下角的Next，然后选择语言，English、中文简体都可以，看自己，我选择的是中文简体，然后Next。 <br>
+14)选择美国英语式，下一步，选择基本存储设备，下一步。 <br>
+15)选择是，忽略所有数据，然后填入主机名master（无所谓的，创建完后也可以改），我们要建立三台虚拟机，主机名分别为master、slave01、slave02，然后下一步。 <br>
+16)选择你想选的地区时间，下一步，然后设置超级用户root的密码，两遍，如果你设置的过于简单，则会提示你的密码不够安全，你可以头铁，选择无论如何都使用，然后下一步。 <br>
+17)选择替换现有的Linux系统，下一步，然后将修改写入磁盘，然后等待。 <br>
+18)安装完成后，选择重新引导重启虚拟机，然后输入root用户，输入密码，即可进入该linux系统，显示[root@你的主机名 ~]#即成功安装。</p>
+
+<p>安装完虚拟机，我们需要做一些准备工作，比如我们新创建的虚拟机还没有IP，我们可以设置一个静态IP，具体操作步骤如下： <br>
+1)输入命令：<code>vi /etc/sysconfig/network-scripts/ifcfg-eth0</code>。 <br>
+2)按i进入插入模式，然后改为ONBOOT=yes、BOOTPROTO=static，在后面追加IPADDR=192.168.24.100、GATEWAY=192.168.24.2、DNS1=8.8.8.8。然后按esc键，输入:wq，保存并退出。（我的IP是这样，只要IPADDR和GATEWAY前三个点的数字一样就可以，GATEWAY最后一定是2） <br>
+3)点击VMWARE的编辑，选择虚拟网络适配器，点击VMnet8，然后点击右下角更改设置，选择名称下的VMnet8，点击VMnet信息下的NAT模式 ，然后将左下角的子网改成192.168.24.0，，然后点击NAT设置，将网关改为192.168.24.2，然后确定，确定。 <br>
+4)输入命令：<code>service network restart</code>重启网卡，输入命令：<code>ifconfig</code>，如果出现IP为192.168.24.100，即为成功，如果失败，看看前三步哪里做错了。 <br>
+5)输入命令：<code>vi /etc/hosts</code>，将192.168.24.100 master <br>
+                           192.168.24.101 slave01 <br>
+                           192.168.24.102 slave02填入并保存退出。（这步是为了后面配置hadoop的时候不来回切root用户改放在这的） <br>
+6)输入命令：<code>chkconfig iptables off</code>关闭防火墙，输入命令：<code>vi /etc/selinux/config</code>，将SELINUX=enforcing改为SELINUX=disabled，然后保存退出。输入命令：reboot重启虚拟机。</p>
+
+<p>设置完静态IP，我们可以根据IP用其他软件连接虚拟机，我们可以在我们自己的电脑系统下操作，而不用再虚拟机哪个黑框框下了，比如在windows系统下操作，我用的是xshell连接虚拟机，还有MobaXterm等软件也可以。 <br>
+我们搭建HDFS环境我们还需要安装JDK，这里我安装的是jdk-8u172-linux-x64.tar.gz版本。</p></li>
+<li><p>安装JDK步骤如下：</p>
+
+<p>1)输入命令：<code>useradd hadoop</code>创建一个新用户，然后输入命令<code>passwd</code>设置用户密码为123456，需要输入两次。输入命令：<code>mkdir /opt/wdp</code>创建wdp文件夹。然后输入命令：<code>cd /opt</code>，输入命令：<code>chown hadoop:hadoop wdp</code>将wdp文件夹权限改为hadoop用户和hadoop组。输入命令<code>su hadoop</code>切到hadoop用户（注意，后面操作都是hadoop用户操作，如无特殊说明，不要切换用户）。 <br>
+2)输入命令：<code>mkdir /home/hadoop/soft</code>创建soft文件夹。输入命令<code>cd /home/hadoop/soft</code>进入文件夹，然后将JDK解压包通过xshell从windows上传到此目录下。然后输入命令：<code>tar -zxvf jdk-8u172-linux-x64.tar.gz -C /opt/wdp</code>将jdk解压到/opt/wdp目录下。 <br>
+3)输入命令<code>cd /opt/wdp</code>，输入命令<code>：mv jdk1.8.0_172 jdk</code>将文件夹名字改为jdk，然后<code>su root</code>切换到root用户，输入命令：<code>vi /etc/profile</code>进行环境变量配置，在最后添加<code>export JAVA_HOME=/opt/wdp/jdk</code>，然后再添加<code>export PATH=$PATH:$JAVA_HOME/bin</code>，然后保存退出。输入命令：<code>exit</code>退出root用户回到hadoop用户，输入命令：<code>source /etc/profile</code>（注意一定不要改错环境变量，如果错了没编译还是有机会改的，要是编译完了PATH配错了，可能就没得了）编译文件，然后输入：javac，出来一堆东西而不是commad not found即配置jdk成功。</p>
+
+<p>jdk配置成功后，就可以进行hadoop安装了。</p></li>
+<li><p>hadoop安装步骤如下（注意当前还是hadoop用户哦）：</p>
+
+<p>1)<code>cd /home/hadoop/soft</code>，将hadoop解压包上传到此文件夹。我这里用的是hadoop-2.6.1.tar.gz版本。 <br>
+2)<code>tar -zxvf hadoop-2.6.1.tar.gz -C /opt/wdp</code>， <br>
+  <code>cd /opt/wdp</code>，<code>mv hadoop-2.6.1 hadoop</code>将文件夹的名字改为hadoop <br>
+3)su root切到root用户。输入命令：<code>vi /etc/profile</code>，最后添加<code>export HADOOP_HOME=/opt/wdp/hadoop</code>，将PATH那条修改为<code>export PATH=$PATH:$JAVA_HOME/bin:$HADOOP_HOME/bin:$HADOOP_HOME/sbin</code>，保存并退出。 <br>
+4)exit，退出root用户回到hadoop用户。<code>source /etc/profile</code>，输入：hadoop，出来一堆东西而不是commad not found即配置hadoop成功。 <br>
+5)<code>cd /opt/wdp/hadoop/etc/hadoop</code>，<code>vi core-site.xml</code>，将内容</p></li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p>修改为</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+              <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+                    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>fs.default.name<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+                    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://master:8020<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+              <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+            <span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<pre><code>        hdfs协议，主机IP（应为配置了hosts文件所以可以是master而不用写192.168.24.100），端口号  
+    6)`vi hadoop-env.sh`，将`export JAVA_HOME=${JAVA_HOME}`修改为`export JAVA_HOME=/opt/wdp/jdk`，修改JDK路径。
+    7)`vi hdfs-site.xml`，将`&lt;configuration&gt;&lt;/configuration&gt;`修改为
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+         <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.replication<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>2<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+          <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+          <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.namenode.name.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/opt/wdp/hadoop/dfs/name<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+          <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+          <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.datanode.data.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/opt/wdp/hadoop/dfs/data<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+          <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<pre><code>设置备份数量，设置数据存放的位置。
+8)`vi mapred-site.xml`，然后将该文件内容改为
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-pi">&lt;?xml version="1.0"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-comment">&lt;!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License. See accompanying LICENSE file.
+--&gt;</span>
+
+<span class="hljs-comment">&lt;!-- Put site-specific property overrides in this file. --&gt;</span>
+
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapreduce.framework.name<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>yarn<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+  <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<pre><code>9)vi yarn-site.xml，将
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+<span class="hljs-comment">&lt;!-- Site specific YARN configuration properties --&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p>改为</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+<span class="hljs-comment">&lt;!-- Site specific YARN configuration properties --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.aux-services<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>mapreduce_shuffle<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+  <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<pre><code>10)rm slaves，然后vi slaves，输入192.168.24.100 master
+                               192.168.24.101 slave01
+                               192.168.24.102 slave02保存并退出。
+到目前为止，3台虚拟机都是进行上述步骤，保证其除了主机名和IP地址，jdk、hadoop什么的配置都一样。
+因为都配置完毕，要准备格式化了。但是有一个问题，就是三台虚拟机之间，要组成集群，那就要互相访问，那就需要我们人为的一直输入密码，这很麻烦，所以我们要先进行三台机器之间的免密登录，然后再格式化。
+</code></pre>
+
+<ul>
+<li><p>免密登录步骤如下：</p>
+
+<p>1)在三台虚拟机上分别cd ~进入家目录，然后分别<code>ssh-keygen -t rsa</code>连续敲击回车（大约4下），就会出现一堆图形之类的。这时在家目录下回创建一个.ssh文件，在.ssh文件中回存在该用户的公钥和私钥，私钥是自己留着的，公钥发给谁，你就能免密登录谁。（如果没有ssh，则输入命令：<code>yum -y install openssh-clients</code>进行下载，注意下载时要有网络哦） <br>
+ 2)slave01和slave02分别使用cd .ssh进入.ssh文件夹下，然后分别输入命令：<code>scp id_rsa.pub hadoop@master:/home/hadoop/.ssh/id_rsa.pub002</code>和<code>scp id_rsa.pub hadoop@master:/home/hadoop/.ssh/id_rsa.pub003</code>。将slave01和slave02公钥通过scp发送给master，放在master的/home/hadoop/.ssh目录下，分别叫id_rsa.pub002和id_rsa.pub003。 <br>
+ 3)在master中输入命令：cd ~/.ssh进入.ssh目录下。然后输入三条命令，分别为：</p></li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">cat id_rsa<span class="hljs-preprocessor">.pub</span> &gt;&gt; authorized_keys
+cat id_rsa<span class="hljs-preprocessor">.pub</span>002 &gt;&gt; authorized_keys
+cat id_rsa<span class="hljs-preprocessor">.pub</span>003 &gt;&gt; authorized_keys</code></pre>
+
+<p>将3台虚拟机的公钥追加到authorized_keys中，然后<code>chmod 600 authorized_keys</code>修改authorized_keys权限为600，只可以自己读写，代表authorized_keys中，别人能进来是经过我自己允许的。 <br>
+     4)在master中分别输入命令：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">scp authorized_keys hadoop<span class="hljs-variable">@slave01</span><span class="hljs-symbol">:/home/hadoop/</span>.ssh/
+scp authorized_keys hadoop<span class="hljs-variable">@slave02</span><span class="hljs-symbol">:/home/hadoop/</span>.ssh/</code></pre>
+
+<p>将装有所有公钥的authorized_keys发给slave01和slave02。 <br>
+    5)可以测试一下是否可以免密登录，比如你在master中，然后输入<code>ssh slave01</code>如果不需要密码就登陆，那么就可以了，别忘了exit退出哦。如果失败了，你可以看看哪步错了，要是看不出来就把.ssh目录删了重新开始免密登录把。</p>
+
+<ul>
+<li><p>配置完免密登录我们就可以格式化了。格式化代码如下：<code>hdfs namenode -format</code>.（注意只在master上进行格式化哦，因为我们要将master当做主节点，slave01和slave02当做从节点）</p>
+
+<p>如果最后出现了SHUTDOWN_MSG: Shutting down NameNode at master/192.168.24.100的提示，那么你就格式化成功了。</p></li>
+<li><p>启动hadoop。</p>
+
+<p>因为master是主节点，在master中分别输入<code>start-yarn.sh</code>和<code>start-dfs.sh</code>，启动hdfs等待。都完成后，输入命令：<code>jps</code>，查看当前启动的进程，如果master中有DataNode、Jps、SecondaryNameNode、NodeManager、ResourceManager、NameNode 6个进程。其他两个从节点也都输入命令：<code>jps</code>。如果有NodeManager、DataNode、Jps三个进程。最后打开浏览器，在地址栏中输入192.168.24.100:50070，进入点击Datanodes，如果Node里出现了三个节点，那么恭喜你，你成功了。如果没不对，你看看之前哪步做错了，先<code>stop-yarn.sh</code>和<code>stop-dfs.sh</code>停止，然后删除3台虚拟机的/opt/wdp/hadoop下的dfs和logs两个目录，重新格式化尝试一下（保证其他都对）。</p></li>
+</ul>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

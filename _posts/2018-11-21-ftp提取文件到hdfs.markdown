@@ -1,0 +1,178 @@
+---
+layout:     post
+title:      ftp提取文件到hdfs
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/yiluohan0307/article/details/79364525				</div>
+								            <div id="content_views" class="markdown_views prism-dracula">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="ftp提取文件到hdfs">ftp提取文件到hdfs</h1>
+
+<p>实际场景中，我们经常需要通过ftp协议把不同数据源的文件统一汇入到hdfs数据中心，经过实践，有以下的三种方法，分别列出其优缺点及适用场景。</p>
+
+
+
+<h2 id="一先把文件ftp到本地然后用命令上传到hdfs">一、先把文件ftp到本地，然后用命令上传到HDFS</h2>
+
+<p>HDFS上传命名</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs css"><span class="hljs-tag">hdfs</span> <span class="hljs-tag">dfs</span> –<span class="hljs-tag">put</span> <span class="hljs-attr_selector">[local_path]</span> <span class="hljs-attr_selector">[hdfs_path]</span></code></pre>
+
+<p>优点：文件在本地可以进行本地化的一系列操作后，再放回hdfs中 <br>
+缺点：文件传输经过两层，并且从源服务器到本地提取是单机串行，比较消耗时间。</p>
+
+<p>适用于文件放入hfds前需要预处理的情景，如：.zip压缩文件不被hadoop支持的，所以我们可以先在本地转压缩方式然后再放入hdfs中。</p>
+
+
+
+<h3 id="1ftp下载到本地">1.ftp下载到本地</h3>
+
+<p>两种方法： <br>
+1）ftp工具下载</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs perl">mget_ftp()
+{
+user=
+passwd=
+host=
+<span class="hljs-keyword">local</span> local_dir=<span class="hljs-variable">$1</span>
+<span class="hljs-keyword">local</span> remote_dir=<span class="hljs-variable">$2</span>
+test -e <span class="hljs-variable">$local_dir</span> ||<span class="hljs-keyword">mkdir</span> -p <span class="hljs-variable">$local_dir</span>
+
+ftp -inv <span class="hljs-variable">$host</span> &lt;&lt;EOF
+    user <span class="hljs-variable">$user</span> <span class="hljs-variable">$passwd</span>
+    binary
+    cd <span class="hljs-variable">$remote_dir</span>
+    lcd <span class="hljs-variable">$local_dir</span>
+    hash
+    prompt off
+    mget *
+    <span class="hljs-comment">#rmdelete /data/cyf_test/*</span>
+    <span class="hljs-comment">#rmdir /data/cyf_test</span>
+    <span class="hljs-keyword">close</span>
+    bye
+EOF
+}</code></pre>
+
+<p>2)wget</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">mget_using_wget()
+{
+local remote_dir=<span class="hljs-variable">$1</span>
+wget <span class="hljs-symbol">ftp:</span>/<span class="hljs-regexp">/IP:PORT/</span><span class="hljs-variable">$REMOTE_DIR</span>/* --ftp-user=<span class="hljs-variable">$NAME</span> --ftp-password=<span class="hljs-variable">$PASSWORD</span> --dont-remove-listing -r
+}</code></pre>
+
+<p>这种方法会在本地建立一个和ftp服务器相同的目录结构 <br>
+或者自定目录</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">wget --ftp-user=<span class="hljs-variable">$USER</span> --ftp-password=<span class="hljs-variable">$PASSWORD</span> ftp://<span class="hljs-variable">$HOST</span>/<span class="hljs-variable">$remote_dir</span>/<span class="hljs-variable">$file</span> -O <span class="hljs-variable">$local_dir</span>/<span class="hljs-variable">$file</span></code></pre>
+
+<p>wget的速度相对于lftp和ftp快很多。 <br>
+3)lftp <br>
+需要安装lftp <br>
+获取远程ftp上的列表</p>
+
+<pre class="prettyprint"><code class=" hljs bash">lftp <span class="hljs-operator">-e</span> <span class="hljs-string">'ls;quit'</span> sftp://<span class="hljs-variable">$USER</span>:<span class="hljs-variable">$PASSWORD</span>@<span class="hljs-variable">$HOST</span>/<span class="hljs-variable">$REMOTE_DIR</span>|sed <span class="hljs-string">'1,2d'</span>|awk <span class="hljs-string">'{print $NF}'</span> &gt; <span class="hljs-variable">$REMOTE_LIST</span>
+</code></pre>
+
+<p>对数据下载</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">lftp sftp://<span class="hljs-variable">$USER</span>:<span class="hljs-variable">$PASSWORD</span>@<span class="hljs-variable">$HOST</span>  <span class="hljs-operator">-e</span> <span class="hljs-string">"get <span class="hljs-variable">$REMOTE_DIR</span>/<span class="hljs-variable">$file</span> -o <span class="hljs-variable">$LOCAL_DIR</span>; bye"</span></code></pre>
+
+
+
+<h3 id="2删除ftp服务器上的文件">2.删除ftp服务器上的文件</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-function"><span class="hljs-title">del_file_from_ftp</span></span>()
+{
+u=
+p=
+ip=
+local file=<span class="hljs-variable">$1</span>
+local remote_dir=<span class="hljs-variable">$2</span>
+ftp -inv <span class="hljs-variable">$ip</span> &lt;&lt;EOF
+        user <span class="hljs-variable">$u</span> <span class="hljs-variable">$p</span>
+        binary
+        prompt
+        delete <span class="hljs-variable">$remote_dir</span>/<span class="hljs-variable">$file</span>
+        bye
+EOF
+}
+
+<span class="hljs-function"><span class="hljs-title">mdel_ftp</span></span>()
+{
+local local_dir=<span class="hljs-variable">$1</span>
+local remote_dir=<span class="hljs-variable">$2</span>
+<span class="hljs-keyword">for</span> file <span class="hljs-keyword">in</span> `find <span class="hljs-variable">$local_dir</span> ! -name <span class="hljs-string">".*"</span>|sed <span class="hljs-string">'1d'</span>|awk -F <span class="hljs-string">"/"</span> <span class="hljs-string">'{print $NF}'</span>`
+<span class="hljs-keyword">do</span>
+    del_file_from_ftp <span class="hljs-variable">$file</span> <span class="hljs-variable">$remote_dir</span>
+<span class="hljs-keyword">done</span>
+}
+//设置ssh互信登录
+<span class="hljs-function"><span class="hljs-title">mdel_ftp_using_ssh</span></span>()
+{
+local local_dir=<span class="hljs-variable">$1</span>
+local remote_dir=<span class="hljs-variable">$2</span>
+<span class="hljs-keyword">for</span> file <span class="hljs-keyword">in</span> `find <span class="hljs-variable">$local_dir</span> ! -name <span class="hljs-string">".*"</span>|sed <span class="hljs-string">'1d'</span>|awk -F <span class="hljs-string">"/"</span> <span class="hljs-string">'{print $NF}'</span>`
+<span class="hljs-keyword">do</span>
+      ssh  -t <span class="hljs-variable">$USER</span>@<span class="hljs-variable">$IP</span> <span class="hljs-string">"rm <span class="hljs-variable">$remote_dir</span>/<span class="hljs-variable">$file</span>"</span>
+<span class="hljs-keyword">done</span>
+}</code></pre>
+
+<p>3.上传到HDFS</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-function"><span class="hljs-title">upload_data_to_hdfs</span></span>()
+{
+local upload_dir=<span class="hljs-string">""</span>
+local des_hdfs_dir=<span class="hljs-string">""</span>
+<span class="hljs-keyword">for</span> file <span class="hljs-keyword">in</span> `ls <span class="hljs-operator">-l</span> <span class="hljs-variable">$LOCAL_DIR</span>|grep <span class="hljs-string">"*.dat"</span>|sed <span class="hljs-string">'1d'</span>|awk <span class="hljs-string">'{print $NF}'</span>`  
+<span class="hljs-keyword">do</span>
+    <span class="hljs-built_in">echo</span> <span class="hljs-string">"upload <span class="hljs-variable">$file</span> to <span class="hljs-variable">$des_hdfs_dir</span>"</span>
+    <span class="hljs-variable">$HDFS_EXE</span> dfs -put <span class="hljs-variable">$upload_dir</span>/<span class="hljs-variable">$file</span> <span class="hljs-variable">$des_hdfs_dir</span>
+<span class="hljs-keyword">done</span>
+}</code></pre>
+
+
+
+<h2 id="二hdfs-dfs-cp">二、HDFS dfs -cp</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">hdfs dfs –cp [<span class="hljs-symbol">ftp:</span>/<span class="hljs-regexp">/username:password@hostname/ftp</span>_path] [<span class="hljs-symbol">hdfs:</span>/<span class="hljs-regexp">//hdfs</span>_path]</code></pre>
+
+<p>优点：简单，提取速度快 <br>
+缺点：CLI执行不会显示进度 <br>
+适用场景：适用于小文件的ftp拷贝。</p>
+
+<p>这种方法没有实际使用过。</p>
+
+
+
+<h2 id="三hadoop-distcp">三、hadoop distcp</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">hadoop distcp [<span class="hljs-symbol">ftp:</span>/<span class="hljs-regexp">/username:password@hostname/ftp</span>_path] [<span class="hljs-symbol">hdfs:</span>/<span class="hljs-regexp">//hdfs</span>_path]</code></pre>
+
+<p>优点：简单，能显示拷贝进度，并且是分布式提取的，数据比较快。 <br>
+缺点： 如果拷贝的文件是不断有其他程序写入，会报错，因为该命令最后要对数据进行checksum导致两边不一致，当然，该命令是主要用于集群间拷贝的。</p>
+
+<p>适用场景：大量文件或大文件的拷贝。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

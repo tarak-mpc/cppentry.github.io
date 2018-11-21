@@ -1,0 +1,315 @@
+---
+layout:     post
+title:      HDFS体系结构及常见功能
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/cp_Mark/article/details/80206720				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>本文主要是介绍HDFS的体系结构和常用操作，涉及到的知识点如下：</p>
+
+<ol>
+<li>HDFS的体系结构</li>
+<li>数据上传</li>
+<li>数据下载</li>
+</ol>
+
+
+
+<h2 id="hdfs的体系结构">HDFS的体系结构</h2>
+
+<p>Hadoop的生态圈，包括HDFS、Yarn、HBase都是主从结构。对于HDFS来说，它的<strong>主节点是NameNode，从节点是DataNode，还有一个更新最新状态的SecondaryNameNode</strong>，下面我们对这几个结点做详细的解释。</p>
+
+<ol>
+<li><p>NameNode：名称节点</p>
+
+<p>（1）职责：</p>
+
+<ul><li>管理、维护HDFS；</li>
+<li>接收客户端的请求：上传、下载、创建目录等；</li>
+<li>维护两个非常重要的文件：edits文件 –&gt; 记录了操作日志；fsimage文件 –&gt; 记录HDFS元信息</li></ul>
+
+<p>（2）HDFS操作日志：edits文件</p>
+
+<p>位置：find . -name edits* (在当前目录下查找以edits打头的文件)</p>
+
+<p>​    最新的操作日志以edits_inprogress***开头</p>
+
+<p>记录：Edits文件保存了自最后一次检查点之后所有针对HDFS文件系统的操作，比如：增加文件、重命名文件、删除目录等等</p>
+
+<p>都是二进制</p>
+
+<p>HDFS提供了一个工具：edits viewer 日志查看器，可以将操作日志转化为XML格式来查看。命令如下：</p>
+
+<pre class="prettyprint"><code class="language-java hljs ">hdfs oev 命令将日志（二进制）输出为XML文件 -i表示输入，-o表示输出
+hdfs oev -i edits_inprogress_0000000000000000208 -o ~/a.xml</code></pre>
+
+<p>（3）HDFS的元信息：fsimage文件</p>
+
+<p>位置：和edits文件在一起</p>
+
+<p>记录：fsimage是HDFS文件系统存于硬盘中的元数据检查点，里面记录了自最后一次检查点之前HDFS文件系统中所有目录和文件的序列化信息（数据块的位置、冗余信息）</p>
+
+<p>也是二进制</p>
+
+<p>HDFS提供了一个工具：image viewer查看器，可以将操作日志转化为文本或者XML格式来查看</p>
+
+<pre class="prettyprint"><code class="language-java hljs ">hdfs oiv 命令将日志（二进制）输出为文本文件 -i表示输入，-o表示输出
+hdfs oiv -i fsimage_0000000000000000207 -o ~/b.txt （文本）
+hdfs oiv -i fsimage_0000000000000000207 -o ~/c.xml -p XML(xml文件)</code></pre></li>
+<li><p>DataNode：数据结点</p>
+
+<p>数据块大小：</p>
+
+<ul><li>1.x版本 64M</li>
+<li>2.x笨笨 128M</li></ul>
+
+<p>位置：find . -name blk*(blk是block的简写)</p>
+
+<p>一般原则：数据块的冗余度一般跟数据结点个数一致，最大不要超过3。在生产环境下，至少2个数据结点</p>
+
+<p>blk_*表示数据块</p>
+
+<p>blk_*.meta表示数据块的元信息</p></li>
+<li><p>SecondaryNameNode：第二名称结点</p>
+
+<p>作用：把edits中最新的状态信息合并到fsimage文件中，即<strong>日志合并</strong>。合并原理图如下。</p>
+
+<p><img src="https://img-blog.csdn.net/20180505155822699?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="SecondaryNameNode合并元信息过程" title=""></p>
+
+<p>NameNode和SecondaryNameNode在一起的原因是为了效率问题，因为两者在一起，SecondaryNameNode在合并最新的edits到fsimage中时，只需要执行cp操作即可；在合并后，把最新的fsimage上传回NameNode下的fsimage</p>
+
+<p>什么时候合并？当HDFS发出检查点（checkpoint）的时候。默认会在两种情况下发出检查点：</p>
+
+<p>​    （1）每隔60分钟。可通过修改参数，改变时间</p>
+
+<p>​    （2）当edits文件达到64M。可通过修改参数，改变阈值</p>
+
+<p>补充：Oracle数据库中也有检查点，如果发生检查点，会以最高优先级唤醒数据库写进程（DBWn）把内存中的脏数据写到数据文件上（持久化）</p>
+
+<blockquote>
+  <p><strong>注意：NameNode和SecondaryNameNode名字看起来差不多，但是两者并没有什么关系</strong></p>
+</blockquote></li>
+<li><p>HDFS存在的问题：</p>
+
+<p>（1）NameNode单点故障，即一旦出现问题整个系统就瘫痪</p>
+
+<p>​    解决方案：Hadoop1.0中，没有解决方案。</p>
+
+<p>​              Hadoop2.0中，使用Zooker实现Name的HA（高可用性，后面会讲到）功能。</p>
+
+<p>（2）NameNode压力过大，且内存受限，影响系统扩展</p>
+
+<p>​    解决方案：Hadoop1.0中，没有解决方案</p>
+
+<p>​              Hadoop2.0中，使用NameNode的联盟实现其水平扩展</p></li>
+</ol>
+
+
+
+<h2 id="hdfs上传">HDFS上传</h2>
+
+<p>先来一张HDFS文件上传的流程图：</p>
+
+<p><img src="https://img-blog.csdn.net/20180505155849464?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="HDFS文件上传" title=""></p>
+
+<p>看完流程图就是具体的上传了，有两种方式：</p>
+
+<p>（1）命令行：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-attribute">-put</span>                上传数据  hdfs dfs <span class="hljs-attribute">-put</span> <span class="hljs-built_in">data</span><span class="hljs-built_in">.</span>txt /input
+<span class="hljs-attribute">-copyFromLocal</span>      上传数据  hdfs dfs <span class="hljs-attribute">-copyFromLocal</span> <span class="hljs-built_in">data</span><span class="hljs-built_in">.</span>txt /input
+<span class="hljs-attribute">-moveFromLocal</span>      上传数据（相当于 ctrl<span class="hljs-subst">+</span>x 剪切）</code></pre>
+
+<p>（2）JavaApi：以下是通过javaApi进行文件上传的代码块，以Window下的FinancialWorkStationEdu.exe文件为例（141M）：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-comment">//使用自己写流的方式来实现</span>
+@Test
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">testUpload1</span>() throws Exception {
+         <span class="hljs-comment">//设置当前用户为root用户（不设置可能出现权限异常）</span>
+        <span class="hljs-comment">//System.setProperty("HADOOP_USER_NAME","root");</span>
+
+        <span class="hljs-comment">//构造一个输入流</span>
+        FileInputStream <span class="hljs-keyword">in</span> = <span class="hljs-keyword">new</span> FileInputStream(<span class="hljs-string">"D:\\download\\chromeDownload\\FinancialWorkStationEdu.exe"</span>);
+
+        <span class="hljs-comment">//配置NameNode地址（在上一边环境变量的配置时，我们配置过它的key和value，直接复制过来即可）</span>
+        Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+        conf.<span class="hljs-keyword">set</span>(<span class="hljs-string">"fs.defaultFS"</span>,<span class="hljs-string">"hdfs://192.168.171.113:9000"</span>);
+
+        <span class="hljs-comment">//客户端</span>
+        FileSystem client = FileSystem.<span class="hljs-keyword">get</span>(conf);
+
+        <span class="hljs-comment">//得到一个输出流</span>
+        FSDataOutputStream <span class="hljs-keyword">out</span> = client.create(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"/input/a.exe"</span>));
+
+        <span class="hljs-comment">//构造缓冲区</span>
+        <span class="hljs-keyword">byte</span>[] buffer = <span class="hljs-keyword">new</span> <span class="hljs-keyword">byte</span>[<span class="hljs-number">1024</span>];
+        <span class="hljs-keyword">int</span> len = <span class="hljs-number">0</span>;
+        <span class="hljs-keyword">while</span>((len = <span class="hljs-keyword">in</span>.read(buffer)) &gt; <span class="hljs-number">0</span>){
+            <span class="hljs-comment">//将读到的数据写入</span>
+            <span class="hljs-keyword">out</span>.write(buffer,<span class="hljs-number">0</span>,len);
+        }
+
+        <span class="hljs-keyword">out</span>.flush();
+
+        <span class="hljs-keyword">out</span>.close();
+        <span class="hljs-keyword">in</span>.close();
+    }
+
+<span class="hljs-comment">//使用Hadoop提供的工具类来实现</span>
+@Test
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">testUpload2</span>() throws Exception {
+        <span class="hljs-comment">//设置当前用户为root用户（不设置可能出现权限异常）</span>
+        <span class="hljs-comment">//System.setProperty("HADOOP_USER_NAME","root");</span>
+
+        <span class="hljs-comment">//构造一个输入流</span>
+        FileInputStream <span class="hljs-keyword">in</span> = <span class="hljs-keyword">new</span> FileInputStream(<span class="hljs-string">"D:\\download\\chromeDownload\\FinancialWorkStationEdu.exe"</span>);
+
+        <span class="hljs-comment">//配置NameNode地址（在上一边环境变量的配置时，我们配置过它的key和value，直接复制过来即可）</span>
+        Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+        conf.<span class="hljs-keyword">set</span>(<span class="hljs-string">"fs.defaultFS"</span>,<span class="hljs-string">"hdfs://192.168.171.113:9000"</span>);
+
+        <span class="hljs-comment">//客户端</span>
+        FileSystem client = FileSystem.<span class="hljs-keyword">get</span>(conf);
+
+        <span class="hljs-comment">//得到一个输出流</span>
+        FSDataOutputStream <span class="hljs-keyword">out</span> = client.create(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"/input/b.exe"</span>));
+        <span class="hljs-comment">//使用Hadoop提供的工具类来实现</span>
+        IOUtils.copyBytes(<span class="hljs-keyword">in</span>,<span class="hljs-keyword">out</span>,<span class="hljs-number">1024</span>);
+    }</code></pre>
+
+<p>在运行上面的代码之前有两个问题要注意：</p>
+
+<ol>
+<li><p>我们使用到的这些API有些是Hadoop提供的，我们需要到hadoop里面把这些jar包拷贝下来，放到项目的lib目录。我们先看下Hadoop的目录结构：</p>
+
+<p><img src="https://img-blog.csdn.net/20180505155948182?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="Hadoop的目录结构" title=""></p>
+
+<p>然后我们需要把common下的lib包和hdfs下的lib拷贝下来即可。</p></li>
+<li><p>权限配置，如果没有配置权限的话，会抛出以下异常：</p>
+
+<blockquote>
+  <p>Caused by: org.apache.hadoop.ipc.RemoteException(org.apache.hadoop.security.AccessControlException): Permission denied: user=cpMark, access=WRITE, inode=”/user/cpMark/input/a.exe”:root:supergroup:drwxr-xr-x</p>
+  
+  <p>即当前用户没有w权限</p>
+</blockquote>
+
+<p>处理这个异常，有以下几种方式：</p>
+
+<p>（1）关闭HDFS的权限检查。这个在hdfs-site.xml中我们是配置过为false，不过被我们注释没有打开，如下：</p>
+
+<pre><code>![HDFS权限配置](https://img-blog.csdn.net/20180505160012706?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70)
+</code></pre>
+
+<p>这里我们打开就可以正常运行了。运行结果如下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180505160037782?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="HDFS文件上传结果" title=""></p>
+
+<p>（2）设置一个属性。把自己设置为root用户，具体方式为在我们的JavaApi前面设置用户名（上面代码注释打开即可）：</p>
+
+<pre class="prettyprint"><code class=" hljs cs"> <span class="hljs-comment">//设置当前用户为root用户</span>
+ System.setProperty(<span class="hljs-string">"HADOOP_USER_NAME"</span>,<span class="hljs-string">"root"</span>);</code></pre>
+
+<p>（3） -D的使用，通过-D获取命令行上的参数。比如：-Dname=Tom -Dgender=Male，那么我们在程序中就可以取到name参数和gender参数，具体如下：</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm"> String name = System<span class="hljs-preprocessor">.getProperty</span>(<span class="hljs-string">"name"</span>)<span class="hljs-comment">;</span>
+ String gender = System<span class="hljs-preprocessor">.getProperty</span>(<span class="hljs-string">"gender"</span>)<span class="hljs-comment">;</span>
+ System<span class="hljs-preprocessor">.out</span><span class="hljs-preprocessor">.println</span>(name+<span class="hljs-string">"\t"</span>+gender)<span class="hljs-comment">;</span></code></pre>
+
+<p>具体操作如下，新建一个带有main入口函数的类，copy以上代码，然后使用javac编译，编译成功之后，使用java命令执行，java -Dname=Tom -Dgender=Male XXX(编译出来的class文件)即可 </p>
+
+<p>（4）改变input目录的权限</p>
+
+<pre class="prettyprint"><code class=" hljs perl"> hdfs dfs -<span class="hljs-keyword">chmod</span> <span class="hljs-number">777</span> /input</code></pre>
+
+<p>这样就可以执行了。</p></li>
+</ol>
+
+<h2 id="hdfs下载">HDFS下载</h2>
+
+<p>下载的话，和上传一样，先来张流程图，然后是代码：</p>
+
+<p><img src="https://img-blog.csdn.net/20180505160118406?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="HDFS文件下载" title=""></p>
+
+<p>看完流程图就是具体的上传了，有两种方式：</p>
+
+<p>（1）命令行：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs haml">-<span class="ruby">copyToLocal   下载数据
+</span>-<span class="ruby">get           下载数据</span></code></pre>
+
+<p>（2）JavaApi：以下是通过javaApi进行文件下载的代码块，以hdfs /input目录下的a.exe,为例：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cs">@Test
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">testDownload1</span>() throws Exception {
+        <span class="hljs-comment">//设置当前用户为root用户</span>
+        System.setProperty(<span class="hljs-string">"HADOOP_USER_NAME"</span>, <span class="hljs-string">"root"</span>);
+
+        <span class="hljs-comment">//配置NameNode地址（在上一边环境变量的配置时，我们配置过它的key和value，直接复制过来即可）</span>
+        Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+        conf.<span class="hljs-keyword">set</span>(<span class="hljs-string">"fs.defaultFS"</span>, <span class="hljs-string">"hdfs://192.168.171.113:9000"</span>);
+
+        <span class="hljs-comment">//构造客户端</span>
+        FileSystem client = FileSystem.<span class="hljs-keyword">get</span>(conf);
+
+        <span class="hljs-comment">//构造一个输入流</span>
+        FSDataInputStream <span class="hljs-keyword">in</span> = client.open(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"/input/a.exe"</span>));
+
+        <span class="hljs-comment">//构造一个输出流  ----&gt; D:\temp\a.exe</span>
+        OutputStream <span class="hljs-keyword">out</span> = <span class="hljs-keyword">new</span> FileOutputStream(<span class="hljs-string">"D:\\temp\\a.exe"</span>);
+
+        <span class="hljs-comment">//构造一个缓冲区</span>
+        <span class="hljs-keyword">byte</span>[] buffer = <span class="hljs-keyword">new</span> <span class="hljs-keyword">byte</span>[<span class="hljs-number">1024</span>];
+        <span class="hljs-keyword">int</span> len = <span class="hljs-number">0</span>;
+        <span class="hljs-keyword">while</span> ((len = <span class="hljs-keyword">in</span>.read(buffer)) &gt; <span class="hljs-number">0</span>) {
+            <span class="hljs-comment">//读取到了数据</span>
+            <span class="hljs-keyword">out</span>.write(buffer, <span class="hljs-number">0</span>, len);
+        }
+
+        <span class="hljs-keyword">out</span>.flush();
+
+        <span class="hljs-keyword">out</span>.close();
+        <span class="hljs-keyword">in</span>.close();
+    }
+
+    @Test
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">testDownload2</span>() throws Exception {
+        <span class="hljs-comment">//设置当前用户为root用户</span>
+        System.setProperty(<span class="hljs-string">"HADOOP_USER_NAME"</span>, <span class="hljs-string">"root"</span>);
+
+        <span class="hljs-comment">//配置NameNode地址（在上一边环境变量的配置时，我们配置过它的key和value，直接复制过来即可）</span>
+        Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+        conf.<span class="hljs-keyword">set</span>(<span class="hljs-string">"fs.defaultFS"</span>, <span class="hljs-string">"hdfs://192.168.171.113:9000"</span>);
+
+        <span class="hljs-comment">//构造客户端</span>
+        FileSystem client = FileSystem.<span class="hljs-keyword">get</span>(conf);
+
+        <span class="hljs-comment">//构造一个输入流</span>
+        FSDataInputStream <span class="hljs-keyword">in</span> = client.open(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"/input/a.exe"</span>));
+
+        <span class="hljs-comment">//构造一个输出流  ----&gt; D:\temp\a.exe</span>
+        OutputStream <span class="hljs-keyword">out</span> = <span class="hljs-keyword">new</span> FileOutputStream(<span class="hljs-string">"D:\\temp\\b.exe"</span>);
+
+        <span class="hljs-comment">//使用工具类简化程序</span>
+        IOUtils.copyBytes(<span class="hljs-keyword">in</span>, <span class="hljs-keyword">out</span>, <span class="hljs-number">1024</span>);
+    }</code></pre>
+
+<p>以上就是HDFS常见功能的介绍，一些其它的API，比如创建目录、查看目录及文件信息、查找某个文件在HDFS集群的位置等，只是API不同而已，大家可以自己去熟悉。</p>
+
+<p>下一篇我会介绍HDFS的高级功能:回收站、快照、配额等。</p>
+
+<p>​</p>
+
+<p>​</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,149 @@
+---
+layout:     post
+title:      Hadoop 基础知识 -- 知乎
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h3></h3>
+<h1>
+</h1><h1>知乎</h1>
+<h3>Unix与类Unix系统的区别是开源免费还是闭源收费</h3>
+<h3>Hadoop MapReduce框架的目标</h3>
+<p>处理PB级别的数据，具有高可用，目标明确，编程模型简单易用等特点。MapReduce提供了多种以HBase为数据源或目标数据库执行的方法。</p>
+<p>MapReduce被设计为在可扩展的方式下解决超过TB级数据处理过程中的问题。应当有一种方法可以建立一个性能随机器数增加而线性提升的系统，这既是MapReduce努力要做到的。它遵守分治原则，通过将数据拆分到分布式文件系统中的不同机器上，让服务器（CPU或新式内核）能尽快直接访问和处理数据。这种方法的问题是用户最终需要合并全局结果。同样，MapReduce为解决这个问题将其内置了。</p>
+<p> </p>
+<p> </p>
+<h3>HBase和Hadoop都是Java编写的。</h3>
+<h3>HBase过滤器的目的</h3>
+<p>HBase过滤器本来的目的是为了筛掉无用的信息，被过滤掉的信息不会被传送到客户端。过滤器不能用来指定用户需要哪些信息，而是在读取数据的过程中不返回用户不想要的信息。</p>
+<p> </p>
+<h3>HBase如何与Hadoop文件系统协作完成数据存储的？</h3>
+<p></p>
+<p>HBase如何透明地操作存储在HDFS上文件的概览。</p>
+<p>从这张图可以看出HBase主要处理两种文件：一种是预写日志（Write-Ahead Log，WAL），另一种是实际的数据文件。这两种文件主要有HRegionServer管理。在某些情况下，HMaster也可以进行一些底层的文件操作。当存储数据到HDFS中时，用户可能注意到实际的数据文件会被切分成更小的块。也正是这一点，用户可以配置系统来更好地处理较大或较小的文件。</p>
+<p><strong>一个基本的流程是客户端首先联系Zookeeper子集群（quorum）（一个由Zookeeper节点组成的单独集群）查找行键。上述过程是通过Zookeeper获取含有-ROOT的rgion服务器名（主机名）来完成的。通过含有-ROOT的region服务器可以查询到含有.META.表中对应的region服务器名，其中包含请求的行键信息。这两处的主要内容都被缓存下来了，并且都只查询一次。最终，通过查询.META.服务器来获取客户端查询的行键数据所在region的服务器名。</strong></p>
+<p><strong>一旦知道了数据的实际位置，即region的位置，HBase会缓存这次查询的信息，同时直接联系管理实际数据的HRegionServer。所以，之后客户端可以通过缓存信息很好地定位所需的数据位置，而不用在此查找.META.表。</strong></p>
+<p><strong>启动HBase时，HMaster负责将所有region分配到每个HRegionServer上，其中也包括特别的-ROOT-和.META.表。</strong></p>
+<p><strong>HRegionServer负责打开region，并创建对应的HRegion实例。当HRegion被打开后，它会为每个表的HColumnFamily创建一个Store实例，这些列族是用户之前创建表时定义的。每个Store实例包含一个或多个StoreFile实例，它们是实际数据存储文件HFile的轻量级封装。每个Store还有其对应的一个MemStore，一个HRegionServer分享了一个HLog实例。</strong></p>
+<h3>HBase的写路径</h3>
+<p>当用户向HRegionServer发起HTable.put(Put)请求时，其会将请求交给对应的HRegion实例来处理。第一步是决定数据是否需要写到由HLog类实现的预写日志中。WAL是标准的Hadoop SequenceFile，并且存储了HLogKey实例。这些键包括序列号和实际数据，所有在服务器崩溃时可以回滚还没有持久化的数据。</p>
+<p>一旦数据被写入到WAL中，数据就会被放到MemStore中。同时还会检查memstore是否已经满了，如果满了，就会被请求刷写到磁盘中去。刷鞋请求由另外一个HRegionServer的线程处理，它会把数据写成HDFS中的一个新HFile。同时也会保存最后写入的序号，系统就知道哪些数据现在被持久化了。</p>
+<h4>关闭前预刷写</h4>
+<p>Memstore被刷写到磁盘的第二个理由是：预刷写，当region服务器被要求关闭时，会数先检查memstore，任何大于配置值hbase.hregion.preclose.flush.size（默认值为5MB）的memstore会刷写到磁盘，然后在最后一轮阻塞正常访问的刷写后关闭region。</p>
+<p>另一方面，关闭region服务器会强制所有的memstore被刷写到磁盘，而不会关系memstore是否达到了配置的最大值，可以使用配置项hbase.hregion.memstore.flush.size（默认值为64MB）或者通过创建表来进行设置。一旦所有的memstore都被刷写到了磁盘，region会被关闭，且在转移到其他region服务器时不会重做WAL。</p>
+<h3>HBase存储文件的块与Hadoop的块之间是否有匹配关系？</h3>
+<p>在HDFS中，文件的默认块大小是64MB，这个是HFile默认块大小的1024倍。因此，HBase存储文件的块与Hadoop的块之间没有匹配关系。事实上，这两种块之间根本没有相关性。HBase把它的文件透明地存储到文件系统中，而HDFS也使用块切分文件仅仅是一个巧合，并且HDFS不知道HBase存储的是什么，它只能看到二进制文件。</p>
+<p> </p>
+<h3>HBase中日志是用来做什么的？           </h3>
+<p>日志是用来保证数据安全的。</p>
+<p> </p>
+<h3>什么是高表和宽表？</h3>
+<p><strong>高表：列少行多</strong></p>
+<p><strong>宽表：列多行少</strong></p>
+<p> </p>
+<p> </p>
+<h3>HBase与Hadoop各自的处理场景</h3>
+<p>HBase实际上是从Hadoop继承了监控API，然而Hadoop是一个面向批处理的系统，给用户反馈的信息往往不够及时。HBase则要求更加实时，因为HBase常被用来处理随机在线访问请求。</p>
+<p> </p>
+<h3>Hive</h3>
+<p><strong>ApacheHive项目提供了基于Hadoop的数据仓库。Hive最早由Facebook开发，现在是Hadoop生态圈的开源项目。</strong></p>
+<p><strong>Hive提供类似于SQL的处理语言，叫HiveQL，允许用户查询存储在hadoop中的半结构化数据。最终查询会转化成MapReduce作业，在本地执行或在分布式的MapReduce集群中执行。数据在作业执行的时候被解析，并且Hive提供了一个不仅可以访问HDFS的数据还可以访问其他数据源的存储处理层。存储层的数据获取对用户来说是透明的。</strong></p>
+<p><strong><span style="color:#FF0000;">Hive0.6.0</span><span style="color:#FF0000;">及以后的版本提供了对</span><span style="color:#FF0000;">HBase</span><span style="color:#FF0000;">的支持。用户可以直接定义将</span><span style="color:#FF0000;">Hive</span><span style="color:#FF0000;">表存储为</span><span style="color:#FF0000;">HBase</span><span style="color:#FF0000;">表，并按需要映射列值，在需要的时候行键可以作为独立的一列。</span></strong></p>
+<h3>Apache Pig</h3>
+<p>Apache Pig项目提供了一个分析海量数据的平台。它提供了自己的查询语言，叫做Pig Latin，Pig语法使用了命令式编程风格，迭代式执行，并最终将输入转化为输出。Pig语言的编程风格与Hive模拟SQL的实现方式的风格截然相反。</p>
+<p>但Pig Latin与HiveQL相比更适合有编程经验的人使用，但本身的结果使得Pig更适合并行处理。</p>
+<h3>Maven</h3>
+<p>Maven是一个流行的包管理工具，可以用于任何基于Java的语言，让你可以连接公共仓库中的程序库。</p>
+<p> </p>
+<h3>什么是非结构化数据？</h3>
+<p>不方便使用数据库二维逻辑来表现的数据即称为非结构化数据。包括所有格式的办公文档，文本，图片，XML，HTML，各类报表，图像和音频/视频信息等。</p>
+<p> </p>
+<h3>文本是非结构化数据吗？</h3>
+<p>是的。</p>
+<p>以文本（如字符，数字，标点，各种可打印的符号等）作为数据形式的非结构化的数据。</p>
+<p>非结构化或半结构化文本数据的典型代表是图书馆数据库中的文档，这些文档可能包含结构字段，如标题，作者，出版日期等。</p>
+<p> </p>
+<h3>JSON？</h3>
+<p><a href="http://baike.baidu.com/view/136475.htm" rel="nofollow"><span style="color:rgb(19,110,194);">JSON</span></a><span style="color:rgb(51,51,51);">(</span><a href="http://baike.baidu.com/view/16168.htm" rel="nofollow"><span style="color:rgb(19,110,194);">JavaScript</span></a><span style="color:rgb(51,51,51);"> </span><span style="color:rgb(51,51,51);">Object
+ Notation) </span><span style="color:rgb(51,51,51);">是一种轻量级的数据交换格式。它基于</span><a href="http://baike.baidu.com/view/810176.htm" rel="nofollow"><span style="color:rgb(19,110,194);">ECMAScript</span></a><span style="color:rgb(51,51,51);">的一个子集。</span><span style="color:rgb(51,51,51);">
+ JSON</span><span style="color:rgb(51,51,51);">采用完全独立于语言的文本格式，但是也使用了类似于</span><span style="color:rgb(51,51,51);">C</span><span style="color:rgb(51,51,51);">语言家族的习惯（包括</span><a href="http://baike.baidu.com/subview/10075/6770152.htm" rel="nofollow"><span style="color:rgb(19,110,194);">C</span></a><span style="color:rgb(51,51,51);">、</span><span style="color:rgb(51,51,51);">C++</span><span style="color:rgb(51,51,51);">、</span><a href="http://baike.baidu.com/view/6590.htm" rel="nofollow"><span style="color:rgb(19,110,194);">C#</span></a><span style="color:rgb(51,51,51);">、</span><a href="http://baike.baidu.com/subview/29/12654100.htm" rel="nofollow"><span style="color:rgb(19,110,194);">Java</span></a><span style="color:rgb(51,51,51);">、</span><span style="color:rgb(51,51,51);">JavaScript</span><span style="color:rgb(51,51,51);">、</span><a href="http://baike.baidu.com/view/46614.htm" rel="nofollow"><span style="color:rgb(19,110,194);">Perl</span></a><span style="color:rgb(51,51,51);">、</span><a href="http://baike.baidu.com/view/21087.htm" rel="nofollow"><span style="color:rgb(19,110,194);">Python</span></a><span style="color:rgb(51,51,51);">等）。这些特性使</span><span style="color:rgb(51,51,51);">JSON</span><span style="color:rgb(51,51,51);">成为理想的数据交换语言。</span><span style="color:rgb(51,51,51);">易于人阅读和编写，同时也易于机器解析和生成</span><span style="color:rgb(51,51,51);">(</span><span style="color:rgb(51,51,51);">一般用于提升网络传输速率</span><span style="color:rgb(51,51,51);">)</span><span style="color:rgb(51,51,51);">。</span></p>
+<h4>基础结构</h4>
+<p><span style="color:#333333;">JSON</span><sup><span style="color:#3366CC;">[1]</span></sup><a name="ref_%5B1%5D_136475"><span style="color:#136EC2;"> </span></a><span style="color:#333333;"> </span><span style="color:#333333;">结构有两种结构</span><sup><span style="color:#3366CC;">[2]</span></sup><a name="ref_%5B2%5D_136475"><span style="color:#136EC2;"> </span></a></p>
+<p align="left"><span style="color:#333333;">json</span><span style="color:#333333;">简单说就是</span><span style="color:#333333;">javascript</span><span style="color:#333333;">中的对象和数组，所以这两种结构就是对象和数组两种结构，通过这两种结构可以表示各种复杂的结构。</span></p>
+<p align="left"><span style="color:#333333;">1</span><span style="color:#333333;">、对象：对象在</span><span style="color:#333333;">js</span><span style="color:#333333;">中表示为</span><span style="color:#333333;">“{}”</span><span style="color:#333333;">括起来的内容，数据结构为</span><span style="color:#333333;">
+ {key</span><span style="color:#333333;">：</span><span style="color:#333333;">value,key</span><span style="color:#333333;">：</span><span style="color:#333333;">value,...}</span><span style="color:#333333;">的键值对的结构，在面向对象的语言中，</span><span style="color:#333333;">key</span><span style="color:#333333;">为对象的属性，</span><span style="color:#333333;">value</span><span style="color:#333333;">为对应的属性值，所以很容易理解，取值方法为</span><span style="color:#333333;">对象</span><span style="color:#333333;">.key
+</span><span style="color:#333333;">获取属性值，这个属性值的类型可以是</span><span style="color:#333333;">数字、字符串、数组、对象几种。</span></p>
+<p align="left"><span style="color:#333333;">2</span><span style="color:#333333;">、数组：数组在</span><span style="color:#333333;">js</span><span style="color:#333333;">中是中括号</span><span style="color:#333333;">“[]”</span><span style="color:#333333;">括起来的内容，数据结构为</span><span style="color:#333333;">["java","javascript","vb",...]</span><span style="color:#333333;">，取值方式和所有语言中一样，使用索引获取，字段值的类型可以是</span><span style="color:#333333;">数字、字符串、数组、对象几种。</span></p>
+<p align="left"><span style="color:#333333;">经过对象、数组</span><span style="color:#333333;">2</span><span style="color:#333333;">种结构就可以组合成复杂的数据结构了。</span></p>
+<p> </p>
+<p> </p>
+<p> </p>
+<h3>Protocol Buffer</h3>
+<p>Protocol Buffer最早由Google开发，用于内部的远程过程调用（RPC），以及开源。<strong>PB是结构化数据，它要求字段和类型都要明确定义。它们是经过优化的，编解码速度快，而且占用空间也很小。比起XML,PB能在同样的空间内存储大约3到10倍的数据，同时编解码速度大约为XML的20至100倍。PB采用一致化编码，因此有很多种创建一个包含多个PB消息的文件的方式。</strong></p>
+<p> </p>
+<h3>Cassandra是什么？</h3>
+<p>Cassandra是一套开源分布式NoSQL数据库系统。最初由Facebook开发，用于储存收件箱等见到格式数据，集google BigTable的数据模型与Amazon Dynamo的完全分布式的架构于一身。Facebook于2008年将Cassandra开源，此后，由于Cassandra良好的扩展性，被Twitter等Web 2.0网站所采纳，成为了一种流行的分布式结构化数据存储方案。</p>
+<p> </p>
+<h3>ElasticSearch是什么？</h3>
+<p>ElasticSearch是一个基于Lucene的搜索服务器。它提供了一个分布式多用户能力的全文搜索引擎，基于RESTful web接口。Elasticsearch是用Java开发的，并作为Apache许可条款下的开放源码发布，是当前流行的企业级搜索引擎。设计用于<a href="http://baike.baidu.com/view/1316082.htm" rel="nofollow"><span>云计算</span></a>中，能够达到实时搜索，稳定，可靠，快速，安装使用方便。</p>
+<p>我们建立一个网站或应用程序，并要添加搜索功能，令我们受打击的是：搜索工作是很难的。我们希望我们的搜索解决方案要快，我们希望有一个零配置和一个完全免费的搜索模式，我们希望能够简单地使用JSON通过HTTP的索引数据，我们希望我们的搜索服务器始终可用，我们希望能够一台开始并扩展到数百，我们要实时搜索，我们要简单的多租户，我们希望建立一个云的解决方案。Elasticsearch旨在解决所有这些问题和更多的问题。</p>
+<p> </p>
+<p> </p>
+<p> </p>
+<p> </p>
+<h3>LAMP</h3>
+<p>Linux，Apache，MySQL，PHP的缩写。</p>
+<h3>Eclipse是一个开源的IDE（集成开发环境）。</h3>
+<h3>在Windows系统中目前使用Hadoop的唯一方式就是使用虚拟机。</h3>
+<h3>Hive依赖于Hadoop，而Hadoop依赖于Java。</h3>
+<p>用户需要确认使用的操作系统中安装有v1.6.*或者v1.7.*版本的JVM（java虚拟机）。用户执行Hive只需使用到JRE（java运行时环境）。</p>
+<h3>Hive中关键字是大小写无关的</h3>
+<h3>Hadoop是面向批处理系统的</h3>
+<h3>HBase是一个分布式的，可伸缩的数据存储</h3>
+<p>其支持行级别的数据更新，快速查询和行级事务（但不支持多行事务）</p>
+<h3>Pig是数据流语言，而不是一种查询语言</h3>
+<p>Pig所使用的定制语言不是基于SQL的。本身Pig就不是被设计为一种查询语言的。</p>
+<h3>HDFS与本地文件系统的关系</h3>
+<p>HDFS是在现有的文件系统上抽象了一层，但不算是本地文件系统。</p>
+<p>为提供对不同数据访问的一直接口，hadoop借鉴了Linux的虚拟文件系统概念，引入了Hadoop抽象文件系统，并在此基础上，提供了大量的具体实现。HDFS是其中的一个实现。</p>
+<p>HDFS是更高层级的文件系统的抽象，将多台集群组成的文件系统看出一个逻辑上的整体。</p>
+<p>                                    </p>
+<h3>GFS与HDFS对比介绍</h3>
+<h4>相同点</h4>
+<p>HDFS基本上可以认为是GFS的一个简化版实现。</p>
+<p>（1）      GFS和HDFS都采用单一主控机+多台工作机的模式，有一台主控机（Master）存储系统全部元数据，并实现数据的分布，复制，备份决策，主控机还实现了元数据的checkpoint和操作日志记录及回访功能。工作机（datanode）存储数据，并根据主控机的指令进行数据存储，数据迁移和数据计算等。</p>
+<p>（2）      GFS和HDFS都通过数据分块和复制（多副本）来提供更高的可靠性和更高的性能。当一个副本不可用时，系统都提供了副本自动复制功能。</p>
+<p>（3）      针对数据读多于写的特点，读服务被分配到多个副本所在机器，提供了系统的整体性能。</p>
+<p>（4）      GFS和HDFS都提供了一个树结构的文件系统，实现了类似于Linux下的文件复制，改名，移动，创建，删除操作依据简单的权限管理。</p>
+<h4>不同点</h4>
+<p>GFS和HDFS在关键点的设计上差异很大，HDFS为了避免GFS的复杂度进行了很多简化。</p>
+<p>（1）      GFS最为复杂的是对多客户端并发追加同一个文件，即多客户并发Append模型。GFS允许文件被多次或者多个客户端同时打开以追加数据，以记录为单位。假设GFS追加记录的大小为16KB ~ 16MB之间，平均大小为1MB，如果每次追加都访问GFS Master显然很低效，因此,GFS通过Lease机制将每个Chunk的写权限授权给Chunk Server。写Lease的含义是Chunk Server对某个Chunk在Lease有效期内（假设为12s）有写权限，拥有Lease的Chunk Server成为Primary
+ Chunk Server，如果Primary Chunk Server宕机，Lease有效期过后Chunk的写Lease可以分配给其它Chunk Server。多客户端并发追加同一个文件导致Chunk Server需要对记录进行定序，客户端的写操作失败后可能重试，从而产生重复记录，再加上客户端API为异步模型，又产生了记录乱序问题。Append模型下重复记录、乱序等问题加上Lease机制，尤其是同一个Chunk的Lease可能在Chunk Server之间迁移，极大地提高了系统设计和一致性模型的复杂度。</p>
+<p>在HDFS中，HDFS文件只允许一次打开并追加数据，客户端先把所有数据写入本地的临时文件中，等到数据量达到一个Chunk的大小（通常是64MB），请求HDFS Master分配工作机及Chunk编号，将一个Chunk的数据一次性写入HDFS文件。由于累计64MB数据才进行实际写HDFS系统，对HDFS Master造成压力不大，不需要类似GFS中的将写Lease授权给工作机的机制，且没有了重复记录和乱序的问题，大大地简化了系统的设计。然而，HDFS不支持Append模型带来的很多问题，构建与之上的Hypertable和HBase需要使用HDFS存储表格系统的操作日志，由于HDFS的客户端需要攒到64MB数据才一次性写人到HDFS中，Hypertable和HBase中的表格系统服务节点如果宕机，部分操作日志没有写入到HDFS，可能会丢数据。</p>
+<p>（2）      Master单点失效的处理。GFS中采用主从模式备份Master的系统元数据，当主Master失效时，可以通过分布式选举备机接替主Master继续对外提供服务，而由于Replication及主备切换本身有一定的复杂性，HDFS Master的持久化数据只写入到本机（可能写入多份存放到Master机器的多个磁盘中防止某个磁盘损害），出现故障时需要人工介入。另外一点是对快照的支持。GFS通过内部采用copy-on-write的数据结构实现集群快照功能，而HDFS不提供快照功能。在大规模分布式系统中，程序有bug是很正常的情况，虽然大多数情况下可以修复bug，不过很难通过补偿操作将系统数据恢复到一致的状态，往往需要底层系统提供快照功能，将系统恢复到最近的某个一致状态。</p>
+<p>总之，HDFS基本可以认为是GFS的简化版，由于时间及应用场景等各方面的原因对GFS的功能做了一定的简化，大大降低了复杂度。</p>
+<h3>MapReduce和HDFS有什么关系</h3>
+<p>首先，HDFS和MapReduce是Hadoop最核心的设计：</p>
+<p>对于HDFS，及Hadoop Distibuted File System，它是Hadoop的存储基础，是数据层面的，提供海量的数据存储。</p>
+<p>对于MapReduce，则是一种引擎或者编程模型，可以理解为数据的上一层，我们可以通过编写MapReduce程序，对海量数据进行计算处理。<span style="color:rgb(51,51,51);">这就类似于我们通过</span><span style="color:rgb(51,51,51);">检索（</span><span style="color:rgb(51,51,51);">MapReduce</span><span style="color:rgb(51,51,51);">）所有文件（</span><span style="color:rgb(51,51,51);">HDFS</span><span style="color:rgb(51,51,51);">），找到我们想要的结果。</span></p>
+<p>其次，MapReduce中JobTracker和TaskTaskTracker分别对应于HDFS中的NameNode和DataNode。</p>
+<p> </p>
+<h3>HBase和Hadoop之间是什么关系</h3>
+<p>HBase使用HDFS来持久化存储数据。为了可以提供行级别的数据更新和快速查询，HBase也使用了内存缓存技术对数据和本地文件进行追加数据更新操作日志。持久化文件将定期地使用附加日志更新进行更新等操作。</p>
+<h3>没有使用MapReduce的分布式处理工具</h3>
+<h4>Spark</h4>
+<p>一个基于Scala API的分布式数据集的分布式计算框架。其可以使用HDFS文件，而且对于MapReduce中多种计算可以提供显著的性能改进。同时还有一个将HIVE指向Spark的项目，称作Shark。</p>
+<h4>Storm</h4>
+<p>一个实时事件流处理系统</p>
+<h4>Kafaka</h4>
+<p>一个分布式的发布-订阅消息传递系统        </p>
+<p> </p>
+<h3>其他数据处理语言和工具</h3>
+<h4>R</h4>
+<p>一个用于统计分析和数据图形化展示的开源语言，通常在数据与统计学家，经济学家等人群中很受欢迎。R不是一个分布式系统，所以其可以处理的数据大小是有限的。社区正努力将R与Hadoop结合起来。</p>
+<h4>Matlab</h4>
+<p>一个受工程师和科学家欢迎的商业数据分析和数值方法计算系统。</p>
+<br>            </div>
+                </div>

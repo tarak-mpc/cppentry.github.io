@@ -1,0 +1,241 @@
+---
+layout:     post
+title:      HDFS应用场景、原理、基本架构及使用方法概述
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：如要转载，请附上转载链接					https://blog.csdn.net/qq_40663357/article/details/83316049				</div>
+								            <div id="content_views" class="markdown_views prism-github-gist">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>以下主要参考小象科技的董西成老师的视频</p>
+<p><em>1. HDFS概述<br>
+2. HDFS基本架构和原理<br>
+3. HDFS程序设计<br>
+4. HDFS 2.0新特性</em></p>
+<h2><a id="HDFS_7"></a>一、HDFS概述</h2>
+<p><strong>HDFS是什么？</strong><br>
+1、源自于Google的GFS论文，发表于2003年10月，HDFS是GFS克隆版<br>
+2、Hadoop Distributed File System，易于扩展的分布式文件系统，运行在大量普通廉价机器上，提供容错机制，为大量用户提供性能不错的文件存取服务</p>
+<p><strong>HDFS优点</strong></p>
+<p>1、高容错性<br>
+数据自动保存多个副本，副本丢失后，自动恢复<br>
+2、适合批处理<br>
+移动计算而非数据， 数据位置暴露给计算框架<br>
+3、适合大数据处理<br>
+GB、TB、甚至PB级数据，百万规模以上的文件数量，10K+节点规模<br>
+4、流式文件访问<br>
+一次性写入，多次读取，保证数据一致性<br>
+5、可构建在廉价机器上<br>
+通过多副本提高可靠性，提供了容错和恢复机制</p>
+<p><strong>HDFS缺点</strong><br>
+1、低延迟数据访问<br>
+比如毫秒级，低延迟与高吞吐率<br>
+2、小文件存取<br>
+占用NameNode大量内存，寻道时间超过读取时间<br>
+3、并发写入、文件随机修改<br>
+一个文件只能有一个写者，仅支持append</p>
+<h2><a id="HDFS_34"></a>二、HDFS基本架构和原理</h2>
+<p><strong>HDFS架构</strong></p>
+<p>1、<strong>Namenode</strong>：<br>
+• 主Master（只有一个）<br>
+• 管理HDFS的名称空间<br>
+• 管理数据块映射信息<br>
+• 配置副本策略<br>
+• 处理客户端读写请求<br>
+2、<strong>SecondNameNode</strong><br>
+• NameNode的热备；<br>
+• 定期合并fsimage和fsedits，推送给NameNode；<br>
+• 当Active NameNode出现故障时，快速切换为新的NameNode。<br>
+3、<strong>Datanode</strong><br>
+• Slave（有多个）<br>
+• 存储实际的数据块<br>
+• 执行数据块读/写<br>
+4、<strong>Client</strong><br>
+• 文件切分<br>
+• 与NameNode交互，获取文件位置信息；<br>
+• 与DataNode交互，读取或者写入数据；<br>
+• 管理HDFS；<br>
+• 访问HDFS。</p>
+<p><strong>HDFS数据块（block）</strong><br>
+1、文件被切分成固定大小的数据块<br>
+默认数据块大小为64MB，可配置，若文件大小不到64MB，则单独存成一个block<br>
+2、为何数据块如此之大<br>
+数据传输时间超过寻道时间（高吞吐率）<br>
+3、一个文件存储方式<br>
+按大小被切分成若干个block，存储到不同节点上，默认情况下每个block有三个副本</p>
+<p><strong>HDFS副本放置策略</strong></p>
+<p><strong>问题</strong>：一个文件划分成多个block，每个block存多份，如何为每个block选择节点存储这几份数据？<br>
+<strong>Block副本放置策略</strong>：<br>
+副本1: 同Client的节点上，<br>
+副本2: 不同机架中的节点上，<br>
+副本3: 与第二个副本同一机架的另一个节点上，<br>
+其他副本:随机挑选</p>
+<p><strong>HDFS可靠性策略</strong></p>
+<p>1、文件完整性：CRC32校验，用其他副本取代损坏文件<br>
+2、Heartbeat：Datanode 定期向Namenode发heartbeat<br>
+3、元数据信息：FSImage（文件系统镜像）、Editlog（操作日志，多份存储，主备NameNode实时切换</p>
+<h2><a id="HDFS_82"></a>HDFS不适合存储小文件</h2>
+<p>1、<strong>元信息存储在NameNode内存中</strong>：一个节点的内存是有限的<br>
+2、<strong>存取大量小文件消耗大量的寻道时间</strong>：类比拷贝大量小文件与拷贝同等大小的一个大文件<br>
+3、<strong>NameNode存储block数目是有限的</strong>：一个block元信息消耗大约150 byte内存，存储1亿个block，大约需要20GB内存，如果一个文件大小为10K，则1亿个文件大小仅为1TB（但要消耗掉NameNode 20GB内存）</p>
+<p><strong>三、HDFS程序设计</strong></p>
+<p><strong>HDFS访问方式</strong><br>
+1、HDFS Shell命令<br>
+2、HDFS Java API<br>
+3、HDFS REST API<br>
+4、HDFS Fuse：实现了fuse协议<br>
+5、HDFS lib hdfs：C/C++访问接口<br>
+6、HDFS 其他语言编程API:使用thrift实现，支持C++、Python、php、C#等语言</p>
+<p><strong>HDFS Shell命令—文件操作命令</strong></p>
+<p>1、将本地文件上传到HDFS上</p>
+<pre><code>bin/hadoop fs -copyFromLocal /local/data /hdfs/data
+</code></pre>
+<p>2、删除文件/目录</p>
+<pre><code>bin/hadoop fs -rmr /hdfs/data
+
+</code></pre>
+<p>3、创建目录</p>
+<pre><code>bin/hadoop fs -mkdir /hdfs/data
+</code></pre>
+<p><strong>HDFS Shell命令—管理脚本</strong></p>
+<p>1、在sbin目录下</p>
+<pre><code>start-all.sh
+start-dfs.sh
+start-yarn.sh
+hadoop-deamon(s).sh
+</code></pre>
+<p>2、单独启动某个服务</p>
+<pre><code>hadoop-deamon.sh start namenode
+hadoop-deamons.sh start namenode（通过SSH登录到各个节点）
+</code></pre>
+<p><strong>HDFS Shell命令—文件管理命令fsck</strong></p>
+<p>1、检查hdfs中文件的健康状况<br>
+2、查找缺失的块以及过少或过多副本的块<br>
+3、查看一个文件的所有数据块位置<br>
+4、删除损坏的数据块</p>
+<p><strong>HDFS Shell命令—数据均衡器balancer</strong></p>
+<p>1、数据块重分布</p>
+<pre><code>bin/start-balancer.sh -threshold &lt;percentage ofdisk capacity&gt;
+</code></pre>
+<p>2、percentage of disk capacity</p>
+<p>HDFS达到平衡状态的磁盘使用率偏差值，值越低各节点越平衡，但消耗时间也更长</p>
+<p><strong>HDFS Shell命令—设置目录份额</strong></p>
+<p>1、限制一个目录最多使用磁盘空间</p>
+<pre><code>bin/hadoop dfsadmin -setSpaceQuota 1t /user/username
+</code></pre>
+<p>2、限制一个目录包含的最多子目录和文件数目</p>
+<pre><code>bin/hadoop dfsadmin -setQuota 10000 /user/username
+</code></pre>
+<p><strong>HDFS Shell命令—增加/移除节点</strong></p>
+<p>1、加入新的datanode<br>
+步骤1：将已存在datanode上的安装包（包括配置文件等）拷贝到新datanode上；<br>
+步骤2：启动新datanode：</p>
+<pre><code>sbin/hadoop-deamon.sh start datanode
+</code></pre>
+<p>2、移除旧datanode<br>
+步骤1：将datanode加入黑名单，并更新黑名单，在<br>
+NameNode上，将datanode的host或者ip加入配置选项<br>
+dfs.hosts.exclude指定的文件中<br>
+步骤2：移除datanode：</p>
+<pre><code>bin/hadoop dfsadmin -refreshNodes
+</code></pre>
+<p><strong>HDFS Java API介绍</strong></p>
+<p>1、Configuration类：该类的对象封装了配置信息，这些配置信息来自core-*.xml；<br>
+2、FileSystem类：文件系统类，可使用该类的方法对文件/目录进行操作。一般通过FileSystem的静态方法get获得一个文件系统对象；<br>
+3、FSDataInputStream和FSDataOutputStream类：HDFS中的输入输出流。分别通过FileSystem的open方法和create方法获得。<br>
+<strong>以上类均来自java包：org.apache.hadoop.fs</strong></p>
+<p><strong>HDFS Java程序举例</strong><br>
+1、将本地文件拷贝到HDFS上</p>
+<pre><code>Configuration config = new Configuration();
+FileSystem hdfs = FileSystem.get(config);
+Path srcPath = new Path(srcFile);
+Path dstPath = new Path(dstFile);
+hdfs.copyFromLocalFile(srcPath, dstPath);
+
+</code></pre>
+<p>2、创建HDFS文件</p>
+<pre><code>//byte[] buff – 文件内容
+ Configuration config = new Configuration();
+ FileSystem hdfs = FileSystem.get(config);
+ Path path = new Path(fileName);
+ FSDataOutputStream outputStream = hdfs.create(path);
+ outputStream.write(buff, 0, buff.length);
+</code></pre>
+<p>其他的就不在这详述了，有兴趣自己去找资料看看</p>
+<h2><a id="Hadoop_20_210"></a>四、Hadoop 2.0新特性</h2>
+<p>1、NameNode HA<br>
+2、NameNode Federation<br>
+3、HDFS 快照（snapshot）<br>
+4、HDFS 缓存（in-memory cache）<br>
+5、HDFS ACL<br>
+6、异构层级存储结构（Heterogeneous Storage<br>
+hierarchy）</p>
+<p><strong>异构层级存储结构—背景</strong><br>
+1、HDFS将所有存储介质抽象成性能相同的Disk</p>
+<pre><code>&lt;property&gt;
+ &lt;name&gt;dfs.datanode.data.dir&lt;/name&gt;
+ &lt;value&gt;/dir0,/dir1,/dir2,/dir3&lt;/value&gt;
+&lt;/property&gt;
+</code></pre>
+<p>2、存储介质种类繁多，一个集群中存在多种异构介质:磁盘、SSD、RAM等<br>
+3、多种类型的任务企图同时运行在同一个Hadoop集群中<br>
+批处理，交互式处理，实时处理，不同性能要求的数据，最好存储在不同类别的存储介质上</p>
+<p><strong>异构层级存储结构—原理</strong><br>
+1、每个节点是由多种异构存储介质构成的</p>
+<pre><code>&lt;property&gt;
+ &lt;name&gt;dfs.datanode.data.dir&lt;/name&gt;
+ &lt;value&gt;[disk]/dir0,[disk]/dir1,[ssd]/dir2,[ssd]/dir3&lt;/value&gt;
+&lt;/property&gt;
+</code></pre>
+<p>HDFS仅提供了一种异构存储结构，并不知道存储介质的性能；<br>
+HDFS为用户提供了API，以控制目录/文件写到什么介质上；<br>
+HDFS为管理员提供了管理工具，可限制每个用户对每种介质的可使用份额；但目前完成度不高</p>
+<p><strong>HDFS ACL—背景：现有权限管理的局限性</strong><br>
+<strong>HDFS ACL—基于POSIX ACL的实现</strong><br>
+启动该功能：将dfs.namenode.acls.enabled置为true<br>
+使用方法;</p>
+<pre><code>hdfs dfs -setfacl -m user:tom:rw- /bank/exchange
+hdfs dfs -setfacl -m user:lucy:rw- /bank/exchange
+hdfs dfs -setfacl -m group:team2:r-- /bank/exchange
+hdfs dfs -setfacl -m group:team3:r-- /bank/exchange
+</code></pre>
+<p><strong>HDFS快照—背景</strong><br>
+1、HDFS上文件和目录是不断变化的，快照可以帮助用户保存某个时刻的数据；<br>
+2、HDFS快照的作用：防止用户误操作删除数据，数据备份</p>
+<p><strong>HDFS快照—基本使用方法</strong><br>
+1、一个目录可以产生快照，当且仅当它是Snapshottable；</p>
+<pre><code>bin/hdfs dfsadmin allowSnapshot &lt;path&gt;
+</code></pre>
+<p>2、创建/删除快照</p>
+<pre><code>bin/hdfs dfs -createSnapshot &lt;path&gt; [&lt;snapshotName&gt;]
+bin/hdfs dfs -deleteSnapshot&lt;path&gt; [&lt;snapshotName&gt;]
+</code></pre>
+<p>3、快照存放位置和特点<br>
+特点：快照是只读的，不可修改<br>
+快照位置：</p>
+<pre><code>&lt;snapshottable_dir_path&gt;/.snapshot
+&lt;snapshottable_dir_path&gt;/.snapshot/snap_name
+</code></pre>
+<p><strong>HDFS缓存—背景</strong><br>
+1、HDFS自身不提供数据缓存功能，而是使用OS缓存：<br>
+容易内存浪费，eg.一个block三个副本同时被缓存<br>
+2、多种计算框架共存，均将HDFS作为共享存储系统<br>
+MapReduce：离线计算，充分利用磁盘<br>
+Impala：低延迟计算，充分利用内存<br>
+Spark：内存计算框架<br>
+3、HDFS应让多种混合计算类型共存一个集群中<br>
+合理的使用内存、磁盘等资源，比如，高频访问的特点文件应被尽可能长期缓存，防止置换到磁盘上</p>
+<p><strong>HDFS缓存—实现情况</strong><br>
+1、用户需通过命令显式的将一个目录或文件加入/移除缓存<br>
+不支持块级别的缓存，不支持自动化缓存，可设置缓存失效时间<br>
+2、缓存目录：仅对一级文件进行缓存：不会递归缓存所有文件与目录<br>
+3、以pool的形式组织缓存资源：<br>
+借助YARN的资源管理方式，将缓存划分到不同pool中<br>
+每个pool有类linux权限管理机制、缓存上限、失效时间等<br>
+4、独立管理内存，未与资源管理系统YARN集成：<br>
+用户可为每个DN设置缓存大小，该值独立于YARN</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

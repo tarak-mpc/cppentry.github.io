@@ -1,0 +1,241 @@
+---
+layout:     post
+title:      Hadoop 1.x 两种方式操作HDFS
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>1、URL API方式</p>
+<p></p>
+<pre><code class="language-java">package org.dragon.hadoop.hdfs.util;
+
+import java.io.InputStream;
+import java.net.URL;
+
+import org.apache.hadoop.fs.FsUrlStreamHandlerFactory;
+import org.apache.hadoop.io.IOUtils;
+import org.junit.Test;
+
+/**
+ * 通过URL操作HDFS
+ * @author Administrator
+ *
+ */
+public class HDFSUrlTest {
+	
+	//让java程序识别HDFS的URL
+	static{
+		URL.setURLStreamHandlerFactory(new FsUrlStreamHandlerFactory());
+	}
+	
+	//查看文件内容
+	@Test
+	public void testRead()throws Exception{
+		InputStream in = null;
+		//文件路径
+		String fileUrl = "hdfs://hadoop-master.dragon.org:9000/opt/data/test/01.data";
+		try{
+			//获取文件输入流
+			in = new URL(fileUrl).openStream();
+			//将文件内容读取出来，打印到控制台
+			//4096：缓冲区大小
+			//false：复制结束后是否关闭数据流
+			IOUtils.copyBytes(in, System.out, 4096, false);
+		}finally{
+			IOUtils.closeStream(in);
+		}
+		
+	}
+	
+}
+</code></pre><br>
+2、JAVA API 
+<p></p>
+<p>    此种方式需要将core-site.xml和hdfs-site.xml放入到工程中，在工程下新建conf目录，放入其中；否则类似创建目录等操作是针对的本地磁盘。</p>
+<p>（1）工具类</p>
+<p></p>
+<pre><code class="language-java">package org.dragon.hadoop.hdfs.util;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+
+/**
+ * HDFS 工具类
+ * @author Administrator
+ *
+ */
+public class HDFSUtils {
+	public static FileSystem getFileSystem(){
+		//声明FileSystem
+		FileSystem hdfs = null;
+		try {
+			//获取配置文件信息
+			Configuration conf = new Configuration();
+			//获取文件系统
+			hdfs = FileSystem.get(conf);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return hdfs;
+	}
+}
+</code></pre>（2）测试类
+<p></p>
+<p></p>
+<pre><code class="language-java">package org.dragon.hadoop.hdfs.util;
+
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IOUtils;
+import org.junit.Test;
+
+public class HDFSTest {
+	//查看目录
+	@Test
+	public void testList() throws Exception{
+		System.out.println(222);
+		//获取文件系统
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		//目录
+		Path path = new Path("/opt/data/");
+		FileStatus[] fileStatus = hdfs.listStatus(path);
+		System.out.println(fileStatus.length);
+		//遍历
+		for(FileStatus fs : fileStatus){
+			Path p = fs.getPath();
+			String info = fs.isDir()?"目录":"文件";
+			System.out.println(info + ":" + p);
+		}
+	}
+	
+	//创建目录
+	@Test
+	public void testMkdir()throws Exception{
+		//获取文件系统
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		Path path = new Path("/opt/data/test01");
+		boolean f = hdfs.mkdirs(path);
+		System.out.println("创建目录是否成功：" + f);
+	}
+	
+	
+	//上传文件
+	@Test
+	public void testPut()throws Exception{
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		//本地文件
+		Path srcPath = new Path("c:/t.log");
+		//HDFS文件上传路径
+		Path dstPath = new Path("/opt/data/test01/");
+		//上传文件
+		hdfs.copyFromLocalFile(srcPath, dstPath);
+	}
+	
+	//创建HDFS文件并写入内容
+	@Test
+	public void testCreate()throws Exception{
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		//HDFS文件上传路径
+		Path dstPath = new Path("/opt/data/test01/touch.data");
+		//获取输出流
+		FSDataOutputStream out = hdfs.create(dstPath);
+		//通过输出流写入数据
+		out.writeUTF("My World,I love it!");
+		//关闭
+		IOUtils.closeStream(out);
+	}
+	//读取文件内容
+	@Test
+	public void testRead()throws Exception{
+		//获取文件系统
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		//文件名称
+		Path path = new Path("/opt/data/test/01.data");
+		//打开文件输入流
+		FSDataInputStream in = hdfs.open(path);
+		//读取文件内容到控制台显示
+		IOUtils.copyBytes(in, System.out, 4096, false);
+		//关闭流
+		IOUtils.closeStream(in);
+	}
+}
+</code></pre>
+<p>继续测试    </p>
+<p></p><pre><code class="language-java">//对HDFS文件进行重命名
+	@Test
+	public void testRename()throws Exception{
+		//获取文件系统
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		//源文件
+		Path srcPath = new Path("/opt/data/test01/touch.data");
+		//目标文件
+		Path destPath = new Path("/opt/data/test01/touch_new.data");
+		boolean flag = hdfs.rename(srcPath, destPath);
+		System.out.println("重命名：" + flag);
+	}
+	
+	//删除文件
+	@Test
+	public void testDeleteFile()throws Exception{
+		//获取文件系统
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		Path path = new Path("/opt/data/test01/touch_new.data");
+		//hdfs.delete(path);
+		boolean flag = hdfs.deleteOnExit(path);
+		System.out.println("删除文件：" + flag);
+	}
+	
+	//删除目录
+	@Test
+	public void testDeleteDir()throws Exception{
+		//获取文件系统
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		Path path = new Path("/opt/data/test01/");
+		boolean flag = hdfs.delete(path, true);
+		System.out.println("删除目录：" + flag);
+	}
+	
+	//查看某个文件在HDFS集群的位置
+	//首先上传文件1.txt(调用上述上传文件方法)到指定目录/opt/data/test01/
+	//调用50070查看block信息
+	@Test
+	public void testFileLocation()throws Exception{
+		//获取文件系统
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		//已经上传的文件
+		Path path = new Path("/opt/data/test01/1.txt");
+		
+		FileStatus fileStatus = hdfs.getFileStatus(path);
+		BlockLocation[] blockLocations = hdfs.getFileBlockLocations(fileStatus, 0, fileStatus.getLen());
+		for(BlockLocation bl:blockLocations){
+			String[] hosts = bl.getHosts();
+			for(String host:hosts){
+				System.out.println(host+" ");
+			}
+			System.out.println();
+		}
+	}
+	
+	//获取HDFS集群上所有节点信息
+	@Test
+	public void testCluster()throws Exception{
+		//获取文件系统
+		FileSystem hdfs = HDFSUtils.getFileSystem();
+		//转换为分布式文件系统
+		DistributedFileSystem distributedFileSystem = (DistributedFileSystem)hdfs;
+		
+		DatanodeInfo[] dataNodeInfos = distributedFileSystem.getDataNodeStats();
+		
+		for(DatanodeInfo dataNodedInfo : dataNodeInfos){
+			String hostName = dataNodedInfo.getHostName();
+			System.out.println(hostName);
+		}
+	}</code></pre>
+<p>经过上述代码，可以实现对HDFS的操作。</p>
+<p></p>
+            </div>
+                </div>

@@ -1,0 +1,364 @@
+---
+layout:     post
+title:      Hadoop实战-中高级部分 之 HDFS原理 架构和副本机制 
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="iteye-blog-content-contain" style="font-size:14px;">
+<div class="div_content_text_all" style="border:0px;background-color:#fafafa;line-height:1.5em;font-family:verdana, arial, helvetica, sans-serif;">
+<div class="O" style="font-size:12px;border-width:0px;">
+<div style="border-width:0px;">
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5833.html" rel="nofollow">Hadoop RestFul</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5936.html" rel="nofollow">Hadoop HDFS原理1</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5937.html" rel="nofollow">Hadoop HDFS原理2</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5938.html" rel="nofollow">Hadoop作业调优参数调整及原理</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5939.html" rel="nofollow">Hadoop HA</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5961.html" rel="nofollow">Hadoop MapReduce高级编程</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5963.html" rel="nofollow">Hadoop IO</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5965.html" rel="nofollow">Hadoop MapReduce工作原理</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5966.html" rel="nofollow">Hadoop 管理</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5969.html" rel="nofollow">Hadoop 集群安装</a></div>
+<div style="border-width:0px;"><a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5968.html" rel="nofollow">Hadoop RPC</a></div>
+<div style="border-width:0px;"> </div>
+</div>
+<div style="border-width:0px;">
+<span class="bold" style="font-weight:bold;">第一部分：当前HDFS架构详尽分析</span> <br> <img style="border-style:none;" src="http://sishuok.com/forum/upload/2012/9/4/ab905f0a30663acc8b302415875fa069__1.JPG" alt=""></div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">HDFS架构</span></div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">•NameNode</div>
+<div style="border-width:0px;">•DataNode</div>
+<div style="border-width:0px;">•Sencondary NameNode</div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">数据存储细节</span></div>
+<div class="O" style="border-width:0px;"><span><img style="border-style:none;" src="http://sishuok.com/forum/upload/2012/9/4/de4875ed05759a5e72fa05ad8a5cf4a6__2.JPG" alt=""><br></span></div>
+</div>
+</div>
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">NameNode 目录结构</span></div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">Namenode</span> <span>的目录结构：</span>
+</div>
+<div style="border-width:0px;">
+<span>           ${</span> <span lang="en-us" xml:lang="en-us">dfs.name.dir}/current /VERSION<br></span><span lang="en-us" xml:lang="en-us">                                                  /edits<br></span><span lang="en-us" xml:lang="en-us">                                                  /fsimage<br></span><span lang="en-us" xml:lang="en-us">                                                  /fstime</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">    dfs.name.dir</span> <span>是</span> <span lang="en-us" xml:lang="en-us">hdfs-site.xml</span> <span>里配置的若干个目录组成的列表。</span>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">NameNode</span></div>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">             Namenode</span> <span>上保存着</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>的名字空间。对于任何对文件系统元数据产生修改的操作，</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>都会使用一种称为</span> <span lang="en-us" xml:lang="en-us">EditLog</span> <span>的事务日志记录下来。例如，在</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>中创建一个文件，</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>就会在</span> <span lang="en-us" xml:lang="en-us">Editlog</span> <span>中插入一条记录来表示；同样地，修改文件的副本系数也将往</span> <span lang="en-us" xml:lang="en-us">Editlog</span> <span>插入一条记录。</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>在本地操作系统的文件系统中存储这个</span> <span lang="en-us" xml:lang="en-us">Editlog</span> <span>。整个文件系统的名</span> <span>字空间，包括数据块到文件的映射、文件的属性等，都存储在一个称为</span> <span lang="en-us" xml:lang="en-us">FsImage</span> <span>的文件中，这</span> <span>个文件也是放在</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>所在的本地文件系统上。</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">              Namenode</span> <span>在内存中保存着整个文件系统的名字空间和文件数据块映射</span> <span lang="en-us" xml:lang="en-us">(Blockmap)</span> <span>的映像</span> <span>。这个关键的元数据结构设计得很紧凑，因而一个有</span> <span lang="en-us" xml:lang="en-us">4G</span> <span>内存的</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>足够支撑大量的文件</span> <span>和目录。当</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>启动时，它从硬盘中读取</span><span lang="en-us" xml:lang="en-us">Editlog</span> <span>和</span> <span lang="en-us" xml:lang="en-us">FsImage</span> <span>，将所有</span> <span lang="en-us" xml:lang="en-us">Editlog</span> <span>中的事务作</span> <span>用在内存中的</span> <span lang="en-us" xml:lang="en-us">FsImage</span> <span>上，并将这个新版本的</span> <span lang="en-us" xml:lang="en-us">FsImage</span> <span>从内存中保存到本地磁盘上，然后删除</span> <span>旧的</span> <span lang="en-us" xml:lang="en-us">Editlog</span> <span>，因为这个旧的</span> <span lang="en-us" xml:lang="en-us">Editlog</span> <span>的事务都已经作用在</span> <span lang="en-us" xml:lang="en-us">FsImage</span> <span>上了。这个过程称为一个检查</span><span>点</span> <span lang="en-us" xml:lang="en-us">(checkpoint)</span> <span>。在当前实现中，检查点只发生在</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>启动时，在不久的将来将实现支持</span> <span>周期性的检查点。</span>
+</div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;"> 
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">HDFS NameSpace</span></div>
+</div>
+</div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span>           </span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>支持传统的层次型文件组织结构。用户或者应用程序可以创建目</span> <span>录，然后将文件保存在这些目录里。文件系统名字空间的层次结构和大多数</span> <span>现有的文件系统类似：用户可以创建、删除、移动或重命名文件。当前，</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>不支持用户磁盘配额和访问权限控制，也不支持硬链接和软链接。但</span> <span>是</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>架构并不妨碍实现这些特性。</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">             Namenode</span> <span>负责维护文件系统命名空间，任何对文件系统名字空间或属</span> <span>性的修改都将被</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>记录下来。应用程序可以设置</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>保存的文件</span> <span>的副本数目。文件副本的数目称为文件的副本系数，这个信息也是由</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>保存的。</span>
+</div>
+<div style="border-width:0px;"><span> </span></div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">DataNode</span></div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">               Datanode</span> <span>将</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>数据以文件的形式存储在本地的文件系统中，它并不知道有</span> <span>关</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>文件的信息。它把每个</span><span lang="en-us" xml:lang="en-us">HDFS</span> <span>数据块存储在本地文件系统的一个单独的文件</span> <span>中。</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>并不在同一个目录创建所有的文件，实际上，它用试探的方法来确定</span> <span>每个目录的最佳文件数目，并且在适当的时候创建子目录。在同一个目录中创建所</span> <span>有的本地文件并不是最优的选择，这是因为本地文件系统可能无法高效地在单个目</span> <span>录中支持大量的文件。</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">            </span><span>当一个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>启动时，它会扫描本地文件系统，产生一个这些本地文件对应</span> <span>的所有</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>数据块的列表，然后作为报告发送到</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>，这个报告就是块状态</span> <span>报告。</span>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">Secondary NameNode</span>      </div>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">        Secondary NameNode</span> <span>定期合并</span> <span lang="en-us" xml:lang="en-us">fsimage</span> <span>和</span> <span lang="en-us" xml:lang="en-us">edits</span> <span>日志，将</span> <span lang="en-us" xml:lang="en-us">edits</span> <span>日志文件大小控制在一个限度下。</span>
+</div>
+<div style="border-width:0px;"><span> </span></div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">配置Secondary NameNode</span></div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">• conf/masters文件指定的为Secondary NameNode节点</div>
+<div style="border-width:0px;">•修改在masters文件中配置了的机器上的conf/hdfs-site.xml文件，加上如下选项：</div>
+<div style="border-width:0px;">       &lt;property&gt; &lt;name&gt;dfs.http.address&lt;/name&gt; &lt;value&gt;namenode.hadoop-host.com:50070&lt;/value&gt; &lt;/property&gt;</div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;">•core-site.xml：这里有2个参数可配置，但一般来说我们不做修改。fs.checkpoint.period表示多长时间记录一次hdfs的镜像。默认是1小时。fs.checkpoint.size表示一次记录多大的size，默认64M。</div>
+<div style="border-width:0px;">      &lt;property&gt; &lt;name&gt;fs.checkpoint.period&lt;/name&gt; &lt;value&gt;3600&lt;/value&gt; &lt;description&gt;The number of seconds between two periodic checkpoints. &lt;/description&gt; &lt;/property&gt;</div>
+<div style="border-width:0px;">        &lt;property&gt; &lt;name&gt;fs.checkpoint.size&lt;/name&gt; &lt;value&gt;67108864&lt;/value&gt; &lt;description&gt;The size of the current edit log (in bytes) that triggers a periodic checkpoint even if the fs.checkpoint.period hasn't expired. &lt;/description&gt; &lt;/property&gt;</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">Secondary NameNode</span></div>
+ <img style="border-style:none;" src="http://sishuok.com/forum/upload/2012/9/4/1d1fb437a9c11991d210637691daafd3__3.JPG" alt=""></div>
+</div>
+ </div>
+</div>
+ 
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">Secondary NameNode处理流程</span></div>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">   </span><span lang="en-us" xml:lang="en-us">(1)</span> <span lang="en-us" xml:lang="en-us">、</span> <span lang="en-us" xml:lang="en-us">namenode</span> <span>响应</span> <span lang="en-us" xml:lang="en-us">Secondary namenode</span> <span>请求，将</span> <span lang="en-us" xml:lang="en-us">edit log</span> <span>推送给</span> <span lang="en-us" xml:lang="en-us">Secondary namenode</span> <span lang="en-us" xml:lang="en-us">，</span> <span>开始重新写一个新的</span> <span lang="en-us" xml:lang="en-us">edit log</span> <span lang="en-us" xml:lang="en-us">。</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">   </span> <span lang="en-us" xml:lang="en-us">(2)</span> <span lang="en-us" xml:lang="en-us">、</span> <span lang="en-us" xml:lang="en-us">Secondary namenode</span> <span>收到来自</span> <span lang="en-us" xml:lang="en-us">namenode</span> <span>的</span> <span lang="en-us" xml:lang="en-us">fsimage</span> <span>文件和</span> <span lang="en-us" xml:lang="en-us">edit log</span> <span lang="en-us" xml:lang="en-us">。</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">   </span> <span lang="en-us" xml:lang="en-us">(3)</span> <span lang="en-us" xml:lang="en-us">、</span> <span lang="en-us" xml:lang="en-us">Secondary namenode</span> <span>将</span> <span lang="en-us" xml:lang="en-us">fsimage</span> <span>加载到内存，应用</span> <span lang="en-us" xml:lang="en-us">edit log</span> <span lang="en-us" xml:lang="en-us">，</span> <span>并生成一</span> <span>个新的</span> <span lang="en-us" xml:lang="en-us">fsimage</span> <span>文件。</span>
+</div>
+<div style="border-width:0px;">
+<span>   </span> <span>(4)</span> <span>、</span> <span lang="en-us" xml:lang="en-us">Secondary namenode</span> <span>将新的</span> <span lang="en-us" xml:lang="en-us">fsimage</span> <span>推送给</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span lang="en-us" xml:lang="en-us">。</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">    </span> <span lang="en-us" xml:lang="en-us">(5)</span> <span lang="en-us" xml:lang="en-us">、</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>用新的</span> <span lang="en-us" xml:lang="en-us">fsimage</span> <span>取代旧的</span> <span lang="en-us" xml:lang="en-us">fsimage</span> <span lang="en-us" xml:lang="en-us">，</span> <span>在</span> <span lang="en-us" xml:lang="en-us">fstime</span> <span>文件中记下检查</span> <span>点发生的时</span>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">HDFS通信协议</span></div>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span>           </span> <span>所有的</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>通讯协议都是构建在</span> <span lang="en-us" xml:lang="en-us">TCP/IP</span> <span>协议上。客户端通过一个可</span> <span>配置的端口连接到</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span lang="en-us" xml:lang="en-us">，</span> <span>通过</span> <span lang="en-us" xml:lang="en-us">ClientProtocol</span> <span>与</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>交互。而</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>是使用</span> <span lang="en-us" xml:lang="en-us">DatanodeProtocol</span> <span>与</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>交互。再设计上，</span> <span lang="en-us" xml:lang="en-us">DataNode</span><span>通过周期性的向</span> <span lang="en-us" xml:lang="en-us">NameNode</span> <span>发送心跳和数据块来保持和</span> <span lang="en-us" xml:lang="en-us">NameNode</span> <span>的通信，数据块报告的信息包括数据块的属性，即数据块属于哪</span> <span>个文件，数据块</span> <span lang="en-us" xml:lang="en-us">ID</span> <span>，修改时间等，</span> <span lang="en-us" xml:lang="en-us">NameNode</span> <span>的</span> <span lang="en-us" xml:lang="en-us">DataNode</span> <span>和数据块的映射</span> <span>关系就是通过系统启动时</span> <span lang="en-us" xml:lang="en-us">DataNode</span> <span>的数据块报告建立的。从</span> <span lang="en-us" xml:lang="en-us">ClientProtocol</span> <span>和</span> <span lang="en-us" xml:lang="en-us">Datanodeprotocol</span> <span>抽象出一个远程调用</span> <span lang="en-us" xml:lang="en-us">(</span> <span lang="en-us" xml:lang="en-us">RPC</span> <span lang="en-us" xml:lang="en-us">），</span> <span>在设计上，</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>不会主动发起</span> <span lang="en-us" xml:lang="en-us">RPC</span> <span lang="en-us" xml:lang="en-us">，</span> <span>而是是响应来自客户端和</span> <span lang="en-us" xml:lang="en-us">Datanode </span><span>的</span> <span lang="en-us" xml:lang="en-us">RPC</span> <span>请求。</span>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;" lang="en-us" xml:lang="en-us">HDFS的安全模式</span></div>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">           Namenode</span> <span>启动后会进入一个称为安全模式的特殊状态。处于安全模式</span> <span>的</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>是不会进行数据块的复制的。</span><span lang="en-us" xml:lang="en-us">Namenode</span> <span>从所有的</span> <span>Datanode</span> <span>接收心跳信号和块状态报告。块状态报告包括了某个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>所有的数据</span> <span>块列表。每个数据块都有一个指定的最小副本数。当</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>检测确认某</span> <span>个数据块的副本数目达到这个最小值，那么该数据块就会被认为是副本安全</span> <span lang="en-us" xml:lang="en-us">(safely replicated)</span> <span>的；在一定百分比（这个参数可配置）的数据块被</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>检测确认是安全之后（加上一个额外的</span> <span lang="en-us" xml:lang="en-us">30</span> <span>秒等待时间），</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>将退出安全模式状态。接下来它会确定还有哪些数据块的副本没</span> <span>有达到指定数目，并将这些数据块复制到其他</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>上。</span>
+</div>
+<div style="border-width:0px;"> </div>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;"><span class="bold" style="font-weight:bold;">第二部分：HDFS文件读取的解析</span></div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">文件读取流程</span></div>
+ <img style="border-style:none;" src="http://sishuok.com/forum/upload/2012/9/4/f4376c477c75ec2e909b14e0ea89b4f1__4.JPG" alt=""></div>
+<div style="border-width:0px;"> 
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">流程分析</span></div>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">•使用HDFS提供的客户端开发库Client，向远程的Namenode发起RPC请求；</div>
+<div style="border-width:0px;">• Namenode会视情况返回文件的部分或者全部block列表，对于每个block，Namenode都会返回有该block拷贝的DataNode地址；</div>
+<div style="border-width:0px;">•客户端开发库Client会选取离客户端最接近的DataNode来读取block；如果客户端本身就是DataNode,那么将从本地直接获取数据.</div>
+<div style="border-width:0px;">•读取完当前block的数据后，关闭与当前的DataNode连接，并为读取下一个block寻找最佳的DataNode；</div>
+<div style="border-width:0px;">•当读完列表的block后，且文件读取还没有结束，客户端开发库会继续向Namenode获取下一批的block列表。</div>
+<div style="border-width:0px;">•读取完一个block都会进行checksum验证，如果读取datanode时出现错误，客户端会通知Namenode，然后再从下一个拥有该block拷贝的datanode继续读。</div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;"> </div>
+</div>
+ </div>
+</div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;"><span class="bold" style="font-weight:bold;">第三部分：HDFS文件写入的解析</span></div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">文件写入流程</span></div>
+ <img style="border-style:none;" src="http://sishuok.com/forum/upload/2012/9/4/ec5bcdd0adff253bac03d901efa20a1c__5.JPG" alt=""></div>
+</div>
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">流程分析</span></div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">•使用HDFS提供的客户端开发库Client，向远程的Namenode发起RPC请求；</div>
+<div style="border-width:0px;">•Namenode会检查要创建的文件是否已经存在，创建者是否有权限进行操作，成功则会为文件 <strong>创建一个记录</strong>，否则会让客户端抛出异常；</div>
+<div style="border-width:0px;">•当客户端开始写入文件的时候，会将文件切分成多个packets，并在内部以数据队列"data queue"的形式管理这些packets，并向Namenode申请新的blocks，获取用来存储replicas的合适的datanodes列表，列表的大小根据在Namenode中对replication的设置而定。</div>
+<div style="border-width:0px;">•开始以pipeline（管道）的形式将packet写入所有的replicas中。把packet以流的方式写入第一个datanode，该datanode把该packet存储之后，再将其传递给在此pipeline中的下一个datanode，直到最后一个datanode，这种写数据的方式呈流水线的形式。</div>
+<div style="border-width:0px;">•最后一个datanode成功存储之后会返回一个ack packet，在pipeline里传递至客户端，在客户端的开发库内部维护着"ack queue"，成功收到datanode返回的ack packet后会从"ack queue"移除相应的packet。</div>
+<div style="border-width:0px;">•如果传输过程中，有某个datanode出现了故障，那么当前的pipeline会被关闭，出现故障的datanode会从当前的pipeline中移除，剩余的block会继续剩下的datanode中继续以pipeline的形式传输，同时Namenode会分配一个新的datanode，保持replicas设定的数量。</div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;"> 
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">流水线复制</span></div>
+</div>
+</div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span>              </span> <span>当客户端向</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>文件写入数据的时候，一开始是写到本地临时文件中。假设该文件的副</span> <span>本系数设置为</span> <span lang="en-us" xml:lang="en-us">3</span> <span>，当本地临时文件累积到一个数据块的大小时，客户端会从</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>获取一个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>列表用于存放副本。然后客户端开始向第一个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>传输数据，第一个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>一小部分一小部分</span> <span lang="en-us" xml:lang="en-us">(4 KB)</span> <span>地接收数据，将每一部分写入本地仓库，并同时传输该部分到列表中</span> <span>第二个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>节点。第二个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>也是这样，一小部分一小部分地接收数据，写入本地</span> <span>仓库，并同时传给第三个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>。最后，第三个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>接收数据并存储在本地。因此，</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>能流水线式地从前一个节点接收数据，并在同时转发给下一个节点，数据以流水线的</span> <span>方式从前一个</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>复制到下一个</span>
+</div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;"> 
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">更细节的原理</span></div>
+</div>
+</div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">           <span>客户端创建文件的请求其实并没有立即发送给</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>，事实上，在刚开始阶</span> <span>段</span> <span lang="en-us" xml:lang="en-us">HDFS</span> <span>客户端会先将文件数据缓存到本地的一个临时文件。应用程序的写操作被透</span> <span>明地重定向到这个临时文件。当这个临时文件累积的数据量超过一个数据块的大小</span> <span>，客户端才会联系</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>。</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>将文件名插入文件系统的层次结构中，并</span> <span>且分配一个数据块给它。然后返回</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>的标识符和目标数据块给客户端。接着</span> <span>客户端将这块数据从本地临时文件上传到指定的</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>上。当文件关闭时，在临</span> <span>时文件中剩余的没有上传的数据也会传输到指定的</span> <span lang="en-us" xml:lang="en-us">Datanode</span> <span>上。然后客户端告诉</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>文件已经关闭。此时</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>才将文件创建操作提交到日志里进行存储</span> <span>。如果</span> <span lang="en-us" xml:lang="en-us">Namenode</span> <span>在文件关闭前宕机了，则该文件将丢失。</span>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;"><span class="bold" style="font-weight:bold;">第四部分：副本机制</span></div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">特点</span></div>
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">1.</span> <span>数据类型单一</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">2.</span> <span>副本数比较多</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">3.</span> <span>写文件时副本的放置方法</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">4.</span> <span>动态的副本创建策略</span>
+</div>
+<div style="border-width:0px;">
+<span lang="en-us" xml:lang="en-us">5.</span> <span>弱化的副本一致性要求</span>
+</div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">副本摆放策略</span></div>
+ <img style="border-style:none;" src="http://sishuok.com/forum/upload/2012/9/4/10469c4e358f1544db4663c342baf464__6.JPG" alt=""></div>
+</div>
+ </div>
+<div style="border-width:0px;"> 
+<div class="O" style="border-width:0px;"><span class="bold" style="font-weight:bold;">修改副本数</span></div>
+</div>
+</div>
+</div>
+<div style="border-width:0px;">
+<div class="O" style="border-width:0px;">
+<div style="border-width:0px;">1.集群只有三个Datanode，hadoop系统replication=4时，会出现什么情况？</div>
+<div style="border-width:0px;">        对于上传文件到hdfs上时，当时hadoop的副本系数是几，这个文件的块数副本数就会有几份，无论以后你怎么更改系统副本系统，这个文件的副本数都不会改变，也就说上传到分布式系统上的文件副本数由当时的系统副本数决定，不会受replication的更改而变化，除非用命令来更改文件的副本数。因为dfs.replication实质上是client参数，在create文件时可以指定具体replication，属性dfs.replication是不指定具体replication时的采用默认备份数。文件上传后，备份数已定，修改dfs.replication是不会影响以前的文件的，也不会影响后面指定备份数的文件。只影响后面采用默认备份数的文件。但可以利用hadoop提供的命令后期改某文件的备份数：hadoop fs -setrep -R 1。如果你是在hdfs-site.xml设置了dfs.replication，这并一定就得了，因为你可能没把conf文件夹加入到你的 project的classpath里，你的程序运行时取的dfs.replication可能是hdfs-default.xml里的 dfs.replication，默认是3。可能这个就是造成你为什么dfs.replication老是3的原因。你可以试试在创建文件时，显式设定replication。replication一般到3就可以了，大了意义也不大。</div>
+<div style="border-width:0px;"> </div>
+<div style="border-width:0px;">转载请注明出处【  <a style="color:#005ea7;" href="http://sishuok.com/forum/blogPost/list/5936.html#19653" rel="nofollow">http://sishuok.com/forum/blogPost/list/5936.html#19653</a>】</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div style="font-size:12px;border-width:0px;font-family:verdana, arial, helvetica, sans-serif;line-height:normal;width:700px;"> </div>
+<div style="font-size:12px;border:1px dotted #00a0ef;font-family:verdana, arial, helvetica, sans-serif;line-height:normal;background-color:#fffce7;">
+<div style="font-size:20px;border-width:0px;color:#0000FF;font-weight:bold;line-height:25px;">精品视频课程推荐</div>
+<p><a style="font-size:16px;color:#FF0000;font-weight:bold;" href="http://sishuok.com/product/701?ad" rel="nofollow">深入浅出学Spring Web MVC视频教程</a> <br>系统、完整的学习Spring Web MVC开发的知识。包括：Spring Web MVC入门；理解DispatcherServlet；注解式控制器开发详解；数据类型转换；数据格式化；数据验证； 拦截器；对Ajax的支持；文件上传下载；表单标签等内容；最后以一个综合的CRUD带翻页的应用示例来综合所学的知识</p>
+<p><a style="font-size:16px;color:#FF0000;font-weight:bold;" href="http://sishuok.com/product/481?ad" rel="nofollow">Hadoop实战-初级部分视频教程</a> <br>Hadoop初级精品课程，帮助学员快速掌握Hadoop入门到上手开发，并掌握一定的开发技巧。通过Hadoop初级课程，学员可以掌握基本的Hadoop 原理，Hadoop环境搭建，Hadoop Shell，Hadoop HDFS基本操作和编程，Hadoop Mapreduce编程。</p>
+<p><a style="font-size:16px;color:#FF0000;font-weight:bold;" href="http://sishuok.com/product/81?ad" rel="nofollow">Java Web开发理论部分视频教程</a> <br>系统掌握开发实际的Java Web应用所需的理论知识和技能(Servlet、Jsp、JavaBean、TagLib、EL、JSTL、MVC模式、连接池DataSource、JNDI等知识)。涉及项目：在线投票计数、在线人数统计、登录检查、购物车、商品管理、非法字符替换等多个随堂演示小应用。</p>
+<p><a style="font-size:16px;color:#FF0000;font-weight:bold;" href="http://sishuok.com/product/181?ad" rel="nofollow">Spring3开发实战-独家视频教程</a> <br>从零到精通Spring3的开发知识；IoC/DI的思想、IoC/DI的运行流程、IoC/DI的开发指导、AOP的思想、AOP的运行流程、AOP应用的设计、Spring对JDBC和Hibernate的支持、Spring的事务、SSH的集成应用</p>
+<p><a style="font-size:16px;color:#FF0000;font-weight:bold;" href="http://sishuok.com/product/521?ad" rel="nofollow">Hadoop实战-中高级部分视频教程</a> <br>Hadoop中高级精品课程，帮助学员快速掌握Hadoop HDFS的原理；MapReduce的原理；MapReduce高级编程；Hadoop</p>
+<p> </p>
+<p> </p>
+<p> </p>
+<p> </p>
+<p>转自：<a href="http://sishuok.com/forum/blogPost/list/5936.html" rel="nofollow">http://sishuok.com/forum/blogPost/list/5936.html</a></p>
+<p> </p>
+<p> </p>
+<p> </p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-size:18pt;font-family:'comic sans ms', sans-serif;"><strong>简介</strong></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>HDFS</strong>（Hadoop Distributed File System ）Hadoop分布式文件系统。是根据google发表的论文翻版的。论文为GFS（Google File System）Google 文件系统（<a style="color:#267cb2;" href="http://www.open-open.com/lib/view/open1328763454608.html" rel="nofollow">中文</a>，<a style="color:#267cb2;" href="http://static.googleusercontent.com/media/research.google.com/zh-CN//archive/gfs-sosp2003.pdf" rel="nofollow">英文</a>）。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>HDFS有很多特点</strong>：</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    <strong>① </strong>保存多个副本，且提供容错机制，副本丢失或宕机自动恢复。默认存3份。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    <strong>② </strong>运行在廉价的机器上。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    <strong>③ </strong>适合大数据的处理。多大？多小？HDFS默认会将文件分割成block，64M为1个block。然后将block按键值对存储在HDFS上，并将键值对的映射存到内存中。如果小文件太多，那内存的负担会很重。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><img src="http://images.cnitblog.com/blog/352072/201311/26104230-8109ac513de14fe1b115b775581751f2.jpg" alt=""></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">如上图所示，HDFS也是按照Master和Slave的结构。分NameNode、SecondaryNameNode、DataNode这几个角色。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><em><strong>NameNode</strong></em>：是Master节点，是大领导。管理数据块映射；处理客户端的读写请求；配置副本策略；管理HDFS的名称空间；</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><em><strong>SecondaryNameNode</strong></em>：是一个小弟，分担大哥namenode的工作量；是NameNode的冷备份；合并fsimage和fsedits然后再发给namenode。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><em><strong>DataNode</strong>：Slave</em>节点，奴隶，干活的。负责存储client发来的数据块block；执行数据块的读写操作。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><em><strong>热备份</strong></em>：b是a的热备份，如果a坏掉。那么b马上运行代替a的工作。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><em><strong>冷备份</strong></em>：b是a的冷备份，如果a坏掉。那么b不能马上代替a工作。但是b上存储a的一些信息，减少a坏掉之后的损失。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><em><strong>fsimage</strong></em>:元数据镜像文件（文件系统的目录树。）</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><em><strong>edits</strong></em>：元数据的操作日志（针对文件系统做的修改操作记录）</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="text-decoration:underline;font-family:'comic sans ms', sans-serif;"><strong>namenode内存中存储的是=fsimage+edits。</strong></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">SecondaryNameNode负责定时默认1小时，从namenode上，获取fsimage和edits来进行合并，然后再发送给namenode。减少namenode的工作量。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"> </span></p>
+<hr style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"> </span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-size:18pt;font-family:'comic sans ms', sans-serif;"><strong>工作原理</strong></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-size:18px;"><strong><span style="font-family:'comic sans ms', sans-serif;">写操作：</span></strong></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><img src="http://images.cnitblog.com/blog/352072/201311/26162921-2de9d28df9b54fe6a97a6fd88f1cb03f.jpg" alt=""></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">有一个文件FileA，100M大小。Client将FileA写入到HDFS上。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">HDFS按默认配置。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">HDFS分布在三个机架上Rack1，Rack2，Rack3。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"> </span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>a.</strong> Client将FileA按64M分块。分成两块，block1和Block2;</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>b.</strong> Client向nameNode发送写数据请求，如图<span style="background-color:#3366ff;">蓝色虚线</span>①<span style="color:#0000ff;">------&gt;</span>。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>c.</strong> NameNode节点，记录block信息。并返回可用的DataNode，如<span style="background-color:#ff99cc;">粉色虚线</span>②<span style="color:#df7cdb;">---------&gt;</span>。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    Block1: host2,host1,host3</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    Block2: host7,host8,host4</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    原理：</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        NameNode具有RackAware机架感知功能，这个可以配置。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        若client为DataNode节点，那存储block时，规则为：副本1，同client的节点上；副本2，不同机架节点上；副本3，同第二个副本机架的另一个节点上；其他副本随机挑选。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        若client不为DataNode节点，那存储block时，规则为：副本1，随机选择一个节点上；副本2，不同副本1，机架上；副本3，同副本2相同的另一个节点上；其他副本随机挑选。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>d.</strong> client向DataNode发送block1；发送过程是以流式写入。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    流式写入过程，</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">       <strong> 1&gt;</strong>将64M的block1按64k的package划分;</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>2&gt;</strong>然后将第一个package发送给host2;</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>3&gt;</strong>host2接收完后，将第一个package发送给host1，同时client想host2发送第二个package；</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>4&gt;</strong>host1接收完第一个package后，发送给host3，同时接收host2发来的第二个package。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>5&gt;</strong>以此类推，如图<span style="background-color:#ff0000;color:#ffffff;">红线实线</span>所示，直到将block1发送完毕。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>6&gt;</strong>host2,host1,host3向NameNode，host2向Client发送通知，说“消息发送完了”。如图<span style="background-color:#d12e93;color:#ffffff;">粉红颜色</span>实线所示。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>7&gt;</strong>client收到host2发来的消息后，向namenode发送消息，说我写完了。这样就真完成了。如图<span style="background-color:#ffff00;">黄色粗实线</span></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>8&gt;</strong>发送完block1后，再向host7，host8，host4发送block2，如图<span style="background-color:#2b23e5;color:#ffffff;">蓝色实线</span>所示。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>9&gt;</strong>发送完block2后，host7,host8,host4向NameNode，host7向Client发送通知，如图<span style="background-color:#00ff00;">浅绿色实线</span>所示。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">        <strong>10&gt;</strong>client向NameNode发送消息，说我写完了，如图<span style="background-color:#ffff00;">黄色粗实线</span>。。。这样就完毕了。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>分析，</strong>通过写过程，我们可以了解到：</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    <strong>①</strong>写1T文件，我们需要3T的存储，3T的网络流量贷款。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    <strong>②</strong>在执行读或写的过程中，NameNode和DataNode通过HeartBeat进行保存通信，确定DataNode活着。如果发现DataNode死掉了，就将死掉的DataNode上的数据，放到其他节点去。读取时，要读其他节点去。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    <strong>③</strong>挂掉一个节点，没关系，还有其他节点可以备份；甚至，挂掉某一个机架，也没关系；其他机架上，也有备份。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"> </p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><strong><span style="font-family:'comic sans ms', sans-serif;font-size:18px;">读操作：</span></strong></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"> <img src="http://images.cnitblog.com/blog/352072/201311/26163017-fc613879835c402886b75e0593ca52ed.jpg" alt=""></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">读操作就简单一些了，如图所示，client要从datanode上，读取FileA。而FileA由block1和block2组成。 </span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"> </span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">那么，读操作流程为：</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>a.</strong> client向namenode发送读请求。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>b.</strong> namenode查看Metadata信息，返回fileA的block的位置。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    block1:host2,host1,host3</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">    block2:host7,host8,host4</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>c.</strong> block的位置是有先后顺序的，先读block1，再读block2。而且block1去host2上读取；然后block2，去host7上读取；</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"> </span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">上面例子中，client位于机架外，那么如果client位于机架内某个DataNode上，例如,client是host6。那么读取的时候，遵循的规律是：</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"><strong>优选读取本机架上的数据</strong>。</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;"> </span></p>
+<hr style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"> </p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><strong><span style="font-family:'comic sans ms', sans-serif;font-size:18pt;">HDFS中常用到的命令</span></strong></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">1、hadoop fs</span></p>
+<div class="cnblogs_Highlighter" style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;">
+<div id="highlighter_262490" class="syntaxhighlighter collapsed java" style="margin-left:0px;font-size:1em;background-color:#ffffff;">
+<div class="toolbar" style="background-color:#f5f5f5;border:1px solid #cccccc;line-height:1.1em;vertical-align:baseline;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace;font-size:1em;color:#0000FF;"><span><a class="toolbar_item command_expandSource expandSource" style="color:#0000FF;background-image:none;border:0px;line-height:1.1em;text-align:center;vertical-align:baseline;font-size:12px;" href="http://www.cnblogs.com/laov/p/3434917.html" rel="nofollow">+ View Code</a></span></div>
+</div>
+</div>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">2、hadoop fsadmin </span></p>
+<div class="cnblogs_Highlighter" style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;">
+<div id="highlighter_173521" class="syntaxhighlighter collapsed java" style="margin-left:0px;font-size:1em;background-color:#ffffff;">
+<div class="toolbar" style="background-color:#f5f5f5;border:1px solid #cccccc;line-height:1.1em;vertical-align:baseline;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace;font-size:1em;color:#0000FF;"><span><a class="toolbar_item command_expandSource expandSource" style="color:#0000FF;background-image:none;border:0px;line-height:1.1em;text-align:center;vertical-align:baseline;font-size:12px;" href="http://www.cnblogs.com/laov/p/3434917.html" rel="nofollow">+ View Code</a></span></div>
+</div>
+</div>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">3、hadoop fsck</span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"><span style="font-family:'comic sans ms', sans-serif;">4、start-balancer.sh<br></span></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"> </p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;">去我的CSDN博客浏览：<a style="color:#267cb2;" href="http://blog.csdn.net/weixuehao/article/details/16967485" rel="nofollow">http://blog.csdn.net/weixuehao/article/details/16967485</a></p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;"> </p>
+<p style="font-family:'Microsoft YaHei', 'Segoe UI', Tahoma, Arial, Helvetica, sans-serif;font-size:14px;">转自：<a style="font-family:verdana, arial, helvetica, sans-serif;font-size:12px;" href="http://www.cnblogs.com/laov/p/3434917.html" rel="nofollow">http://www.cnblogs.com/laov/p/3434917.html</a></p>
+<p> </p>
+</div>
+</div>            </div>
+                </div>

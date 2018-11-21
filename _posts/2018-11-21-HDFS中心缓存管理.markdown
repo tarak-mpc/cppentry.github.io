@@ -1,0 +1,47 @@
+---
+layout:     post
+title:      HDFS中心缓存管理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/zhanglh046/article/details/78547312				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-family:'Times New Roman';font-size:18px;">一 HDFS 中心缓存背景</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">缓存HDFS中的热点公共资源文件和短期临时的热点数据文件</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">情况一: 公共资源文件. </span>
+</p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">这些文件可以是一些存放于HDFS中的依赖资源jar包,或是一些算法学习依赖.so文件等等.像这类的数据文件,放在HDFS上的好处是,我可以在HDFS上全局共享嘛,不用到本地机器上去依赖,而且好管理,我可以直接更新到HDFS上.但是这种场景更好的做法是把它做成distributedcache,否则在程序中将会发送大量的请求到NameNode中去获取这些资源文件的和内容.而且这种请求量是非常恐怖的,不是说请求一次就够了,而是调用一次,请求一次.</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">情况二: 短期临时的热点数据文件.</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">比如集群中每天需要统计的报表数据,需要读取前一天的或是最近一周的数据做离线分析,但是过了这个期限内的基本就很少再用到了,就可以视为冷数据了.那么这个时候就可以把符合这个时间段的数据做缓存处理,然后过期了,就直接从缓存中清除.</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">在HDFS中,最终缓存的本质上还是一个INodeFile文件.但是在逻辑上,引出了下面几个概念.</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;"> </span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">二 缓存管理的作用</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">阻止了频繁使用到的数据从内存中清除；</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">HDFS可以根据数据块的缓存情况调度任务，优先调用有缓存的数据块，提高了读的性能；</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">数据块被DataNode缓存以后，客户端就可以使用更加高效的零拷贝读取数据块。因为数据块已经执行了数据校验的过程，零拷贝读取就不会在校验数据</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;"> </span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">三 缓存相关概念</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">3.1缓存指令(CacheDirective):一条缓存指令定义了要被缓存的路径，可以是文件或者文件夹，注意缓存不会递归文件夹，即只有当前文件夹的才会被缓存</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">3.2缓存池(CachePool):管理缓存指令的组</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">3.3CacheManager: 负责管理集中式缓存的组件，管理着DataNode上所有缓存的数据块，同时负责响应hdfscacheadmin命令。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;"> </span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;"> </span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">CacheManager元素：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">derectivesById： 以缓存指令id为key保存缓存指令</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">derectivesByPath:以缓存路径为key，保存缓存指令</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">cachePools:以缓存池名称为key,保存所有缓存池</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">CacheReplicationMonitor:负责扫描命名空间和缓存指令，以确定需需要缓存或者删除缓存的数据块，并向DataNode分配缓存任务</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;"> </span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">客户端请求添加缓存池，已准备添加缓存指令：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">ClientProtocal.addCachePool:</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">首先判断这个请求参数是否合法</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">然后看CacheManager的cachePools字段是否包含这个缓存池信息</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">再次：如果没有，就构造一个CachePool</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;"> </span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;">创建缓存之后,客户端就会调用ClientProtocal.addCacheDirective()方法将一个路径添加到缓存中。NameNodeRpcServer接收这个请求之后，会将创建缓存请求的参数封装到一个CacheDirectiveInfo对象，然后调用CacheManager.addInternal()方法响应这个请求，最后通过触发CacheReplicationMonitor执行缓存操作，他会一直循环调用rescan方法，将缓存指令包含的数据块加入到集合中，然后遍历集合，判断这些数据块时执行cache操作还是执行uncache操作。然后为每一个等待cache的数据块选择一个合适的DataNode(保存了该数据块副本的所有DN中选一个可用内存最多的</span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;"> </span></p>
+<p><span style="font-family:'Times New Roman';font-size:18px;"> </span></p>
+            </div>
+                </div>

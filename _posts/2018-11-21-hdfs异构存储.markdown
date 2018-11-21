@@ -1,0 +1,455 @@
+---
+layout:     post
+title:      hdfs异构存储
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div class="article_title">
+<h3>转载自<a href="http://blog.csdn.net/androidlushangderen/article/details/51105876" rel="nofollow">http://blog.csdn.net/androidlushangderen/article/details/51105876</a></h3>
+</div>
+<div style="clear:both;"></div>
+<div id="article_content" class="article_content">
+<div class="markdown_views">
+<h1 id="前言"><a name="t0"></a>前言</h1>
+<hr><p><a href="http://lib.csdn.net/base/hadoop" rel="nofollow" class="replace_word" title="Hadoop知识库" style="color:#df3434;font-weight:bold;">Hadoop</a>在2.6.0版本中引入了一个新特性<em>异构存储</em>.异构存储关键在于异构2个字.异构存储可以根据各个存储介质读写特性的不同发挥各自的优势.一个很适用的场景就是上篇文章提到的冷热数据的存储.针对冷数据,采用容量大的,读写性能不高的存储介质存储,比如最普通的Disk磁盘.而对于热数据而言,可以采用SSD的方式进行存储,这样就能保证高效的读性能,在速率上甚至能做到十倍于或百倍于普通磁盘读写的速度.换句话说,HDFS的异构存储特性的出现使得我们不需要搭建2套独立的集群来存放冷热2类数据,在一套集群内就能完成.所以这个功能特性还是有非常大的实用意义的.本文就带大家了解HDFS的异构存储分为哪几种类型,存储策略如何,HDFS如何做到智能化的异构存储.</p>
+<h1 id="异构存储类型"><a name="t1"></a>异构存储类型</h1>
+<hr><p>上文提到了多次的异构这个名词,那么到底异构存储分为了种类型呢,这里列举一下HDFS中所声明的Storage Type.</p>
+<ul><li>RAM_DISK</li><li>SSD</li><li>DISK</li><li>ARCHIVE</li></ul><p>HDFS中是定义了这4种类型,SSD,DISK一看就知道是什么意思,这里看一下其余的2个,RAM_DISK,其实就是Memory内存,而ARCHIVE并没有特指哪种存储介质,主要的指的是高密度存储数据的介质来解决数据量的容量扩增的问题.这4类是被定义在了StorageType类中:</p>
+<pre class="prettyprint"><code class="hljs r has-numbering">public enum StorageType {
+  // sorted by the speed of the storage types, from fast to slow
+  RAM_DISK(true),
+  SSD(false),
+  DISK(false),
+  ARCHIVE(false);
+  <span class="hljs-keyword">...</span></code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li></ul><p>旁边的true或者false代表的是此类存储类型是否是<em>transient</em>特性的.transient的意思是指转瞬即逝的,并非持久化的.在HDFS中,如果没有主动声明数据目录存储类型的,默认都是DISK.</p>
+<pre class="prettyprint"><code class="hljs vbnet has-numbering"> Defines the types <span class="hljs-keyword">of</span> supported storage media. The <span class="hljs-keyword">default</span> storage
+ medium <span class="hljs-keyword">is</span> assumed <span class="hljs-keyword">to</span> be DISK.</code></pre><ul class="pre-numbering"><li>1</li><li>2</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets_01.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li></ul><p>这4类存储介质之间一个很多的性能区别就在于读写速度,从上到下依次减慢,所以从冷热数据的处理来看,将数据存在内存中或是SSD中会是不错的选择,而冷数据则存放与DISK和ARCHIVE类型的介质中会更好.所以HDFS中冷热数据文件目录的StorageType的设定将会显得非常的重要.那么如何让HDFS知道集群中哪些数据存储目录是具体哪种类型的存储介质呢,这里需要配置的主动声明,HDFS可没有做自动检测识别的功能.在配置属性dfs.datanode.data.dir中进行本地对应存储目录的设置,同时带上一个存储类型标签,声明此目录用的是哪种类型的存储介质,例子如下:</p>
+<pre class="prettyprint"><code class="hljs cs has-numbering">[SSD]file:<span class="hljs-comment"><span class="hljs-xmlDocTag">///</span>grid/dn/ssd0</span></code></pre><ul class="pre-numbering"><li>1</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets_01.png" alt=""></a></div><ul class="pre-numbering"><li>1</li></ul><p>如果目录前没有带上[SSD]/[DISK]/[ARCHIVE]/[RAM_DISK]这4种中的任何一种,则默认是DISK类型.下面是一张存储介质结构图 <br><img src="https://img-blog.csdn.net/20160410195326493" alt="这里写图片描述" title=""></p>
+<h1 id="异构存储原理"><a name="t2"></a>异构存储原理</h1>
+<hr><p>了解完了异构存储的多种存储介质之后,我们有必要了解一下HDFS的异构存储的实现原理.在这里会结合部分HDFS源码进行阐述.概况性的总结为3小点:</p>
+<ul><li>DataNode通过心跳汇报自身数据存储目录的StorageType给NameNode,</li><li>随后NameNode进行汇总并更新集群内各个节点的存储类型情况</li><li>待复制文件根据自身设定的存储策略信息向NameNode请求拥有此类型存储介质的DataNode作为候选节点</li></ul><p>从以上3点来看,本质原理并不复杂.下面结合部分源码,来一步步追踪内部的过程细节.</p>
+<h2 id="datanode存储目录汇报"><a name="t3"></a>DataNode存储目录汇报</h2>
+<hr><p>首先是数据存储目录的解析与心跳汇报过程.在FsDatasetImpl的构造函数中对dataDir进行了存储目录的解析,生成了StorageType的List列表.</p>
+<pre class="prettyprint"><code class="hljs r has-numbering">  /**
+   * An FSDataset has a directory where it loads its data files.
+   */
+  FsDatasetImpl(DataNode datanode, DataStorage storage, Configuration conf
+      ) throws IOException {
+    <span class="hljs-keyword">...</span>
+    String[] dataDirs = conf.getTrimmedStrings(DFSConfigKeys.DFS_DATANODE_DATA_DIR_KEY);
+    Collection&lt;StorageLocation&gt; dataLocations = DataNode.getStorageLocations(conf);
+    List&lt;VolumeFailureInfo&gt; volumeFailureInfos = getInitialVolumeFailureInfos(
+        dataLocations, storage);
+    <span class="hljs-keyword">...</span></code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li></ul><p>真正调用的是DataNode的getStorageLocations方法.</p>
+<pre class="prettyprint"><code class="hljs java has-numbering">  <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> List&lt;StorageLocation&gt; <span class="hljs-title">getStorageLocations</span>(Configuration conf) {
+    <span class="hljs-comment">// 获取dfs.datanode.data.dir配置中多个目录地址字符串</span>
+    Collection&lt;String&gt; rawLocations =
+        conf.getTrimmedStringCollection(DFS_DATANODE_DATA_DIR_KEY);
+    List&lt;StorageLocation&gt; locations =
+        <span class="hljs-keyword">new</span> ArrayList&lt;StorageLocation&gt;(rawLocations.size());
+
+    <span class="hljs-keyword">for</span>(String locationString : rawLocations) {
+      <span class="hljs-keyword">final</span> StorageLocation location;
+      <span class="hljs-keyword">try</span> {
+        <span class="hljs-comment">// 解析为对应的StorageLocation</span>
+        location = StorageLocation.parse(locationString);
+      } <span class="hljs-keyword">catch</span> (IOException ioe) {
+        LOG.error(<span class="hljs-string">"Failed to initialize storage directory "</span> + locationString
+            + <span class="hljs-string">". Exception details: "</span> + ioe);
+        <span class="hljs-comment">// Ignore the exception.</span>
+        <span class="hljs-keyword">continue</span>;
+      } <span class="hljs-keyword">catch</span> (SecurityException se) {
+        LOG.error(<span class="hljs-string">"Failed to initialize storage directory "</span> + locationString
+                     + <span class="hljs-string">". Exception details: "</span> + se);
+        <span class="hljs-comment">// Ignore the exception.</span>
+        <span class="hljs-keyword">continue</span>;
+      }
+      <span class="hljs-comment">// 将解析好的StorageLocation加入到列表中</span>
+      locations.add(location);
+    }
+
+    <span class="hljs-keyword">return</span> locations;
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li></ul><p>当然我们最关系的过程就是如何解析配置并最终得到对应存储类型的过程,就是下面这行操作所执行的内容</p>
+<pre class="prettyprint"><code class="hljs fix has-numbering"><span class="hljs-attribute">location </span>=<span class="hljs-string"> StorageLocation.parse(locationString);</span></code></pre><ul class="pre-numbering"><li>1</li></ul><div class="save_code tracking-ad"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li></ul><p>进入到StorageLocation方法,查阅解析方法</p>
+<pre class="prettyprint"><code class="hljs cs has-numbering">  <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> StorageLocation <span class="hljs-title">parse</span>(String rawLocation)
+      throws IOException, SecurityException {
+    <span class="hljs-comment">// 采用正则匹配的方式的方式进行解析</span>
+    Matcher matcher = regex.matcher(rawLocation);
+    StorageType storageType = StorageType.DEFAULT;
+    String location = rawLocation;
+
+    <span class="hljs-keyword">if</span> (matcher.matches()) {
+      String classString = matcher.<span class="hljs-keyword">group</span>(<span class="hljs-number">1</span>);
+      location = matcher.<span class="hljs-keyword">group</span>(<span class="hljs-number">2</span>);
+      <span class="hljs-keyword">if</span> (!classString.isEmpty()) {
+        storageType =
+            StorageType.valueOf(StringUtils.toUpperCase(classString));
+      }
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-keyword">new</span> StorageLocation(storageType, <span class="hljs-keyword">new</span> Path(location).toUri());
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li></ul><p>这里的StorageType.DEFAULT就是DISK,在StorageType中定义的</p>
+<pre class="prettyprint"><code class="hljs java has-numbering"><span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> StorageType DEFAULT = DISK;</code></pre><ul class="pre-numbering"><li>1</li></ul><div class="save_code tracking-ad"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li></ul><p>后续这些解析好的存储目录以及对应的存储介质类型会被加入到storageMap中.</p>
+<pre class="prettyprint"><code class="hljs r has-numbering">  private void addVolume(Collection&lt;StorageLocation&gt; dataLocations,
+      Storage.StorageDirectory sd) throws IOException {
+    final File dir = sd.getCurrentDir();
+    final StorageType storageType =
+        getStorageTypeFromLocations(dataLocations, sd.getRoot());
+
+    <span class="hljs-keyword">...</span>
+
+    synchronized (this) {
+      volumeMap.addAll(tempVolumeMap);
+      storageMap.put(sd.getStorageUuid(),
+          new DatanodeStorage(sd.getStorageUuid(),
+              DatanodeStorage.State.NORMAL,
+              storageType));
+      <span class="hljs-keyword">...</span>
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li></ul><p>这个storageMap存储了具体存储目录到具体存储类型的映射关系,可以说是非常细粒度的.更重要的是,这个信息会被DataNode组织成StorageReport通过心跳的形式上报给NameNode.于是就来到了第一阶段的下半过程.</p>
+<pre class="prettyprint"><code class="hljs rsl has-numbering">  public StorageReport[] getStorageReports(String bpid)
+      throws IOException {
+    List&lt;StorageReport&gt; reports;
+    synchronized (statsLock) {
+      List&lt;FsVolumeImpl&gt; curVolumes = getVolumes();
+      reports = new ArrayList&lt;&gt;(curVolumes.size());
+      <span class="hljs-keyword">for</span> (FsVolumeImpl <span class="hljs-shader"><span class="hljs-keyword">volume</span> : curVolumes) {
+        try (</span>FsVolumeReference ref = <span class="hljs-shader"><span class="hljs-keyword">volume</span>.obtainReference(</span>)) {
+          StorageReport sr = new StorageReport(<span class="hljs-shader"><span class="hljs-keyword">volume</span>.toDatanodeStorage(</span>),
+              false,
+              <span class="hljs-shader"><span class="hljs-keyword">volume</span>.getCapacity(</span>),
+              <span class="hljs-shader"><span class="hljs-keyword">volume</span>.getDfsUsed(</span>),
+              <span class="hljs-shader"><span class="hljs-keyword">volume</span>.getAvailable(</span>),
+              <span class="hljs-shader"><span class="hljs-keyword">volume</span>.getBlockPoolUsed(</span>bpid));
+          reports.add(sr);
+        } catch (ClosedChannelException e) {
+          <span class="hljs-keyword">continue</span>;
+        }
+      }
+    }
+
+    <span class="hljs-keyword">return</span> reports.toArray(new StorageReport[reports.size()]);
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li></ul><p>以上是StorageReport的组织过程.最终被BPServiceActor的sendHeartBeat调用,发送给了NameNode.</p>
+<pre class="prettyprint"><code class="hljs avrasm has-numbering">  HeartbeatResponse sendHeartBeat() throws IOException {
+    // 获取存储类型情况报告信息
+    StorageReport[] reports =
+        dn<span class="hljs-preprocessor">.getFSDataset</span>()<span class="hljs-preprocessor">.getStorageReports</span>(bpos<span class="hljs-preprocessor">.getBlockPoolId</span>())<span class="hljs-comment">;</span>
+    if (LOG<span class="hljs-preprocessor">.isDebugEnabled</span>()) {
+      LOG<span class="hljs-preprocessor">.debug</span>(<span class="hljs-string">"Sending heartbeat with "</span> + reports<span class="hljs-preprocessor">.length</span> +
+                <span class="hljs-string">" storage reports from service actor: "</span> + this)<span class="hljs-comment">;</span>
+    }
+    // 获取坏磁盘数据信息
+    VolumeFailureSummary volumeFailureSummary = dn<span class="hljs-preprocessor">.getFSDataset</span>()
+        <span class="hljs-preprocessor">.getVolumeFailureSummary</span>()<span class="hljs-comment">;</span>
+    int numFailedVolumes = volumeFailureSummary != null ?
+        volumeFailureSummary<span class="hljs-preprocessor">.getFailedStorageLocations</span>()<span class="hljs-preprocessor">.length</span> : <span class="hljs-number">0</span><span class="hljs-comment">;</span>
+    // 还有DataNode自身的存储容量信息,最后发送给了NameNode
+    return bpNamenode<span class="hljs-preprocessor">.sendHeartbeat</span>(bpRegistration,
+        reports,
+        dn<span class="hljs-preprocessor">.getFSDataset</span>()<span class="hljs-preprocessor">.getCacheCapacity</span>(),
+        dn<span class="hljs-preprocessor">.getFSDataset</span>()<span class="hljs-preprocessor">.getCacheUsed</span>(),
+        dn<span class="hljs-preprocessor">.getXmitsInProgress</span>(),
+        dn<span class="hljs-preprocessor">.getXceiverCount</span>(),
+        numFailedVolumes,
+        volumeFailureSummary)<span class="hljs-comment">;</span>
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li></ul><h2 id="存储心跳信息的更新处理"><a name="t4"></a>存储心跳信息的更新处理</h2>
+<hr><p>在这里来到了第二阶段的心跳处理过程.在DatanodeManager的handleHeartbeat中进行了处理</p>
+<pre class="prettyprint"><code class="hljs java has-numbering">  <span class="hljs-javadoc">/** Handle heartbeat from datanodes. */</span>
+  <span class="hljs-keyword">public</span> DatanodeCommand[] <span class="hljs-title">handleHeartbeat</span>(DatanodeRegistration nodeReg,
+      StorageReport[] reports, <span class="hljs-keyword">final</span> String blockPoolId,
+      <span class="hljs-keyword">long</span> cacheCapacity, <span class="hljs-keyword">long</span> cacheUsed, <span class="hljs-keyword">int</span> xceiverCount, 
+      <span class="hljs-keyword">int</span> maxTransfers, <span class="hljs-keyword">int</span> failedVolumes,
+      VolumeFailureSummary volumeFailureSummary) <span class="hljs-keyword">throws</span> IOException {
+    <span class="hljs-keyword">synchronized</span> (heartbeatManager) {
+      <span class="hljs-keyword">synchronized</span> (datanodeMap) {
+        DatanodeDescriptor nodeinfo = <span class="hljs-keyword">null</span>;
+        ...
+
+        heartbeatManager.updateHeartbeat(nodeinfo, reports,
+                                         cacheCapacity, cacheUsed,
+                                         xceiverCount, failedVolumes,
+                                         volumeFailureSummary);
+        ...</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li></ul><p>最终在heartbeatManager中会更新到具体的DatanodeDescription的updateHeartbeatState方法,里面就会更新Storage的信息</p>
+<pre class="prettyprint"><code class="hljs r has-numbering">  /**
+   * process datanode heartbeat or stats initialization.
+   */
+  public void updateHeartbeatState(StorageReport[] reports, long cacheCapacity,
+      long cacheUsed, int xceiverCount, int volFailures,
+      VolumeFailureSummary volumeFailureSummary) {
+    <span class="hljs-keyword">...</span>
+    <span class="hljs-keyword">for</span> (StorageReport report : reports) {
+      DatanodeStorageInfo storage = updateStorage(report.getStorage());
+      <span class="hljs-keyword">if</span> (checkFailedStorages) {
+        failedStorageInfos.remove(storage);
+      }
+
+      storage.receivedHeartbeat(report);
+      totalCapacity += report.getCapacity();
+      totalRemaining += report.getRemaining();
+      totalBlockPoolUsed += report.getBlockPoolUsed();
+      totalDfsUsed += report.getDfsUsed();
+    }
+    rollBlocksScheduled(getLastUpdateMonotonic());
+    <span class="hljs-keyword">...</span></code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li></ul><h2 id="目标存储介质类型节点的请求"><a name="t5"></a>目标存储介质类型节点的请求</h2>
+<hr><p>各个DataNode心跳信息都更新完毕之后,就会有目标存储介质需求的待复制文件块向NameNode进行请求.比如在FSNamesystem的getAdditionDatanode中就有这里的处理</p>
+<pre class="prettyprint"><code class="hljs java has-numbering">  <span class="hljs-javadoc">/**<span class="hljs-javadoctag"> @see</span> ClientProtocol#getAdditionalDatanode */</span>
+  LocatedBlock getAdditionalDatanode(String src, <span class="hljs-keyword">long</span> fileId,
+      <span class="hljs-keyword">final</span> ExtendedBlock blk, <span class="hljs-keyword">final</span> DatanodeInfo[] existings,
+      <span class="hljs-keyword">final</span> String[] storageIDs,
+      <span class="hljs-keyword">final</span> Set&lt;Node&gt; excludes,
+      <span class="hljs-keyword">final</span> <span class="hljs-keyword">int</span> numAdditionalNodes, <span class="hljs-keyword">final</span> String clientName
+      ) <span class="hljs-keyword">throws</span> IOException {
+      ...
+      <span class="hljs-keyword">final</span> INodeFile file = checkLease(src, clientName, inode, fileId);
+      clientMachine = file.getFileUnderConstructionFeature().getClientMachine();
+      clientnode = blockManager.getDatanodeManager().getDatanodeByHost(clientMachine);
+      preferredblocksize = file.getPreferredBlockSize();
+      <span class="hljs-comment">// 获取待复制文件的存储策略Id,对应的就是存储策略信息类型</span>
+      storagePolicyID = file.getStoragePolicyID();
+
+      <span class="hljs-comment">//find datanode storages</span>
+      <span class="hljs-keyword">final</span> DatanodeManager dm = blockManager.getDatanodeManager();
+      <span class="hljs-comment">// 获取已存在的节点中存储目录列表信息</span>
+      chosen = Arrays.asList(dm.getDatanodeStorageInfos(existings, storageIDs));
+    } <span class="hljs-keyword">finally</span> {
+      readUnlock();
+    }
+
+    ...
+    <span class="hljs-comment">// choose new datanodes.</span>
+    <span class="hljs-comment">// 然后进行满足需求节点的选择</span>
+    <span class="hljs-keyword">final</span> DatanodeStorageInfo[] targets = blockManager.chooseTarget4AdditionalDatanode(
+        src, numAdditionalNodes, clientnode, chosen, 
+        excludes, preferredblocksize, storagePolicyID);
+    <span class="hljs-keyword">final</span> LocatedBlock lb = <span class="hljs-keyword">new</span> LocatedBlock(blk, targets);
+    blockManager.setBlockToken(lb, AccessMode.COPY);
+    <span class="hljs-keyword">return</span> lb;
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li><li>31</li><li>32</li><li>33</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li><li>31</li><li>32</li><li>33</li></ul><p>然后目标存储节点信息就被设到了具体Block块的信息中了.这里的一个target也就是DatanodeStorageInfo,代表的就是DataNode中的一个dataDir存储目录.上述代码中具体blockManager如何根据给定的候选DatanodeStorageInfo存储目录和存储策略来选择出目标节点,那就是下一节将要重点阐述的StoragePolicy存储介质选择策略的内容了.本节最后给出HDFS的异构存储过程调用的简单的流程图<br><img src="https://img-blog.csdn.net/20160410195708227" alt="这里写图片描述" title=""></p>
+<h1 id="blockstoragepolicy存储类型选择策略"><a name="t6"></a>BlockStoragePolicy存储类型选择策略</h1>
+<hr><p>与Block放置策略类似,对于数据的介质存储同样有对应若干种的策略选择.对于一个完整的存储类型选择策略,有如下的基本信息定义:</p>
+<pre class="prettyprint"><code class="hljs java has-numbering"><span class="hljs-javadoc">/**
+ * A block storage policy describes how to select the storage types
+ * for the replicas of a block.
+ */</span>
+<span class="hljs-annotation">@InterfaceAudience</span>.Private
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">BlockStoragePolicy</span> {</span>
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> Logger LOG = LoggerFactory.getLogger(BlockStoragePolicy
+      .class);
+
+  <span class="hljs-javadoc">/** A 4-bit policy ID 策略唯一标识Id*/</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">byte</span> id;
+  <span class="hljs-javadoc">/** Policy name 策略名称 */</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> String name;
+
+  <span class="hljs-javadoc">/** The storage types to store the replicas of a new block. */</span>
+  <span class="hljs-javadoc">/** 对于一个新的block的一系列的存储副本块的可选存储类型信息组 **/</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> StorageType[] storageTypes;
+  <span class="hljs-javadoc">/** The fallback storage type for block creation. */</span>
+  <span class="hljs-javadoc">/** 对于第一个创建的block块的fallback情况时的可选存储类型 **/</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> StorageType[] creationFallbacks;
+  <span class="hljs-javadoc">/** The fallback storage type for replication. */</span>
+  <span class="hljs-javadoc">/** 对于的block块的其余副本的fallback情况时的可选存储类型 **/</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> StorageType[] replicationFallbacks;
+  <span class="hljs-javadoc">/**
+   * Whether the policy is inherited during file creation.
+   * If set then the policy cannot be changed after file creation.
+   */</span>
+  <span class="hljs-comment">// 是否继承祖先目录信息的策略信息当创建文件的时候,用于主动设置  Policy的时候</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">boolean</span> copyOnCreateFile;
+  ...</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li></ul><p>这里出现了<strong>fallback</strong> 的情况,什么叫做fallback的情况呢</p>
+<pre class="prettyprint"><code class="hljs has-numbering">当前存储类型不可用的时候,退一级所选择使用的存储类型</code></pre><ul class="pre-numbering"><li>1</li></ul><div class="save_code tracking-ad"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li></ul><p>相应的逻辑代码</p>
+<pre class="prettyprint"><code class="hljs r has-numbering">  public List&lt;StorageType&gt; chooseStorageTypes(final short replication,
+      final Iterable&lt;StorageType&gt; chosen,
+      final EnumSet&lt;StorageType&gt; unavailables,
+      final boolean isNewBlock) {
+    <span class="hljs-keyword">...</span>
+    <span class="hljs-keyword">for</span>(int i = storageTypes.size() - <span class="hljs-number">1</span>; i &gt;= <span class="hljs-number">0</span>; i--) {
+      // replace/remove unavailable storage types.
+      // 获取当前徐亚的存储类型
+      final StorageType t = storageTypes.get(i);
+      // 如果当前的存储类型是在不可用的存储类型列表中,选择fallback的情况
+      <span class="hljs-keyword">if</span> (unavailables.contains(t)) {
+        // 根据是否是新的block块还是普通的replica选择相应的fallBack的storage type
+        final StorageType fallback = isNewBlock?
+            getCreationFallback(unavailables)
+            : getReplicationFallback(unavailables);
+        <span class="hljs-keyword">if</span> (fallback == null) {
+          removed.add(storageTypes.remove(i));
+        } <span class="hljs-keyword">else</span> {
+          storageTypes.set(i, fallback);
+        }
+      }
+    }
+    <span class="hljs-keyword">...</span></code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li></ul><p>在getFallback方法中会选取第一个满足条件的fallback的storage type.</p>
+<pre class="prettyprint"><code class="hljs cs has-numbering">  <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> StorageType <span class="hljs-title">getFallback</span>(EnumSet&lt;StorageType&gt; unavailables,
+      StorageType[] fallbacks) {
+    <span class="hljs-keyword">for</span>(StorageType fb : fallbacks) {
+      <span class="hljs-comment">// 如果找到满足条件的storage type,立即返回</span>
+      <span class="hljs-keyword">if</span> (!unavailables.contains(fb)) {
+        <span class="hljs-keyword">return</span> fb;
+      }
+    }
+    <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li></ul><p>当然这些都只是单一的存储类型选择策略.HDFS在使用的时候也不是直接new一个StoragePolicy对象的方式直接调用,而是从<strong>BlockStoragePolicySuite</strong>策略集合中进行获取的.</p>
+<h1 id="blockstoragepolicysuite存储类型策略集合"><a name="t7"></a>BlockStoragePolicySuite存储类型策略集合</h1>
+<hr><p>BlockStoragePolicySuite的官方定义就是</p>
+<pre class="prettyprint"><code class="hljs vhdl has-numbering">A collection <span class="hljs-keyword">of</span> <span class="hljs-keyword">block</span> storage policies.</code></pre><ul class="pre-numbering"><li>1</li></ul><div class="save_code tracking-ad"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li></ul><p>在此类内部,定义了6种策略,不仅仅分为冷热数据2种.</p>
+<ul><li><strong>Hot</strong> - for both storage and compute. The data that is popular and still being used for processing will stay in this policy. When a block is hot, all replicas are stored in DISK.</li><li><strong>Cold</strong> - only for storage with limited compute. The data that is no longer being used, or data that needs to be archived is moved from hot storage to cold storage. When a block is cold, all replicas are stored in ARCHIVE.</li><li><strong>Warm</strong> - partially hot and partially cold. When a block is warm, some of its replicas are stored in DISK and the remaining replicas are stored in ARCHIVE.</li><li><strong>All_SSD</strong> - for storing all replicas in SSD.</li><li><strong>One_SSD</strong> - for storing one of the replicas in SSD. The remaining replicas are stored in DISK.</li><li><strong>Lazy_Persist</strong> - for writing blocks with single replica in memory. The replica is first written in RAM_DISK and then it is lazily persisted in DISK.</li></ul><p>在这6种策略中,前3类策略和后3种策略可以看作是2大类.前者从冷热数据的角度划分出了3小类的Policy.而后面3者则根据SSD盘的和内存存放作为区别特征策略被单独划分了出来.策略倒是划分出来了,但是这些不同的策略之间的主要区别在于哪里呢,答案就是候选存储类型组.<br>
+在创建BlockStoragePolicySuite的时候,对这些策略都进行了构造</p>
+<pre class="prettyprint"><code class="hljs java has-numbering">  <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> BlockStoragePolicySuite <span class="hljs-title">createDefaultSuite</span>() {
+    <span class="hljs-keyword">final</span> BlockStoragePolicy[] policies =
+        <span class="hljs-keyword">new</span> BlockStoragePolicy[<span class="hljs-number">1</span> &lt;&lt; ID_BIT_LENGTH];
+    <span class="hljs-keyword">final</span> <span class="hljs-keyword">byte</span> lazyPersistId = HdfsConstants.MEMORY_STORAGE_POLICY_ID;
+    policies[lazyPersistId] = <span class="hljs-keyword">new</span> BlockStoragePolicy(lazyPersistId, 
+        HdfsConstants.MEMORY_STORAGE_POLICY_NAME,
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.RAM_DISK, StorageType.DISK},
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.DISK},
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.DISK},
+        <span class="hljs-keyword">true</span>);    <span class="hljs-comment">// Cannot be changed on regular files, but inherited.</span>
+    <span class="hljs-keyword">final</span> <span class="hljs-keyword">byte</span> allssdId = HdfsConstants.ALLSSD_STORAGE_POLICY_ID;
+    policies[allssdId] = <span class="hljs-keyword">new</span> BlockStoragePolicy(allssdId,
+        HdfsConstants.ALLSSD_STORAGE_POLICY_NAME,
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.SSD},
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.DISK},
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.DISK});
+    <span class="hljs-keyword">final</span> <span class="hljs-keyword">byte</span> onessdId = HdfsConstants.ONESSD_STORAGE_POLICY_ID;
+    policies[onessdId] = <span class="hljs-keyword">new</span> BlockStoragePolicy(onessdId,
+        HdfsConstants.ONESSD_STORAGE_POLICY_NAME,
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.SSD, StorageType.DISK},
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.SSD, StorageType.DISK},
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.SSD, StorageType.DISK});
+    <span class="hljs-keyword">final</span> <span class="hljs-keyword">byte</span> hotId = HdfsConstants.HOT_STORAGE_POLICY_ID;
+    policies[hotId] = <span class="hljs-keyword">new</span> BlockStoragePolicy(hotId,
+        HdfsConstants.HOT_STORAGE_POLICY_NAME,
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.DISK}, StorageType.EMPTY_ARRAY,
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.ARCHIVE});
+    <span class="hljs-keyword">final</span> <span class="hljs-keyword">byte</span> warmId = HdfsConstants.WARM_STORAGE_POLICY_ID;
+    policies[warmId] = <span class="hljs-keyword">new</span> BlockStoragePolicy(warmId,
+        HdfsConstants.WARM_STORAGE_POLICY_NAME,
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.DISK, StorageType.ARCHIVE},
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.DISK, StorageType.ARCHIVE},
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.DISK, StorageType.ARCHIVE});
+    <span class="hljs-keyword">final</span> <span class="hljs-keyword">byte</span> coldId = HdfsConstants.COLD_STORAGE_POLICY_ID;
+    policies[coldId] = <span class="hljs-keyword">new</span> BlockStoragePolicy(coldId,
+        HdfsConstants.COLD_STORAGE_POLICY_NAME,
+        <span class="hljs-keyword">new</span> StorageType[]{StorageType.ARCHIVE}, StorageType.EMPTY_ARRAY,
+        StorageType.EMPTY_ARRAY);
+    <span class="hljs-keyword">return</span> <span class="hljs-keyword">new</span> BlockStoragePolicySuite(hotId, policies);
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li><li>31</li><li>32</li><li>33</li><li>34</li><li>35</li><li>36</li><li>37</li><li>38</li><li>39</li><li>40</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li><li>31</li><li>32</li><li>33</li><li>34</li><li>35</li><li>36</li><li>37</li><li>38</li><li>39</li><li>40</li></ul><p>在这些策略对象的参数中,第三个参数是最起决定性作用的,因为第三个参数会被用来返回给副本block作为候选存储类型.在storageTypes参数中,有时可能只有1个参数,例如<strong>ALLSSD</strong>策略只有</p>
+<pre class="prettyprint"><code class="hljs cs has-numbering"><span class="hljs-keyword">new</span> StorageType[]{StorageType.SSD}</code></pre><ul class="pre-numbering"><li>1</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets_01.png" alt=""></a></div><ul class="pre-numbering"><li>1</li></ul><p>而<strong>ONESSD</strong>却有2个</p>
+<pre class="prettyprint"><code class="hljs avrasm has-numbering">new StorageType[]{StorageType<span class="hljs-preprocessor">.SSD</span>, StorageType<span class="hljs-preprocessor">.DISK</span>}</code></pre><ul class="pre-numbering"><li>1</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets_01.png" alt=""></a></div><ul class="pre-numbering"><li>1</li></ul><p>这里面其实是有一定原因的.因为block有多副本的机制,每个策略要为所有的副本都返回相应的Storage Type,如果副本数超过候选Storage Type数组怎么处理,答案在下面这个方法中</p>
+<pre class="prettyprint"><code class="hljs java has-numbering">  <span class="hljs-keyword">public</span> List&lt;StorageType&gt; <span class="hljs-title">chooseStorageTypes</span>(<span class="hljs-keyword">final</span> <span class="hljs-keyword">short</span> replication) {
+    <span class="hljs-keyword">final</span> List&lt;StorageType&gt; types = <span class="hljs-keyword">new</span> LinkedList&lt;StorageType&gt;();
+    <span class="hljs-keyword">int</span> i = <span class="hljs-number">0</span>, j = <span class="hljs-number">0</span>;
+
+    <span class="hljs-comment">// Do not return transient storage types. We will not have accurate</span>
+    <span class="hljs-comment">// usage information for transient types.</span>
+    <span class="hljs-comment">// 从前往后依次匹配存储类型到对应的副本下标中</span>
+    <span class="hljs-keyword">for</span> (;i &lt; replication &amp;&amp; j &lt; storageTypes.length; ++j) {
+      <span class="hljs-keyword">if</span> (!storageTypes[j].isTransient()) {
+        types.add(storageTypes[j]);
+        ++i;
+      }
+    }
+
+    <span class="hljs-comment">// 获取最后一个存储类型,统一作为多余副本的存储类型</span>
+    <span class="hljs-keyword">final</span> StorageType last = storageTypes[storageTypes.length - <span class="hljs-number">1</span>];
+    <span class="hljs-keyword">if</span> (!last.isTransient()) {
+      <span class="hljs-keyword">for</span> (; i &lt; replication; i++) {
+        types.add(last);
+      }
+    }
+    <span class="hljs-keyword">return</span> types;
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li></ul><p>这样的话,<strong>ONESSD</strong>就必然只有1个block副本是此类型的,而<strong>ALLSSD</strong>则将会全部是SSD的存储.下面给出存储策略集合的结构图<br><img src="https://img-blog.csdn.net/20160411113803016" alt="这里写图片描述" title=""><br>
+上述策略中有一个策略比较有意思的是<strong>LAZY_PERSIST</strong>,先将数据写到内存中,然后在持久化,不知道性能如何,大家可以试试此策略.</p>
+<h1 id="blockstoragepolicy存储策略的调用"><a name="t8"></a>BlockStoragePolicy存储策略的调用</h1>
+<hr><p>分析完BlockStoragePolicy的种类之后,我们看看HDFS在哪些地方设置了这些策略. <br>
+首先,我们要知道HDFS的默认Policy是哪种</p>
+<pre class="prettyprint"><code class="hljs r has-numbering">  @VisibleForTesting
+  public static BlockStoragePolicySuite   createDefaultSuite() {
+    <span class="hljs-keyword">...</span>
+    <span class="hljs-keyword">return</span> new BlockStoragePolicySuite(hotId, policies);
+  }
+  <span class="hljs-keyword">...</span>
+
+  public BlockStoragePolicySuite(byte defaultPolicyID,
+      BlockStoragePolicy[] policies) {
+    this.defaultPolicyID = defaultPolicyID;
+    this.policies = policies;
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li></ul><p><strong>如上所示,就是HOT的策略,把集群中的数据都看成是经常访问的数据</strong>.然后进一步查看getPolicy的方法调用,如下图 <br><img src="https://img-blog.csdn.net/20160411115654052" alt="这里写图片描述" title=""><br>
+我们以方法chooseTarget4NewBlock为例子,追踪一下上游的调用过程.</p>
+<pre class="prettyprint"><code class="hljs java has-numbering">  <span class="hljs-keyword">public</span> DatanodeStorageInfo[] <span class="hljs-title">chooseTarget4NewBlock</span>(<span class="hljs-keyword">final</span> String src,
+      <span class="hljs-keyword">final</span> <span class="hljs-keyword">int</span> numOfReplicas, <span class="hljs-keyword">final</span> Node client,
+      <span class="hljs-keyword">final</span> Set&lt;Node&gt; excludedNodes,
+      <span class="hljs-keyword">final</span> <span class="hljs-keyword">long</span> blocksize,
+      <span class="hljs-keyword">final</span> List&lt;String&gt; favoredNodes,
+      <span class="hljs-keyword">final</span> <span class="hljs-keyword">byte</span> storagePolicyID) <span class="hljs-keyword">throws</span> IOException {
+    List&lt;DatanodeDescriptor&gt; favoredDatanodeDescriptors = 
+        getDatanodeDescriptors(favoredNodes);
+    <span class="hljs-keyword">final</span> BlockStoragePolicy storagePolicy = storagePolicySuite.getPolicy(storagePolicyID);
+    ...</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li></ul><p>在父方法中获取了storagePolicyID策略ID,往上追踪,来到了FSNamesystem的getNewBlockTargets方法</p>
+<pre class="prettyprint"><code class="hljs r has-numbering">  DatanodeStorageInfo[] getNewBlockTargets(String src, long fileId,
+      String clientName, ExtendedBlock previous, Set&lt;Node&gt; excludedNodes,
+      List&lt;String&gt; favoredNodes, LocatedBlock[] onRetryBlock) throws IOException {
+      <span class="hljs-keyword">...</span>
+      replication = pendingFile.getFileReplication();
+      storagePolicyID = pendingFile.getStoragePolicyID();
+    } finally {
+      readUnlock();
+    }
+
+    <span class="hljs-keyword">if</span> (clientNode == null) {
+      clientNode = getClientNode(clientMachine);
+    }
+
+    // choose targets <span class="hljs-keyword">for</span> the new block to be allocated.
+    <span class="hljs-keyword">return</span> getBlockManager().chooseTarget4NewBlock( 
+        src, replication, clientNode, excludedNodes, blockSize, favoredNodes,
+        storagePolicyID);
+  }</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li></ul><p>于是我们看到storagePolicyID是从INodeFile中获取而来的.这与上文中目标节点请求的过程类似,都有从File中获取策略Id的动作.那么新的问题又来了,INodeFile中的StoragePolicyID从何而来呢,有一下2种途径</p>
+<ul><li>通过RPC接口主动设置</li><li>
+<p>没有主动设置的ID会继承父目录的策略,如果父目录还是没有,则会设置ID_UNSPECIFIED,继而会用DEFAULT Storage Policy进行替代,源码如下:</p>
+<pre class="prettyprint"><code class="hljs cs has-numbering">  <span class="hljs-keyword">public</span> <span class="hljs-keyword">byte</span> <span class="hljs-title">getStoragePolicyID</span>() {
+<span class="hljs-keyword">byte</span> id = getLocalStoragePolicyID();
+<span class="hljs-keyword">if</span> (id == ID_UNSPECIFIED) {
+  <span class="hljs-keyword">return</span> <span class="hljs-keyword">this</span>.getParent() != <span class="hljs-keyword">null</span> ?
+      <span class="hljs-keyword">this</span>.getParent().getStoragePolicyID() : id;
+}
+<span class="hljs-keyword">return</span> id;
+}</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li></ul><div class="save_code tracking-ad"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li></ul><p>总的过程调用图如下 <br><img src="https://img-blog.csdn.net/20160411135541324" alt="这里写图片描述" title=""></p>
+</li></ul><h1 id="hdfs-storagepolicies策略的使用"><a name="t9"></a>HDFS Storagepolicies策略的使用</h1>
+<hr><p>在文章的最后介绍几个关于Storage Policy的几个使用命令,帮助大家真正学会运用这个强大的特性.输入<em>hdfs storagepolicies -help</em>,你会得到一下3大操作命令</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">$ hdfs storagepolicies -help
+[-listPolicies]
+
+List all <span class="hljs-keyword">the</span> existing block storage policies.
+
+[-setStoragePolicy -path &lt;path&gt; -policy &lt;policy&gt;]
+
+Set <span class="hljs-keyword">the</span> storage policy <span class="hljs-keyword">to</span> a <span class="hljs-type">file</span>/directory.
+
+&lt;path&gt;    The path <span class="hljs-keyword">of</span> <span class="hljs-keyword">the</span> <span class="hljs-type">file</span>/directory <span class="hljs-keyword">to</span> <span class="hljs-keyword">set</span> storage policy 
+&lt;policy&gt;  The <span class="hljs-property">name</span> <span class="hljs-keyword">of</span> <span class="hljs-keyword">the</span> block storage policy                 
+
+[-getStoragePolicy -path &lt;path&gt;]
+
+Get <span class="hljs-keyword">the</span> storage policy <span class="hljs-keyword">of</span> a <span class="hljs-type">file</span>/directory.
+
+&lt;path&gt;  The path <span class="hljs-keyword">of</span> <span class="hljs-keyword">the</span> <span class="hljs-type">file</span>/directory <span class="hljs-keyword">for</span> getting <span class="hljs-keyword">the</span> storage policy </code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li></ul><p>1个设置命令,2个获取命令,<strong>最简单的使用方法是事先划分好冷热数据存储目录,设置好对应的Storage Policy,然后后续相应的程序在对应分类目录下写数据,自动继承父目录的存储策略</strong>.在较新版的Hadoop发布版本中增加了数据迁移工具.此工具的重要用途在于<strong>他会扫描HDFS上的文件,判断文件是否满足其内部设置的存储策略,如果不满足,就会重新迁移数据到目标存储类型节点上</strong>.使用方式如下</p>
+<pre class="prettyprint"><code class="hljs livecodeserver has-numbering">$ hdfs mover -help
+Usage: hdfs mover [-p &lt;<span class="hljs-built_in">files</span>/dirs&gt; | -f &lt;<span class="hljs-built_in">local</span> <span class="hljs-built_in">file</span>&gt;]
+    -p &lt;<span class="hljs-built_in">files</span>/dirs&gt; <span class="hljs-operator">a</span> <span class="hljs-constant">space</span> separated list <span class="hljs-operator">of</span> HDFS <span class="hljs-built_in">files</span>/dirs <span class="hljs-built_in">to</span> migrate.
+    -f &lt;<span class="hljs-built_in">local</span> <span class="hljs-built_in">file</span>&gt; <span class="hljs-operator">a</span> <span class="hljs-built_in">local</span> <span class="hljs-built_in">file</span> containing <span class="hljs-operator">a</span> list <span class="hljs-operator">of</span> HDFS <span class="hljs-built_in">files</span>/dirs <span class="hljs-built_in">to</span> migrate.</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li></ul><div class="save_code tracking-ad" style="display:none;"><a><img src="http://static.blog.csdn.net/images/save_snippets.png" alt=""></a></div><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li></ul><p>其中1个参数针对的HDFS上的文件目录,另1个是本地的文件.</p>
+<h1 id="总结"><a name="t10"></a>总结</h1>
+<hr><p>HDFS异构存储功能的出现绝对是解决冷热数据存储问题的一把利器,希望通过本文能给大家带来全新的认识和了解.</p>
+<h1 id="参考链接"><a name="t11"></a>参考链接</h1>
+<hr><p>1.<a href="http://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/ArchivalStorage.html" rel="nofollow">http://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/ArchivalStorage.html</a><br>
+2.<a href="http://www.shopbrodart.com/archival-storage/" rel="nofollow">http://www.shopbrodart.com/archival-storage/</a></p>
+</div>
+</div>
+<div class="similar_article">
+<div class="similar_c"></div>
+</div>
+            </div>
+                </div>

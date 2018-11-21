@@ -1,0 +1,156 @@
+---
+layout:     post
+title:      Hadoop 处理小文件
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_17612199/article/details/51337995				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="问题">问题：</h2>
+
+<p>小文件指的是那些size比HDFS的block size(默认64M)小的多的文件。如果在HDFS中存储小文件，那么在HDFS中肯定会含有许许多多这样的小文件(不然就不会用hadoop了)。而HDFS的问题在于无法很有效的处理大量小文件。</p>
+
+<ol>
+<li><p>任何一个文件，目录和block，在HDFS中都会被表示为一个object存储在namenode的内存中，每一个object占用150 bytes的内存空间。所以，如果有10million个文件，没一个文件对应一个block，那么就将要消耗namenode 3G的内存来保存这些block的信息。如果规模再大一些，那么将会超出现阶段计算机硬件所能满足的极限。不仅如此，HDFS并不是为了有效的处理大量小文件而存在的。它主要是为了流式的访问大文件而设计的。对小文件的读取通常会造成大量从datanode到datanode的seeks和hopping来retrieve文件，而这样是非常的低效的一种访问方式。</p></li>
+<li><p>大量小文件在mapreduce中的问题 <br>
+Map tasks通常是每次处理一个block的input(默认使用FileInputFormat)。如果文件非常的小，并且拥有大量的这种小文件，那么每一个map task都仅仅处理了非常小的input数据，并且会产生大量的map tasks，每一个map task都会消耗一定量的bookkeeping的资源。比较一个1GB的文件，默认block size为64M，和1Gb的文件，没一个文件100KB，那么后者没一个小文件使用一个map task，那么job的时间将会十倍甚至百倍慢于前者。hadoop中有一些特性可以用来减轻这种问题：可以在一个JVM中允许task reuse，以支持在一个JVM中运行多个map task，以此来减少一些JVM的启动消耗(通过设置mapred.job.reuse.jvm.num.tasks属性，默认为1，－1为无限制)。另一种方法为使用MultiFileInputSplit，它可以使得一个map中能够处理多个split。</p></li>
+</ol>
+
+
+
+<h2 id="sequencefile">SequenceFile</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">package org<span class="hljs-preprocessor">.bigdata</span><span class="hljs-preprocessor">.util</span><span class="hljs-comment">;</span>
+
+import java<span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.IOException</span><span class="hljs-comment">;</span>
+
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.conf</span><span class="hljs-preprocessor">.Configuration</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.fs</span><span class="hljs-preprocessor">.Path</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.IOUtils</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.IntWritable</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.SequenceFile</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.SequenceFile</span><span class="hljs-preprocessor">.Reader</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.SequenceFile</span><span class="hljs-preprocessor">.Writer</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.SequenceFile</span><span class="hljs-preprocessor">.Writer</span><span class="hljs-preprocessor">.Option</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.Text</span><span class="hljs-comment">;</span>
+
+public class SequenceFileDemo {
+
+    public static void main(String[] args) throws IOException {
+        Configuration cfg = HadoopCfg<span class="hljs-preprocessor">.getConfiguration</span>()<span class="hljs-comment">;</span>
+        Path path = new Path(<span class="hljs-string">"seqfile"</span>)<span class="hljs-comment">;</span>
+        Option optPath = SequenceFile<span class="hljs-preprocessor">.Writer</span><span class="hljs-preprocessor">.file</span>(path)<span class="hljs-comment">;</span>
+        Option optKey = SequenceFile<span class="hljs-preprocessor">.Writer</span><span class="hljs-preprocessor">.keyClass</span>(IntWritable<span class="hljs-preprocessor">.class</span>)<span class="hljs-comment">;</span>
+        Option optValue = SequenceFile<span class="hljs-preprocessor">.Writer</span><span class="hljs-preprocessor">.valueClass</span>(Text<span class="hljs-preprocessor">.class</span>)<span class="hljs-comment">;</span>
+        Writer writer = SequenceFile<span class="hljs-preprocessor">.createWriter</span>(cfg, optPath, optKey,
+                optValue)<span class="hljs-comment">;</span>
+        for (int i = <span class="hljs-number">0</span><span class="hljs-comment">; i &lt; 100; i++) {</span>
+            writer<span class="hljs-preprocessor">.append</span>(new IntWritable(i), new Text(<span class="hljs-string">"hello"</span>))<span class="hljs-comment">;</span>
+        }
+        IOUtils<span class="hljs-preprocessor">.closeStream</span>(writer)<span class="hljs-comment">;</span>
+
+        IntWritable key = new IntWritable()<span class="hljs-comment">;</span>
+        Text value = new Text()<span class="hljs-comment">;</span>
+        Reader<span class="hljs-preprocessor">.Option</span> optionFile = Reader<span class="hljs-preprocessor">.file</span>(path)<span class="hljs-comment">;</span>
+        Reader reader = new Reader(cfg, optionFile)<span class="hljs-comment">;</span>
+        while (reader<span class="hljs-preprocessor">.next</span>(key, value)) {
+            System<span class="hljs-preprocessor">.out</span><span class="hljs-preprocessor">.println</span>(key + <span class="hljs-string">"----&gt;"</span> + value)<span class="hljs-comment">;</span>
+        }
+        reader<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+}
+</code></pre>
+
+
+
+<h2 id="mapfile">MapFile</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">package org<span class="hljs-preprocessor">.bigdata</span><span class="hljs-preprocessor">.util</span><span class="hljs-comment">;</span>
+
+import java<span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.IOException</span><span class="hljs-comment">;</span>
+
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.conf</span><span class="hljs-preprocessor">.Configuration</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.fs</span><span class="hljs-preprocessor">.Path</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.IOUtils</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.IntWritable</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.MapFile</span><span class="hljs-preprocessor">.Reader</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.MapFile</span><span class="hljs-preprocessor">.Writer</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.MapFile</span><span class="hljs-preprocessor">.Writer</span><span class="hljs-preprocessor">.Option</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.Text</span><span class="hljs-comment">;</span>
+
+public class MapFileDemo {
+
+    public static void main(String[] args) throws IOException {
+        Configuration cfg = HadoopCfg<span class="hljs-preprocessor">.getConfiguration</span>()<span class="hljs-comment">;</span>
+        Path path = new Path(<span class="hljs-string">"mapfile"</span>)<span class="hljs-comment">;</span>
+        Option optKey = Writer<span class="hljs-preprocessor">.keyClass</span>(IntWritable<span class="hljs-preprocessor">.class</span>)<span class="hljs-comment">;</span>
+        org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.SequenceFile</span><span class="hljs-preprocessor">.Writer</span><span class="hljs-preprocessor">.Option</span> optValue = Writer
+                <span class="hljs-preprocessor">.valueClass</span>(Text<span class="hljs-preprocessor">.class</span>)<span class="hljs-comment">;</span>
+        Writer writer = new Writer(cfg, path, optKey, optValue)<span class="hljs-comment">;</span>
+        for (int i = <span class="hljs-number">100</span><span class="hljs-comment">; i &lt; 100; i++) {</span>
+            writer<span class="hljs-preprocessor">.append</span>(new IntWritable(i), new Text(<span class="hljs-string">"hello"</span>))<span class="hljs-comment">;</span>
+        }
+        IOUtils<span class="hljs-preprocessor">.closeStream</span>(writer)<span class="hljs-comment">;</span>
+
+        IntWritable key = new IntWritable()<span class="hljs-comment">;</span>
+        Text value = new Text()<span class="hljs-comment">;</span>
+        Reader reader = new Reader(path, cfg)<span class="hljs-comment">;</span>
+        while (reader<span class="hljs-preprocessor">.next</span>(key, value)) {
+            System<span class="hljs-preprocessor">.out</span><span class="hljs-preprocessor">.println</span>(key + <span class="hljs-string">"----&gt;"</span> + value)<span class="hljs-comment">;</span>
+        }
+        reader<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+}
+</code></pre>
+
+
+
+<h2 id="mapreduce">MapReduce</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">package org<span class="hljs-preprocessor">.bigdata</span><span class="hljs-preprocessor">.util</span><span class="hljs-comment">;</span>
+
+import java<span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.IOException</span><span class="hljs-comment">;</span>
+
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.conf</span><span class="hljs-preprocessor">.Configuration</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.SequenceFile</span><span class="hljs-preprocessor">.Reader</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.Text</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.mapreduce</span><span class="hljs-preprocessor">.Mapper</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.ReflectionUtils</span><span class="hljs-comment">;</span>
+
+public class SequenceFileMapReduce {
+
+    public static Reader reader = null<span class="hljs-comment">;</span>
+    public static Configuration cfg = null<span class="hljs-comment">;</span>
+
+    public static class SequenceFileMapper extends
+            Mapper&lt;Text, Text, Text, Text&gt; {
+
+        @Override
+        protected void map(Text key, Text value, Context context)
+                throws IOException, InterruptedException {
+            key = (Text) ReflectionUtils<span class="hljs-preprocessor">.newInstance</span>(reader<span class="hljs-preprocessor">.getKeyClass</span>(), cfg)<span class="hljs-comment">;</span>
+            value = (Text) ReflectionUtils<span class="hljs-preprocessor">.newInstance</span>(reader<span class="hljs-preprocessor">.getValueClass</span>(),
+                    cfg)<span class="hljs-comment">;</span>
+            while (reader<span class="hljs-preprocessor">.next</span>(key, value)) {
+                ...
+            }
+        }
+    }
+    ...
+}
+
+</code></pre>
+
+<p>通常对于“the small files problem”的回应会是：使用SequenceFile。这种方法是说，使用filename作为key，并且file contents作为value。实践中这种方式非常管用。回到10000个100KB的文件，可以写一个程序来将这些小文件写入到一个单独的SequenceFile中去，然后就可以在一个streaming fashion(directly or using mapreduce)中来使用这个sequenceFile。不仅如此，SequenceFiles也是splittable的，所以mapreduce可以break them into chunks，并且分别的被独立的处理。和HAR不同的是，这种方式还支持压缩。block的压缩在许多情况下都是最好的选择，因为它将多个records压缩到一起，而不是一个record一个压缩。 <br>
+将已有的许多小文件转换成一个SequenceFiles可能会比较慢。但是，完全有可能通过并行的方式来创建一个一系列的SequenceFiles。(Stuart Sierra has written a very useful post about converting a tar file into a SequenceFile—tools like this are very useful)。更进一步，如果有可能最好设计自己的数据pipeline来将数据直接写入一个SequenceFile。 <br>
+<img src="http://static.oschina.net/uploads/img/201310/22161939_MTNV.png" alt="这里写图片描述" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

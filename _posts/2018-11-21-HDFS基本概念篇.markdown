@@ -1,0 +1,449 @@
+---
+layout:     post
+title:      HDFS基本概念篇
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>目录<br>
+课程大纲（HDFS详解）<span> </span>2<br>
+1. HDFS前言<span> </span>3<br>
+2. HDFS的概念和特性<span> </span>3<br>
+3. HDFS的shell(命令行客户端)操作<span> </span>4<br>
+3.1 HDFS命令行客户端使用<span> </span>4<br>
+3.2命令行客户端支持的命令参数<span> </span>4<br>
+3.2 常用命令参数介绍<span> </span>5<br>
+4. hdfs的工作机制<span> </span>8<br>
+4.1 概述：<span> </span>8<br>
+4.2 HDFS写数据流程<span> </span>9<br>
+4.2.1 概述<span> </span>9<br>
+4.2.2 详细步骤图<span> </span>9<br>
+4.2.3 详细步骤解析<span> </span>9<br>
+4.3. HDFS读数据流程<span> </span>10<br>
+4.3.1 概述<span> </span>10<br>
+4.3.2 详细步骤图：<span> </span>10<br>
+4.3.3 详细步骤解析<span> </span>10<br>
+5. NAMENODE工作机制<span> </span>11<br>
+5.1 概述<span> </span>11<br>
+5.2元数据管理<span> </span>11<br>
+5.2.1 元数据存储机制<span> </span>11<br>
+5.2.2 元数据手动查看<span> </span>11<br>
+5.2.3 元数据的checkpoint<span> </span>12<br>
+6. DATANODE的工作机制<span> </span>13<br>
+6.1 概述<span> </span>13<br>
+6.2 观察验证DATANODE功能<span> </span>13<br>
+7. HDFS的java操作<span> </span>13<br>
+7.1 搭建开发环境<span> </span>13<br>
+7.2 获取api中的客户端对象<span> </span>14<br>
+7.3 DistributedFileSystem实例对象所具备的方法<span> </span>14<br>
+7.4 HDFS客户端操作数据代码示例：<span> </span>15<br>
+7.4.1 文件的增删改查<span> </span>15<br>
+7.4.2 通过流的方式访问hdfs<span> </span>18<br><br><br><br><br><br><br><br><br><br><br>
+课程大纲（HDFS详解）<br>
+Hadoop HDFS<span> </span>分布式文件系统DFS简介<br><span></span>HDFS的系统组成介绍<br><span></span>HDFS的组成部分详解<br><span></span>副本存放策略及路由规则<br><span></span>命令行接口<br><span></span>Java接口<br><span></span>客户端与HDFS的数据流讲解<br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+学习目标：<br>
+掌握hdfs的shell操作<br>
+掌握hdfs的java api操作<br>
+理解hdfs的工作原理<br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+ <br>
+******<span> </span>******<br>
+1. HDFS前言<br>
+<span> </span>设计思想<br>
+分而治之：将大文件、大批量文件，分布式存放在大量服务器上，以便于采取分而治之的方式对海量数据进行运算分析；<br><br><br>
+<span> </span>在大数据系统中作用：<br>
+为各类分布式运算框架（如：mapreduce，spark，tez，……）提供数据存储服务<br><br><br>
+<span> </span>重点概念：文件切块，副本存放，元数据<br><br><br>
+2. HDFS的概念和特性<br>
+首先，它是一个文件系统，用于存储文件，通过统一的命名空间——目录树来定位文件<br><br><br>
+其次，它是分布式的，由很多服务器联合起来实现其功能，集群中的服务器有各自的角色；<br><br><br>
+重要特性如下：<br>
+（1）HDFS中的文件在物理上是分块存储（block），块的大小可以通过配置参数( dfs.blocksize)来规定，默认大小在hadoop2.x版本中是128M，老版本中是64M<br><br><br>
+（2）HDFS文件系统会给客户端提供一个统一的抽象目录树，客户端通过路径来访问文件，形如：hdfs://namenode:port/dir-a/dir-b/dir-c/file.data<br><br><br>
+（3）目录结构及文件分块信息(元数据)的管理由namenode节点承担<br>
+——namenode是HDFS集群主节点，负责维护整个hdfs文件系统的目录树，以及每一个路径（文件）所对应的block块信息（block的id，及所在的datanode服务器）<br><br><br><br><br>
+（4）文件的各个block的存储管理由datanode节点承担<br>
+---- datanode是HDFS集群从节点，每一个block都可以在多个datanode上存储多个副本（副本数量也可以通过参数设置dfs.replication）<br><br><br>
+（5）HDFS是设计成适应一次写入，多次读出的场景，且不支持文件的修改<br><br><br>
+(注：适合用来做数据分析，并不适合用来做网盘应用，因为，不便修改，延迟大，网络开销大，成本太高)<br>
+******HDFS基本操作篇******<br>
+3. HDFS的shell(命令行客户端)操作<br>
+3.1 HDFS命令行客户端使用<br>
+HDFS提供shell命令行客户端，使用方法如下：<br>
+ <br><img src="" alt=""><br><br><br><br>
+3.2 命令行客户端支持的命令参数<br>
+        [-appendToFile &lt;localsrc&gt; ... &lt;dst&gt;]<br>
+        [-cat [-ignoreCrc] &lt;src&gt; ...]<br>
+        [-checksum &lt;src&gt; ...]<br>
+        [-chgrp [-R] GROUP PATH...]<br>
+        [-chmod [-R] &lt;MODE[,MODE]... | OCTALMODE&gt; PATH...]<br>
+        [-chown [-R] [OWNER][:[GROUP]] PATH...]<br>
+        [-copyFromLocal [-f] [-p] &lt;localsrc&gt; ... &lt;dst&gt;]<br>
+        [-copyToLocal [-p] [-ignoreCrc] [-crc] &lt;src&gt; ... &lt;localdst&gt;]<br>
+        [-count [-q] &lt;path&gt; ...]<br>
+        [-cp [-f] [-p] &lt;src&gt; ... &lt;dst&gt;]<br>
+        [-createSnapshot &lt;snapshotDir&gt; [&lt;snapshotName&gt;]]<br>
+        [-deleteSnapshot &lt;snapshotDir&gt; &lt;snapshotName&gt;]<br>
+        [-df [-h] [&lt;path&gt; ...]]<br>
+        [-du [-s] [-h] &lt;path&gt; ...]<br>
+        [-expunge]<br>
+        [-get [-p] [-ignoreCrc] [-crc] &lt;src&gt; ... &lt;localdst&gt;]<br>
+        [-getfacl [-R] &lt;path&gt;]<br>
+        [-getmerge [-nl] &lt;src&gt; &lt;localdst&gt;]<br>
+        [-help [cmd ...]]<br>
+        [-ls [-d] [-h] [-R] [&lt;path&gt; ...]]<br>
+        [-mkdir [-p] &lt;path&gt; ...]<br>
+        [-moveFromLocal &lt;localsrc&gt; ... &lt;dst&gt;]<br>
+        [-moveToLocal &lt;src&gt; &lt;localdst&gt;]<br>
+        [-mv &lt;src&gt; ... &lt;dst&gt;]<br>
+        [-put [-f] [-p] &lt;localsrc&gt; ... &lt;dst&gt;]<br>
+        [-renameSnapshot &lt;snapshotDir&gt; &lt;oldName&gt; &lt;newName&gt;]<br>
+        [-rm [-f] [-r|-R] [-skipTrash] &lt;src&gt; ...]<br>
+        [-rmdir [--ignore-fail-on-non-empty] &lt;dir&gt; ...]<br>
+        [-setfacl [-R] [{-b|-k} {-m|-x &lt;acl_spec&gt;} &lt;path&gt;]|[--set &lt;acl_spec&gt; &lt;path&gt;]]<br>
+        [-setrep [-R] [-w] &lt;rep&gt; &lt;path&gt; ...]<br>
+        [-stat [format] &lt;path&gt; ...]<br>
+        [-tail [-f] &lt;file&gt;]<br>
+        [-test -[defsz] &lt;path&gt;]<br>
+        [-text [-ignoreCrc] &lt;src&gt; ...]<br>
+        [-touchz &lt;path&gt; ...]<br>
+        [-usage [cmd ...]]<br><br><br><br><br><br><br><br><br>
+3.2 常用命令参数介绍<br>
+-help             <br>
+功能：输出这个命令参数手册<br>
+-ls                  <br>
+功能：显示目录信息<br>
+示例： hadoop fs -ls hdfs://hadoop-server01:9000/<br>
+备注：这些参数中，所有的hdfs路径都可以简写<br>
+--&gt;hadoop fs -ls /   等同于上一条命令的效果<br>
+-mkdir              <br>
+功能：在hdfs上创建目录<br>
+示例：hadoop fs  -mkdir  -p  /aaa/bbb/cc/dd<br>
+-moveFromLocal            <br>
+功能：从本地剪切粘贴到hdfs<br>
+示例：hadoop  fs  - moveFromLocal  /home/hadoop/a.txt  /aaa/bbb/cc/dd<br>
+-moveToLocal              <br>
+功能：从hdfs剪切粘贴到本地<br>
+示例：hadoop  fs  - moveToLocal   /aaa/bbb/cc/dd  /home/hadoop/a.txt <br>
+--appendToFile  <br>
+功能：追加一个文件到已经存在的文件末尾<br>
+示例：hadoop  fs  -appendToFile  ./hello.txt  hdfs://hadoop-server01:9000/hello.txt<br>
+可以简写为：<br>
+Hadoop  fs  -appendToFile  ./hello.txt  /hello.txt<br><br><br>
+-cat  <br>
+功能：显示文件内容  <br>
+示例：hadoop fs -cat  /hello.txt<br><br><br>
+-tail                 <br>
+功能：显示一个文件的末尾<br>
+示例：hadoop  fs  -tail  /weblog/access_log.1<br>
+-text                  <br>
+功能：以字符形式打印一个文件的内容<br>
+示例：hadoop  fs  -text  /weblog/access_log.1<br>
+-chgrp <br>
+-chmod<br>
+-chown<br>
+功能：linux文件系统中的用法一样，对文件所属权限<br>
+示例：<br>
+hadoop  fs  -chmod  666  /hello.txt<br>
+hadoop  fs  -chown  someuser:somegrp   /hello.txt<br>
+-copyFromLocal    <br>
+功能：从本地文件系统中拷贝文件到hdfs路径去<br>
+示例：hadoop  fs  -copyFromLocal  ./jdk.tar.gz  /aaa/<br>
+-copyToLocal      <br>
+功能：从hdfs拷贝到本地<br>
+示例：hadoop fs -copyToLocal /aaa/jdk.tar.gz<br>
+-cp              <br>
+功能：从hdfs的一个路径拷贝hdfs的另一个路径<br>
+示例： hadoop  fs  -cp  /aaa/jdk.tar.gz  /bbb/jdk.tar.gz.2<br><br><br>
+-mv                     <br>
+功能：在hdfs目录中移动文件<br>
+示例： hadoop  fs  -mv  /aaa/jdk.tar.gz  /<br>
+-get              <br>
+功能：等同于copyToLocal，就是从hdfs下载文件到本地<br>
+示例：hadoop fs -get  /aaa/jdk.tar.gz<br>
+-getmerge             <br>
+功能：合并下载多个文件<br>
+示例：比如hdfs的目录 /aaa/下有多个文件:log.1, log.2,log.3,...<br>
+hadoop fs -getmerge /aaa/log.* ./log.sum<br>
+-put                <br>
+功能：等同于copyFromLocal<br>
+示例：hadoop  fs  -put  /aaa/jdk.tar.gz  /bbb/jdk.tar.gz.2<br><br><br>
+-rm                <br>
+功能：删除文件或文件夹<br>
+示例：hadoop fs -rm -r /aaa/bbb/<br><br><br>
+-rmdir                 <br>
+功能：删除空目录<br>
+示例：hadoop  fs  -rmdir   /aaa/bbb/ccc<br>
+-df               <br>
+功能：统计文件系统的可用空间信息<br>
+示例：hadoop  fs  -df  -h  /<br><br><br>
+-du <br>
+功能：统计文件夹的大小信息<br>
+示例：<br>
+hadoop  fs  -du  -s  -h /aaa/*<br><br><br>
+-count         <br>
+功能：统计一个指定目录下的文件节点数量<br>
+示例：hadoop fs -count /aaa/<br><br><br>
+-setrep                <br>
+功能：设置hdfs中文件的副本数量<br>
+示例：hadoop fs -setrep 3 /aaa/jdk.tar.gz<br><br><br><br><br><br><br><br><br>
+ <br>
+******HDFS原理篇******<br>
+4. hdfs的工作机制<br>
+（工作机制的学习主要是为加深对分布式系统的理解，以及增强遇到各种问题时的分析解决能力，形成一定的集群运维能力）<br><br><br>
+注：很多不是真正理解hadoop技术体系的人会常常觉得HDFS可用于网盘类应用，但实际并非如此。要想将技术准确用在恰当的地方，必须对技术有深刻的理解<br>
+4.1 概述<br>
+1.<span> </span>HDFS集群分为两大角色：NameNode、DataNode  (Secondary Namenode)<br>
+2.<span> </span>NameNode负责管理整个文件系统的元数据<br>
+3.<span> </span>DataNode 负责管理用户的文件数据块<br>
+4.<span> </span>文件会按照固定的大小（blocksize）切成若干块后分布式存储在若干台datanode上<br>
+5.<span> </span>每一个文件块可以有多个副本，并存放在不同的datanode上<br>
+6.<span> </span>Datanode会定期向Namenode汇报自身所保存的文件block信息，而namenode则会负责保持文件的副本数量<br>
+7.<span> </span>HDFS的内部工作机制对客户端保持透明，客户端请求访问HDFS都是通过向namenode申请来进行<br><br><br>
+ <br>
+4.2 HDFS写数据流程<br>
+4.2.1 概述<br>
+客户端要向HDFS写数据，首先要跟namenode通信以确认可以写文件并获得接收文件block的datanode，然后，客户端按顺序将文件逐个block传递给相应datanode，并由接收到block的datanode负责向其他datanode复制block的副本<br>
+4.2.2 详细步骤图<br>
+ <img src="" alt=""><br>
+4.2.3 详细步骤解析<br>
+1、根namenode通信请求上传文件，namenode检查目标文件是否已存在，父目录是否存在<br>
+2、namenode返回是否可以上传<br>
+3、client请求第一个 block该传输到哪些datanode服务器上<br>
+4、namenode返回3个datanode服务器ABC<br>
+5、client请求3台dn中的一台A上传数据（本质上是一个RPC调用，建立pipeline），A收到请求会继续调用B，然后B调用C，将真个pipeline建立完成，逐级返回客户端<br>
+6、client开始往A上传第一个block（先从磁盘读取数据放到一个本地内存缓存），以packet为单位，A收到一个packet就会传给B，B传给C；A每传一个packet会放入一个应答队列等待应答<br>
+7、当一个block传输完成之后，client再次请求namenode上传第二个block的服务器。<br>
+4.3. HDFS读数据流程<br>
+4.3.1 概述<br>
+客户端将要读取的文件路径发送给namenode，namenode获取文件的元信息（主要是block的存放位置信息）返回给客户端，客户端根据返回的信息找到相应datanode逐个获取文件的block并在客户端本地进行数据追加合并从而获得整个文件<br><br><br>
+4.3.2 详细步骤图<br>
+ <img src="" alt=""><br><br><br>
+4.3.3 详细步骤解析<br>
+1、跟namenode通信查询元数据，找到文件块所在的datanode服务器<br>
+2、挑选一台datanode（就近原则，然后随机）服务器，请求建立socket流<br>
+3、datanode开始发送数据（从磁盘里面读取数据放入流，以packet为单位来做校验）<br>
+4、客户端以packet为单位接收，现在本地缓存，然后写入目标文件<br><br><br><br><br><br><br><br><br><br><br><br><br><br><br>
+ <br>
+5. NAMENODE工作机制<br>
+学习目标：理解namenode的工作机制尤其是元数据管理机制，以增强对HDFS工作原理的理解，及培养hadoop集群运营中“性能调优”、“namenode”故障问题的分析解决能力<br><br><br>
+问题场景：<br>
+1、集群启动后，可以查看文件，但是上传文件时报错，打开web页面可看到namenode正处于safemode状态，怎么处理？<br>
+2、Namenode服务器的磁盘故障导致namenode宕机，如何挽救集群及数据？<br>
+3、Namenode是否可以有多个？namenode内存要配置多大？namenode跟集群数据存储能力有关系吗？<br>
+4、文件的blocksize究竟调大好还是调小好？<br>
+……<br><br><br>
+诸如此类问题的回答，都需要基于对namenode自身的工作原理的深刻理解<br><br><br>
+5.1 NAMENODE职责<br>
+NAMENODE职责：<br>
+负责客户端请求的响应<br>
+元数据的管理（查询，修改）<br>
+5.2 元数据管理<br>
+namenode对数据的管理采用了三种存储形式：<br>
+内存元数据(NameSystem)<br>
+磁盘元数据镜像文件<br>
+数据操作日志文件（可通过日志运算出元数据）<br>
+5.2.1 元数据存储机制<br>
+A、内存中有一份完整的元数据(内存meta data)<br>
+B、磁盘有一个“准完整”的元数据镜像（fsimage）文件(在namenode的工作目录中)<br>
+C、用于衔接内存metadata和持久化元数据镜像fsimage之间的操作日志（edits文件）注：当客户端对hdfs中的文件进行新增或者修改操作，操作记录首先被记入edits日志文件中，当客户端操作成功后，相应的元数据会更新到内存meta.data中<br>
+5.2.2 元数据手动查看<br>
+可以通过hdfs的一个工具来查看edits中的信息<br>
+bin/hdfs oev -i edits -o edits.xml<br>
+bin/hdfs oiv -i fsimage_0000000000000000087 -p XML -o fsimage.xml<br>
+5.2.3 元数据的checkpoint<br>
+每隔一段时间，会由secondary namenode将namenode上积累的所有edits和一个最新的fsimage下载到本地，并加载到内存进行merge（这个过程称为checkpoint）<br><br><img src="" alt=""><br>
+checkpoint的详细过程<br>
+ <br><br><br>
+checkpoint操作的触发条件配置参数<br>
+dfs.namenode.checkpoint.check.period=60  #检查触发条件是否满足的频率，60秒<br>
+dfs.namenode.checkpoint.dir=file://${hadoop.tmp.dir}/dfs/namesecondary<br>
+#以上两个参数做checkpoint操作时，secondary namenode的本地工作目录<br>
+dfs.namenode.checkpoint.edits.dir=${dfs.namenode.checkpoint.dir}<br><br><br>
+dfs.namenode.checkpoint.max-retries=3  #最大重试次数<br>
+dfs.namenode.checkpoint.period=3600  #两次checkpoint之间的时间间隔3600秒<br>
+dfs.namenode.checkpoint.txns=1000000 #两次checkpoint之间最大的操作记录<br>
+checkpoint的附带作用<br>
+namenode和secondary namenode的工作目录存储结构完全相同，所以，当namenode故障退出需要重新恢复时，可以从secondary namenode的工作目录中将fsimage拷贝到namenode的工作目录，以恢复namenode的元数据<br><br><br>
+5.2.4 元数据目录说明<br>
+在第一次部署好Hadoop集群的时候，我们需要在NameNode（NN）节点上格式化磁盘：<br>
+$HADOOP_HOME/bin/hdfs namenode -format<br>
+格式化完成之后，将会在$dfs.namenode.name.dir/current目录下如下的文件结构<br>
+current/<br>
+|-- VERSION<br>
+|-- edits_*<br>
+|-- fsimage_0000000000008547077<br>
+|-- fsimage_0000000000008547077.md5<br>
+`-- seen_txid<br>
+其中的dfs.name.dir是在hdfs-site.xml文件中配置的，默认值如下：<br>
+&lt;property&gt;<br>
+  &lt;name&gt;dfs.name.dir&lt;/name&gt;<br>
+  &lt;value&gt;file://${hadoop.tmp.dir}/dfs/name&lt;/value&gt;<br>
+&lt;/property&gt;<br><br><br>
+hadoop.tmp.dir是在core-site.xml中配置的，默认值如下<br>
+&lt;property&gt;<br>
+  &lt;name&gt;hadoop.tmp.dir&lt;/name&gt;<br>
+  &lt;value&gt;/tmp/hadoop-${user.name}&lt;/value&gt;<br>
+  &lt;description&gt;A base for other temporary directories.&lt;/description&gt;<br>
+&lt;/property&gt;<br><br><br>
+dfs.namenode.name.dir属性可以配置多个目录，<br>
+如/data1/dfs/name,/data2/dfs/name,/data3/dfs/name,....。各个目录存储的文件结构和内容都完全一样，相当于备份，这样做的好处是当其中一个目录损坏了，也不会影响到Hadoop的元数据，特别是当其中一个目录是NFS（网络文件系统Network File System，NFS）之上，即使你这台机器损坏了，元数据也得到保存。<br>
+下面对$dfs.namenode.name.dir/current/目录下的文件进行解释。<br>
+1、VERSION文件是Java属性文件，内容大致如下：<br>
+#Fri Nov 15 19:47:46 CST 2013<br>
+namespaceID=934548976<br>
+clusterID=CID-cdff7d73-93cd-4783-9399-0a22e6dce196<br>
+cTime=0<br>
+storageType=NAME_NODE<br>
+blockpoolID=BP-893790215-192.168.24.72-1383809616115<br>
+layoutVersion=-47<br><br><br><br><br>
+其中<br>
+　　（1）、namespaceID是文件系统的唯一标识符，在文件系统首次格式化之后生成的；<br>
+　　（2）、storageType说明这个文件存储的是什么进程的数据结构信息（如果是DataNode，storageType=DATA_NODE）；<br>
+　　（3）、cTime表示NameNode存储时间的创建时间，由于我的NameNode没有更新过，所以这里的记录值为0，以后对NameNode升级之后，cTime将会记录更新时间戳；<br>
+　　（4）、layoutVersion表示HDFS永久性数据结构的版本信息， 只要数据结构变更，版本号也要递减，此时的HDFS也需要升级，否则磁盘仍旧是使用旧版本的数据结构，这会导致新版本的NameNode无法使用；<br>
+　　（5）、clusterID是系统生成或手动指定的集群ID，在-clusterid选项中可以使用它；如下说明<br><br><br>
+a、使用如下命令格式化一个Namenode：<br>
+$HADOOP_HOME/bin/hdfs namenode -format [-clusterId &lt;cluster_id&gt;]<br>
+选择一个唯一的cluster_id，并且这个cluster_id不能与环境中其他集群有冲突。如果没有提供cluster_id，则会自动生成一个唯一的ClusterID。<br>
+b、使用如下命令格式化其他Namenode：<br>
+ $HADOOP_HOME/bin/hdfs namenode -format -clusterId &lt;cluster_id&gt;<br>
+c、升级集群至最新版本。在升级过程中需要提供一个ClusterID，例如：<br>
+$HADOOP_PREFIX_HOME/bin/hdfs start namenode --config $HADOOP_CONF_DIR  -upgrade -clusterId &lt;cluster_ID&gt;<br>
+如果没有提供ClusterID，则会自动生成一个ClusterID。<br>
+　　（6）、blockpoolID：是针对每一个Namespace所对应的blockpool的ID，上面的这个BP-893790215-192.168.24.72-1383809616115就是在我的ns1的namespace下的存储块池的ID，这个ID包括了其对应的NameNode节点的ip地址。<br>
+　　<br>
+2、$dfs.namenode.name.dir/current/seen_txid非常重要，是存放transactionId的文件，format之后是0，它代表的是namenode里面的edits_*文件的尾数，namenode重启的时候，会按照seen_txid的数字，循序从头跑edits_0000001~到seen_txid的数字。所以当你的hdfs发生异常重启的时候，一定要比对seen_txid内的数字是不是你edits最后的尾数，不然会发生建置namenode时metaData的资料有缺少，导致误删Datanode上多余Block的资讯。<br><br><br>
+3、$dfs.namenode.name.dir/current目录下在format的同时也会生成fsimage和edits文件，及其对应的md5校验文件。<br><br><br><br><br>
+补充：seen_txid <br>
+文件中记录的是edits滚动的序号，每次重启namenode时，namenode就知道要将哪些edits进行加载edits<br>
+6. DATANODE的工作机制<br>
+问题场景：<br>
+1、集群容量不够，怎么扩容？<br>
+2、如果有一些datanode宕机，该怎么办？<br>
+3、datanode明明已启动，但是集群中的可用datanode列表中就是没有，怎么办？<br><br><br>
+以上这类问题的解答，有赖于对datanode工作机制的深刻理解<br>
+6.1 概述<br>
+1、Datanode工作职责：<br>
+存储管理用户的文件块数据<br>
+定期向namenode汇报自身所持有的block信息（通过心跳信息上报）<br>
+（这点很重要，因为，当集群中发生某些block副本失效时，集群如何恢复block初始副本数量的问题）<br><br><br>
+&lt;property&gt;<br><span></span>&lt;name&gt;dfs.blockreport.intervalMsec&lt;/name&gt;<br><span></span>&lt;value&gt;3600000&lt;/value&gt;<br><span></span>&lt;description&gt;Determines block reporting interval in milliseconds.&lt;/description&gt;<br>
+&lt;/property&gt;<br><br><br>
+2、Datanode掉线判断时限参数<br>
+datanode进程死亡或者网络故障造成datanode无法与namenode通信，namenode不会立即把该节点判定为死亡，要经过一段时间，这段时间暂称作超时时长。HDFS默认的超时时长为10分钟+30秒。如果定义超时时间为timeout，则超时时长的计算公式为：<br><span></span>timeout  = 2 * heartbeat.recheck.interval + 10 * dfs.heartbeat.interval。<br><span></span>而默认的heartbeat.recheck.interval 大小为5分钟，dfs.heartbeat.interval默认为3秒。<br><span></span>需要注意的是hdfs-site.xml 配置文件中的heartbeat.recheck.interval的单位为毫秒，dfs.heartbeat.interval的单位为秒。所以，举个例子，如果heartbeat.recheck.interval设置为5000（毫秒），dfs.heartbeat.interval设置为3（秒，默认），则总的超时时间为40秒。<br><br><br>
+&lt;property&gt;<br>
+        &lt;name&gt;heartbeat.recheck.interval&lt;/name&gt;<br>
+        &lt;value&gt;2000&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+        &lt;name&gt;dfs.heartbeat.interval&lt;/name&gt;<br>
+        &lt;value&gt;1&lt;/value&gt;<br>
+&lt;/property&gt;<br><br><br>
+6.2 观察验证DATANODE功能<br>
+上传一个文件，观察文件的block具体的物理存放情况：<br><br><br>
+在每一台datanode机器上的这个目录中能找到文件的切块：<br>
+/home/hadoop/app/hadoop-2.4.1/tmp/dfs/data/current/BP-193442119-192.168.2.120-1432457733977/current/finalized<br><br><br><br><br><br><br><br><br>
+******HDFS应用开发篇******<br>
+7. HDFS的java操作<br>
+hdfs在生产应用中主要是客户端的开发，其核心步骤是从hdfs提供的api中构造一个HDFS的访问客户端对象，然后通过该客户端对象操作（增删改查）HDFS上的文件<br>
+7.1 搭建开发环境<br>
+1、引入依赖<br>
+&lt;dependency&gt;<br>
+    &lt;groupId&gt;org.apache.hadoop&lt;/groupId&gt;<br>
+    &lt;artifactId&gt;hadoop-client&lt;/artifactId&gt;<br>
+    &lt;version&gt;2.6.1&lt;/version&gt;<br>
+&lt;/dependency&gt;<br><br><br>
+注：如需手动引入jar包，hdfs的jar包----hadoop的安装目录的share下<br>
+2、window下开发的说明<br>
+建议在linux下进行hadoop应用的开发，不会存在兼容性问题。如在window上做客户端应用开发，需要设置以下环境：<br>
+A、在windows的某个目录下解压一个hadoop的安装包<br>
+B、将安装包下的lib和bin目录用对应windows版本平台编译的本地库替换<br>
+C、在window系统中配置HADOOP_HOME指向你解压的安装包<br>
+D、在windows系统的path变量中加入hadoop的bin目录<br>
+7.2 获取api中的客户端对象<br>
+在java中操作hdfs，首先要获得一个客户端实例<br>
+Configuration conf = new Configuration()<br>
+FileSystem fs = FileSystem.get(conf)<br><br><br>
+而我们的操作目标是HDFS，所以获取到的fs对象应该是DistributedFileSystem的实例；<br>
+get方法是从何处判断具体实例化那种客户端类呢？<br>
+——从conf中的一个参数 fs.defaultFS的配置值判断；<br><br><br>
+如果我们的代码中没有指定fs.defaultFS，并且工程classpath下也没有给定相应的配置，conf中的默认值就来自于hadoop的jar包中的core-default.xml，默认值为： file:///，则获取的将不是一个DistributedFileSystem的实例，而是一个本地文件系统的客户端对象<br><br><br><br><br>
+7.3 DistributedFileSystem实例对象所具备的方法<br>
+ <img src="" alt=""><br>
+7.4 HDFS客户端操作数据代码示例：<br>
+7.4.1 文件的增删改查<br>
+public class HdfsClient {<br><br><br><span></span>FileSystem fs = null;<br><br><br><span></span>@Before<br><span></span>public void init() throws Exception {<br><br><br><span></span>// 构造一个配置参数对象，设置一个参数：我们要访问的hdfs的URI<br><span></span>// 从而FileSystem.get()方法就知道应该是去构造一个访问hdfs文件系统的客户端，以及hdfs的访问地址<br><span></span>// new Configuration();的时候，它就会去加载jar包中的hdfs-default.xml<br><span></span>// 然后再加载classpath下的hdfs-site.xml<br><span></span>Configuration conf = new Configuration();<br><span></span>conf.set("fs.defaultFS", "hdfs://hdp-node01:9000");<br><span></span>/**<br><span></span>* 参数优先级： 1、客户端代码中设置的值 2、classpath下的用户自定义配置文件 3、然后是服务器的默认配置<br><span></span>*/<br><span></span>conf.set("dfs.replication", "3");<br><br><br><span></span>// 获取一个hdfs的访问客户端，根据参数，这个实例应该是DistributedFileSystem的实例<br><span></span>// fs = FileSystem.get(conf);<br><br><br><span></span>// 如果这样去获取，那conf里面就可以不要配"fs.defaultFS"参数，而且，这个客户端的身份标识已经是hadoop用户<br><span></span>fs = FileSystem.get(new URI("hdfs://hdp-node01:9000"), conf, "hadoop");<br><br><br><span></span>}<br><br><br><span></span>/**<br><span></span>* 往hdfs上传文件<br><span></span>* <br><span></span>* @throws Exception<br><span></span>*/<br><span></span>@Test<br><span></span>public void testAddFileToHdfs() throws Exception {<br><br><br><span></span>// 要上传的文件所在的本地路径<br><span></span>Path src = new Path("g:/redis-recommend.zip");<br><span></span>// 要上传到hdfs的目标路径<br><span></span>Path dst = new Path("/aaa");<br><span></span>fs.copyFromLocalFile(src, dst);<br><span></span>fs.close();<br><span></span>}<br><br><br><span></span>/**<br><span></span>* 从hdfs中复制文件到本地文件系统<br><span></span>* <br><span></span>* @throws IOException<br><span></span>* @throws IllegalArgumentException<br><span></span>*/<br><span></span>@Test<br><span></span>public void testDownloadFileToLocal() throws IllegalArgumentException, IOException {<br><span></span>fs.copyToLocalFile(new Path("/jdk-7u65-linux-i586.tar.gz"), new Path("d:/"));<br><span></span>fs.close();<br><span></span>}<br><br><br><span></span>@Test<br><span></span>public void testMkdirAndDeleteAndRename() throws IllegalArgumentException, IOException {<br><br><br><span></span>// 创建目录<br><span></span>fs.mkdirs(new Path("/a1/b1/c1"));<br><br><br><span></span>// 删除文件夹 ，如果是非空文件夹，参数2必须给值true<br><span></span>fs.delete(new Path("/aaa"), true);<br><br><br><span></span>// 重命名文件或文件夹<br><span></span>fs.rename(new Path("/a1"), new Path("/a2"));<br><br><br><span></span>}<br><br><br><span></span>/**<br><span></span>* 查看目录信息，只显示文件<br><span></span>* <br><span></span>* @throws IOException<br><span></span>* @throws IllegalArgumentException<br><span></span>* @throws FileNotFoundException<br><span></span>*/<br><span></span>@Test<br><span></span>public void testListFiles() throws FileNotFoundException, IllegalArgumentException, IOException {<br><br><br><span></span>// 思考：为什么返回迭代器，而不是List之类的容器<br><span></span>RemoteIterator&lt;LocatedFileStatus&gt; listFiles = fs.listFiles(new Path("/"), true);<br><br><br><span></span>while (listFiles.hasNext()) {<br><span></span>LocatedFileStatus fileStatus = listFiles.next();<br><span></span>System.out.println(fileStatus.getPath().getName());<br><span></span>System.out.println(fileStatus.getBlockSize());<br><span></span>System.out.println(fileStatus.getPermission());<br><span></span>System.out.println(fileStatus.getLen());<br><span></span>BlockLocation[] blockLocations = fileStatus.getBlockLocations();<br><span></span>for (BlockLocation bl : blockLocations) {<br><span></span>System.out.println("block-length:" + bl.getLength() + "--" + "block-offset:" + bl.getOffset());<br><span></span>String[] hosts = bl.getHosts();<br><span></span>for (String host : hosts) {<br><span></span>System.out.println(host);<br><span></span>}<br><span></span>}<br><span></span>System.out.println("--------------为angelababy打印的分割线--------------");<br><span></span>}<br><span></span>}<br><br><br><span></span>/**<br><span></span>* 查看文件及文件夹信息<br><span></span>* <br><span></span>* @throws IOException<br><span></span>* @throws IllegalArgumentException<br><span></span>* @throws FileNotFoundException<br><span></span>*/<br><span></span>@Test<br><span></span>public void testListAll() throws FileNotFoundException, IllegalArgumentException, IOException {<br><br><br><span></span>FileStatus[] listStatus = fs.listStatus(new Path("/"));<br><br><br><span></span>String flag = "d--             ";<br><span></span>for (FileStatus fstatus : listStatus) {<br><span></span>if (fstatus.isFile())  flag = "f--         ";<br><span></span>System.out.println(flag + fstatus.getPath().getName());<br><span></span>}<br><span></span>}<br>
+}<br><br><br><br><br><br><br>
+7.4.2 通过流的方式访问hdfs<br>
+/**<br>
+ * 相对那些封装好的方法而言的更底层一些的操作方式<br>
+ * 上层那些mapreduce   spark等运算框架，去hdfs中获取数据的时候，就是调的这种底层的api<br>
+ * @author<br>
+ *<br>
+ */<br>
+public class StreamAccess {<br><span></span><br><span></span>FileSystem fs = null;<br><br><br><span></span>@Before<br><span></span>public void init() throws Exception {<br><br><br><span></span>Configuration conf = new Configuration();<br><span></span>fs = FileSystem.get(new URI("hdfs://hdp-node01:9000"), conf, "hadoop");<br><br><br><span></span>}<br><span></span><br><span></span>/**<br><span></span>* 通过流的方式上传文件到hdfs<br><span></span>* @throws Exception<br><span></span>*/<br><span></span>@Test<br><span></span>public void testUpload() throws Exception {<br><span></span><br><span></span>FSDataOutputStream outputStream = fs.create(new Path("/angelababy.love"), true);<br><span></span>FileInputStream inputStream = new FileInputStream("c:/angelababy.love");<br><span></span><br><span></span>IOUtils.copy(inputStream, outputStream);<br><span></span><br><span></span>}<br><span></span><br><span></span>@Test<br><span></span>public void testDownLoadFileToLocal() throws IllegalArgumentException, IOException{<br><span></span><br><span></span>//先获取一个文件的输入流----针对hdfs上的<br><span></span>FSDataInputStream in = fs.open(new Path("/jdk-7u65-linux-i586.tar.gz"));<br><span></span><br><span></span>//再构造一个文件的输出流----针对本地的<br><span></span>FileOutputStream out = new FileOutputStream(new File("c:/jdk.tar.gz"));<br><span></span><br><span></span>//再将输入流中数据传输到输出流<br><span></span>IOUtils.copyBytes(in, out, 4096);<br><span></span><br><span></span><br><span></span>}<br><span></span><br><span></span><br><span></span>/**<br><span></span>* hdfs支持随机定位进行文件读取，而且可以方便地读取指定长度<br><span></span>* 用于上层分布式运算框架并发处理数据<br><span></span>* @throws IllegalArgumentException<br><span></span>* @throws IOException<br><span></span>*/<br><span></span>@Test<br><span></span>public void testRandomAccess() throws IllegalArgumentException, IOException{<br><span></span>//先获取一个文件的输入流----针对hdfs上的<br><span></span>FSDataInputStream in = fs.open(new Path("/iloveyou.txt"));<br><span></span><br><span></span><br><span></span>//可以将流的起始偏移量进行自定义<br><span></span>in.seek(22);<br><span></span><br><span></span>//再构造一个文件的输出流----针对本地的<br><span></span>FileOutputStream out = new FileOutputStream(new File("c:/iloveyou.line.2.txt"));<br><span></span><br><span></span>IOUtils.copyBytes(in,out,19L,true);<br><span></span><br><span></span>}<br><span></span><br><span></span><br><span></span><br><span></span>/**<br><span></span>* 显示hdfs上文件的内容<br><span></span>* @throws IOException <br><span></span>* @throws IllegalArgumentException <br><span></span>*/<br><span></span>@Test<br><span></span>public void testCat() throws IllegalArgumentException, IOException{<br><span></span><br><span></span>FSDataInputStream in = fs.open(new Path("/iloveyou.txt"));<br><span></span><br><span></span>IOUtils.copyBytes(in, System.out, 1024);<br><span></span>}<br>
+}<br><br><br><br><br>
+7.4.3 场景编程<br>
+在mapreduce 、spark等运算框架中，有一个核心思想就是将运算移往数据，或者说，就是要在并发计算中尽可能让运算本地化，这就需要获取数据所在位置的信息并进行相应范围读取<br>
+以下模拟实现：获取一个文件的所有block位置信息，然后读取指定block中的内容<br><span></span>@Test<br><span></span>public void testCat() throws IllegalArgumentException, IOException{<br><span></span><br><span></span>FSDataInputStream in = fs.open(new Path("/weblog/input/access.log.10"));<br><span></span>//拿到文件信息<br><span></span>FileStatus[] listStatus = fs.listStatus(new Path("/weblog/input/access.log.10"));<br><span></span>//获取这个文件的所有block的信息<br><span></span>BlockLocation[] fileBlockLocations = fs.getFileBlockLocations(listStatus[0], 0L, listStatus[0].getLen());<br><span></span>//第一个block的长度<br><span></span>long length = fileBlockLocations[0].getLength();<br><span></span>//第一个block的起始偏移量<br><span></span>long offset = fileBlockLocations[0].getOffset();<br><span></span><br><span></span>System.out.println(length);<br><span></span>System.out.println(offset);<br><span></span><br><span></span>//获取第一个block写入输出流<br>
+//<span> </span>IOUtils.copyBytes(in, System.out, (int)length);<br><span></span>byte[] b = new byte[4096];<br><span></span><br><span></span>FileOutputStream os = new FileOutputStream(new File("d:/block0"));<br><span></span>while(in.read(offset, b, 0, 4096)!=-1){<br><span></span>os.write(b);<br><span></span>offset += 4096;<br><span></span>if(offset&gt;=length) return;<br><span></span>};<br><span></span>os.flush();<br><span></span>os.close();<br><span></span>in.close();<br><span></span>}<br><br><br><br><br>
+8. 案例1：开发shell采集脚本<br>
+8.1需求说明<br>
+点击流日志每天都10T，在业务应用服务器上，需要准实时上传至数据仓库（Hadoop HDFS）上<br>
+8.2需求分析<br>
+一般上传文件都是在凌晨24点操作，由于很多种类的业务数据都要在晚上进行传输，为了减轻服务器的压力，避开高峰期。<br>
+如果需要伪实时的上传，则采用定时上传的方式<br><span></span><br>
+8.3技术分析<br><span></span>HDFS SHELL:  hadoop fs  –put   xxxx.tar  /data    还可以使用 Java Api<br><span></span><span></span>满足上传一个文件，不能满足定时、周期性传入。<br><span></span>定时调度器：<br><span></span>Linux crontab<br><span></span>crontab -e<br>
+*/5 * * * * $home/bin/command.sh   //五分钟执行一次<br>
+系统会自动执行脚本，每5分钟一次，执行时判断文件是否符合上传规则，符合则上传<br>
+8.4实现流程<br>
+8.4.1日志产生程序<br>
+日志产生程序将日志生成后，产生一个一个的文件，使用滚动模式创建文件名。<br>
+ <br><span></span>日志生成的逻辑由业务系统决定，比如在log4j配置文件中配置生成规则，如：当xxxx.log 等于10G时，滚动生成新日志<br><span></span>log4j.logger.msg=info,msg<br>
+log4j.appender.msg=cn.maoxiangyi.MyRollingFileAppender<br>
+log4j.appender.msg.layout=org.apache.log4j.PatternLayout<br>
+log4j.appender.msg.layout.ConversionPattern=%m%n<br>
+log4j.appender.msg.datePattern='.'yyyy-MM-dd<br>
+log4j.appender.msg.Threshold=info<br>
+log4j.appender.msg.append=true<br>
+log4j.appender.msg.encoding=UTF-8<br>
+log4j.appender.msg.MaxBackupIndex=100<br>
+log4j.appender.msg.MaxFileSize=10GB<br>
+log4j.appender.msg.File=/home/hadoop/logs/log/access.log<br><br><br>
+细节：<br>
+1、<span> </span>如果日志文件后缀是1\2\3等数字，该文件满足需求可以上传的话。把该文件移动到准备上传的工作区间。<br>
+2、<span> </span>工作区间有文件之后，可以使用hadoop put命令将文件上传。<br>
+阶段问题：<br>
+1、<span> </span>待上传文件的工作区间的文件，在上传完成之后，是否需要删除掉。<br>
+8.4.2伪代码<br><span></span>使用ls命令读取指定路径下的所有文件信息，<br><span></span>ls  | while read  line<br><span></span>//判断line这个文件名称是否符合规则<br>
+if<span> </span>line=access.log.* (<br><span></span>将文件移动到待上传的工作区间<br><span></span>)<br><br><br>
+//批量上传工作区间的文件<br>
+hadoop fs  –put   xxx<br><br><br><span></span><br>
+脚本写完之后，配置linux定时任务，每5分钟运行一次。<br><span></span><br>
+8.5代码实现<br>
+代码第一版本，实现基本的上传功能和定时调度功能<br>
+ <img src="" alt=""><br><br><br>
+代码第二版本：增强版V2(基本能用，还是不够健全)<br>
+ <br>
+ <img src="" alt=""></p>
+<p><img src="" alt=""><br>
+8.6效果展示及操作步骤<br>
+1、日志收集文件收集数据，并将数据保存起来，效果如下：<br><span></span> <img src="" alt=""><br>
+2、上传程序通过crontab定时调度<br>
+ <img src="" alt=""><br>
+3、程序运行时产生的临时文件<br>
+ <img src="" alt=""><br>
+4、Hadoo hdfs上的效果<br>
+ <img src="" alt=""><br><br><br>
+9. 案例2：开发JAVA采集程序<br>
+9.1 需求<br>
+从外部购买数据，数据提供方会实时将数据推送到6台FTP服务器上，我方部署6台接口采集机来对接采集数据，并上传到HDFS中<br><br><br>
+提供商在FTP上生成数据的规则是以小时为单位建立文件夹(2016-03-11-10)，每分钟生成一个文件（00.dat,01.data,02.dat,........）<br><br><br>
+提供方不提供数据备份，推送到FTP服务器的数据如果丢失，不再重新提供，且FTP服务器磁盘空间有限，最多存储最近10小时内的数据<br><br><br>
+由于每一个文件比较小，只有150M左右，因此，我方在上传到HDFS过程中，需要将15分钟时段的数据合并成一个文件上传到HDFS<br><br><br>
+为了区分数据丢失的责任，我方在下载数据时最好进行校验<br>
+9.2 设计分析<br><br><img src="" alt=""><br>
+ <br><br><br><br><br></p>
+            </div>
+                </div>

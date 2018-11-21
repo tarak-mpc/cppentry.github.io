@@ -1,0 +1,88 @@
+---
+layout:     post
+title:      Spark编程使用的基本指令
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<pre><code class="language-java">// * hadoop fs -mkdir input
+ // * hadoop fs -copyFromLocal /user/local/hadoop/*.txt input
+ // * hadoop jar *.jar  className input output
+ // * hadoop namenode -format
+ // *
+ 
+ // * spark
+ // * hadoop fs -copyFromLocal README.md ./
+ // * ./spark-shell   以local方式运行
+ // * sc SparkContext实例  hdfs://sparkmaster:9000在Hadoop下的conf中的core-site.xml定义
+ //  RDD 算子分为三类：值型、键值型、操作型；又可以根据输入分区和输出分区的映射关系进行进一步的细分
+// file 是个MappedRDD
+val file = sc.textFile("hdfs://sparkmaster:9000/user/root/README.md")
+val sp = file.filter(line =&gt; line.contains("SPARK"))   //FilteredRDD
+sp.count
+
+// sparkmaster；4040  web ui spark-shell
+// 以local方式运行 
+val rdd = sc.parallelize(List(1,2,3,4,5))  //parallelCollectRDD
+val mapRdd = rdd.map(_*2)    // MappedRDD
+mapRdd.count
+val filterRdd = mapRdd.filter(_ &gt; 4)  // FilteredRDD
+filterRdd.collect
+
+
+// 集群方式 
+// ./start-dfs.sh  -&gt;  ./start-all(spark)
+// ./spark-shell --master spark://sparkmaster:7077
+val rdd = sc.textFile("/README.md")
+rdd.count
+rdd.cache
+rdd.count
+val wordcount = rdd.flatMap(_.split(' ')).map((_,1)).reduceByKey(_+_)  // RDD[(String,Int)] = MappPartitionRDD[6]
+wordcount.collect     // Array[(String,Int)]
+wordcount.saveAsTextFile("/result")
+val wordcountSort = wordcount.map(x =&gt;(x._2,x._1)).sortByKey(false).map(x =&gt;(x._2,x._1))  //是否还存在 
+wordcountSort.saveAsTextFile("/result1")
+
+
+// unoin：使用union函数时需要保证两个RDD元素的数据类型相同，返回的RDD数据类型和被合并的RDD元素数据类型相同
+val rdd1 = sc.parallelize(List('a',1),List('b',1))  // RDD[(Char,Int)] = ParallelCollectionPartition[20]
+val rdd2 = sc.parallelize(List('c',1),List('d',1))
+val result = rdd1 unoin rdd2            // RDD[(Char,Int)] = UnionRDD
+result.collect   //// Array[(Char,Int)]
+
+// join：对两个需要连接的RDD进行cogroup函数操作。cogroup操作之后形成的新RDD，对每个key下的元素进行笛卡尔积操作，
+//返回的结果再展平，对应Key下的所有元组形成一个集合，最后返回RDD[(K，(V，W))]
+//注:cogroup函数将两个RDD进行协同划分,对在两个RDD中的Key-Value类型的元素，每个RDD相同Key的元素分别聚合为一个集合，
+//  并且返回两个RDD中对应Key的元素集合的迭代器(K, (Iterable[V], Iterable[w]))
+val rdd1 = sc.parallelize(List('a',1),List('a',2),List('b',3),List('b',4))  // RDD[(Char,Int)] = ParallelCollectionPartition[20]
+val rdd2 = sc.parallelize(List('a',5),List('a',6),List('b',7),List('b',8))
+val result = rdd1 join rdd2   //RDD[(Char,(Int,Int))] = FlatMappedValuesRDD
+result.collect  //Array[(Char,(Int,Int))]    (iter:Iterator[T]=&gt;iter.toArray)
+
+
+val format = new java.text.simpleDateFordmat("yyyy-mm-dd")
+case class Register(d:java.util.Date, uuid:String, cust_id:String, lat:Float, lng:Float)
+case class Click(d:java.util.Date, uuid:String, landing_page:Int)
+val reg = sc.textFile("hdfs://sparkmaster:9000/data/join/two.tsv").map(_.split("\t"))
+         .map(r=&gt;(r(1),Register(format.parse(r(0)), r(1), r(2), r(3).toFloat, r(4).toFloat))) // RDD[(String,Register)]
+val clk = sc.textFile("hdfs://sparkmaster:9000/data/join/one.tsv").map(_.split("\t"))
+         .map(c=&gt;(c(1),Click(format.parse(r(0)), c(1), c(2).toInt))) // RDD[(String,Click)]
+val result = reg join clk  // RDD[(String,(Register,Click))]
+result.take(2)
+result.saveAsTextFile("hdfs://sparkmaster:9000/data/join/result1")
+
+
+
+
+// ./spark-shell --master spark://sparkmaster:7077 --executor-memory 1g
+val file = sc.textFile("hdfs://sparkmaster:9000/user/root/README.md")
+file.toDebugString    // HadoopRDD -&gt; MappedRDD
+// hdfs fs -getMerge hdfs://sparkmaster:9000/data/data/* combineResult
+
+ ./spark-submit --master spark://sparkmaster:7077 --class WordCount --executor-memory 512m ../test/myspark1.jar hdfs://sparkmaster:9000/input/wordcont.txt
+</code></pre><pre><code class="language-java">
+</code></pre><br><pre></pre>
+<pre></pre>
+            </div>
+                </div>

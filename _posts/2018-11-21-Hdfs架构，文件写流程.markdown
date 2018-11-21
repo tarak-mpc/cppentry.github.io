@@ -1,0 +1,71 @@
+---
+layout:     post
+title:      Hdfs架构，文件写流程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>伪分布式的HDFS 的NN,DN,SNN都是部署在同一台机器上的。</p>
+<p>HDFS的启动：./start-dfs.sh<br>
+HDFS查看内容 hdfs dfs -ls</p>
+<h2><a id="1block_5"></a>1.block的概念</h2>
+<p>hdfs默认一个block（块）是134217728个字节（128M），数据被切分以块为单位存储在不同的机器上，</p>
+<pre><code> 举个例子
+ 每个瓶子容量128ML  1碗水260ML 需要3个瓶子
+A 128ml
+B 128ml
+C 4ml
+</code></pre>
+<p>一般来说，生产环境的数据会有3个副本，也就是数据的每一个块会被复制3份存储起来，防止某些块数据丢失。</p>
+<h2><a id="2HDFS_18"></a>2.HDFS架构设计，主从结构</h2>
+<p>NN 主  名称节点<br>
+SNN    第二名称节点 --》NN（如果挂了）<br>
+DN 从  数据节点<br>
+<img src="https://img-blog.csdnimg.cn/20181103204651380.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM2NDU5Mzg2,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>
+（1）namenode<br>
+<strong>NN的功能是存储文件目录结构，文件属性名称等，还有文件对应哪些数据块，数据块对应分布到哪些datanode节点上。</strong></p>
+<p>需要注意的是，namenode不会持久化存储这种数据块的对应关系，，集群在启动和运行时会定期发送blockreport给namenode汇报存储情况，namenode就可以在<strong>内存</strong>中动态维护这种映射关系。</p>
+<p>namenode会将存储的信息以两种文件形式去保存。<br>
+1.命名空间镜像文件 fsimage<br>
+2.编辑日志 editlog</p>
+<p>（2）datanode</p>
+<p><strong>datanode存储数据块和块的校验和</strong>，<strong>功能就是文件数据块的读写</strong>，块的校验和就是当一个完整的数据被切分分开存储后，使用时从不同存储地方读取出来的数据组合起来时，用来检测数据是否发生了丢失和损坏的。</p>
+<p>和NN通信：<br>
+1.datanode会每隔3秒发送一个心跳包，通报存活情况<br>
+2.每隔10次心跳发送一个blockreport，汇报最新存储情况</p>
+<p>（3）secondary namenode<br>
+<strong>snn是存储nn的fsimage和editlog的，他的作用是定期合并fsimage+editlog文件为新的fsimage，推送给NN，称为检查点，checkpoint</strong></p>
+<p>dfs.namenode.checkpoint.period: 3600 相当于1个小时更新一次</p>
+<p>fsimage: 镜像文件 文件系统树      全量 7：00<br>
+editlog：操作日志 读写的操作记录  增量 7：00-8：00</p>
+<p>如下图所示，假设当前是7.整，nn会把edit和fsimage读取到snn里，snn会把这两个文件整合为一个新的镜像文件返回给nn，这时的镜像文件相当于有了8.前所有的文件情况，edit保持持续更新。<br>
+<img src="https://img-blog.csdnimg.cn/20181103203449288.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM2NDU5Mzg2,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<h2><a id="3_51"></a>3.副本的放置策略</h2>
+<p><strong>在生产环境中，机器会被放到机架里</strong>。</p>
+<p>之前说过存储在datanode块里的数据会有3个副本。一般来说。</p>
+<p>第一个副本:<br>
+假设我提交文件的所在机器就是datanode节点，<br>
+那么第一个块就存储在本节点上；<br>
+如果不是，就随机挑选一台磁盘不太慢的 cpu不太繁忙的节点上；（通过心跳判断）</p>
+<p>第二个副本:<br>
+放置在于第一个副本的不同的机架的节点上</p>
+<p>第三个副本:<br>
+与第二个副本相同的机架的不同的节点上<br>
+<img src="https://img-blog.csdnimg.cn/20181103205037568.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM2NDU5Mzg2,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<h2><a id="4hdfs_68"></a>4.hdfs文件的写流程</h2>
+<p><img src="https://img-blog.csdnimg.cn/20181103205223217.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM2NDU5Mzg2,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述">linux -&gt; hdfs<br>
+假如输入一个命令： hdfs dfs -put xxx.log /user/hadoop/asd</p>
+<p>1.Client（就是输命令啦）调filesystem.create(path，path就是上面指令后面的路径),与nn rpc通信，check path是否已经存在及有没有权限创建；<br>
+假如OK，就创建一个新文件，但是不关联任何的block，返回一个FSDataOutputStream对象；<br>
+假如不OK，就返回错误信息</p>
+<p>2.Client调用FSDataOutputStream对象的write方法，<br>
+将第一个块写给DN1，当第一个块写完，DN1复制块到DN2,当第二个块写完，DN2复制块到DN3，当第三个块写完，DN3返回一个ack packet确认包给DN2，</p>
+<p>当DN2收到DN3的ack，发送一个ack给DN1,当DN1收到DN2的ack，发送一个ack给FSDataOutputStream对象，标识第一个块3个副本全部写完；</p>
+<p>然后余下的块依次这么写！</p>
+<p>3.当文件写完成，Client调用FSDataOutputStream对象的close方法，关闭输出流，flush缓存区的数据包；</p>
+<p>4.再调用filesystem.complete方法，告诉NN，我们写完了。</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

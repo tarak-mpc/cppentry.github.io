@@ -1,0 +1,138 @@
+---
+layout:     post
+title:      大数据分布式系统涉及的一些基本概念（二）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="大数据分布式系统涉及的一些基本概念二">大数据分布式系统涉及的一些基本概念（二）</h1>
+
+<ul>
+<li><strong>hdfs架构</strong></li>
+<li><strong>元数据块</strong></li>
+<li><strong>数据块</strong></li>
+<li><strong>读写策略</strong></li>
+</ul>
+
+<hr>
+
+
+
+<h2 id="hdfs架构">hdfs架构</h2>
+
+
+
+<h4 id="hdfs-采用masterslave的架构来存储数据这种架构主要由四个部分组成分别为hdfs-clientnamenodedatanode和secondary-namenode一个hdfs-cluster包含一个namenode和若干的datanodenamenode是master">HDFS 采用Master/Slave的架构来存储数据，这种架构主要由四个部分组成，分别为HDFS Client、NameNode、DataNode和Secondary NameNode。一个hdfs cluster包含一个NameNode和若干的DataNode，NameNode是master。</h4>
+
+<p><img src="https://img-blog.csdn.net/20180124181544686?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXdlMTk5NjEyMjg=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+选择 HDFS 存储数据，因为 HDFS 具有以下优点：</p>
+
+<ul>
+<li><p>高容错性</p>
+
+<p>数据自动保存多个副本。它通过增加副本的形式，提高容错性。某一个副本丢失以后，它可以自动恢复，这是由 HDFS 内部机制实现的，我们不必关心。</p></li>
+<li><p>适合批处理 </p>
+
+<p>它是通过移动计算而不是移动数据。它会把数据位置暴露给计算框架。</p></li>
+<li><p>适合大数据处理 </p>
+
+<p>处理数据达到 GB、TB、甚至PB级别的数据。能够处理百万规模以上的文件数量，数量相当之大。能够处理10K节点的规模。</p></li>
+<li><p>流式文件访问 </p>
+
+<p>一次写入，多次读取。文件一旦写入不能修改，只能追加。它能保证数据的一致性。</p></li>
+<li><p>可构建在廉价机器上 </p>
+
+<p>它通过多副本机制，提高可靠性。它提供了容错和恢复机制。比如某一个副本丢失，可以通过其它副本来恢复。</p></li>
+</ul>
+
+
+
+<h2 id="元数据块">元数据块</h2>
+
+<p>元数据（Metadata）：维护HDFS文件系统中文件和目录的信息，分为内存元数据和元数据文件两种。NameNode维护整个元数据。 <br>
+从类型上讲，元数据有三类重要信息：</p>
+
+<pre><code>第一类是文件和目录自身的属性信息，例如文件名、目录名、父目录信息、文件大小、创建时间、修改时间等。
+第二类记录文件内容存储相关信息，例如文件块情况、副本个数、每个副本所在的Data Node 信息等。
+第三类用来记录HDFS中所有Data Node信息，用于Data Node管理。
+</code></pre>
+
+
+
+<h2 id="数据块">数据块</h2>
+
+<p>数据块是存储在DataNode中的，为了能够容错数据块是以多个副本的形式分布在集群中的，副本数量默认为3。 <br>
+<strong>数据存储</strong>： <br>
+HDFS client上传数据到HDFS时，首先，在本地缓存数据，当数据达到一个block大小时，请求NameNode分配一个block。 NameNode会把block所在的DataNode的地址告诉HDFS client。 HDFS client会直接和DataNode通信，把数据写到DataNode节点一个block文件中。</p>
+
+
+
+<h2 id="读写策略">读写策略</h2>
+
+<p><strong>读文件操作</strong>： <br>
+<img src="https://img-blog.csdn.net/20180124185314650?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXdlMTk5NjEyMjg=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+1.首先调用FileSystem对象的open方法，其实是一个DistributedFileSystem的实例。</p>
+
+<p>2.DistributedFileSystem通过rpc获得文件的第一批block的locations，同一个block按照重复数会返回多个locations，这些locations按照hadoop拓扑结构排序，距离客户端近的排在前面。</p>
+
+<p>3.前两步会返回一个FSDataInputStream对象，该对象会被封装DFSInputStream对象，DFSInputStream可 以方便的管理datanode和namenode数据流。客户端调用read方法，DFSInputStream最会找出离客户端最近的datanode 并连接。</p>
+
+<p>4.数据从datanode源源不断的流向客户端。</p>
+
+<p>5.如果第一块的数据读完了，就会关闭指向第一块的datanode连接，接着读取下一块。这些操作对客户端来说是透明的，客户端的角度看来只是读一个持续不断的流。</p>
+
+<p>6.如果第一批block都读完了， DFSInputStream就会去namenode拿下一批block的locations，然后继续读，如果所有的块都读完，这时就会关闭掉所有的流。 <br>
+如果在读数据的时候， DFSInputStream和datanode的通讯发生异常，就会尝试正在读的block的排序第二近的datanode,并且会记录哪个 datanode发生错误，剩余的blocks读的时候就会直接跳过该datanode。 DFSInputStream也会检查block数据校验和，如果发现一个坏的block,就会先报告到namenode节点，然后 DFSInputStream在其他的datanode上读该block的镜像。</p>
+
+<p>该设计就是客户端直接连接datanode来检索数据并且namenode来负责为每一个block提供最优的datanode， namenode仅仅处理block location的请求，这些信息都加载在namenode的内存中，hdfs通过datanode集群可以承受大量客户端的并发访问。</p>
+
+<p><strong>写文件操作</strong>： <br>
+<img src="https://img-blog.csdn.net/20180124185502208?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXdlMTk5NjEyMjg=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>1.客户端通过调用DistributedFileSystem的create方法创建新文件。</p>
+
+<p>2.DistributedFileSystem通过RPC调用namenode去创建一个没有blocks关联的新文件，创建前， namenode会做各种校验，比如文件是否存在，客户端有无权限去创建等。如果校验通过， namenode就会记录下新文件，否则就会抛出IO异常。</p>
+
+<p>3.前两步结束后，会返回FSDataOutputStream的对象，与读文件的时候相似， FSDataOutputStream被封装成DFSOutputStream。DFSOutputStream可以协调namenode和 datanode。客户端开始写数据到DFSOutputStream，DFSOutputStream会把数据切成一个个小的packet，然后排成队 列data quene。</p>
+
+<p>4.DataStreamer会去处理接受data quene，它先询问namenode这个新的block最适合存储的在哪几个datanode里（比如重复数是3，那么就找到3个最适合的 datanode），把他们排成一个pipeline。DataStreamer把packet按队列输出到管道的第一个datanode中，第一个 datanode又把packet输出到第二个datanode中，以此类推。</p>
+
+<p>5.DFSOutputStream还有一个对列叫ack quene，也是由packet组成，等待datanode的收到响应，当pipeline中的所有datanode都表示已经收到的时候，这时akc quene才会把对应的packet包移除掉。 <br>
+如果在写的过程中某个datanode发生错误，会采取以下几步： <br>
+1) pipeline被关闭掉； <br>
+2)为了防止防止丢包ack quene里的packet会同步到data quene里； <br>
+3)把产生错误的datanode上当前在写但未完成的block删掉； <br>
+4)block剩下的部分被写到剩下的两个正常的datanode中； <br>
+5)namenode找到另外的datanode去创建这个块的复制。当然，这些操作对客户端来说是无感知的。</p>
+
+<p>6.客户端完成写数据后调用close方法关闭写入流。</p>
+
+<p>7.DataStreamer把剩余得包都刷到pipeline里，然后等待ack信息，收到最后一个ack后，通知datanode把文件标视为已完成。</p>
+
+
+
+<h2 id="shell命令">shell命令</h2>
+
+<p>hadoop fs    帮助命令 <br>
+hadoop fs -mkdir    创建空白文件夹 <br>
+hadoop fs -put  把linux上的文件复制到hdfs中 <br>
+hadoop fs -ls 显示当前目录结构 <br>
+hadoop fs -get 递归显示当前目录结构 <br>
+hadoop fs –du 统计目录下各文件大小 <br>
+hadoop fs -count 统计文件(夹)数量 <br>
+hadoop fs -mv 将文件从源路径移动到目标路径 <br>
+hadoop fs -cp  将文件从源路径复制到目标路径 <br>
+hadoop fs -cat  查看文件内容 <br>
+hadoop fs -text 将路径指定文件的内容输出到stdout <br>
+hadoop fs -touchz  创建空白文件 <br>
+hadoop fs -stat   显示文件的统计信息 <br>
+hadoop fs -tail  查看文件尾部内容 <br>
+hadoop fs -chmod   修改文件权限 <br>
+hadoop fs -chown   改变文件的拥有者 <br>
+hadoop fs -chgrp   修改文件的属组 <br>
+hadoop fs -rm  删除指定的文件 <br>
+hadoop fs -rmr   递归删除指定目录下的所有子目录和文件 <br>
+hadoop fs -help 显示帮助信息</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

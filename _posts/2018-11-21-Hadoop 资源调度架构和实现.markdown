@@ -1,0 +1,63 @@
+---
+layout:     post
+title:      Hadoop 资源调度架构和实现
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;line-height:24px;">
+<span style="line-height:1.6;"><strong>1.工作流程</strong></span></div>
+<div style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;line-height:24px;">
+<ul><li><span style="line-height:1.6;"><strong>系统的输入输出</strong></span></li></ul></div>
+<div style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;line-height:24px;">
+<ol><li><span style="line-height:1.6;">上传输入数据到HDFS</span><br></li><li><span style="line-height:1.6;">将打包的jar作为作业提交作业到YARN</span><br></li><li><span style="line-height:1.6;">YARN对作业进行调度和执行，执行过程中从HDFS读取数据，将结果数据写入HDFS</span><br></li><li><span style="line-height:1.6;">从HDFS读取结果数据</span></li></ol><ul><li><strong>YARN进行作业调度和执行的工作流程</strong></li></ul></div>
+<div style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;line-height:24px;">
+<img src="https://img-blog.csdn.net/20170731103036781?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" border="0" alt="" style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;border:0px;line-height:24px;"><br><div><span style="line-height:1.6;">步骤 1　</span><span style="line-height:1.6;">上传用户程序、</span><span style="line-height:1.6;">ApplicationMaster 程序</span><span style="line-height:1.6;">到HDFS，然后提交作业的描述信息（作业文件位置，程序执行脚本命令）。</span><br></div>
+</div>
+<div style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;line-height:24px;">
+<div>
+<div>步骤 2　<span style="line-height:1.6;">Applications Manager创建相应的Application状态机管理应用的信息和状态，</span><span style="line-height:1.6;">ResourceManager 为该应用程序分配第一个 Container（资源，URL），并与对应的 NodeManager 通信，要求它在这个 Container 中启动应用程序的 ApplicationMaster（</span><span style="line-height:1.6;">三层多叉树</span><span style="line-height:1.6;">进行作业控制</span><span style="line-height:1.6;">）。</span></div>
+<div>步骤 3　ApplicationMaster 首先向 ResourceManager 注册，这样用户可以直接通过ResourceManage 查看应用程序的运行状态，然后它将为各个任务申请资源，并监控它的运行状态，直到运行结束，即重复步骤 4~7。</div>
+</div>
+<div>步骤 4   ApplicationMaster 采用轮询的方式通过 RPC 协议向 ResourceManager 申请和领取资源。<br></div>
+<div>步骤 5　一旦 ApplicationMaster 申请到资源后，便与对应的 NodeManager 通信，要求它启动任务。<br></div>
+<div>步骤 6　NodeManager 为任务设置好运行环境（包括环境变量、JAR 包、二进制程序等）后，将任务启动命令（+分配的资源信息）写到一个脚本中，并通过运行该脚本启动任务（执行程序）。<br></div>
+<div>步骤 7　各个任务通过某个 RPC 协议向 ApplicationMaster 汇报自己的状态和进度，以让 ApplicationMaster 随时掌握各个任务的运行状态，从而可以在任务失败时重新启动任务。<span style="line-height:1.6;">在应用程序运行过程中，用户可随时通过 RPC 向 ApplicationMaster 查询应用程序的当前运行状态。</span></div>
+<div>步骤 8　应用程序运行完成后，ApplicationMaster 向 ResourceManager 注销并关闭自己。</div>
+<div><strong>2.工作流程的具体实现</strong></div>
+<div>
+<div><span style="line-height:1.6;"><img src="https://img-blog.csdn.net/20170731103309676?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" border="0" alt="" style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;border:0px;line-height:24px;"><br></span></div>
+<div>
+<ul><li><span style="line-height:1.6;">整体实现：</span><br><ul><li><span style="line-height:1.6;">划分子构件，根据不同的功能和职责设计不同的构件，构件之间通过事件系统进行通信和协作（静态类图）。（任务执行：ContainerLauncher,ResourceLocationService,ContainerExecutor）</span></li><li><span style="line-height:1.6;">工作流程的细化，通过序列图梳理功能的具体实现流程（函数）。</span></li></ul></li><li><span style="line-height:1.6;"><strong>关键点：</strong></span><span style="line-height:1.6;">    </span><span style="line-height:1.6;">    </span><br></li></ul></div>
+<div>
+<div><strong>步骤 1</strong>　<span style="line-height:1.6;">上传用户程序、</span><span style="line-height:1.6;">ApplicationMaster 程序</span><span style="line-height:1.6;">到HDFS，然后提交作业的描述信息（作业文件位置，程序执行脚本命令）。</span></div>
+<div><img src="https://img-blog.csdn.net/20170731103339217?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" border="0" alt="" style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;border:0px;"><span style="line-height:1.6;"><br></span></div>
+<div>
+<div>
+<ol><li><span style="line-height:1.6;"><strong>YARN根据提交的配置信息对数据集进行切分从而将对处理一个数据集的作业切分成处理多个子数据集的任务，然后对任务进行调度和执行 </strong></span></li><li><span style="line-height:1.6;">提交的JAR作为任务执行的关键点（回调机制）</span></li></ol></div>
+<div>
+<ul><li><span style="line-height:1.6;">Jar中本身有一个MapTask函数和ReduceTask函数，Hadoop编程框架带的</span></li><li><span style="line-height:1.6;">client在提交作业前会对用户写的主函数进行执行，将设置的作业配置信息写入job.xml</span><br></li><li><span style="line-height:1.6;">nodeManager在执行时则通过命令执行调用MapTask和ReduceTask的类的main函数，而不是用户写的主函数，并在执行的过程中根据Job.xml动态执行</span></li></ul></div>
+</div>
+<div><strong>步骤 2</strong>　<span style="line-height:1.6;">Applications Manager创建相应的Application状态机管理应用的信息和状态，</span><span style="line-height:1.6;">ResourceManager 为该应用程序分配第一个 Container（资源，URL），并与对应的 NodeManager 通信，要求它在这个 Container 中启动应用程序的 ApplicationMaster</span><span style="line-height:1.6;">。</span></div>
+<div>
+<ol><li><span style="line-height:1.6;">ApplicationMater使用三层多叉树进行作业控制（JobTracker）</span></li></ol></div>
+</div>
+<div><strong>步骤 4</strong><span> </span>  ApplicationMaster 采用轮询的方式通过 RPC 协议向 ResourceManager 申请和领取资源。<br></div>
+<div>
+<ol><li><span style="line-height:1.6;">ApplicationMaster采用增量型的资源请求方式</span><br></li><li>ResourceManager创建Application状态机和NodeManager状态机，然后进行请求和资源之间的调度分配</li></ol></div>
+<div><strong>步骤 6</strong>　NodeManager 为任务设置好运行环境（包括环境变量、JAR 包、二进制程序等）后，<strong>将任务启动命令（+分配的资源信息）写到一个脚本</strong>中，并<strong>通过运行该脚本启动任务（执行程序）</strong>。</div>
+</div>
+</div>
+<div style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;line-height:24px;">
+<strong>3.系统整体实现:功能构件以及连接件（系统架构）</strong></div>
+<div style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;line-height:24px;">
+<ul><li><span style="line-height:1.6;"><strong>功能构</strong></span><span style="line-height:1.6;">件</span></li></ul><ol><li><span style="line-height:1.6;">构件都是基于线程实现的一个个可独立运行的实体，使用统一的服务模型对其进行管理（init,start,stop）</span></li><li><span style="line-height:1.6;">组合构件：单一构件实例化后注册到组合构件，然后通过组合构件统一的进行构件的</span>init,start和stop（组合模式）<img src="https://img-blog.csdn.net/20170731103241958?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" border="0" alt="" style="border:0px;line-height:24px;"></li></ol><div><span style="line-height:1.6;">    </span></div>
+<div><span style="line-height:1.6;">    3.</span><span style="line-height:1.6;">主要工作方式：循环的产生事件，被动的接收事件处理事件（观察者模式）</span></div>
+<ul><li><span style="line-height:1.6;"><strong>连接件</strong></span></li></ul>
+    <span style="line-height:1.6;">不同节点的构件件使用RPC进行连接，同一节点的构件使用事件系统进行连接（+部分函数调用）</span></div>
+<div style="font-family:Helvetica, 'Hiragino Sans GB', '微软雅黑', 'Microsoft YaHei UI', SimSun, SimHei, arial, sans-serif;font-size:15px;line-height:24px;">
+<ul><li><span style="line-height:1.6;"><strong>状态机</strong></span>&lt;四元组&gt;<br></li></ul>
+    使用<span style="line-height:1.6;">状态机（</span><span style="line-height:1.6;">抽象的数据结构）对Application,Container,Node的信息（属性）和状态进行管理</span></div>
+            </div>
+                </div>

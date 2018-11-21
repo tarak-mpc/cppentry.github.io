@@ -1,0 +1,71 @@
+---
+layout:     post
+title:      大数据笔记03--高可用的完全分布式HDFS及HDFS操作
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-light">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc"><h3>menu</h3><ul><li><a href="#_1" rel="nofollow">高可用的完全分布式</a></li><ul><li><a href="#HDFS_2" rel="nofollow">HDFS存在的问题</a></li><li><a href="#HA_7" rel="nofollow">HA</a></li><ul><li><a href="#_8" rel="nofollow">架构图</a></li><li><a href="#_10" rel="nofollow">构成</a></li><li><a href="#_15" rel="nofollow">如何解决单点故障</a></li></ul></ul><li><a href="#HDFS_27" rel="nofollow">HDFS常用操作</a></li></ul></div><p></p>
+<h1><a id="_1"></a>高可用的完全分布式</h1>
+<h2><a id="HDFS_2"></a>HDFS存在的问题</h2>
+<ol>
+<li>NameNode单点故障，造成整个集群不可用，即可用度低<br>
+解决：高可用（High Availability），通过备用NN解决</li>
+<li>NameNode内存受限，影响扩展性<br>
+解决：联邦（Federation）机制，横向扩展，多个NN分管元数据（仅了解）</li>
+</ol>
+<h2><a id="HA_7"></a>HA</h2>
+<h3><a id="_8"></a>架构图</h3>
+<p><img src="https://img-blog.csdn.net/20181015202005106?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0tpc3NzaG90QUhVQg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<h3><a id="_10"></a>构成</h3>
+<ul>
+<li>主备NameNode，一个Active，其他standby</li>
+<li>JournalNodes，JNN集群，存放edits文件，节点数为奇数。</li>
+<li>Zookeeper集群，在NN挂掉时通过选举机制选出新的activeNN（之后会详细学习）</li>
+<li>FailoverController（zkfc），监控NN健康状态并向ZK汇报</li>
+</ul>
+<h3><a id="_15"></a>如何解决单点故障</h3>
+<ul>
+<li>active的NN接受请求造成的操作存入JNN中存放的edits中，超过半数节点写入即可再次接受请求（防止发生脑裂）。</li>
+<li>standby的NN会将JNN中的edits拿过来进行重演，合并fsimage，并推送回NN1（即SNN发挥的作用）。</li>
+<li>NN挂掉时，可以手动将NN2提升为active，或使用zookeeper实现。zkfc接收zk的选举结果，将自己所监控的NN提升为active。并检查挂掉的NN，若为假死（监控其的zkfc挂掉），则将其置为standby。（需要NN2的zkfc和NN1的通信）</li>
+<li>无论何时NN1挂掉，NN2提升为active，NN2内的元数据始终是和NN1同步的。这时持久化的工作暂时由NN2自己进行（集群仍可用，只是效率降低），等待程序员重启新的NN</li>
+<li>DN会同时向两个NN发送位置信息和心跳，防止两个NN数据不同步</li>
+</ul>
+<h1><a id="HDFS_27"></a>HDFS常用操作</h1>
+<p>上传文件：</p>
+<pre><code>hdfs dfs -put a /test
+hdfs dfs -copyFromLocal a /test	（同-put）
+hdfs dfs -moveFromLocal a /test
+</code></pre>
+<p>创建新目录：</p>
+<pre><code>hdfs dfs -mkdir ./test
+-p 级联创建
+</code></pre>
+<p>向文件中追加内容：</p>
+<pre><code>hdfs dfs -appendToFile b /test/a
+</code></pre>
+<p>查看文件：</p>
+<pre><code>hdfs dfs -cat /test/a
+</code></pre>
+<p>更改属主和属组：</p>
+<pre><code>hdfs dfs -chgrp group01 /test/a
+hdfs dfs -chown user01:group01 /test/a（可以同时修改属主和属组）
+-R 递归修改
+</code></pre>
+<p>更改权限：</p>
+<pre><code>hdfs dfs -chmod 777 /test/a.txt
+-R 递归修改
+</code></pre>
+<p>下载文件到本地：</p>
+<pre><code>hdfs dfs -copyToLocal /test/a /abc
+</code></pre>
+<p>查看文件系统的磁盘空间：</p>
+<pre><code>hdfs dfs -df -h
+-h 添加单位
+</code></pre>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

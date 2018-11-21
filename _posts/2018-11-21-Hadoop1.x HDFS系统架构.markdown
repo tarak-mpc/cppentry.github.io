@@ -1,0 +1,165 @@
+---
+layout:     post
+title:      Hadoop1.x HDFS系统架构
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="wiz_toc_layer"><a class="wiz_toc h1" href="#wiz_toc_0" rel="nofollow">1. HDFS中的一些概念</a><br><a class="wiz_toc h2" href="#wiz_toc_1" rel="nofollow">1.1 数据块</a><br><a class="wiz_toc h2" href="#wiz_toc_2" rel="nofollow">1.2 NameNode和DataNode</a><br><a class="wiz_toc h3" href="#wiz_toc_3" rel="nofollow">1.2.1 管理者：Namenode</a><br><a class="wiz_toc h3" href="#wiz_toc_4" rel="nofollow">1.2.1 工作者：Datanode</a><br><a class="wiz_toc h2" href="#wiz_toc_5" rel="nofollow">1.3 Secondary Namenode</a><br><a class="wiz_toc h2" href="#wiz_toc_6" rel="nofollow">1.4 HDFS的优缺点</a><br><a class="wiz_toc h1" href="#wiz_toc_7" rel="nofollow">2. HDFS的架构</a><br><a class="wiz_toc h2" href="#wiz_toc_8" rel="nofollow">2.1 HDFS架构之NameNode和DataNode</a><br><a class="wiz_toc h2" href="#wiz_toc_9" rel="nofollow">2.2 Namenode和Secondary Namenode运行关系</a><br><a class="wiz_toc h1" href="#wiz_toc_10" rel="nofollow">3. HDFS文件的读写流程</a><br><a class="wiz_toc h2" href="#wiz_toc_11" rel="nofollow">3.1 HDFS文件的读取</a><br><a class="wiz_toc h2" href="#wiz_toc_12" rel="nofollow">3.2 HDFS文件的写入</a></div><a href="#wizToc" rel="nofollow"></a>
+
+<h2 id="wiz_toc_0">1. HDFS中的一些概念</h2>
+
+<p>HDFS（Hadoop Distributed File System）：分布式文件系统，将一个文件分成多个块，分别存储(拷贝)到不同的节点上，它是Hadoop体系中<font style="color:#FF0000;font-weight:bold;">数据存储管理</font>的基础。它是一个高度容错的系统，能检测和应对硬件故障，用于在低成本的通用硬件上运行。HDFS简化了文件的一致性模型，通过流式数据访问，提供高吞吐量应用程序数据访问功能，适合带有大型数据集的应用程序。</p>
+
+<h3 id="wiz_toc_1">1.1 数据块</h3>
+
+<p>每个磁盘都有<strong>数据块</strong>的概念，在HDFS中也有数据块的概念，HDFS中的所有文件都是分割成块存储在Datanode上的，每个块<font style="color:#FF0000;font-weight:bold;">默认64M</font>。。每个块都有多个副本存储在不同的机器上：<font style="color:#FF0000;font-weight:bold;">默认有3个副本</font>，3个副本不可能存放在同一个机器上。 <br><strong>HDFS副本存放策略</strong> <br><img src="http://images2015.cnblogs.com/blog/527668/201604/527668-20160429142312566-979079376.jpg" alt="" title=""></p>
+
+<p><strong>以下是HDFS文件存储架构图</strong> <br>
+黄色：表示每台机器 <br>
+绿色：文件被分割出的块 <br><img src="http://images2015.cnblogs.com/blog/527668/201604/527668-20160429142327597-2008469801.jpg" alt="" title=""></p>
+
+<p>例如： <br>
+上图中part-0文件，有2个块。块1和块3只在2个机器上分别出现过2次。 <br>
+上图中part-1文件，有3个块。块2,4,5分别在不同的机器上各出现3次</p>
+
+<p>HDFS中也可以显示块信息，使用fsck命令 <br>
+例如：下面的命令将列出文件系统中各个文件由哪些块构成</p>
+
+<pre class="prettyprint linenums prettyprinted"></pre><ol class="linenums"><li class="L0"><code class="language-bash"><span class="pln"> $ hadoop fsck </span><span class="pun">/</span><span class="pln"> </span><span class="pun">-</span><span class="pln">files </span><span class="pun">-</span><span class="pln">blocks</span></code></li></ol>
+
+<h3 id="wiz_toc_2">1.2 NameNode和DataNode</h3>
+
+<p>HDFS的设计是主（Master）从（Slave）结构的。也就是，一个管理者（NameNode）和多个工作者（DataNode）组成。</p>
+
+<h4 id="wiz_toc_3">1.2.1 管理者：Namenode</h4>
+
+<p>NameNode是主节点，它是一个中心服务器，负责管理整个文件系统的命名空间和控制着客户端对文件的访问。它不保存文件的内容，而是<font style="color:#FF0000;font-weight:bold;">保存着文件的元数据（文件名称，所在目录，文件权限，文件拥有者，文件有多少块，每个块有多少副本，块都存在哪些节点上）</font>。 <br>
+Namenode负责文件的元数据操作，Datanode处理文件内容的读写请求。 <br>
+跟文件相关的流不经过Namenode，只会询问该文件跟哪个Datanode有关系。 <br>
+副本存放在哪些Datanode上是由Namenode来控制。读取文件时，Namenode尽量让用户先读取最近的副本。 <br>
+Namenode全权管理数据块的复制，周期性的从集群中的每个Datanode接收心跳信号和块状态报告。 <br>
+Namenode和Datanode就是通过这两种方式来进行通信： <br>
+心跳信号：意味着该Datanode节点工作正常 <br>
+块状态报告：包含了一个该Datanode上所有数据块的列表</p>
+
+<p><strong>元数据保存在内存中</strong> <br>
+Namenode维护着整个文件系统树以及树内的所有文件。这些信息以两个文件的形式永久保存在磁盘上。命名空间镜像文件（fsimage）和操作日志（fsedits）文件 <br><strong>1. fsimage是什么？</strong> <br>
+       fsimage是元数据镜像文件：Namenode启动后，文件的元数据被加载到内存中，加载到内存后也会把这些元数据写入到本地的磁盘中，这个文件就是fsimage文件。 <br>
+       元数据镜像在内存中保存一份最新的，内存中的镜像=fsimage+fsedit <br><strong>2. fsedits是什么？</strong> <br>
+       fsedits是元数据操作日志文件：客户端要对文件进行读写操作，在这些操作产生的日志就存在了fsedit文件中。</p>
+
+<h4 id="wiz_toc_4">1.2.1 工作者：Datanode</h4>
+
+<p>DataNode是从节点，它的作用很简单，就是存储文件的块数据。以及块数据的校验和。 <br>
+一个数据块在Ddtanode以文件存储在磁盘上，包括两个文件：数据本身和元数据（数据块的长度，块数据的校验和，时间戳） <br>
+Datanode启动后向Namenode注册，通过后，周期性（1小时）的向Namenode上报所有块信息。 <br>
+心跳是3秒一次，如果超过10分钟没有收到某个Datanode的心跳。则认为该节点不可用。</p>
+
+<h3 id="wiz_toc_5">1.3 Secondary Namenode</h3>
+
+<p>Secondary Namenode：Secondary表示助手的意思，也就是说Secondary Namenode表示NameNode的助手，辅助NameNode工作的一个节点。要了解Secondary Namenode节点都辅助NameNode做了哪些工作，我们需要先回顾下NameNode是做什么的？ <br>
+NameNode是HDFS中的一个主节点，主要是来管理其他DataNode从节点。它存储了HDFS系统的namespace和控制着客户端对HDFS文件系统的访问。NameNode在维护整个文件系统树的时候是以两个文件的形式永久保存在磁盘上。镜像文件(fsimage)和操作日志文件（fsedits）。考虑以下，这两个文件一直这样运行存在着有什么问题？</p>
+
+<ol><li>fsedits操作日志文件会越来越大，因为它保存着客户端对HDFS文件系统的访问日志。</li>
+<li>只有在NameNode重启后，edits logs才会合并到fsimage中，产生一个新的文件系统快照。但是NameNode是很少重启的。 <br>
+为了保证edit logs文件不会太大和fsimage是一个最新的文件，此时需要一个节点来备份这些文件。定期的合并这两个文件然后再推送给NameNode，这样就减轻NameNode工作的压力，同时也保证了假如Namenode节点宕机后数据无法恢复问题。虽然可能不会把所有的数据全部恢复出来，但是至少丢失的很少。</li>
+</ol><p>所以，Secondary Namenode做的就是这些辅助工作</p>
+
+<ol><li>Secondary NameNode所做的不过是在文件系统中设置一个检查点来帮助NameNode更好的工作。它不是要取代掉NameNode也不是NameNode的备份。</li>
+<li>SecondaryNameNode有两个作用，一是镜像备份，二是日志与镜像的定期合并。两个过程同时进行，称为checkpoint</li>
+</ol><p>在core-site.xml配置文件中有2个参数可配置，但一般来说我们不做修改。fs.checkpoint.period表示多长时间记录一次hdfs的镜像。默认是1小时。fs.checkpoint.size表示一次记录多大的size，默认64M。</p>
+
+<pre class="prettyprint linenums prettyprinted"></pre><ol class="linenums"><li class="L0"><code class="language-xml"><span class="tag">&lt;property&gt;</span></code></li><li class="L1"><code class="language-xml"><span class="pln">    </span><span class="tag">&lt;name&gt;</span><span class="pln">fs.checkpoint.period</span><span class="tag">&lt;/name&gt;</span></code></li><li class="L2"><code class="language-xml"><span class="pln">    </span><span class="tag">&lt;value&gt;</span><span class="pln">3600</span><span class="tag">&lt;/value&gt;</span></code></li><li class="L3"><code class="language-xml"><span class="pln">    </span><span class="tag">&lt;description&gt;</span><span class="pln">The number of seconds between two periodic checkpoints.</span></code></li><li class="L4"><code class="language-xml"><span class="pln">    </span><span class="tag">&lt;/description&gt;</span></code></li><li class="L5"><code class="language-xml"><span class="tag">&lt;/property&gt;</span></code></li><li class="L6"><code class="language-xml"><span class="tag">&lt;property&gt;</span></code></li><li class="L7"><code class="language-xml"><span class="pln">    </span><span class="tag">&lt;name&gt;</span><span class="pln">fs.checkpoint.size</span><span class="tag">&lt;/name&gt;</span></code></li><li class="L8"><code class="language-xml"><span class="pln">    </span><span class="tag">&lt;value&gt;</span><span class="pln">67108864</span><span class="tag">&lt;/value&gt;</span></code></li><li class="L9"><code class="language-xml"><span class="pln">    </span><span class="tag">&lt;description&gt;</span><span class="pln">The size of the current edit log (in bytes) that triggers a periodic checkpoint even if the fs.checkpoint.period hasn’t expired.</span></code></li><li class="L0"><code class="language-xml"><span class="pln">    </span><span class="tag">&lt;/description&gt;</span></code></li><li class="L1"><code class="language-xml"><span class="tag">&lt;/property&gt;</span></code></li></ol>
+
+<p>可以参考这篇博客，写的还是很详细的<a href="http://blog.csdn.net/xh16319/article/details/31375197" rel="nofollow">Secondary NameNode:它究竟有什么作用？</a></p>
+
+<h3 id="wiz_toc_6">1.4 HDFS的优缺点</h3>
+
+<p><strong>优点：</strong></p>
+
+<ol><li>高容错性 <br>
+数据自动保存多个副本 <br>
+副本丢失后，自动恢复</li>
+<li>适合批处理 <br>
+移动计算而非数据 <br>
+数据位置暴露给计算框架</li>
+<li>适合大数据处理 <br>
+GB、TB、甚至PB级数据 <br>
+百万规模以上的文件数量 <br>
+10K+节点规模</li>
+<li>流式文件访问 <br>
+一次性写入，多次读取 <br>
+保证数据一致性</li>
+<li>可构建在廉价机器上 <br>
+通过多副本提高可靠性 <br>
+提供了容错和恢复机制</li>
+</ol><p><strong>缺点：</strong></p>
+
+<ol><li>低延迟与高吞吐率的数据访问 ，比如毫秒级</li>
+<li>小文件存取 <br>
+占用NameNode大量内存 <br>
+寻道时间超过读取时间</li>
+<li>并发写入、文件随机修改 <br>
+一个文件同一个时间只能有一个写者 <br>
+仅支持append</li>
+</ol><h2 id="wiz_toc_7">2. HDFS的架构</h2>
+
+<p>HDFS以流式数据访问（一次写入，多次读取）模式来存储超大文件，运行于商用硬件集群上。超大文件是指GB,TB,PB的文件。目前已经有存储到PB级别的Hadoop集群了。</p>
+
+<p><strong>计算机字节关系</strong> <br><img src="http://images2015.cnblogs.com/blog/527668/201604/527668-20160429142335644-764157839.png" alt="" title=""></p>
+
+<p><strong>Hadoop1.x HDFS官方架构图</strong> <br><img src="http://images2015.cnblogs.com/blog/527668/201604/527668-20160429142349957-213628590.jpg" alt="" title=""></p>
+
+<h3 id="wiz_toc_8">2.1 HDFS架构之NameNode和DataNode</h3>
+
+<p><strong>HDFS架构图</strong> <br><img src="http://images2015.cnblogs.com/blog/527668/201604/527668-20160429142405660-661713657.jpg" alt="" title=""></p>
+
+<ol><li>客户端（HDFS Client）：如果想对文件进行读写的话，首先需要通过Namenode来获取一些信息。Namenode存储着命名空间（namespace）和元数据（metadata） <br>
+客户端有如下工作：
+
+<ol><li>文件的切分</li>
+<li>与Namenode交互，获取文件位置信息</li>
+<li>与Datanode交互，读取或者写入数据</li>
+<li>管理HDFS</li>
+<li>访问HDFS（浏览器，Shell命令，JavaAPI）</li></ol></li>
+<li>辅助节点（Secondary）：用于辅助Namenode工作，分担其工作量。主要工作是nameSpace的冷备份工作，并非热备份。<font style="color:#FF0000;font-weight:bold;">定期将Namenode的镜像文件（fsimage）和操作日志（fsedit）进行合并，然后推送给Namenode</font> <br><strong>1. fsimage是什么？</strong> <br>
+   是元数据镜像文件：Namenode启动后，文件的元数据被加载到内存中，加载到内存后也会把这些元数据写入到本地的磁盘中，这个文件就是fsimage文件。 <br>
+   元数据镜像在内存中保存一份最新的，内存中的镜像=fsimage+fsedit <br><strong>2. fsedits是什么？</strong> <br>
+   是元数据操作日志文件：客户端要对文件进行读写操作，在这些操作产生的日志就存在了fsedit文件中。</li>
+<li>数据节点（Datanode）：Namenode和Datanode通信是通过心跳和块报告。每个文件被分割成不同的块，存在不同的机器的本地磁盘上。</li>
+</ol><h3 id="wiz_toc_9">2.2 Namenode和Secondary Namenode运行关系</h3>
+
+<p><img src="http://images2015.cnblogs.com/blog/527668/201604/527668-20160429142422269-719853447.jpg" alt="" title=""><br><strong>Secondarynamenode工作原理</strong> <br>
+日志与镜像的定期合并总共分以下五步：</p>
+
+<ol><li>Secondary Namenode通知Namenode切换editlog</li>
+<li>Secondary Namenode通过Http方式从Namenode获取fsimage和editlog</li>
+<li>Secondary Namenode将fsimage载入内存，然后开始合并editlog</li>
+<li>Secondary Namenode将新的fsimage发回给Namenode</li>
+<li>Namenode收到fsiamge后将新的fsimage替换旧的fsimage</li>
+</ol><h2 id="wiz_toc_10">3. HDFS文件的读写流程</h2>
+
+<h3 id="wiz_toc_11">3.1 HDFS文件的读取</h3>
+
+<p><strong>HDFS文件读取：</strong> <br><img src="http://images2015.cnblogs.com/blog/527668/201604/527668-20160429142433472-1841679105.jpg" alt="" title=""></p>
+
+<ol><li>首先调用FileSystem对象的open方法，其实是一个DistributedFileSystem的实例</li>
+<li>DistributedFileSystem通过rpc获得文件的第一批个block的locations，同一block按照重复数会返回多个locations，这些locations按照hadoop拓扑结构排序，距离客户端近的排在前面.</li>
+<li>前两步会返回一个FSDataInputStream对象，该对象会被封装成DFSInputStream对象，DFSInputStream可以方便的管理datanode和namenode数据流。客户端调用read方法，DFSInputStream最会找出离客户端最近的datanode并连接。</li>
+<li>数据从datanode源源不断的流向客户端。</li>
+<li>如果第一块的数据读完了，就会关闭指向第一块的datanode连接，接着读取下一块。这些操作对客户端来说是透明的，客户端的角度看来只是读一个持续不断的流。</li>
+<li>如果第一批block都读完了，DFSInputStream就会去namenode拿下一批blocks的location，然后继续读，如果所有的块都读完，这时就会关闭掉所有的流。</li>
+</ol><h3 id="wiz_toc_12">3.2 HDFS文件的写入</h3>
+
+<p><strong>HDFS文件写入：</strong> <br><img src="http://images2015.cnblogs.com/blog/527668/201604/527668-20160429142444128-367631421.jpg" alt="" title=""></p>
+
+<ol><li>客户端通过调用DistributedFileSystem的create方法创建新文件</li>
+<li>DistributedFileSystem通过RPC调用namenode去创建一个没有blocks关联的新文件，创建前，namenode会做各种校验，比如文件是否存在，客户端有无权限去创建等。如果校验通过，namenode就会记录下新文件，否则就会抛出IO异常.</li>
+<li>前两步结束后会返回FSDataOutputStream的对象，和读文件的时候相似，FSDataOutputStream被封装成DFSOutputStream，DFSOutputStream可以协调namenode和datanode。客户端开始写数据到DFSOutputStream,DFSOutputStream会把数据切成一个个小packet，然后排成队列data quene。</li>
+<li>DataStreamer会去处理接受data quene，他先问询namenode这个新的block最适合存储的在哪几个datanode里，比如重复数是3，那么就找到3个最适合的datanode，把他们排成一个pipeline.DataStreamer把packet按队列输出到管道的第一个datanode中，第一个datanode又把packet输出到第二个datanode中，以此类推。</li>
+<li>DFSOutputStream还有一个对列叫ack quene，也是有packet组成，等待datanode的收到响应，当pipeline中的所有datanode都表示已经收到的时候，这时akc quene才会把对应的packet包移除掉。</li>
+<li>客户端完成写数据后调用close方法关闭写入流</li>
+<li>DataStreamer把剩余得包都刷到pipeline里然后等待ack信息，收到最后一个ack后，通知datanode把文件标示为已完成。</li>
+</ol><p>读写流程参考自：<a href="http://blog.csdn.net/woshiwanxin102213/article/details/19990487" rel="nofollow">HDFS笔记（特点、原理与基本架构）</a></p><br><br><div><a title="来自为知笔记(Wiz)" href="http://www.wiz.cn/i/fc6402d0" rel="nofollow">来自为知笔记(Wiz)</a></div><br><br>            </div>
+                </div>

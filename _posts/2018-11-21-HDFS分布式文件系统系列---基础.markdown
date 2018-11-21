@@ -1,0 +1,241 @@
+---
+layout:     post
+title:      HDFS分布式文件系统系列---基础
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="1概述">1、概述</h1>
+
+
+
+<h2 id="1背景">1、背景</h2>
+
+<p>HDFS(Hadoop Distributed File System)Hadoop分布式文件系统； <br>
+Hadoop内核包括：HDFS，Yarn，MapReduce； <br>
+HDFS源于Google的一篇论文：GFS <br>
+ - 该论文发表与2003年10月； <br>
+ - HDFS是GFS的克隆版；</p>
+
+<p>HDFS是</p>
+
+<ul>
+<li>一个易于扩展的分布式文件系统；</li>
+<li>运行在大量廉价机器上，提供容错机制；</li>
+<li>为大量用户提供性能不错的文件存取服务；</li>
+</ul>
+
+
+
+<h2 id="2优点">2、优点</h2>
+
+<ol>
+<li><p>扩展性</p></li>
+<li><p>高容错性</p>
+
+<pre><code> HDFS保存多个副本；
+ 副本丢失后，会自动恢复（保证每个文件维持一定的副本数，如果一个副本坏了，可以通过其他副本进行恢复）；
+</code></pre></li>
+<li><p>适合批处理</p>
+
+<pre><code>移动计算而非数据的思想，提高大数据的性能；
+将数据位置信息爆露给上层框架（上层框架可以根据位置进行作业调度--本地性，移动计算）
+</code></pre></li>
+<li><p>适合大数据处理</p>
+
+<pre><code> GB、TB、PB级别的数据；
+ 百万规模以上的文件数量；
+ 10k+节点规模；
+</code></pre></li>
+<li><p>流式文件访问</p>
+
+<pre><code>一次写入，多次读取；
+保证数据一致性；
+</code></pre></li>
+<li><p>可构建在廉价的机器上</p>
+
+<pre><code>通过多副本提高可靠性；
+提供容错和恢复机制；  
+</code></pre></li>
+</ol>
+
+
+
+<h2 id="3缺点">3、缺点</h2>
+
+<p>不适合：</p>
+
+<ul>
+<li><p>低延迟的数据访问</p>
+
+<pre><code>比如毫秒级；
+</code></pre></li>
+<li><p>小文件存取</p>
+
+<pre><code>    1）会占用NameNode的大量内存（namenode上保存元数据信息--文件的块组成信息，块位置信息等，这些信息保存在内存中；当块多时，会消耗大量内存；）；
+    2）寻道时间超过读取时间；
+</code></pre></li>
+<li><p>并发写入、文件随机修改</p>
+
+<pre><code>1）  一个文件只能有一个写者，不能通过多线程同时写入；
+2）  仅支持append，不能对已有的文件内容进行修改； 
+</code></pre></li>
+</ul>
+
+
+
+<h1 id="2基本原理">2、基本原理</h1>
+
+<ul>
+<li><p>将文件切分为等大的数据块，存储在多个机器上；</p></li>
+<li><p>将文件切分、容错、负载均衡等功能透明化；</p></li>
+<li><p>可以将HDFS看成一个容量巨大的、具备高容错性的磁盘；</p></li>
+</ul>
+
+<p>HDFS不适合存储小文件，原因分析？</p>
+
+<ul>
+<li>元信息存储在namenode内存中，而一个节点的内存是有限的；</li>
+<li>存取大量小文件会消耗大量的寻道时间；</li>
+<li>namenode存储block数是有限的； <br>
+ 一个文件大小不足一个block，会单独保存成一个block； <br>
+ 一个block的元信息大约消耗150byte内存；如果block数多，其元信息会消耗大量的内存，影响block数； <br>
+===》会通过对小文件进行合并再进行保存；</li>
+</ul>
+
+<h1 id="3hdfs实现方式">3、HDFS实现方式</h1>
+
+<p>问题： <br>
+存在大小不一的文件；多个机器； <br>
+目标：将文件存到机器上；</p>
+
+<p>思考</p>
+
+<ul>
+<li>方法1</li>
+</ul>
+
+<p>文件1存在server1上；文件2存在server2；。。。；创建一个索引表-存放文件的位置； <br>
+存在的问题：可靠性低；</p>
+
+<ul>
+<li>方法2</li>
+</ul>
+
+<p>对于1），每个文件保存多分，每份在不同的server上； <br>
+存在的问题：很难负载均衡（文件大小不一）；很难进行分布式处理（对于一个文件，不能并行处理）；</p>
+
+<ul>
+<li>方法3</li>
+</ul>
+
+<p>将文件按大小进行切分，切分成等大的数据块，存放在不同的server上，每个块保存多分； <br>
+再创建2个索引表：一个保存数据块位置信息；一个保存文件的块组成（文件由哪些块组成）； <br>
+==》这就是HDFS的设计思想； <br>
+<img src="https://img-blog.csdn.net/20160930164301687" alt="这里写图片描述" title=""></p>
+
+
+
+<h1 id="4hdfs架构">4、HDFS架构</h1>
+
+<p>由6）得出 <br>
+需要一个节点保存索引表；其他节点保存数据，所以HDFS架构Master/Slave结构；Master是namenode；Slave是datanode； <br>
+Master/Slave结构存在单点故障问题，所以准备namenode2个，一个主namenode，一个是backup； <br>
+<img src="https://img-blog.csdn.net/20160930164822845" alt="这里写图片描述" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20160930174549425" alt="这里写图片描述" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20160930174727208" alt="这里写图片描述" title=""></p>
+
+
+
+<h1 id="5hdfs中一些概念">5、HDFS中一些概念</h1>
+
+
+
+<h2 id="1数据块block">1）数据块（block）</h2>
+
+<ul>
+<li><p>文件被切分成固定大小的数据块；</p>
+
+<p>块大小默认为64MB，可配置； <br>
+如果一个文件不足64MB，则单独存成一个block；</p></li>
+<li><p>为什么一个block这么大？</p>
+
+<p>linux中也有块的概念，但linux中一个块k单位； <br>
+  使数据读取时间超过寻道时间；（高吞吐率）</p></li>
+<li><p>一个文件存储方式？</p>
+
+<p>文件按大小被切分成多个block，存储在不同的节点上； <br>
+默认情况下，每个block有3个副本；</p></li>
+</ul>
+
+
+
+<h2 id="2副本放置策略">2）副本放置策略</h2>
+
+<p>每个block有3分，那么这3份如何存放？ <br>
+拓扑 <br>
+     一个集群中有多个机架，一个机架有多个服务器，机架内部的服务器通过一个内部交换机；机架之间通过中央交换机； <br>
+同一机架内的服务器同时挂掉的可能性大，因为共用一个交换机； <br>
+<img src="https://img-blog.csdn.net/20160930170058319" alt="这里写图片描述" title=""></p>
+
+<ul>
+<li><p>基于上述考虑，Bolock副本存放策略：</p>
+
+<pre><code>副本1：同client的节点上；
+副本2：不同机架上的节点上；
+副本3：与副本2在同一机架上的节点上；
+其他副本：随机选择（不同节点）
+==》2个在同一机架内；另一个在不同机架上；
+</code></pre></li>
+<li><p>为什么不存放在3个机架上？</p>
+
+<pre><code>因为当前方案已经实现了机架级别的容灾；位于不同的机架上，容错性更好，但是写延迟增加；当前方案在性能和容错性之间折中；
+</code></pre></li>
+</ul>
+
+
+
+<h2 id="3可靠性策略">3）可靠性策略</h2>
+
+<p>常见的3种错误情况，不同的情况采取不同的策略 <br>
+1、文件损坏 <br>
+  CRC校验（每块有一个校验码，读取文件前先进行校验） <br>
+  用其他副本替代损坏文件</p>
+
+<p>2、网络或机器失败 <br>
+ 如何判断datanode挂掉？datanode定时向namenode发送心跳信息，如果一定时间没有发送，则namenode会认为datanode挂掉； <br>
+ datanode挂掉之后，会将该节点上的block在其他节点上重构；</p>
+
+<p>3、namenode挂掉 <br>
+namenode挂掉–元信息失效–情况比较严重</p>
+
+<ul>
+<li>多分存储（定期写到磁盘上，元信息存储 在namenode内存中）</li>
+<li>FSImage  Editlog</li>
+<li>主备NameNode实时切换</li>
+</ul>
+
+<h1 id="6hdfs读写流程">6、HDFS读写流程</h1>
+
+
+
+<h2 id="1hdfs读">1、HDFS读</h2>
+
+<p><img src="https://img-blog.csdn.net/20161002095200244" alt="这里写图片描述" title=""></p>
+
+<h2 id="2hdfs写">2、HDFS写</h2>
+
+<p><img src="https://img-blog.csdn.net/20161002094437943" alt="这里写图片描述" title=""></p>
+
+<ul>
+<li>HDFS client通过DistributedFileSystem向namenode询问文件文件是否已经存在，如果不存在，namenode通过可以写，并且返回3个要写的datanode地址（3个副本）；</li>
+<li>HDFS client通过FSData OutputStream写；写是通过流式方式写的（不是通过启动3个线程并发写，因为这样的话，FSData OutputStream会成为瓶颈–比如更多的副本数）</li>
+<li>流式写–FSData OutputStream向第一个datanode写，将一个数据块分成更小的单位-package，一个packge写完后，该datanode将该package传到第二个datanode，依次类推；</li>
+<li>写完后，向上层通知；</li>
+<li>client关闭FSData OutputStream；</li>
+</ul>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

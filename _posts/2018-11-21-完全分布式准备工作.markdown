@@ -1,0 +1,174 @@
+---
+layout:     post
+title:      完全分布式准备工作
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u013388996/article/details/79268941				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div>﻿﻿</div>
+<p>完全分布式安装<br>
+1、<br>
+角色分配<br>
+组件   linux01        linux02               linux03 <br>
+HDFS   namenode      Secondarynamenode   <br>
+HDFS   datanode        datanode             datanode<br>
+Yarn                   resourcemanger<br>
+Yarn   nodemanager      nodemanager         nodemanager<br>
+history  historyserver</p>
+<p><br>
+2、环境准备<br>
+ 2.1系统和软件【3台】<br>
+ CentOS 6.5    hadoop 2.5.0     jdk1.70—67<br>
+ 2.2 配置IP和DNS（root）<br>
+  配置静态IP<br>
+  DNS<br>
+  //检查主机映射<br>
+  $ cat /etc/hosts</p>
+<p>  //检查主机名<br>
+  $cat /etc/sysconfig/network</p>
+<p>  //检查IP和DNS<br>
+  $ cat /etc/sysconfig/network-scripts/ifcfg-eth0</p>
+<p>  2.3关闭防火墙 (3台) （root）<br>
+  # service iptables stop<br>
+  # chkconfig iptables off</p>
+<p>  关闭Linux安全子系统<br>
+  # vi /etc/sysconfig/selinux </p>
+<p>  2.4创建相同普通用户名和密码 【3台】<br>
+  # useradd hadoop<br>
+  # echo 123456 | passwd --stdin hadoop</p>
+<p>  2.5配置主机映射   【三台都需要需要添加】<br>
+  # vi /etc/hosts<br>
+192.168.7.9 hadoop.senior01<br>
+192.168.7.10  hadoop.senior02<br>
+192.168.7.11 hadoop.senior03</p>
+<p>  2.6卸载自带的jdk<br>
+  # rpm -qa | grep jdk<br>
+# rpm -e --nodeps tzdata-java-2012j-1.el6.noarch<br>
+# rpm -e --nodeps java-1.6.0-openjdk-1.6.0.0-1.50.1.11.5.el6_3.x86_64<br>
+# rpm -e --nodeps java-1.7.0-openjdk-1.7.0.9-2.3.4.1.el6_3.x86_64</p>
+<p>三、配置NTP服务<br>
+ *.把Linux01作为整个集群的时间同步服务器<br>
+ *.集群中所有其他服务器都来这台服务器Linux01同步时间<br>
+ 1.检查每台服务器所在的时区<br>
+ $ date -R    --检查当前系统时区<br>
+ Thu, 16 Feb 2017 17:06:18 +0800<br>
+ #  rm  -rf /etc/localtime        ---如果时区不是+0800<br>
+# ln -s /usr/share/zoneinfo/Asia/Shanghai   /etc/localtime</p>
+<p> 2.安装ntp服务<br>
+ # rpm -qa | grep ntp      --查看ntp软件包是否已安装</p>
+<p> #yum  -y install ntp     --如果没有那就需要安装ntp</p>
+<p> 3.修改ntp的配置文件（Linux01）<br>
+ # vi /etc/ntp.conf<br>
+*去掉下面这行下面的#，并把网段修改成自己的网段<br>
+ restrict 192.168.7.0 mask 255.255.255.0 nomodify notrap</p>
+<p>*注释掉一下几行<br>
+#server 0.centos.pool.ntp.org iburst<br>
+#server 1.centos.pool.ntp.org iburst<br>
+#server 2.centos.pool.ntp.org iburst<br>
+#server 3.centos.pool.ntp.org iburst</p>
+<p>把下面前面两行的#号去掉，如果没有，需要手动去添加<br>
+server 127.127.1.0      #local clock<br>
+fudge 127.127.1.0  stratum 10<br>
+ <br>
+ 4.启动ntp服务(默认是开启)Linux01<br>
+ # service ntpd start   <br>
+ # chkconfig ntpd on </p>
+<p> 5.同步服务器的时间（Linux01）<br>
+# ntpdate cn.pool.ntp.org     --&gt;操作这一步时关闭ntp服务<br>
+16 Feb 17:14:40 ntpdate[26564]: step time server 188.39.37.91 offset -12.669996 sec</p>
+<p> 6.如果另外两台的ntp的进程开启，那么需要关闭<br>
+ # service ntpd stop<br>
+ # chkconfig ntpd off</p>
+<p> 7.第2、3台向第一台同步时间<br>
+ # ntpdate hadoop.senior01<br>
+ 16 Feb 17:43:27 ntpdate[2554]: adjust time server 192.168.7.9 offset -0.001412 sec</p>
+<p> 8.制定周期性时间同步计划任务（第2、3台-Linux02 、Linux03）<br>
+ ## 每10分钟同步一次服务器时间<br>
+ */10 * * * * /usr/sbin/ntpdate hadoop.senior01</p>
+<p># date -s "19:05:56 2017/2/16"</p>
+<p>四、配置免密钥登陆<br>
+ 使用ssh 登陆的时候不需要用户名和密码</p>
+<p> $ ssh-keygen<br>
+ * 回车，产生的当前主机的公钥和私钥</p>
+<p> //分发密钥（要向3台都发送）<br>
+ $ ssh-copy-id hadoop.senior01 <br>
+ $ ssh-copy-id hadoop.senior02 <br>
+ $ ssh-copy-id hadoop.senior03  </p>
+<p> （Linux01~03 ）<br>
+ $ ssh-keygen<br>
+ $ ssh-copy-id hadoop.senior01 <br>
+ $ ssh-copy-id hadoop.senior02 <br>
+ $ ssh-copy-id hadoop.senior03 </p>
+<p>分发完成会在用户主目录下的.ssh目录生成以下文件：<br>
+authorized_keys  id_rsa  id_rsa.pub  known_hosts<br>
+如果配置错误可以先删除.ssh目录，重新做一遍</p>
+<p><br></p>
+<p>==========================================<br>
+3.====core-site.xml====<br>
+&lt;!--指定第一台做namenode--&gt;<br>
+&lt;property&gt;<br>
+ &lt;name&gt;fs.defaultFS&lt;/name&gt;<br>
+ &lt;value&gt;hdfs://hadoop.senior01:8020&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+ <br>
+&lt;property&gt;<br>
+ &lt;name&gt;hadoop.tmp.dir&lt;/name&gt;<br>
+ &lt;value&gt;/opt/modules/hadoop-2.5.0/data&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>=========hdfs-site.xml=====<br>
+&lt;!-- 分布式副本数设置为3 --&gt;<br>
+ &lt;property&gt;<br>
+        &lt;name&gt;dfs.replication&lt;/name&gt;<br>
+        &lt;value&gt;3&lt;/value&gt;<br>
+    &lt;/property&gt;<br>
+ &lt;!-- secondarynamenode主机名 --&gt;<br>
+ &lt;property&gt;<br>
+        &lt;name&gt;dfs.namenode.secondary.http-address&lt;/name&gt;<br>
+        &lt;value&gt;hadoop.senior02:50090&lt;/value&gt;<br>
+    &lt;/property&gt;<br>
+ &lt;!-- namenode的web访问主机名:端口号 --&gt;<br>
+    &lt;property&gt;<br>
+        &lt;name&gt;dfs.namenode.http-address&lt;/name&gt;<br>
+        &lt;value&gt;hadoop.senior01:50070&lt;/value&gt;<br>
+ &lt;/property&gt;<br>
+ &lt;!-- 关闭权限检查用户或用户组 --&gt;<br>
+ &lt;property&gt;<br>
+        &lt;name&gt;dfs.permissions.enabled&lt;/name&gt;<br>
+        &lt;value&gt;false&lt;/value&gt;<br>
+    &lt;/property&gt;</p>
+<p>============yarn-site.xml=======<br>
+&lt;property&gt;<br>
+        &lt;name&gt;yarn.resourcemanager.hostname&lt;/name&gt;<br>
+        &lt;value&gt;hadoop.senior02&lt;/value&gt;<br>
+    &lt;/property&gt;<br>
+    &lt;property&gt;<br>
+        &lt;name&gt;yarn.nodemanager.aux-services&lt;/name&gt;<br>
+        &lt;value&gt;mapreduce_shuffle&lt;/value&gt;<br>
+    &lt;/property&gt;<br>
+ &lt;property&gt;<br>
+        &lt;name&gt;yarn.log-aggregation-enable&lt;/name&gt;<br>
+        &lt;value&gt;true&lt;/value&gt;<br>
+    &lt;/property&gt;<br>
+ &lt;property&gt;<br>
+        &lt;name&gt;yarn.log-aggregation.retain-seconds&lt;/name&gt;<br>
+        &lt;value&gt;86400&lt;/value&gt;<br>
+    &lt;/property&gt;</p>
+<p>=========================mapred-site.xml============<br>
+$ cp mapred-site.xml.template mapred-site.xml</p>
+<p>&lt;property&gt;<br>
+        &lt;name&gt;mapreduce.framework.name&lt;/name&gt;<br>
+        &lt;value&gt;yarn&lt;/value&gt;<br>
+    &lt;/property&gt;<br>
+ &lt;property&gt;<br>
+        &lt;name&gt;mapreduce.jobhistory.address&lt;/name&gt;<br>
+        &lt;value&gt;hadoop.senior01:10020&lt;/value&gt;<br>
+    &lt;/property&gt;<br>
+ &lt;property&gt;<br>
+        &lt;name&gt;mapreduce.jobhistory.webapp.address&lt;/name&gt;<br>
+        &lt;value&gt;hadoop.senior01:19888&lt;/value&gt;<br>
+    &lt;/property&gt;<br></p>
+            </div>
+                </div>

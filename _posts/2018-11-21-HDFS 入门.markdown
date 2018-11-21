@@ -1,0 +1,81 @@
+---
+layout:     post
+title:      HDFS 入门
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/youngbit007/article/details/77981888				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p><img src="https://img-blog.csdn.net/20170917114600676?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20170917114106523?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>注意secondaryname node 不是name node的备份，仅仅备份了一部分的元数据，不是实时备份。它的主要工作是帮助NN合并editslog，减少NN启动时间</p>
+
+<p>比如删除元数据，不会立马删除，而是将操作信息写入日志edits log，在合并的时候（edits log和fsimage合并的时候）进行实际的删除。合并完成之后会得到一个新的fsimage再传送给NN，并替换原来的。</p>
+
+<p>所以NN的主要做用是接受客户端的读写操作，而元数据的更新等需要大量IO操作的合并等由SNN来做。</p>
+
+<p>SNN执行合并机制：</p>
+
+<ol>
+<li>根据配置文件设置的时间间隔fs.checkpoint.period 默认为3600s</li>
+<li>根据配置文件设置edits log大小 fs.checkpoint.size规定edits文件的最大默认为64M</li>
+</ol>
+
+<p><img src="https://img-blog.csdn.net/20170917123114646?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>NameNode的$dfs.namenode.name.dir/current/文件夹的几个文件：</p>
+
+<p>current/ <br>
+|– VERSION <br>
+|– edits_* <br>
+|– fsimage_0000000000008547077 <br>
+|– fsimage_0000000000008547077.md5 <br>
+`– seen_txid <br>
+　　其中存在大量的以edits开头的文件和少量的以fsimage开头的文件。那么这两种文件到底是什么，有什么用？下面对这两中类型的文件进行详解。在进入下面的主题之前先来搞清楚edits和fsimage文件的概念： <br>
+　　（1）、fsimage文件其实是Hadoop文件系统元数据的一个永久性的检查点，其中包含Hadoop文件系统中的所有目录和文件idnode的序列化信息； <br>
+　　（2）、edits文件存放的是Hadoop文件系统的所有更新操作的路径，文件系统客户端执行的所以写操作首先会被记录到edits文件中。 <br>
+　　 <br>
+　　fsimage和edits文件都是经过序列化的，在NameNode启动的时候，它会将fsimage文件中的内容加载到内存中，之后再执行edits文件中的各项操作，使得内存中的元数据和实际的同步，存在内存中的元数据支持客户端的读操作。</p>
+
+<p>　　NameNode起来之后，HDFS中的更新操作会重新写到edits文件中，因为fsimage文件一般都很大（GB级别的很常见），如果所有的更新操作都往fsimage文件中添加，这样会导致系统运行的十分缓慢，但是如果往edits文件里面写就不会这样，每次执行写操作之后，且在向客户端发送成功代码之前，edits文件都需要同步更新。如果一个文件比较大，使得写操作需要向多台机器进行操作，只有当所有的写操作都执行完成之后，写操作才会返回成功，这样的好处是任何的操作都不会因为机器的故障而导致元数据的不同步。</p>
+
+<p>　　fsimage包含Hadoop文件系统中的所有目录和文件idnode的序列化信息；对于文件来说，包含的信息有修改时间、访问时间、块大小和组成一个文件块信息等；而对于目录来说，包含的信息主要有修改时间、访问控制权限等信息。fsimage并不包含DataNode的信息，而是包含DataNode上块的映射信息，并存放到内存中，当一个新的DataNode加入到集群中，DataNode都会向NameNode提供块的信息，而NameNode会定期的“索取”块的信息，以使得NameNode拥有最新的块映射。因为fsimage包含Hadoop文件系统中的所有目录和文件idnode的序列化信息，所以如果fsimage丢失或者损坏了，那么即使DataNode上有块的数据，但是我们没有文件到块的映射关系，我们也无法用DataNode上的数据！所以定期及时的备份fsimage和edits文件非常重要！</p>
+
+<p>　　在前面我们也提到，文件系统客户端执行的所以写操作首先会被记录到edits文件中，那么久而久之，edits会非常的大，而NameNode在重启的时候需要执行edits文件中的各项操作，那么这样会导致NameNode启动的时候非常长！在下篇文章中我会谈到在Hadoop 1.x版本和Hadoop 2.x版本是怎么处理edits文件和fsimage文件的。</p>
+
+<p>注意NN工作的数据都在内存中，会将用户操作都记录在edit 文件</p>
+
+<p><img src="https://img-blog.csdn.net/20170917124400633?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>HDFS读流程 <br>
+<img src="https://img-blog.csdn.net/20170917124930558?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>其中Distributed FileSystem/FSDataInputStream是两个API，而且4,5是并发执行的，当读取所有的block在客户端合并成一个大文件。</p>
+
+<p>HDFS写流程</p>
+
+<p><img src="https://img-blog.csdn.net/20170917125246040?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+注意当写dn的时候，仅仅是向一个dn上写block，其他副本由这个DN新起线程去完成。</p>
+
+<p>HDFS文件权限 <br>
+<img src="https://img-blog.csdn.net/20170917132451288?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>HDFS的HA，主要给NN做HA <br>
+<img src="https://img-blog.csdn.net/20170914161815753?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+用户连接的是ZK <br>
+<img src="https://img-blog.csdn.net/20170920102343951?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>zk 必须是大于1的奇数（竞争锁的投票机制）） <br>
+zkfc和nn的数量一致 <br>
+JN也是奇数个</p>
+
+<p>HDFS做HA，节点数量举例 <br>
+<img src="https://img-blog.csdn.net/20170914162839894?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveW91bmdiaXQwMDc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>MapReduce的HA，主要给Resource Manager做HA. 但是一般企业只对HDFS做HA</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>
