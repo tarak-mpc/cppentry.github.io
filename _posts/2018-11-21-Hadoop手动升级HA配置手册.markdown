@@ -1,0 +1,534 @@
+---
+layout:     post
+title:      Hadoop手动升级HA配置手册
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/shenliang1985/article/details/50500374				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p align="center"><span style="font-size:24px;">Hadoop手动升级HA配置手册</span></p>
+<h1>1 Hadoop组件升级</h1>
+<p>本文是Apache hadoop、Hbase升级至CDH版hadoop、Hbase,同时涵盖了Hadoop HA的配置的操作手册..</p>
+<h1>2 Hadoop升级</h1>
+<h2>2.1 Hadoop升级准备</h2>
+<h3>2.1.1 环境说明</h3>
+<p>Hadoop原始版本、升级版本分别为:Apache Hadoop 1.2.1,hadoop2.5.0-CDH5.3.3</p>
+<h3>2.1.2 升级准备</h3>
+<p>2.1.2.1 升级JDK</p>
+<p>#如果JDK版本已经是1.7以上,此步可略过</p>
+<p><strong><span style="color:#00B050;">rpm –ivh oracle-j2sdk1.7-1.7.0+update67-1.x86_64.rpm</span></strong></p>
+<p><strong><span style="color:#FF0000;">注:</span></strong>默认安装在/usr/java目录内</p>
+<p>2.1.2.2 停Hbase相关外围应用、停Hbase服务</p>
+<p><strong><span style="color:#00B050;">stop-hbase.sh</span></strong></p>
+<p><strong><span style="color:#FF0000;">注:</span></strong>此时zookeeper和Hadoop相关主进程皆不需要停.</p>
+<p>2.1.2.3 备份Namenode元数据</p>
+<p>#hadoop先进入安全模式,合并edits并备份namenode元数据</p>
+<p><strong><span style="color:#00B050;">hadoop dfsadmin -safemode enter</span></strong></p>
+<p><strong><span style="color:#00B050;">hadoop dfsadmin -saveNamespace</span></strong></p>
+<p><strong><span style="color:#00B050;">stop-all.sh</span></strong></p>
+<p><strong><span style="color:#00B050;">cp  /app/data/name/*/app/data/name_bak/</span></strong></p>
+<p><strong><span style="color:#FF0000;">注:</span></strong>这里的/app/data/name/来至Hadoop1.2.1里hdfs-site.xmldfs.name.dir的配置</p>
+<p> </p>
+<p>2.1.2.4 上传新版Hadoop并做好相关配置文件的设置</p>
+<p>#上传并解压安装包hadoop-2.5.0-cdh5.3.3.tar.gz到namenode所在机器上,如:/app/</p>
+<p><strong><span style="color:#00B050;">tar –zxvf hadoop-2.5.0-cdh5.3.3.tar.gz</span></strong></p>
+<p># 检查主节点安装包执行目录是否有执行权限</p>
+<p>#配置如下参数文件:</p>
+<p>#core-site.xml,hadoop-env.sh,hdfs-site.xml,mapred-site.xml,slaves,yarn-site.xml,yarn-evn.sh,master</p>
+<p>a)  配置core-site.xml</p>
+<p>#基本沿用1代时的配置.</p>
+<p>b)  hadoop-env.sh</p>
+<p>exportJAVA_HOME=/usr/java/jdk1.7.0_67-cloudera/</p>
+<p>export HADOOP_HEAPSIZE=70000</p>
+<p>c)  hdfs-site.xml</p>
+<p>#修改参数如下参数的名称以兼容2代, 其它参数沿用.</p>
+<p>#修改参数dfs.name.dir为dfs.namenode.name.dir</p>
+<p>#修改参数dfs.data.dir为dfs.datanode.data.dir</p>
+<p>d)  mapred-site.xml</p>
+<p>#新增yarn参数,之前1代的参数可以注释掉</p>
+<p></p>
+<pre><code class="language-html">&lt;property&gt;
+     &lt;name&gt;mapreduce.framework.name&lt;/name&gt;
+     &lt;value&gt;yarn&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+&lt;name&gt;mapred.system.dir&lt;/name&gt;
+&lt;value&gt;/home/shenl/hadoop1.2.1/system&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+&lt;name&gt;mapred.local.dir&lt;/name&gt;
+&lt;value&gt;/home/shenl/hadoop1.2.1/local&lt;/value&gt;
+&lt;/property&gt;</code></pre><br><br><p></p>
+<p>e)  slaves</p>
+<p>沿用1代的配置</p>
+<p>f)  yarn-site.xml</p>
+<p></p>
+<pre><code class="language-html">&lt;property&gt; 
+              &lt;name&gt;yarn.resourcemanager.address&lt;/name&gt; 
+              &lt;value&gt;master1:8032&lt;/value&gt; &lt;/property&gt; 
+     &lt;property&gt; 
+              &lt;name&gt;yarn.resourcemanager.scheduler.address&lt;/name&gt; 
+              &lt;value&gt;master1:8030&lt;/value&gt; 
+     &lt;/property&gt; 
+     &lt;property&gt; 
+              &lt;name&gt;yarn.resourcemanager.resource-tracker.address&lt;/name&gt; 
+              &lt;value&gt;master1:8031&lt;/value&gt; 
+     &lt;/property&gt;
+ 
+     &lt;property&gt;
+              &lt;name&gt;yarn.resourcemanager.admin.address&lt;/name&gt; 
+              &lt;value&gt;master1:8033&lt;/value&gt; 
+     &lt;/property&gt; &lt;property&gt; 
+              &lt;name&gt;yarn.resourcemanager.webapp.address&lt;/name&gt; 
+              &lt;value&gt;master1:8088&lt;/value&gt; 
+     &lt;/property&gt; 
+     &lt;property&gt; 
+              &lt;name&gt;yarn.nodemanager.aux-services&lt;/name&gt; 
+              &lt;value&gt;mapreduce_shuffle&lt;/value&gt; 
+     &lt;/property&gt; 
+     &lt;property&gt; 
+              &lt;name&gt;yarn.nodemanager.aux-services.mapreduce.shuffle.class&lt;/name&gt; 
+              &lt;value&gt;org.apache.hadoop.mapred.ShuffleHandler&lt;/value&gt; 
+     &lt;/property&gt;</code></pre><br><br><p></p>
+<p><strong><span style="color:#FF0000;">注</span></strong>:这里master1是namenode的主机名</p>
+<p> </p>
+<p>g)  yarn-env.sh</p>
+<p>#修改JAVA_HOME</p>
+<p><strong><span style="color:#C00000;">exportJAVA_HOME=/usr/java/jdk1.7.0_67-cloudera/</span></strong></p>
+<p>h)  master</p>
+<p>#新增master文件,填写namenode的主机名</p>
+<p> </p>
+<p>2.1.2.5 在Namenode节点里分发已经配置好的2代hadoop</p>
+<p><strong><span style="color:#00B050;">scp -rq /app/hadoop-2.5.0-cdh5.3.3 hadoop@datanode1:/app/&amp;&amp;</span></strong></p>
+<p><strong><span style="color:#00B050;">scp -rq /app/hadoop-2.5.0-cdh5.3.3 hadoop@datanode2:/app/&amp;&amp;</span></strong></p>
+<p> </p>
+<p>2.1.2.6 在所有节点上配置HADOOP_HOME被生效</p>
+<p><strong><span style="color:#00B050;">vi ~/bash_profile</span></strong></p>
+<p><strong><span style="color:#C00000;">export HADOOP_HOME=/home/shenl/hadoop-2.5.0-cdh5.3.3</span></strong></p>
+<p><strong><span style="color:#00B050;">source ~/.bash_profile</span></strong></p>
+<p><strong><span style="color:#00B050;">which hadoop  </span></strong></p>
+<p><strong><span style="color:#00B050;">which hadoop-daemon.sh</span></strong></p>
+<h2><a name="OLE_LINK177"></a><a name="OLE_LINK151"></a><a name="OLE_LINK104"></a><a name="OLE_LINK103">2.2</a> Hadoop升级回滚</h2>
+<h3><a name="OLE_LINK191"></a><a name="OLE_LINK178"></a><a name="OLE_LINK152"></a><a name="OLE_LINK106"></a><a name="OLE_LINK105">2.1</a>升级Hadoop</h3>
+<p>2.1.1 升级Namenode</p>
+<p>#观察namenode日志</p>
+<p><strong><span style="color:#00B050;">tail-f hadoop-hadoop-namenode-bigdata01.log</span></strong></p>
+<p><strong><span style="color:#00B050;">hadoop-daemon.shstart namenode -upgrade</span></strong></p>
+<p><strong><span style="color:#00B050;"><img src="https://img-blog.csdn.net/20160111231558915?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></span></strong></p>
+<p></p>
+<p><strong><span style="color:#FF0000;">注</span></strong>:Namenode日志稳定后,即可任务升级成功</p>
+<p>2.1.2 升级Datanode</p>
+<p>#升级Datanode,可以在Namenode里对所有时间节点同时升级</p>
+<p><strong><span style="color:#00B050;">hadoop-daemons.shstart datanode</span></strong></p>
+<p>#数据节点日志如下:</p>
+<p></p>
+<p><img src="https://img-blog.csdn.net/20160111231703782?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></p>
+<p><strong><span style="color:#FF0000;">注</span></strong>:在namenode日志里看到所有的数据节点成功方可认为升级完成</p>
+<p>2.1.3 升级Datanode</p>
+<p>#namenode节点上执行, YARN验证</p>
+<p><strong><span style="color:#00B050;">yarn-daemon.sh startresourcemanager</span></strong></p>
+<p><strong><span style="color:#00B050;">yarn-daemons.shstart nodemanager</span></strong></p>
+<p><strong><span style="color:#00B050;">mr-jobhistory-daemon.shstart historyserver</span></strong></p>
+<p>#执行wordcount验证:</p>
+<p><strong><span style="color:#00B050;">hadoopjar/home/shenl/hadoop-2.5.0-cdh5.3.3/share/hadoop/mapreduce/hadoop-mapreduce-examples-2.5.0-cdh5.3.3.jarwordcount /shenl/gc.log /shenl3/</span></strong></p>
+<p><strong><span style="color:#FF0000;">注:</span></strong>检测控制台执行过程 map 100% reduce 100% 即任务执行成功 或则到 8088端口查看作业情况.</p>
+<h3>2.2 回滚hadoop</h3>
+<p>#还原回1代Hadoop的环境变量,并生效,参数文件指向1代</p>
+<p>2.2.2.1 回滚Namenode</p>
+<p><strong><span style="color:#00B050;">hadoop-daemon.shstart namenode -rollback</span></strong></p>
+<p> </p>
+<p>2.2.2.2 回滚Datanode</p>
+<p><strong><span style="color:#00B050;">hadoop-daemons.shstart datanode –rollback</span></strong></p>
+<h1>3 Hbase升级</h1>
+<h2>3.1 Hadoop升级准备</h2>
+<h3>3.1.1 环境说明</h3>
+<p>Hbase原始版本、升级版本分别为:Hbase 0.96.1.1 ,hbase0.98.6-cdh5.3.3</p>
+<h3>3.1.2 升级准备</h3>
+<p>3.1.2.1 上传并解压安装文件</p>
+<p>上传并解压安装包(hbase-0.98.6-cdh5.3.3.tar.gz)到Hmaster机器上,如目录：/app/</p>
+<p><strong><span style="color:#00B050;">tar–zxvf  hbase-0.98.6-cdh5.3.3.tar.gz</span></strong></p>
+<p>3.1.2.2 修改hbase-env.sh里的相关参数</p>
+<p>#修改引用的JDK</p>
+<p><strong><span style="color:#C00000;">export JAVA_HOME=/usr/java/jdk1.7.0_67-cloudera/</span></strong></p>
+<p><strong><span style="color:#C00000;">export  HBASE_HEAPSIZE=8000</span></strong></p>
+<p><strong><span style="color:#C00000;">export HBASE_PID_DIR=/home/shenl/pids/hbase96</span></strong></p>
+<p> </p>
+<p>3.1.2.3 拷贝1代hbase的相关参数</p>
+<p>#拷贝1代hbase的conf下的Hbase-site.xml、regionserver到2代的conf下.</p>
+<p> </p>
+<p>3.1.2.4 拷贝hmaster里hbase到各slave节点</p>
+<p>#分发2代hbase到各个节点</p>
+<p><strong><span style="color:#00B050;">scp -r /app/hbase-0.98.6-cdh5.3.3hadoop@datanode1:/app/</span></strong></p>
+<p>3.1.2.5 各节点里修改Hbase的环境变量</p>
+<p>#修改用户的环境变量,指定$HBASE_HOME并追加$HBASE_HOME/bin到PATH</p>
+<p><strong><span style="color:#00B050;">vi ~/.bash_profile</span></strong></p>
+<p><strong><span style="color:#C00000;">exportHBASE_HOME=/home/impala/hbase-0.98.6-cdh5.3.3</span></strong></p>
+<p><strong><span style="color:#00B050;">source ~/.bash_profile</span></strong></p>
+<h2>3.2 Hbase升级回滚</h2>
+<h3>4.1 升级Hbase</h3>
+<p>执行升级检查和升级命令(Hmaster节点)</p>
+<p><strong><span style="color:#00B050;">hbase upgrade –check </span></strong></p>
+<p><strong><span style="color:#00B050;">hbase upgrade –execute</span></strong></p>
+<p><img src="https://img-blog.csdn.net/20160111231802288?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></p>
+<p>#启动hbase (Hmaster节点上执行)</p>
+<p><strong><span style="color:#00B050;">start-hbase.sh</span></strong></p>
+<h3>4.2回滚hbase</h3>
+<p>修改回之前的环境变量,生效后启动即可<strong><span style="color:#00B050;">.</span></strong></p>
+<h1>5 Hadoop HA配置</h1>
+<h2>5.1 Hadoop Yarn HA配置</h2>
+<p>5.1.1 hdfs-site.xml参数配置,注意看<strong><span style="color:#C00000;">HASupport</span></strong>部分</p>
+<p></p>
+<pre><code class="language-html">&lt;?xml version="1.0"?&gt;
+&lt;?xml-stylesheet type="text/xsl"href="configuration.xsl"?&gt;
+ 
+&lt;configuration&gt;
+ 
+&lt;property&gt;
+&lt;name&gt;dfs.namenode.name.dir&lt;/name&gt;
+&lt;value&gt;file:///home/shenl/home/impala/data/hadoop1.2.1&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;property&gt;
+&lt;name&gt;dfs.datanode.data.dir&lt;/name&gt;
+&lt;value&gt;file:///home/shenl/home/impala/dfs_data01/dfs1.2.1&lt;/value&gt;
+&lt;/property&gt;
+ 
+ 
+&lt;property&gt;
+&lt;name&gt;dfs.replication&lt;/name&gt;
+&lt;value&gt;3&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;property&gt;
+&lt;name&gt;hadoop.tmp.dir&lt;/name&gt;
+&lt;value&gt;/home/shenl/var/hadoop1.2.1/tmp&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;property&gt;
+&lt;name&gt;dfs.http.address&lt;/name&gt;
+&lt;value&gt;master1:50070&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;property&gt;
+&lt;name&gt;dfs.datanode.du.reserved&lt;/name&gt;
+&lt;value&gt;10737418240&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;property&gt;
+&lt;name&gt;dfs.permissions&lt;/name&gt;
+&lt;value&gt;false&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;property&gt;
+&lt;name&gt;dfs.secondary.http.address&lt;/name&gt;
+&lt;value&gt;data1:50090&lt;/value&gt;
+&lt;description&gt;
+The secondary namenode http server address and port.
+If the port is 0 then the server will start on a freeport.
+&lt;/description&gt;
+ 
+&lt;/property&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.datanode.max.xcievers&lt;/name&gt;
+&lt;value&gt;4096&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;property&gt;
+&lt;name&gt;dfs.hosts.exclude&lt;/name&gt;
+&lt;value&gt;/home/shenl/home/impala/src/hadoop-1.2.1/conf/slaves.ex&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;!-- HA Configure --&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.nameservices&lt;/name&gt;
+   &lt;value&gt;zzg&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.ha.namenodes.zzg&lt;/name&gt;
+   &lt;value&gt;master1,data1&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.namenode.rpc-address.zzg.master1&lt;/name&gt;
+   &lt;value&gt;master1:9000&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.namenode.rpc-address.zzg.data1&lt;/name&gt;
+   &lt;value&gt;data1:9000&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+    &lt;name&gt;dfs.namenode.http-address.zzg.master1&lt;/name&gt;
+   &lt;value&gt;master1:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.namenode.http-address.zzg.data1&lt;/name&gt;
+   &lt;value&gt;data1:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.namenode.servicerpc-address.zzg.master1&lt;/name&gt;
+   &lt;value&gt;master1:53310&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.namenode.servicerpc-address.zzg.data1&lt;/name&gt;
+   &lt;value&gt;data1:53310&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.namenode.shared.edits.dir&lt;/name&gt;
+    &lt;value&gt;qjournal://data1:8485;data2:8485;data3:8485/zzg&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.journalnode.edits.dir&lt;/name&gt;
+   &lt;value&gt;/home/shenl/usr/local/cloud/data/hadoop/ha/journal&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.client.failover.proxy.provider.zzg&lt;/name&gt;
+   &lt;value&gt;org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.ha.automatic-failover.enabled&lt;/name&gt;
+   &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+       &lt;name&gt;ha.zookeeper.quorum&lt;/name&gt;
+       &lt;value&gt;data1:2181,data2:2181,data3:2181&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.ha.fencing.methods&lt;/name&gt;
+   &lt;value&gt;sshfence&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.ha.fencing.ssh.private-key-files&lt;/name&gt;
+    &lt;value&gt;/home/shenl/.ssh/id_rsa&lt;/value&gt;
+&lt;/property&gt;
+ 
+&lt;/configuration&gt;</code></pre><br><br><p></p>
+<p> </p>
+<p>5.1.2  yarn-site.xml参数配置,注意看<strong><span style="color:#C00000;">HA Support</span></strong>部分.</p>
+<p></p>
+<pre><code class="language-html">&lt;configuration&gt;
+         &lt;property&gt; 
+                   &lt;name&gt;yarn.resourcemanager.address&lt;/name&gt; 
+                   &lt;value&gt;master1:8032&lt;/value&gt; &lt;/property&gt; 
+         &lt;property&gt; 
+                   &lt;name&gt;yarn.resourcemanager.scheduler.address&lt;/name&gt; 
+                   &lt;value&gt;master1:8030&lt;/value&gt; 
+         &lt;/property&gt; 
+         &lt;property&gt; 
+                   &lt;name&gt;yarn.resourcemanager.resource-tracker.address&lt;/name&gt; 
+                   &lt;value&gt;master1:8031&lt;/value&gt; 
+         &lt;/property&gt;
+ 
+         &lt;property&gt;
+                   &lt;name&gt;yarn.resourcemanager.admin.address&lt;/name&gt; 
+                   &lt;value&gt;master1:8033&lt;/value&gt; 
+         &lt;/property&gt; &lt;property&gt; 
+                   &lt;name&gt;yarn.resourcemanager.webapp.address&lt;/name&gt; 
+                   &lt;value&gt;master1:8088&lt;/value&gt; 
+         &lt;/property&gt; 
+         &lt;property&gt; 
+                   &lt;name&gt;yarn.nodemanager.aux-services&lt;/name&gt; 
+                  &lt;value&gt;mapreduce_shuffle&lt;/value&gt; 
+         &lt;/property&gt; 
+         &lt;property&gt; 
+                   &lt;name&gt;yarn.nodemanager.aux-services.mapreduce.shuffle.class&lt;/name&gt; 
+                   &lt;value&gt;org.apache.hadoop.mapred.ShuffleHandler&lt;/value&gt; 
+         &lt;/property&gt; 
+        
+&lt;!-- HA Support --&gt;
+ 
+       &lt;property&gt;
+                &lt;name&gt;yarn.resourcemanager.connect.retry-interval.ms&lt;/name&gt;
+               &lt;value&gt;2000&lt;/value&gt;
+       &lt;/property&gt;
+        &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.ha.enabled&lt;/name&gt;
+               &lt;value&gt;true&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.ha.automatic-failover.enabled&lt;/name&gt;
+               &lt;value&gt;true&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.ha.rm-ids&lt;/name&gt;
+               &lt;value&gt;rm1,rm2&lt;/value&gt;
+       &lt;/property&gt;
+        &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.recovery.enabled&lt;/name&gt;
+                &lt;value&gt;true&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.zk-state-store.address&lt;/name&gt;
+               &lt;value&gt;data1:2181,data2:2181,data3:2181&lt;/value&gt;
+       &lt;/property&gt;
+ 
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.store.class&lt;/name&gt;
+               &lt;value&gt;org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.zk-address&lt;/name&gt;
+               &lt;value&gt;data1:2181,data2:2181,data3:2181&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.cluster-id&lt;/name&gt;
+               &lt;value&gt;zzg&lt;/value&gt;
+       &lt;/property&gt;
+        &lt;property&gt;
+               &lt;name&gt;yarn.app.mapreduce.am.scheduler.connection.wait.interval-ms&lt;/name&gt;
+               &lt;value&gt;5000&lt;/value&gt;
+        &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.address.rm1&lt;/name&gt;
+               &lt;value&gt;master1:23140&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.scheduler.address.rm1&lt;/name&gt;
+                &lt;value&gt;master1:23130&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.webapp.address.rm1&lt;/name&gt;
+               &lt;value&gt;master1:23188&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.resource-tracker.address.rm1&lt;/name&gt;
+               &lt;value&gt;master1:23125&lt;/value&gt;
+       &lt;/property&gt;
+        &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.admin.address.rm1&lt;/name&gt;
+               &lt;value&gt;master1:23141&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.ha.admin.address.rm1&lt;/name&gt;
+               &lt;value&gt;master1:23142&lt;/value&gt;
+       &lt;/property&gt;
+        &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.address.rm2&lt;/name&gt;
+               &lt;value&gt;data1:23140&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.scheduler.address.rm2&lt;/name&gt;
+               &lt;value&gt;data1:23130&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.webapp.address.rm2&lt;/name&gt;
+               &lt;value&gt;data1:23188&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.resource-tracker.address.rm2&lt;/name&gt;
+               &lt;value&gt;data1:23125&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.admin.address.rm2&lt;/name&gt;
+               &lt;value&gt;data1:23141&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.resourcemanager.ha.admin.address.rm2&lt;/name&gt;
+               &lt;value&gt;data1:23142&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;description&gt;Address where the localizer IPCis.&lt;/description&gt;
+               &lt;name&gt;yarn.nodemanager.localizer.address&lt;/name&gt;
+               &lt;value&gt;0.0.0.0:23344&lt;/value&gt;
+       &lt;/property&gt;
+        &lt;property&gt;
+               &lt;description&gt;NM Webapp address.&lt;/description&gt;
+               &lt;name&gt;yarn.nodemanager.webapp.address&lt;/name&gt;
+               &lt;value&gt;0.0.0.0:23999&lt;/value&gt;
+       &lt;/property&gt;
+        &lt;property&gt;
+               &lt;name&gt;yarn.nodemanager.local-dirs&lt;/name&gt;
+               &lt;value&gt;/home/shenl/usr/local/cloud/data/hadoop/yarn/local&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;yarn.nodemanager.log-dirs&lt;/name&gt;
+               &lt;value&gt;/home/shenl/usr/local/cloud/data/logs/hadoop&lt;/value&gt;
+       &lt;/property&gt;
+       &lt;property&gt;
+               &lt;name&gt;mapreduce.shuffle.port&lt;/name&gt;
+               &lt;value&gt;23080&lt;/value&gt;
+       &lt;/property&gt;
+        &lt;property&gt;
+                &lt;name&gt;yarn.client.failover-proxy-provider&lt;/name&gt;
+                &lt;value&gt;org.apache.hadoop.yarn.client.ConfiguredRMFailoverProxyProvider&lt;/value&gt;
+        &lt;/property&gt;
+        
+&lt;/configuration&gt;</code></pre><br><br><p></p>
+<h2>5.2 Hadoop HA初始化</h2>
+<p>5.2.1停hbase和hadoop服务</p>
+<p><strong><span style="color:#00B050;">stop-habase.sh</span></strong></p>
+<p><strong><span style="color:#00B050;">stop-all.sh</span></strong></p>
+<p>5.2.2启动JournalNode服务</p>
+<p><strong><span style="color:#00B050;">hadoop-daemon.sh start journalnode</span></strong></p>
+<p><strong><span style="color:#FF0000;">注:</span></strong> hdfs-site.xml里8485端口对应的节点上执行.</p>
+<p>#验证:访问web页面 data2:8480, data3:8480, data4:8480 或则jps查看进程</p>
+<p>        <img src="https://img-blog.csdn.net/20160111231954670?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""></p>
+<p>5.2.3 格式化所有JournalNode</p>
+<p><strong><span style="color:#00B050;">hdfs namenode -initializeSharedEdits -force</span> </strong></p>
+<p><strong><span style="color:#FF0000;">注: </span></strong></p>
+<p>1 这里默认master1为主namenode,data1为备namenode,如上命令在master1里执行)</p>
+<p>2 这个操作影响的参数和目录为 HDFS-SITE.xml里的dfs.journalnode.edits.dir  参考值为:/home/shenl/data/hadoop/ha/journal</p>
+<p>3 这一操作主要完成格式化所有JournalNode,以及将日志文件从master1拷贝到所有JournalNode</p>
+<p> </p>
+<p>5.2.4 在master1里执行ZookeeperHA格式化</p>
+<p><strong><span style="color:#00B050;">hdfs zkfc -formatZK</span></strong></p>
+<p>       <img src="https://img-blog.csdn.net/20160111232023185?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""></p>
+<p><img src="https://img-blog.csdn.net/20160111232041711?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></p>
+<p>            </p>
+<p>5.2.5 拷贝主namenode元数据到备节点内</p>
+<p><strong><span style="color:#00B050;">scp -r home/impala/data/hadoop1.2.1/* </span>
+</strong><a href="mailto:hadoop@data1:/home/shenl/data/hadoop1.2.1" rel="nofollow"><strong><span style="color:#00B050;">hadoop@data1:/home/shenl/data/hadoop1.2.1</span></strong></a></p>
+<p><strong><span style="color:#FF0000;">注:</span></strong></p>
+<p>拷贝master1节点内的dfs.namenode.name.dir和共享dfs.namenode.shared.edits.dir目录的内容到data1的相应目录内.</p>
+<p>5.2.6 在master1里启动namenode</p>
+<p><strong><span style="color:#00B050;">hadoop-daemon.sh start namenode</span></strong></p>
+<p>5.2.7 在data1里启动namenode</p>
+<p><strong><span style="color:#00B050;">hadoop-daemon.sh start namenode</span></strong></p>
+<p>5.2.8 在master1里启动所有的datanode</p>
+<p><strong><span style="color:#00B050;">hadoop-daemons.sh start datanode </span>                                    </strong></p>
+<p><strong><span style="color:#FF0000;">注：</span></strong>此时 查看页面master1:35070、data1:35070，两个namenode都是出于standby的状态，因为还未开启选举服务。</p>
+<p>5.2.9 在master1和data1内启动自动选举服务</p>
+<p><strong><span style="color:#00B050;">hadoop-daemon.sh start zkfc</span></strong></p>
+<p>   <img src="https://img-blog.csdn.net/20160111232115084?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""></p>
+<p>5.2.10 在master1里执行命令验证HA是否正常</p>
+<p><strong>         <span style="color:#00B050;">hdfshaadmin -getServiceState master1</span></strong></p>
+<p><strong><span style="color:#00B050;">         hdfshaadmin -DFSHAadmin -failover master1 data1</span></strong></p>
+<p> #或则kill -9 active的namenode,验证standy的namenode是否变为active</p>
+<p> </p>
+<h2>5.3 YARN HA验证</h2>
+<p>5.3.1   配置YARN HA参数</p>
+<p>#HA 参数已经在HADOOP HA时配置好</p>
+<p>5.3.2   验证</p>
+<p>1)    分别在主namenode和备namenode里执行</p>
+<p><strong><span style="color:#00B050;">yarn-daemon.shstart resourcemanager</span></strong></p>
+<p>2)    在主namenode里执行 </p>
+<p><strong><span style="color:#00B050;">yarn-daemons.shstart nodemanager</span></strong></p>
+<p>3)    在主namenode里执行 </p>
+<p><strong><span style="color:#00B050;">mr-jobhistory-daemon.shstart historyserver</span></strong></p>
+<p>4)    执行Yarn HA状态验证脚本 </p>
+<p>yarn rmadmin -getServiceState rm1</p>
+<p>yarn rmadmin -getServiceState rm2</p>
+<p>5)    kill-9 active的nodemanager 测试</p>
+<p>6)    验证wordcont MR程序,执行如下命令:</p>
+<p><strong><span style="color:#00B050;">hadoopjar /home/shenl/hadoop-2.5.0-cdh5.3.3/share/hadoop/mapreduce/hadoop-mapreduce-examples-2.5.0-cdh5.3.3.jarwordcount /shenl/gc.log /shenl3/</span></strong></p>
+<p>如果成功,视为Yarn HA可用.</p>
+<p> </p>
+<h1>6 Hbase HA配置</h1>
+<h2>6.1 Hbase HA配置</h2>
+<p>6.1.1   配置Hbase HA参数</p>
+<p>1)    拷贝配置了Hadoop HA的core-site.xml,hdfs-site.xml到Hmaster节点的conf目录</p>
+<p><strong><span style="color:#00B050;">cp/home/shenl/hadoop-2.5.0-cdh5.3.3/etc/hadoop/core-site.xml .</span></strong></p>
+<p><strong><span style="color:#00B050;">cp/home/ shenl /hadoop-2.5.0-cdh5.3.3/etc/hadoop/hdfs-site.xml .</span></strong></p>
+<p>2)    Hmaster的conf目录里新增backup-master文件,填写作为备份master的主机名(如data1)</p>
+<p>3)    scpHmaster节点的conf的内容到各个从节点</p>
+<p>4)    在hbase主节点里执行start-hbase.sh</p>
+<h2>6.2 Hbase HA验证</h2>
+<p>kill -9 一个active的Hmaster,在Hbase shell执行</p>
+<p><strong><span style="color:#00B050;">put 'shenl' ,'row11','a:name','hello'</span></strong></p>
+<h1>7 Hadoop升级最终化</h1>
+<p>#集群稳定后,执行最终化以提交本次升级任务.</p>
+<p><strong><span style="color:#00B050;">hadoop dfsadmin –finalizeUpgrade</span></strong></p>
+<h1>8 总结</h1>
+<p>结合日志分析具体问题.</p>
+            </div>
+                </div>

@@ -1,0 +1,295 @@
+---
+layout:     post
+title:      Hadoop环境搭建（集群）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hadoop环境搭建集群">Hadoop环境搭建（集群）</h1>
+
+<ul>
+<li><strong>环境准备（centos7 x 3）</strong></li>
+<li><strong>Hadoop参数配置</strong></li>
+<li><strong>启动Hadoop</strong></li>
+</ul>
+
+<h2 id="环境准备">环境准备</h2>
+
+<ul>
+<li>Linux新增hadoop用户（当前用户root）：</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs apache"><span class="hljs-keyword">useradd</span> -m hadoop -s /bin/bash
+<span class="hljs-keyword">passwd</span> hadoop  
+<span class="hljs-comment"># 给hadoop用户增加权限（当前用户root）</span>
+<span class="hljs-keyword">visudo</span>
+<span class="hljs-keyword">hadoop</span> <span class="hljs-literal">ALL</span>=(<span class="hljs-literal">ALL</span>) NOPASSWD:<span class="hljs-literal">ALL</span>  # 追加配置</code></pre>
+
+<ul>
+<li>配置SSH：</li>
+</ul>
+
+<pre class="prettyprint"><code class="language-shell hljs ruby"><span class="hljs-comment"># 安装SSH</span>
+sudo yum install openssh-clients  
+sudo yum install openssh-server
+
+<span class="hljs-comment"># 查看是否已安装成功</span>
+rpm -qa | grep ssh
+
+<span class="hljs-comment"># 创建本机SSH密钥</span>
+cd ~<span class="hljs-regexp">/.ssh/</span>                         <span class="hljs-comment"># 若没有该目录，请先执行一次ssh localhost</span>
+ssh-keygen -t rsa                   <span class="hljs-comment"># 采用rsa加密策略生成密钥，一般三回车</span>
+cat id_rsa.pub &gt;&gt; authorized_keys   <span class="hljs-comment"># 加入授权</span>
+chmod <span class="hljs-number">600</span> ./authorized_keys         <span class="hljs-comment"># 修改文件权限</span>
+ssh localhost                       <span class="hljs-comment"># 试用SSH登陆本机进行验证</span>
+
+<span class="hljs-comment"># 集群环境SSH (非DNS)</span>
+vi /etc/hosts                       <span class="hljs-comment"># 更改hosts的IP与hostname的映射</span>
+<span class="hljs-comment"># 192.168.0.160 Master</span>
+<span class="hljs-comment"># 192.168.0.161 Slave1</span>
+<span class="hljs-comment"># 192.168.0.162 Slave2</span>
+
+<span class="hljs-comment"># Master主机</span>
+cd ~<span class="hljs-regexp">/.ssh/</span>                     <span class="hljs-comment"># 进入rsa公钥私钥文件存放的目录</span>
+rm -f id_rsa*                   <span class="hljs-comment"># 删除目录下的id_rsa，id_rsa.pub文件</span>
+ssh-keygen -t rsa
+cat id_rsa.pub &gt;&gt; authorized_keys
+ssh-copy-id -i <span class="hljs-constant">Master</span>           <span class="hljs-comment"># 登录Slave1,将公钥拷贝到Master的authorized_keys中</span>
+ssh-copy-id -i <span class="hljs-constant">Master</span>           <span class="hljs-comment"># 登录Slave2,将公钥拷贝到Master的authorized_keys中</span>
+more authorized_keys            <span class="hljs-comment"># 查看生成的认证key</span>
+chmod <span class="hljs-number">600</span> authorized_keys       <span class="hljs-comment"># 授权authorized_keys文件</span>
+<span class="hljs-comment"># 将授权文件分配到其他主机上</span>
+scp /home/hadoop/.ssh/authorized_keys <span class="hljs-constant">Slave1</span><span class="hljs-symbol">:/home/hadoop/</span>.ssh/ <span class="hljs-comment">#拷贝到Slave1上</span>
+scp /home/hadoop/.ssh/authorized_keys <span class="hljs-constant">Slave2</span><span class="hljs-symbol">:/home/hadoop/</span>.ssh/ <span class="hljs-comment">#拷贝到Slave2上</span>
+</code></pre>
+
+<ul>
+<li>配置Java环境：</li>
+</ul>
+
+<pre class="prettyprint"><code class="language-shell hljs bash">rpm -ql java-<span class="hljs-number">1.7</span>.<span class="hljs-number">0</span>-openjdk-devel | grep <span class="hljs-string">'/bin/javac'</span>
+vi ~/.bashrc               <span class="hljs-comment"># 或者/etc/profile，全局、针对所有用户</span>
+<span class="hljs-comment">#配置环境变量</span>
+<span class="hljs-comment">### ------------------------------------------</span>
+<span class="hljs-keyword">export</span> JAVA_HOME=/usr/java/jdk1.<span class="hljs-number">7.0</span>_79
+<span class="hljs-keyword">export</span> CLASSPATH=.:<span class="hljs-variable">$JAVA_HOME</span>/jre/lib/rt.jar:<span class="hljs-variable">$JAVA_HOME</span>/lib/dt.jar:<span class="hljs-variable">$JAVA_HOME</span>/lib/tools.jar
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">$PATH</span>:<span class="hljs-variable">$JAVA_HOME</span>/bin
+<span class="hljs-comment">### ------------------------------------------</span>
+<span class="hljs-built_in">source</span> ~/.bashrc    <span class="hljs-comment"># 使变量设置生效</span>
+<span class="hljs-built_in">echo</span> <span class="hljs-variable">$JAVA_HOME</span>     <span class="hljs-comment"># 检验变量值</span>
+java -version       <span class="hljs-comment"># 查看当前JAVA版本</span></code></pre>
+
+
+
+<h2 id="hadoop安装及配置">Hadoop安装及配置</h2>
+
+<ul>
+<li>Hadoop安装（在Master主机上）</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs bash">cat ~/download/hadoop-<span class="hljs-number">2</span>.x.x.tar.gz.mds | grep <span class="hljs-string">'MD5'</span> <span class="hljs-comment"># 列出md5检验值</span>
+md5sum ~/下载/hadoop-<span class="hljs-number">2</span>.x.x.tar.gz | tr <span class="hljs-string">"a-z"</span> <span class="hljs-string">"A-Z"</span> <span class="hljs-comment"># 计算md5值，并转化为大写，方便比较</span>
+<span class="hljs-built_in">sudo</span> tar -zxf ~/下载/hadoop-<span class="hljs-number">2</span>.x.x.tar.gz -C /usr    <span class="hljs-comment"># 解压到/usr中</span>
+<span class="hljs-built_in">cd</span> /usr/
+<span class="hljs-built_in">sudo</span> mv ./hadoop-<span class="hljs-number">2</span>.x.x/ ./hadoop            <span class="hljs-comment"># 将文件夹名改为hadoop</span>
+<span class="hljs-built_in">sudo</span> chown -R hadoop:hadoop ./hadoop        <span class="hljs-comment"># 修改文件权限</span>
+<span class="hljs-built_in">cd</span> /usr/hadoop
+./bin/hadoop version</code></pre>
+
+<ul>
+<li>向conf下的slaves文件中添加所有的DataNode节点的hostname</li>
+<li>修改core-site.xml，配置如下：</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>fs.defaultFS<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://Master:9000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hadoop.tmp.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>file:/usr/hadoop/tmp<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<ul>
+<li>修改hdfs-site.xml，配置如下：</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.namenode.secondary.http-address<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>Master:50090<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.permissions<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>false<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.replication<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>1<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.namenode.name.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>file:/usr/hadoop/tmp/dfs/name<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.datanode.data.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>file:/usr/hadoop/tmp/dfs/data<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<ul>
+<li>修改mapred-site.xml （默认文件名为 mapred-site.xml.template），配置如下：</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapreduce.framework.name<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>yarn<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapreduce.jobhistory.address<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>Master:10020<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapreduce.jobhistory.webapp.address<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>Master:19888<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapreduce.tasktracker.map.tasks.maximum<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>2<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">final</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">final</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapreduce.tasktracker.reduce.tasks.maximum<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>2<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">final</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">final</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span>
+</code></pre>
+
+<ul>
+<li>修改yarn-site.xml，，配置如下：</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.resourcemanager.hostname<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>Master<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.aux-services<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>mapreduce_shuffle<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.resource.memory-mb<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>8192<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.resource.cpu-vcores<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>8<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<ul>
+<li>将Master节点上的hadoop文件打包并分发至其他节点</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs ruby">cd /usr
+sudo rm -r ./hadoop/tmp                     <span class="hljs-comment"># 删除 Hadoop 临时文件</span>
+sudo rm -r ./hadoop/logs/*                  <span class="hljs-comment"># 删除日志文件</span>
+tar -zcf ~<span class="hljs-regexp">/hadoop.master.tar.gz ./hadoop</span>   <span class="hljs-comment"># 先压缩再复制</span>
+cd ~
+scp ./hadoop.master.tar.gz <span class="hljs-constant">Slave1</span><span class="hljs-symbol">:/home/hadoop</span>
+scp ./hadoop.master.tar.gz <span class="hljs-constant">Slave2</span><span class="hljs-symbol">:/home/hadoop</span>
+
+<span class="hljs-comment">#Slave1、Slave2 节点上</span>
+sudo rm -r /usr/hadoop    <span class="hljs-comment"># 删掉旧的（如果存在）</span>
+sudo tar -zxf ~<span class="hljs-regexp">/hadoop.master.tar.gz -C /usr</span>
+sudo chown -<span class="hljs-constant">R</span> <span class="hljs-symbol">hadoop:</span>hadoop /usr/hadoop</code></pre>
+
+<ul>
+<li>配置Hadoop环境变量</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs bash">vi ~/.bashrc
+
+<span class="hljs-keyword">export</span> HADOOP_HOME=/usr/hadoop
+<span class="hljs-keyword">export</span> HADOOP_INSTALL=<span class="hljs-variable">$HADOOP_HOME</span>
+<span class="hljs-keyword">export</span> HADOOP_MAPRED_HOME=<span class="hljs-variable">$HADOOP_HOME</span>
+<span class="hljs-keyword">export</span> HADOOP_COMMON_HOME=<span class="hljs-variable">$HADOOP_HOME</span>
+<span class="hljs-keyword">export</span> HADOOP_HDFS_HOME=<span class="hljs-variable">$HADOOP_HOME</span>
+<span class="hljs-keyword">export</span> YARN_HOME=<span class="hljs-variable">$HADOOP_HOME</span>
+<span class="hljs-keyword">export</span> HADOOP_COMMON_LIB_NATIVE_DIR=<span class="hljs-variable">$HADOOP_HOME</span>/lib/native
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">$PATH</span>:<span class="hljs-variable">$HADOOP_HOME</span>/sbin:<span class="hljs-variable">$HADOOP_HOME</span>/bin
+<span class="hljs-keyword">export</span> JAVA_LIBRARY_PATH=/usr/hadoop/lib/native <span class="hljs-comment">#use local lib</span>
+
+<span class="hljs-built_in">source</span> ~/.bashrc</code></pre>
+
+
+
+<h2 id="启动hadoop">启动Hadoop</h2>
+
+<ul>
+<li>启动Hadoop集群</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs perl">hdfs namenode -<span class="hljs-keyword">format</span>   <span class="hljs-comment"># 首次启动需要先在Master节点执行NameNode的格式化</span>
+start-dfs.sh
+start-yarn.sh
+mr-jobhistory-daemon.sh start historyserver
+
+<span class="hljs-comment"># Master节点上可以看到 NameNode、ResourceManager、SecondaryNameNode、JobHistoryServer进程</span>
+<span class="hljs-comment"># Slave节点可以看到DataNode和NodeManager进程</span>
+jps
+
+hdfs dfsadmin -report   <span class="hljs-comment"># 查看DataNode是否正常启动</span>
+
+<span class="hljs-variable">**</span><span class="hljs-variable">*DataNode</span>无法启动，删除所有节点（包括Slave节点）上的/usr/hadoop/tmp文件夹，重新执行一次 hdfs namenode -<span class="hljs-keyword">format</span></code></pre>
+
+<ul>
+<li>运行WordCount</li>
+</ul>
+
+<pre class="prettyprint"><code class="language-shell hljs lasso">hdfs dfs <span class="hljs-attribute">-mkdir</span> <span class="hljs-attribute">-p</span> /user/hadoop
+hdfs dfs <span class="hljs-attribute">-mkdir</span> input
+hdfs dfs <span class="hljs-attribute">-put</span> XXX<span class="hljs-built_in">.</span>txt input
+hadoop jar /wordcount<span class="hljs-built_in">.</span>jar input output</code></pre>
+
+<ul>
+<li>关闭 Hadoop 集群</li>
+</ul>
+
+<pre class="prettyprint"><code class="language-shell hljs lasso">stop<span class="hljs-attribute">-yarn</span><span class="hljs-built_in">.</span>sh
+stop<span class="hljs-attribute">-dfs</span><span class="hljs-built_in">.</span>sh
+mr<span class="hljs-attribute">-jobhistory</span><span class="hljs-attribute">-daemon</span><span class="hljs-built_in">.</span>sh stop historyserver</code></pre>
+
+<ul>
+<li>原文：<a href="http://blog.csdn.net/l371036075_yue/article/details/52548818" rel="nofollow">http://blog.csdn.net/l371036075_yue/article/details/52548818</a></li>
+</ul>
+
+
+
+<h2 id="apache-hadoop"><a href="http://hadoop.apache.org/" rel="nofollow">Apache Hadoop</a></h2>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>
