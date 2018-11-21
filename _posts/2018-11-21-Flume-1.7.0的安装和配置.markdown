@@ -1,0 +1,197 @@
+---
+layout:     post
+title:      Flume-1.7.0的安装和配置
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/looc_246437/article/details/77752148				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>Flume是什么</p>
+
+<p>　　Flume 作为 cloudera 开发的实时日志收集系统，受到了业界的认可与广泛应用。Flume 初始的发行版本目前被统称为 Flume OG（original generation），属于 cloudera。但随着 FLume 功能的扩展，Flume OG 代码工程臃肿、核心组件设计不合理、核心配置不标准等缺点暴露出来，尤其是在 Flume OG 的最后一个发行版本 0.94.0 中，日志传输不稳定的现象尤为严重，为了解决这些问题，2011 年 10 月 22 号，cloudera 完成了 Flume-728，对 Flume 进行了里程碑式的改动：重构核心组件、核心配置以及代码架构，重构后的版本统称为 Flume NG（next generation）；改动的另一原因是将 Flume 纳入 apache 旗下，cloudera Flume 改名为 Apache Flume。 <br>
+</p><hr> <br>
+Flume的特点<p></p>
+
+<p>　　Flume是一个分布式、可靠、和高可用的海量日志采集、聚合和传输的系统。支持在日志系统中定制各类数据发送方，用于收集数据；同时，Flume提供对数据进行简单处理，并写到各种数据接受方（比如文本、HDFS、Hbase等）的能力 。 <br>
+　　Flume的数据流由事件（Event）贯穿始终。事件是Flume的基本数据单位，它携带日志数据（字节数组形式）并且携带有头信息，这些Event由Agent外部的Source生成，当Source捕获事件后会进行特定的格式化，然后Source会把事件推入（单个或多个）Channel中。你可以把Channel看作是一个缓冲区，它将保存事件直到Sink处理完该事件。Sink负责持久化日志或者把事件推向另一个Source。 <br>
+</p><hr> <br>
+Flume的可靠性 <p></p>
+
+<p>　　当节点出现故障时，日志能够被传送到其他节点上而不会丢失。Flume提供了三种级别的可靠性保障，从强到弱依次分别为：end-to-end（收到数据agent首先将event写到磁盘上，当数据传送成功后，再删除；如果数据发送失败，可以重新发送），Store on failure（这也是scribe采用的策略，当数据接收方crash时，将数据写到本地，待恢复后，继续发送），Besteffort（数据发送到接收方后，不会进行确认）。 <br>
+</p><hr> <br>
+Flume的可恢复性：<p></p>
+
+<p>　　还是靠Channel。推荐使用FileChannel，事件持久化在本地文件系统里(性能较差)。  <br>
+　　Flume的一些核心概念： <br>
+Agent：使用JVM 运行Flume。每台机器运行一个agent，但是可以在一个agent中包含多个sources和sinks。 <br>
+Client：生产数据，运行在一个独立的线程。 <br>
+Source：从Client收集数据，传递给Channel。 <br>
+Sink：从Channel收集数据，运行在一个独立线程。 <br>
+Channel：连接 sources 和 sinks ，这个有点像一个队列。 <br>
+Events：可以是日志记录、 avro 对象等。</p>
+
+
+
+<h3 id="准备">准备</h3>
+
+<ul>
+<li>1.搭建好的Hadoop分布式集群</li>
+<li>2.apache-flume-1.7.0-bin.tar.gz</li>
+</ul>
+
+
+
+<h3 id="安装">安装</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-variable">#tar</span> <span class="hljs-attribute">-zxvf</span> apache<span class="hljs-attribute">-flume</span><span class="hljs-subst">-</span><span class="hljs-number">1.7</span><span class="hljs-number">.0</span><span class="hljs-attribute">-bin</span><span class="hljs-built_in">.</span>tar<span class="hljs-built_in">.</span>gz <span class="hljs-attribute">-C</span> /usr/<span class="hljs-built_in">local</span>/hadoop
+<span class="hljs-variable">#cd</span> /usr/<span class="hljs-built_in">local</span>/hadoop
+<span class="hljs-variable">#mv</span> apache<span class="hljs-attribute">-flume</span><span class="hljs-subst">-</span><span class="hljs-number">1.7</span><span class="hljs-number">.0</span><span class="hljs-attribute">-bin</span> flume<span class="hljs-subst">-</span><span class="hljs-number">1.7</span><span class="hljs-number">.0</span></code></pre>
+
+
+
+<h3 id="配置">配置</h3>
+
+<ul>
+<li>1.修改flume-env.sh</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-variable">#cd</span> /usr/<span class="hljs-built_in">local</span>/hadoop/flume<span class="hljs-subst">-</span><span class="hljs-number">1.7</span><span class="hljs-number">.0</span>/conf
+<span class="hljs-variable">#mv</span> flume<span class="hljs-attribute">-env</span><span class="hljs-built_in">.</span>sh<span class="hljs-built_in">.</span>template flume<span class="hljs-attribute">-env</span><span class="hljs-built_in">.</span>sh
+<span class="hljs-variable">#vim</span> flume<span class="hljs-attribute">-env</span><span class="hljs-built_in">.</span>sh</code></pre>
+
+<p>添加Java环境变量</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">export <span class="hljs-constant">JAVA_HOME</span>=<span class="hljs-regexp">/usr/local</span><span class="hljs-regexp">/jvm/jdk</span>1.<span class="hljs-number">8.0_144</span></code></pre>
+
+<ul>
+<li>2.配置flume环境变量</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs vala"><span class="hljs-preprocessor">#vim /etc/profile</span></code></pre>
+
+<p>添加如下记录</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">FLUME_HOME=/usr/local/hadoop/flume-<span class="hljs-number">1.7</span>.<span class="hljs-number">0</span>
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">$FLUME_HOME</span>/bin:<span class="hljs-variable">$PATH</span>
+<span class="hljs-keyword">export</span> FLUME_CONF_DIR=<span class="hljs-variable">$FLUME_HOME</span>/conf</code></pre>
+
+<p>使配置文件生效</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vala"><span class="hljs-preprocessor">#source /etc/profile</span></code></pre>
+
+
+
+<h3 id="验证">验证</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs coffeescript">[root<span class="hljs-property">@Slave1</span> ~]<span class="hljs-comment"># flume-ng version</span>
+Flume <span class="hljs-number">1.7</span><span class="hljs-number">.0</span>
+Source code <span class="hljs-attribute">repository</span>: <span class="hljs-attribute">https</span>:<span class="hljs-regexp">//gi</span>t-wip-us.apache.org/repos/asf/flume.git
+<span class="hljs-attribute">Revision</span>: <span class="hljs-number">511</span>d868555dd4d16e6ce4fedc72c2d1454546707
+Compiled <span class="hljs-keyword">by</span> bessbd <span class="hljs-literal">on</span> Wed Oct <span class="hljs-number">12</span> <span class="hljs-number">20</span>:<span class="hljs-number">51</span>:<span class="hljs-number">10</span> CEST <span class="hljs-number">2016</span>
+From source <span class="hljs-reserved">with</span> checksum <span class="hljs-number">0</span>d21b3ffdc55a07e1d08875872c00523
+[root<span class="hljs-property">@Slave1</span> ~]<span class="hljs-comment"># </span></code></pre>
+
+<p>如上则表示安装配置成功</p>
+
+
+
+<h3 id="flume案例">Flume案例</h3>
+
+<ul>
+<li>1.编写配置文件</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor">#vim logger.conf</span>
+
+<span class="hljs-preprocessor"># Name the components on this agent</span>
+agent1<span class="hljs-preprocessor">.sources</span> = source1
+agent1<span class="hljs-preprocessor">.sinks</span> = sink1
+agent1<span class="hljs-preprocessor">.channels</span> = channel1
+
+<span class="hljs-preprocessor"># Describe/configure the source</span>
+agent1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.source</span>1<span class="hljs-preprocessor">.type</span> = netcat
+agent1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.source</span>1<span class="hljs-preprocessor">.bind</span> = Slave1
+agent1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.source</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">44444</span>
+
+<span class="hljs-preprocessor"># Describe the sink</span>
+agent1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.sink</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+<span class="hljs-preprocessor"># Use a channel which buffers events in memory</span>
+agent1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.channel</span>1<span class="hljs-preprocessor">.type</span> = memory
+agent1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.channel</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+//默认该通道中最大可以存储的event数量
+agent1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.channel</span>1<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+//每次最大可以从source中拿到或者送到sink中的event数量
+
+<span class="hljs-preprocessor"># Bind the source and sink to the channel</span>
+agent1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.source</span>1<span class="hljs-preprocessor">.channels</span> = channel1
+agent1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.sink</span>1<span class="hljs-preprocessor">.channel</span> = channel1   //注意这里的channels和channel</code></pre>
+
+<ul>
+<li>2.测试</li>
+</ul>
+
+<p>启动</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs haml">[root@Slave1 flume-1.7.0]# bin/flume-ng agent --conf conf --conf-file conf/logger.conf --name agent1 -Dflume.root.logger=INFO,console
+
+参数
+agent：启动一个agent
+-<span class="ruby">-conf：指定配置文件，加载一些默认的参数
+</span>-<span class="ruby">-conf-file：指定采集方案路径
+</span>-<span class="ruby">-name：启动的agent的名字
+</span>-<span class="ruby"><span class="hljs-constant">Dflume</span>.root.logger=<span class="hljs-constant">INFO</span>,console（实际生产中用不到）</span></code></pre>
+
+<p>产生信息</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs r">[root@Slave2 conf]<span class="hljs-comment"># telnet Slave1 44444</span>
+Trying <span class="hljs-number">192.168</span><span class="hljs-number">.142</span><span class="hljs-number">.131</span><span class="hljs-keyword">...</span>
+Connected to Slave1.
+Escape character is <span class="hljs-string">'^]'</span>.
+luchao
+OK
+abcdefg
+OK
+hello world
+OK
+ABCDEFGHIJKLMNOPQRSTUVWXYZ
+OK</code></pre>
+
+<p>接收信息</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs css">2017<span class="hljs-tag">-09-01</span> 03<span class="hljs-pseudo">:15</span><span class="hljs-pseudo">:20</span>,001 (<span class="hljs-tag">SinkRunner-PollingRunner-DefaultSinkProcessor</span>) <span class="hljs-attr_selector">[INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)]</span> <span class="hljs-tag">Event</span>: <span class="hljs-rules">{ <span class="hljs-rule"><span class="hljs-attribute">headers</span>:<span class="hljs-value">{</span></span></span>} <span class="hljs-tag">body</span>: 6<span class="hljs-tag">C</span> 75 63 68 61 6<span class="hljs-tag">F</span> 0<span class="hljs-tag">D</span>                            <span class="hljs-tag">luchao</span>. }
+2017<span class="hljs-tag">-09-01</span> 03<span class="hljs-pseudo">:15</span><span class="hljs-pseudo">:26</span>,551 (<span class="hljs-tag">SinkRunner-PollingRunner-DefaultSinkProcessor</span>) <span class="hljs-attr_selector">[INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)]</span> <span class="hljs-tag">Event</span>: <span class="hljs-rules">{ <span class="hljs-rule"><span class="hljs-attribute">headers</span>:<span class="hljs-value">{</span></span></span>} <span class="hljs-tag">body</span>: 61 62 63 64 65 66 67 0<span class="hljs-tag">D</span>                         <span class="hljs-tag">abcdefg</span>. }
+2017<span class="hljs-tag">-09-01</span> 03<span class="hljs-pseudo">:15</span><span class="hljs-pseudo">:36</span>,170 (<span class="hljs-tag">SinkRunner-PollingRunner-DefaultSinkProcessor</span>) <span class="hljs-attr_selector">[INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)]</span> <span class="hljs-tag">Event</span>: <span class="hljs-rules">{ <span class="hljs-rule"><span class="hljs-attribute">headers</span>:<span class="hljs-value">{</span></span></span>} <span class="hljs-tag">body</span>: 68 65 6<span class="hljs-tag">C</span> 6<span class="hljs-tag">C</span> 6<span class="hljs-tag">F</span> 20 77 6<span class="hljs-tag">F</span> 72 6<span class="hljs-tag">C</span> 64 0<span class="hljs-tag">D</span>             <span class="hljs-tag">hello</span> <span class="hljs-tag">world</span>. }
+2017<span class="hljs-tag">-09-01</span> 03<span class="hljs-pseudo">:16</span><span class="hljs-pseudo">:14</span>,197 (<span class="hljs-tag">SinkRunner-PollingRunner-DefaultSinkProcessor</span>) <span class="hljs-attr_selector">[INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)]</span> <span class="hljs-tag">Event</span>: <span class="hljs-rules">{ <span class="hljs-rule"><span class="hljs-attribute">headers</span>:<span class="hljs-value">{</span></span></span>} <span class="hljs-tag">body</span>: 41 42 43 44 45 46 47 48 49 4<span class="hljs-tag">A</span> 4<span class="hljs-tag">B</span> 4<span class="hljs-tag">C</span> 4<span class="hljs-tag">D</span> 4<span class="hljs-tag">E</span> 4<span class="hljs-tag">F</span> 50 <span class="hljs-tag">ABCDEFGHIJKLMNOP</span> }</code></pre>
+
+<p>注：“ABCDEFGHIJKLMNOPQRSTUVWXYZ”没有接收完全的原因是netcat默认接收的长度限制。</p>
+
+
+
+<h3 id="over">Over</h3>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,482 @@
+---
+layout:     post
+title:      Flume安装配置实践
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<h1 class="postTitle" style="font-size:12px;font-weight:normal;line-height:18px;font-family:'微软雅黑';">
+<a id="cb_post_title_url" class="postTitle2" href="http://www.cnblogs.com/windcarp/p/3872578.html" rel="nofollow" style="font-size:24px;color:rgb(0,0,0);text-decoration:none;">Flume采集处理日志文件</a></h1>
+<div class="clear" style="clear:both;font-family:'微软雅黑';line-height:18px;">
+</div>
+<div class="postBody" style="font-size:13.92px;font-family:'微软雅黑';">
+<div id="cnblogs_post_body" style="overflow:auto;">
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h1 style="font-size:28px;">Flume简介</h1>
+</div>
+</li></ol><p>Flume是Cloudera提供的一个高可用的，高可靠的，分布式的海量日志采集、聚合和传输的系统，Flume支持在日志系统中定制各类数据发送方，用于收集数据；同时，Flume提供对数据进行简单处理，并写到各种数据接受方（可定制）的能力。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">系统功能</h2>
+</div>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">日志收集</h3>
+</div>
+</li></ol></li></ol><p>Flume最早是Cloudera提供的日志收集系统，目前是Apache下的一个孵化项目，Flume支持在日志系统中定制各类数据发送方，用于收集数据。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">数据处理</h3>
+</div>
+</li></ol><p>Flume提供对数据进行简单处理，并写到各种数据接受方（可定制）的能力 Flume提供了从console（控制台）、RPC（Thrift-RPC）、text（文件）、tail（UNIX tail）、syslog（syslog日志系统，支持TCP和UDP等2种模式），exec（命令执行）等数据源上收集数据的能力。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">工作方式</h2>
+</div>
+</li></ol><p>Flume采用了多Master的方式。为了保证配置数据的一致性，Flume[1] 引入了ZooKeeper，用于保存配置数据，ZooKeeper本身可保证配置数据的一致性和高可用，另外，在配置数据发生变化时，ZooKeeper可以通知Flume Master节点。Flume Master间使用gossip协议同步数据。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">流程结构</h2>
+</div>
+</li></ol><p>Flume的结构主要分为三部分：source、channel以及sink.其中source为源头，负责采集日志；channel为通道，负责传输和暂时储存；sink为目的地，将采集到的日志保存起来。在真正日志采集的过程中，根据待采集日志的类型以及存储需求，选择相应的类型的source、channel和sink进行配置，从而将日志采集并且保存起来。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h1 style="font-size:28px;">Flume采集日志方案</h1>
+</div>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">需求分析</h2>
+</div>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">日志分类</h3>
+</div>
+</li></ol></li></ol></li></ol><p>操作系统：linux</p>
+<p>日志更新类型：产生新日志，原日志结尾处追加</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">采集时间需求</h3>
+</div>
+</li></ol><p>采集周期：短周期（一天之内）</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">采集方案</h2>
+</div>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">采集构架</h3>
+</div>
+</li></ol></li></ol><p>使用flume采集日志文件的过程较简洁，只需选择恰当的source、channel和sink并且配置起来即可，若有特殊需求也可自己进行二次开发实现个人需求。</p>
+<p><img src="http://images.cnitblog.com/blog/656961/201407/281033008052580.png" alt="" style="border:0px;"></p>
+<p>具体过程为：按照需求配置一个agent，选取适当的source和sink，然后启动该agent，开始采集日志。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">source</h3>
+</div>
+</li></ol><p>flume提供多种source供用户进行选择，尽可能多的满足大部分日志采集的需求，常用的source的类型包括avro、exec、netcat、spooling-directory和syslog等。具体的使用范围和配置方法详见<a href="http://www.cnblogs.com/windcarp/p/3872578.html#_%E5%B8%B8%E8%A7%81%E7%9A%84source" rel="nofollow" style="color:#008000;text-decoration:none;">source</a>.</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">channel</h3>
+</div>
+</li></ol><p>flume中的channel不如source和sink那么重要，但却是不可忽视的组成部分。常用的channel为memory-channel，同时也有其他类型的channel，如JDBC、file-channel、custom-channel等，详情见<a href="http://www.cnblogs.com/windcarp/p/3872578.html#_%E5%B8%B8%E8%A7%81%E7%9A%84channel" rel="nofollow" style="color:#008000;text-decoration:none;">channel</a>.</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">sink</h3>
+</div>
+</li></ol><p>flume的sink也有很多种，常用的包括avro、logger、HDFS、hbase以及file-roll等，除此之外还有其他类型的sink，如thrift、IRC、custom等。具体的使用范围和使用方法详见<a href="http://www.cnblogs.com/windcarp/p/3872578.html#_%E5%B8%B8%E8%A7%81%E7%9A%84sink" rel="nofollow" style="color:#008000;text-decoration:none;">sink</a>.</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h1 style="font-size:28px;">Flume处理日志</h1>
+</div>
+</li></ol><p>Flume不止可以采集日志，还可以对日志进行简单的处理，在source处可以通过interceptor对日志正文处的重要内容进行过滤提取，在channel处可以通过header进行分类，将不同类型的日志投入不同的通道中，在sink处可以通过正则序列化来将正文内容进行进一步的过滤和分类。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">Flume Source Interceptors</h2>
+</div>
+</li></ol><p>Flume可以通过interceptor将重要信息提取出来并且加入到header中，常用的interceptor有时间戳、主机名和UUID等，用户也可以根据个人需求编写正则过滤器，将某些特定格式的日志内容过滤出来，以满足特殊需求。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">Flume Channel Selectors</h2>
+</div>
+</li></ol><p>Flume可以根据需求将不同的日志传输进不同的channel，具体方式有两种：复制和多路传输。复制就是不对日志进行分组，而是将所有日志都传输到每个通道中，对所有通道不做区别对待；多路传输就是根据指定的header将日志进行分类，根据分类规则将不同的日志投入到不同的channel中，从而将日志进行人为的初步分类。</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">Flume Sink Processors</h2>
+</div>
+</li></ol><p>Flume在sink处也可以对日志进行处理，常见的sink处理器包括custom、failover、load balancing和default等，和interceptor一样，用户也可以根据特殊需求使用正则过滤处理器，将日志内容过滤出来，但和interceptor不同的是在sink处使用正则序列化过滤出的内容不会加入到header中，从而不会使日志的header显得过于臃肿。</p>
+<p> </p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h1 style="font-size:28px;">附录</h1>
+</div>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">常见的source</h2>
+</div>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">avro source</h3>
+</div>
+</li></ol></li></ol></li></ol><p>avro可以监听和收集指定端口的日志，使用avro的source需要说明被监听的主机ip和端口号，下面给出一个具体的例子：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources = r1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.type = avro</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.bind = 0.0.0.0</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.port = 4141</span></p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">exec source</h3>
+</div>
+</li></ol><p>exec可以通过指定的操作对日志进行读取，使用exec时需要指定shell命令，对日志进行读取，下面给出一个具体的例子：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources = r1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.type = exec</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.command = tail -F /var/log/secure</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.channels = c1</span></p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">spooling-directory source</h3>
+</div>
+</li></ol><p>spo_dir可以读取文件夹里的日志，使用时指定一个文件夹，可以读取该文件夹中的所有文件，需要注意的是该文件夹中的文件在读取过程中不能修改，同时文件名也不能修改。下面给出一个具体的例子：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">agent-1.channels = ch-1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">agent-1.sources = src-1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+ </p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">agent-1.sources.src-1.type = spooldir</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">agent-1.sources.src-1.channels = ch-1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">agent-1.sources.src-1.spoolDir = /var/log/apache/flumeSpool</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">agent-1.sources.src-1.fileHeader = true</span></p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">syslog source</h3>
+</div>
+</li></ol><p>syslog可以通过syslog协议读取系统日志，分为tcp和udp两种，使用时需指定ip和端口，下面给出一个udp的例子：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources = r1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.type = syslogudp</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.port = 5140</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.host = localhost</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sources.r1.channels = c1</span></p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">常见的channel</h2>
+</div>
+</li></ol><p>Flume的channel种类并不多，最常用的是memory channel，下面给出例子：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels.c1.type = memory</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels.c1.capacity = 10000</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels.c1.transactionCapacity = 10000</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels.c1.byteCapacityBufferPercentage = 20</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels.c1.byteCapacity = 800000</span></p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h2 style="font-size:21px;">常见的sink</h2>
+</div>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">logger sink</h3>
+</div>
+</li></ol></li></ol><p>logger顾名思义，就是将收集到的日志写到flume的log中，是个十分简单但非常实用的sink</p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">avro sink</h3>
+</div>
+</li></ol><p>avro可以将接受到的日志发送到指定端口，供级联agent的下一跳收集和接受日志，使用时需要指定目的ip和端口：例子如下：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks = k1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.type = avro</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.channel = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.hostname = 10.10.10.10</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.port = 4545</span></p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">file roll sink</h3>
+</div>
+</li></ol><p>file_roll可以将一定时间内收集到的日志写到一个指定的文件中，具体过程为用户指定一个文件夹和一个周期，然后启动agent，这时该文件夹会产生一个文件将该周期内收集到的日志全部写进该文件内，直到下一个周期再次产生一个新文件继续写入，以此类推，周而复始。下面给出一个具体的例子：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks = k1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.type = file_roll</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.channel = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.sink.directory = /var/log/flume</span></p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">hdfs sink</h3>
+</div>
+</li></ol><p>hdfs与file roll有些类似，都是将收集到的日志写入到新创建的文件中保存起来，但区别是file roll的文件存储路径为系统的本地路径，而hdfs的存储路径为分布式的文件系统hdfs的路径，同时hdfs创建新文件的周期可以是时间，也可以是文件的大小，还可以是采集日志的条数。具体实例如下：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks = k1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.type = hdfs</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.channel = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.hdfs.path = /flume/events/%y-%m-%d/%H%M/%S</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.hdfs.filePrefix = events-</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.hdfs.round = true</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.hdfs.roundValue = 10</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.hdfs.roundUnit = minute</span></p>
+<ol><li style="list-style:decimal;">
+<div style="text-align:justify;">
+<h3 style="font-size:16px;">hbase sink</h3>
+</div>
+</li></ol><p>hbase是一种数据库，可以储存日志，使用时需要指定存储日志的表名和列族名，然后agent就可以将收集到的日志逐条插入到数据库中。例子如下：</p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.channels = c1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks = k1</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.type = hbase</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.table = foo_table</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.columnFamily = bar_cf</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.serializer = org.apache.flume.sink.hbase.RegexHbaseEventSerializer</span></p>
+<p style="text-align:justify;background:rgb(191,191,191);">
+<span style="font-family:'宋体';font-size:12pt;">a1.sinks.k1.channel = c1</span></p>
+</div>
+</div>
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<h2 style="font-size:21px;font-family:Verdana, Arial, Helvetica, sans-serif;background-color:rgb(254,254,242);">
+概述</h2>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<hr></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+Windows平台：Java写日志到Flume，Flume最终把日志写到MongoDB。</div>
+<br></div>
+<h2 style="font-size:21px;font-family:Verdana, Arial, Helvetica, sans-serif;background-color:rgb(254,254,242);">
+系统环境</h2>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<hr></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<ul><li style="list-style:disc;">操作系统：win7 64</li><li style="list-style:disc;">JDK:1.6.0_43</li></ul><h2 style="font-size:21px;">资源下载</h2>
+<ul><li style="list-style:disc;">Maven:3.3.3<br>
+下载、安装、入门参考：<a href="http://www.cnblogs.com/ywjy/p/4766872.html" rel="nofollow" style="color:rgb(7,93,179);">1. Maven - 开始</a>和<a href="http://www.cnblogs.com/ywjy/p/4766915.html" rel="nofollow" style="color:rgb(7,93,179);">2.
+ 创建一个简单的Maven项目</a></li><li style="list-style:disc;">Flume:1.6.0<br>
+下载<a href="http://apache.opencas.org/flume/1.6.0/apache-flume-1.6.0-bin.tar.gz" rel="nofollow" style="color:rgb(7,93,179);font-size:15.5556px;line-height:1.6;">apache-flume-1.6.0-bin.tar.gz</a>，并解压到合适的目录（e.g. F:\temp\apache-flume-1.6.0-bin）</li><li style="list-style:disc;">MongoDB:3.2.3<br>
+下载<a href="https://www.mongodb.org/dr/fastdl.mongodb.org/win32/mongodb-win32-x86_64-3.2.3-signed.msi/download" rel="nofollow" style="color:rgb(7,93,179);">mongodb-win32-x86_64-3.2.3-signed.msi</a>，并安装到合适的目录（e.g. D:\develop\MongoDB）</li></ul><h2 style="font-size:21px;">辅助资源下载</h2>
+<div>
+<ul><li style="list-style:disc;">MongoDB Java Driver:2.13.0<br>
+下载地址：<a href="http://repo1.maven.org/maven2/org/mongodb/mongo-java-driver/2.13.0/mongo-java-driver-2.13.0.jar" rel="nofollow" style="color:rgb(7,93,179);">mongo-java-driver-2.13.0.jar</a><br>
+下载之后放入Flume安装目录的lib下。</li><li style="list-style:disc;">flume-ng-mongodb-sink<br>
+Flume需要这个，才能把数据写到MongoDB中<br>
+下载地址：<a href="https://github.com/leonlee/flume-ng-mongodb-sink" rel="nofollow" style="color:rgb(7,93,179);">flume-ng-mongodb-sink</a><br>
+这是一个基于Maven的源代码，package之后，将jar包放到Flume安装目录的lib下。</li></ul><h2 style="font-size:21px;">初始化</h2>
+</div>
+<div>
+<hr></div>
+<h2 style="font-size:21px;">数据初始化</h2>
+</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+为MongoDB指定dbpath。</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<ol><li style="list-style:decimal;">新建一个目录，作为dbpath<br>
+e.g. D:\develop\MongoDB\mydata</li><li style="list-style:decimal;">启动监听服务 - CMD运行<br><div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<pre style="font-family:'Courier New' !important;">D:\develop\MongoDB\bin\mongod --dbpath=D:\develop\MongoDB\mydata</pre>
+</div>
+</li></ol><h2 style="font-size:21px;">配置Flume</h2>
+</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<ol><li style="list-style:decimal;">生成flume-env.ps1<br>
+在安装目录的conf/下，复制flume-env.ps1.template，重命名为flume-env.ps1</li><li style="list-style:decimal;">修改log4j.properties<br>
+在安装目录的conf/下，修改文件log4j.properties；修改flume.root.logger=INFO,console</li></ol><h2 style="font-size:21px;">实现</h2>
+</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<hr></div>
+<h2 style="font-size:21px;font-family:Verdana, Arial, Helvetica, sans-serif;background-color:rgb(254,254,242);">
+Flume到MongoDB</h2>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+在Flume安装目录的conf下，添加mongo-agent.properties：</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+<pre style="font-family:'Courier New' !important;">agent.sources =<span style="line-height:1.5;"> so1
+agent.channels </span>=<span style="line-height:1.5;"> c1
+agent.sinks </span>=<span style="line-height:1.5;"> s1
+
+agent.sources.so1.type </span>=<span style="line-height:1.5;"> avro
+agent.sources.so1.bind </span>= 0.0.0.0<span style="line-height:1.5;">
+agent.sources.so1.port </span>= 44444<span style="line-height:1.5;">
+agent.sources.so1.channels </span>=<span style="line-height:1.5;"> c1
+
+agent.channels.c1.type </span>=<span style="line-height:1.5;"> memory
+agent.channels.c1.capacity </span>= 1000<span style="line-height:1.5;">
+agent.channels.c1.transactionCapacity </span>= 100<span style="line-height:1.5;">
+
+agent.sinks.s1.type </span>=<span style="line-height:1.5;"> org.riderzen.flume.sink.MongoSink
+agent.sinks.s1.host </span>=<span style="line-height:1.5;"> localhost
+agent.sinks.s1.port </span>= 27017<span style="line-height:1.5;">
+agent.sinks.s1.model </span>=<span style="line-height:1.5;"> single
+agent.sinks.s1.db </span>=<span style="line-height:1.5;"> test
+agent.sinks.s1.collection </span>=<span style="line-height:1.5;"> log
+agent.sinks.s1.batch </span>= 100<span style="line-height:1.5;">
+agent.sinks.s1.channel </span>= c1</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+</div>
+<p style="line-height:1.5;">
+简单说明：</p>
+</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<ol><li style="list-style:decimal;">根据agent.sources.so1的相关配置，在44444端口开启监听 - log4j可以往这个端口写日志</li><li style="list-style:decimal;">根据agent.sinks.s1的相关配置，so1接收到的数据，将写到localhost:27017的test数据库的log-collection中<br>
+27017是MongoDB的默认监听端口</li></ol><h2 style="font-size:21px;">Java到Flume</h2>
+</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+这是一个基于Maven的一个simple project，你可以从<a href="https://github.com/xmov/flume-ng-java2mongodb" rel="nofollow" style="color:rgb(7,93,179);">flume-ng-java2mongodb</a>拿到源代码。</div>
+<h3 style="font-size:16px;font-family:Verdana, Arial, Helvetica, sans-serif;background-color:rgb(254,254,242);">
+文件结构</h3>
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;background-color:rgb(245,245,245);">
+<pre style="font-family:'Courier New' !important;"><span style="line-height:1.5;">src/main/java
+    |---- cn.sinobest.flume.client.demo
+              |---- LogDemo.java
+src/main/resources
+    |---- log4j.properties
+pom.xml</span></pre>
+</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<h3 style="font-size:16px;">文件内容</h3>
+</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<ol><li style="list-style:decimal;"><span style="line-height:1.6;">pom.xml</span>
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+<pre style="font-family:'Courier New' !important;"><span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">project </span><span style="line-height:1.5;color:rgb(255,0,0);">xmlns</span><span style="line-height:1.5;color:rgb(0,0,255);">="http://maven.apache.org/POM/4.0.0"</span><span style="line-height:1.5;color:rgb(255,0,0);"> xmlns:xsi</span><span style="line-height:1.5;color:rgb(0,0,255);">="http://www.w3.org/2001/XMLSchema-instance"</span><span style="line-height:1.5;color:rgb(255,0,0);">
+    xsi:schemaLocation</span><span style="line-height:1.5;color:rgb(0,0,255);">="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+    <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">modelVersion</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>4.0.0<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">modelVersion</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+    <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">groupId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>cn.sinobest.asj<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">groupId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+    <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">artifactId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>fluent-client-demo<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">artifactId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+    <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">version</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>0.0.1-SNAPSHOT<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">version</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+    <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">dependencies</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+        <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">dependency</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">groupId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>log4j<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">groupId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">artifactId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>log4j<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">artifactId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">version</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>1.2.16<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">version</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+        <span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">dependency</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+        <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">dependency</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">groupId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>commons-logging<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">groupId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">artifactId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>commons-logging<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">artifactId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">version</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>1.1.1<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">version</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+        <span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">dependency</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+        <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">dependency</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">groupId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>org.apache.flume.flume-ng-clients<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">groupId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">artifactId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>flume-ng-log4jappender<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">artifactId</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+            <span style="line-height:1.5;color:rgb(0,0,255);">&lt;</span><span style="line-height:1.5;color:rgb(128,0,0);">version</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>1.6.0<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">version</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+        <span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">dependency</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+    <span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">dependencies</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span>
+<span style="line-height:1.5;color:rgb(0,0,255);">&lt;/</span><span style="line-height:1.5;color:rgb(128,0,0);">project</span><span style="line-height:1.5;color:rgb(0,0,255);">&gt;</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+</div>
+</li><li style="list-style:decimal;"><span style="line-height:1.6;">log4j.properties<br></span>
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+<pre style="font-family:'Courier New' !important;">#<span style="line-height:1.5;"> 配置Log4jAppender，能写日志到Flume
+log4j</span>.appender.flumeAvro=org.apache.flume.clients.log4jappender.<span style="line-height:1.5;">Log4jAppender
+log4j</span>.appender.flumeAvro.Hostname=<span style="line-height:1.5;">localhost
+log4j</span>.appender.flumeAvro.Port=44444<span style="line-height:1.5;">
+log4j</span>.appender.flumeAvro.UnsafeMode=<span style="line-height:1.5;">true
+log4j</span>.appender.flumeAvro.layout=org.apache.log4j.<span style="line-height:1.5;">PatternLayout
+log4j</span>.appender.flumeAvro.layout.ConversionPattern=<span style="line-height:1.5;">%m
+</span>#<span style="line-height:1.5;"> 配置根logger 此配置的日志级别和appender会被所有的logger继承
+log4j</span>.rootLogger=INFO, flumeAvro</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+</div>
+注意：
+<div>&lt;1&gt; org.apache.flume.clients.log4jappender.Log4jAppender负责将数据写到Flume的具体实现</div>
+<div>&lt;2&gt; 44444端口为前文Flume配置agent.sources.so1的监听端口</div>
+</li><li style="list-style:decimal;"><span style="line-height:1.6;">LogDemo.java<br></span>
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+<pre style="font-family:'Courier New' !important;"><span style="line-height:1.5;color:rgb(0,0,255);">package</span><span style="line-height:1.5;"> cn.sinobest.flume.client.demo;
+</span><span style="line-height:1.5;color:rgb(0,0,255);">import</span><span style="line-height:1.5;"> org.apache.commons.logging.Log;
+</span><span style="line-height:1.5;color:rgb(0,0,255);">import</span><span style="line-height:1.5;"> org.apache.commons.logging.LogFactory;
+</span><span style="line-height:1.5;color:rgb(0,0,255);">public</span> <span style="line-height:1.5;color:rgb(0,0,255);">class</span><span style="line-height:1.5;"> LogDemo {
+    </span><span style="line-height:1.5;color:rgb(0,0,255);">static</span> <span style="line-height:1.5;color:rgb(0,0,255);">final</span> Log log = LogFactory.getLog(LogDemo.<span style="line-height:1.5;color:rgb(0,0,255);">class</span><span style="line-height:1.5;">);
+    
+    </span><span style="line-height:1.5;color:rgb(0,0,255);">public</span> <span style="line-height:1.5;color:rgb(0,0,255);">static</span> <span style="line-height:1.5;color:rgb(0,0,255);">void</span><span style="line-height:1.5;"> main(String[] args) {
+        log.info(</span>"{'name':'Adam', 'age':'26', 'skill':'reading'}"<span style="line-height:1.5;">);
+    }
+}</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+</div>
+<div>注意：确保日志内容是json格式的字符串。</div>
+</li></ol><h2 style="font-size:21px;">测试</h2>
+</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13px;line-height:19.5px;background-color:rgb(254,254,242);">
+<ol><li style="list-style:decimal;">启动MongoDB
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<pre style="font-family:'Courier New' !important;">D:\develop\MongoDB\bin\mongod --dbpath=D:\develop\MongoDB\mydata</pre>
+</div>
+</li><li style="list-style:decimal;">启动Flume<br><div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<pre style="font-family:'Courier New' !important;"># <span style="line-height:1.5;color:rgb(0,0,255);">cd</span> F:\temp\apache-flume-1.6.0-bin\<span style="line-height:1.5;">bin
+flume-ng</span>.<span style="line-height:1.5;color:rgb(0,0,255);">cmd</span> agent --conf ..\conf -f ..\conf\mongo-agent.properties -n agent</pre>
+</div>
+说明：第1行命令是提醒确认当前所在路径。</li><li style="list-style:decimal;">运行LogDemo</li><li style="list-style:decimal;">查看结果
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+<pre style="font-family:'Courier New' !important;">D:\tools\PowerCmd&gt;D:\develop\MongoDB\bin\<span style="line-height:1.5;">mongo
+</span>2016-03-08T18:05:33.168+0800 I CONTROL  [main] Hotfix KB2731284 or later update is <span style="line-height:1.5;color:rgb(0,0,255);">not</span> installed, will zero-out data <span style="line-height:1.5;color:rgb(0,0,255);">files</span><span style="line-height:1.5;">
+MongoDB </span><span style="line-height:1.5;color:rgb(0,0,255);">shell</span> version: 3.2.3<span style="line-height:1.5;">
+connecting to: test
+</span>&gt; db.log.<span style="line-height:1.5;color:rgb(0,0,255);">find</span>()<span style="line-height:1.5;">
+{ </span>"_id" : ObjectId("56dea2b18449e36553652bc3"), "name" : "Adam", "age" : "26", "skill" : "reading"<span style="line-height:1.5;"> }
+</span>&gt; </pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5;"><a title="复制代码" style="color:rgb(7,93,179);text-decoration:underline;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+</div>
+<div>说明：</div>
+<div>&lt;1&gt; mongo默认连接test数据库，也可以使用mongo test的方式指定连接test数据库。</div>
+<div>&lt;2&gt; db.log.find()用来查看log-collection中的数据，可以看到数据已经写入成功。</div>
+</li></ol></div>
+            </div>
+                </div>

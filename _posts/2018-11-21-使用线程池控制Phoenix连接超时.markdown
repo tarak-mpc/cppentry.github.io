@@ -1,0 +1,393 @@
+---
+layout:     post
+title:      使用线程池控制Phoenix连接超时
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/yh_Anonymous/article/details/78770434				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<blockquote>
+  <p>HBase – Hadoop Database，一个NoSQL数据库，可存储大量非关系型数据，利用HBase技术可在廉价PC Server上搭建起大规模结构化存储集群。</p>
+  
+  <p>Phoenix是构建在HBase上的一个SQL层，能让我们用标准的JDBC API而不是HBase客户端API来对HBase数据进行操作。</p>
+</blockquote>
+
+<p>HBase，可以用shell进行操作，也可以用Java api进行操作。HBase虽然是一个数据库，但是它的查询语句对于熟悉了使用MySql、Oracle的人来说，十分的不友好。所以在开发过程中，会使用一些三方驱动，将不友好的HBase语句操作转化为我们熟悉的SQL语句。</p>
+
+<hr>
+
+<p><strong><em>Phoenix存在的几个特点&amp;爬过的坑</em></strong>：</p>
+
+<ol>
+<li><p>不支持直接设置连接超时， 所以这里使用线程池的方式来控制数据库连接超时。</p></li>
+<li><p>phoenix默认不是auto commit模式，不会在关闭连接时做commit的，需要我们手动调用commit方法。</p></li>
+<li><p>phoenix/hbase对表名大小写敏感，如果表名为小写字母，则需要加双引号如<code>select count(1) from "test"</code>，否则会被转换成大写字母，并且抛TableNotFoundException异常。</p></li>
+</ol>
+
+<hr>
+
+<p><strong><em>以下是工具类代码</em></strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java">
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">PhoenixClient</span> {</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> Logger logger = LoggerFactory.getLogger(PhoenixClient.class);
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> CONN_TIMEOUT = <span class="hljs-number">15</span>;
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> BATCH_SIZE = <span class="hljs-number">1000</span>;
+
+    <span class="hljs-comment">// 利用静态块的方式初始化Driver，防止加载不到</span>
+    <span class="hljs-keyword">static</span> {
+        <span class="hljs-keyword">try</span> {
+            Class.forName(<span class="hljs-string">"org.apache.phoenix.jdbc.PhoenixDriver"</span>);
+        } <span class="hljs-keyword">catch</span> (ClassNotFoundException e) {
+            logger.error(<span class="hljs-string">"加载hbase的phoenix驱动失败"</span>, e);
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     * 获取一个Hbase-Phoenix的连接
+     *<span class="hljs-javadoctag"> @param</span> host zookeeper的master-host
+     *<span class="hljs-javadoctag"> @param</span> port zookeeper的master-port
+     *<span class="hljs-javadoctag"> @return</span>
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> Connection <span class="hljs-title">getConnection</span>(String host, String port) {
+
+        String url = <span class="hljs-string">"jdbc:phoenix:"</span> + host + <span class="hljs-string">":"</span> + port;
+
+        <span class="hljs-keyword">return</span> getConnection(url);
+    }
+
+    <span class="hljs-javadoc">/**
+     * 获取一个Hbase-Phoenix的连接jdbc的url类似为
+     * jdbc:phoenix:192.168.1.101:2181
+     * jdbc:phoenix:41.test1.com,42.test2.com,43.test3.com:2181
+     *<span class="hljs-javadoctag"> @return</span>
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> Connection <span class="hljs-title">getConnection</span>(<span class="hljs-keyword">final</span> String url) {
+        Connection conn = <span class="hljs-keyword">null</span>;
+
+        <span class="hljs-keyword">try</span> {
+            <span class="hljs-comment">// Phoenix不支持直接设置连接超时</span>
+            <span class="hljs-comment">// 所以这里使用线程池的方式来控制数据库连接超时</span>
+            <span class="hljs-keyword">final</span> ExecutorService exec = Executors.newFixedThreadPool(<span class="hljs-number">1</span>);
+            Callable&lt;Connection&gt; call = <span class="hljs-keyword">new</span> Callable&lt;Connection&gt;() {
+                <span class="hljs-keyword">public</span> Connection <span class="hljs-title">call</span>() <span class="hljs-keyword">throws</span> Exception {
+                    <span class="hljs-keyword">return</span> DriverManager.getConnection(url);
+                }
+            };
+            Future&lt;Connection&gt; future = exec.submit(call);
+            <span class="hljs-comment">// 如果在设定超时(以秒为单位)之内，还没得到 Connection 对象，则认为连接超时，不继续阻塞</span>
+            conn = future.get(<span class="hljs-number">1000</span> * CONN_TIMEOUT, TimeUnit.MILLISECONDS);
+            exec.shutdownNow();
+        } <span class="hljs-keyword">catch</span> (InterruptedException e) {
+            logger.error(<span class="hljs-string">"获取连接线程中断！url="</span> + url, e);
+        } <span class="hljs-keyword">catch</span> (ExecutionException e) {
+            logger.error(<span class="hljs-string">"获取连接出错！url="</span> + url, e);
+        } <span class="hljs-keyword">catch</span> (TimeoutException e) {
+            logger.error(<span class="hljs-string">"获取连接超时！url="</span> + url, e);
+        }
+
+        <span class="hljs-keyword">return</span> conn;
+    }
+
+
+    <span class="hljs-comment">// 关闭一个Phoenix的连接</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">closeConnection</span>(Connection conn) {
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">null</span> != conn) {
+            <span class="hljs-keyword">try</span> {
+                conn.close();
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                logger.error(<span class="hljs-string">"关闭连接失败！"</span>, e);
+            }
+        }
+    }
+
+    <span class="hljs-comment">// 关闭一个Phoenix的结果集</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">closeJdbcResultSet</span>(ResultSet rs, Statement st) {
+        <span class="hljs-keyword">try</span> {
+            <span class="hljs-keyword">if</span> (rs != <span class="hljs-keyword">null</span>) {
+                rs.close();
+            }
+            <span class="hljs-keyword">if</span> (st != <span class="hljs-keyword">null</span>) {
+                st.close();
+            }
+        } <span class="hljs-keyword">catch</span> (SQLException e) {
+            logger.error(<span class="hljs-string">"execute closeJdbcResultSet failed"</span>, e);
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     * 检查数据表是否存在
+     *<span class="hljs-javadoctag"> @param</span> conn jdbc连接
+     *<span class="hljs-javadoctag"> @param</span> schema 命名空间
+     *<span class="hljs-javadoctag"> @param</span> table 表名
+     *<span class="hljs-javadoctag"> @return</span>
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">checkTableExists</span>(Connection conn, String schema, String table) {
+
+        <span class="hljs-keyword">boolean</span> retFlag = <span class="hljs-keyword">false</span>;
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">null</span> != conn) {
+            <span class="hljs-keyword">try</span> {
+                ResultSet rs = conn.getMetaData().getTables(<span class="hljs-keyword">null</span>, schema, table, <span class="hljs-keyword">null</span>);
+                <span class="hljs-keyword">if</span> (rs.next()) {
+                    retFlag = <span class="hljs-keyword">true</span>;
+                }
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                logger.error(<span class="hljs-string">"检查表出错！sql="</span> + table, e);
+            }
+        }
+
+        <span class="hljs-keyword">return</span> retFlag;
+    }
+
+    <span class="hljs-javadoc">/**
+     * 根据phoenix支持的SQL格式，执行DDL操作
+     * create table test (mykey integer not null primary key, mycolumn varchar)
+     * CREATE TABLE user (id varchar PRIMARY KEY, INFO.account varchar ,INFO.passwd varchar)
+     *<span class="hljs-javadoctag"> @param</span> conn jdbc连接
+     *<span class="hljs-javadoctag"> @param</span> sql sql语句
+     *<span class="hljs-javadoctag"> @return</span>
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">executeDDLSql</span>(Connection conn, String sql) {
+
+        <span class="hljs-keyword">boolean</span> retFlag = <span class="hljs-keyword">false</span>;
+
+        <span class="hljs-keyword">int</span> rs = <span class="hljs-number">0</span>;
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">null</span> != conn) {
+            <span class="hljs-keyword">try</span> {
+                <span class="hljs-comment">// 耗时监控：记录一个开始时间</span>
+                <span class="hljs-keyword">long</span> startTime = System.currentTimeMillis();
+                Statement stmt = conn.createStatement();
+                retFlag = stmt.execute(sql);
+                <span class="hljs-comment">// 耗时监控：记录一个结束时间</span>
+                <span class="hljs-keyword">long</span> time = System.currentTimeMillis() - startTime;
+                logger.info(<span class="hljs-string">"执行时间："</span> + time + <span class="hljs-string">" sql="</span> + sql);
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                logger.error(<span class="hljs-string">"DDL执行出错！sql="</span> + sql, e);
+            }
+        }
+
+        <span class="hljs-keyword">return</span> retFlag;
+    }
+
+    <span class="hljs-javadoc">/**
+     * 根据phoenix支持的SQL格式，执行增删改操作
+     *<span class="hljs-javadoctag"> @param</span> conn jdbc连接
+     *<span class="hljs-javadoctag"> @param</span> sql sql语句
+     *<span class="hljs-javadoctag"> @return</span>
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">executeUpdateSql</span>(Connection conn, String sql) {
+
+        <span class="hljs-keyword">boolean</span> retFlag = <span class="hljs-keyword">false</span>;
+        Statement stmt = <span class="hljs-keyword">null</span>;
+        <span class="hljs-keyword">int</span> rs = <span class="hljs-number">0</span>;
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">null</span> != conn) {
+            <span class="hljs-keyword">try</span> {
+                <span class="hljs-comment">// 耗时监控：记录一个开始时间</span>
+                <span class="hljs-keyword">long</span> startTime = System.currentTimeMillis();
+                stmt = conn.createStatement();
+                rs = stmt.executeUpdate(sql);
+                <span class="hljs-comment">// Phoenix进行数据更改时不会自动的commit,需要手动提交</span>
+                conn.commit();
+                <span class="hljs-keyword">if</span> (rs &gt;= <span class="hljs-number">1</span>) {
+                    retFlag = <span class="hljs-keyword">true</span>;
+                }
+                <span class="hljs-comment">// 耗时监控：记录一个结束时间</span>
+                <span class="hljs-keyword">long</span> time = System.currentTimeMillis() - startTime;
+                logger.info(<span class="hljs-string">"执行时间："</span> + time + <span class="hljs-string">" sql="</span> + sql);
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                logger.error(<span class="hljs-string">"SQL执行出错！sql="</span> + sql, e);
+            } <span class="hljs-keyword">finally</span> {
+                closeJdbcResultSet(<span class="hljs-keyword">null</span>, stmt);
+            }
+        }
+
+        <span class="hljs-keyword">return</span> retFlag;
+    }
+
+    <span class="hljs-javadoc">/**
+     * 根据phoenix支持的SQL格式，批量执行新增修改删除操作
+     *<span class="hljs-javadoctag"> @param</span> conn jdbc连接
+     *<span class="hljs-javadoctag"> @param</span> sqlList sql语句
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">executeUpdateSqlBatch</span>(Connection conn, List&lt;String&gt; sqlList) {
+
+        <span class="hljs-keyword">boolean</span> retFlag = <span class="hljs-keyword">false</span>;
+        Statement stmt = <span class="hljs-keyword">null</span>;
+        <span class="hljs-keyword">int</span> rs = <span class="hljs-number">0</span>;
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">null</span> != conn) {
+            <span class="hljs-keyword">try</span> {
+                <span class="hljs-comment">// 耗时监控：记录一个开始时间</span>
+                <span class="hljs-keyword">long</span> startTime = System.currentTimeMillis();
+                <span class="hljs-comment">// 准备查询</span>
+                stmt = conn.createStatement();
+                <span class="hljs-keyword">int</span> size = sqlList.size();
+                <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i = <span class="hljs-number">0</span>; i &lt; size; i++) {
+                    rs = stmt.executeUpdate(sqlList.get(i));
+                    <span class="hljs-keyword">if</span> (i % BATCH_SIZE == <span class="hljs-number">0</span>) {
+                        conn.commit();
+                    }
+                }
+                <span class="hljs-comment">// Phoenix进行数据更改时不会自动的commit,需要手动提交</span>
+                conn.commit();
+
+                retFlag = <span class="hljs-keyword">true</span>;
+
+                <span class="hljs-comment">// 耗时监控：记录一个结束时间</span>
+                <span class="hljs-keyword">long</span> time = System.currentTimeMillis() - startTime;
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                logger.error(<span class="hljs-string">"批量SQL执行出错"</span>, e);
+            } <span class="hljs-keyword">finally</span> {
+                closeJdbcResultSet(<span class="hljs-keyword">null</span>, stmt);
+            }
+        }
+
+        <span class="hljs-keyword">return</span> retFlag;
+    }
+
+    <span class="hljs-javadoc">/**
+     * 根据phoenix支持的SQL格式，统计数据量 如果数据量很大，统计会很慢
+     *<span class="hljs-javadoctag"> @param</span> conn jdbc连接
+     *<span class="hljs-javadoctag"> @param</span> sql sql语句
+     *<span class="hljs-javadoctag"> @return</span>
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> String <span class="hljs-title">executeCountSql</span>(Connection conn, String sql) {
+
+        Statement stmt = <span class="hljs-keyword">null</span>;
+        ResultSet rsCount;
+        String count = <span class="hljs-string">"0"</span>;
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">null</span> != conn) {
+            <span class="hljs-comment">// 耗时监控：记录一个开始时间</span>
+            <span class="hljs-keyword">long</span> startTime = System.currentTimeMillis();
+
+            <span class="hljs-keyword">try</span> {
+                <span class="hljs-comment">// 准备查询</span>
+                stmt = conn.createStatement();
+                rsCount = stmt.executeQuery(sql);
+                <span class="hljs-keyword">if</span> (rsCount.next()) {
+                    count = rsCount.getString(<span class="hljs-number">1</span>);
+                }
+
+                <span class="hljs-comment">// 耗时监控：记录一个结束时间</span>
+                <span class="hljs-keyword">long</span> time = System.currentTimeMillis() - startTime;
+                logger.info(<span class="hljs-string">"执行时间："</span> + time + <span class="hljs-string">" sql="</span> + sql);
+
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                logger.error(<span class="hljs-string">"SQL执行出错！sql="</span> + sql, e);
+            } <span class="hljs-keyword">finally</span> {
+                closeJdbcResultSet(<span class="hljs-keyword">null</span>, stmt);
+            }
+        }
+
+        <span class="hljs-keyword">return</span> count;
+    }
+
+    <span class="hljs-javadoc">/**
+     * 根据phoenix支持的SQL格式，查询Hbase的数据，并返回Map格式的数据
+     *<span class="hljs-javadoctag"> @param</span> conn jdbc连接
+     *<span class="hljs-javadoctag"> @param</span> sql sql语句
+     *<span class="hljs-javadoctag"> @return</span>
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> List&lt;Map&lt;String, Object&gt;&gt; <span class="hljs-title">getMapBySqlQuery</span>(Connection conn, String sql) {
+
+        List&lt;Map&lt;String, Object&gt;&gt; reslist = <span class="hljs-keyword">new</span> ArrayList&lt;Map&lt;String, Object&gt;&gt;();
+
+        Statement stmt = <span class="hljs-keyword">null</span>;
+        PhoenixResultSet set = <span class="hljs-keyword">null</span>;
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">null</span> != conn) {
+            <span class="hljs-comment">// 耗时监控：记录一个开始时间</span>
+            <span class="hljs-keyword">long</span> startTime = System.currentTimeMillis();
+
+            <span class="hljs-keyword">try</span> {
+                <span class="hljs-comment">// 准备查询</span>
+                stmt = conn.createStatement();
+                set = (PhoenixResultSet) stmt.executeQuery(sql);
+
+                <span class="hljs-comment">// 查询出来的列是不固定的，所以这里通过遍历的方式获取列名</span>
+                ResultSetMetaData meta = set.getMetaData();
+                ArrayList&lt;String&gt; cols = <span class="hljs-keyword">new</span> ArrayList&lt;String&gt;();
+
+                <span class="hljs-keyword">while</span> (set.next()) {
+                    <span class="hljs-keyword">if</span> (cols.size() == <span class="hljs-number">0</span>) {
+                        <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i = <span class="hljs-number">1</span>, count = meta.getColumnCount(); i &lt;= count; i++) {
+                            cols.add(meta.getColumnName(i));
+                        }
+                    }
+
+                    Map&lt;String, Object&gt; perCol = <span class="hljs-keyword">new</span> LinkedHashMap&lt;String, Object&gt;();
+                    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i = <span class="hljs-number">0</span>, len = cols.size(); i &lt; len; i++) {
+                        perCol.put(cols.get(i), set.getObject(cols.get(i)));
+                    }
+                    reslist.add(perCol);
+                }
+                <span class="hljs-comment">// 耗时监控：记录一个结束时间</span>
+                <span class="hljs-keyword">long</span> time = System.currentTimeMillis() - startTime;
+                logger.info(<span class="hljs-string">"执行时间："</span> + time + <span class="hljs-string">" sql="</span> + sql);
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                logger.error(<span class="hljs-string">"SQL执行出错！sql="</span> + sql, e);
+            } <span class="hljs-keyword">finally</span> {
+                closeJdbcResultSet(set, stmt);
+            }
+        }
+
+        <span class="hljs-keyword">return</span> reslist;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) {
+        String ddlSql = <span class="hljs-string">"CREATE TABLE PHOENIXTEST (ID VARCHAR PRIMARY KEY,INFO.ACCOUNT VARCHAR ,INFO.PASSWD VARCHAR)"</span>;
+        String updateSql = <span class="hljs-string">"upsert into PHOENIXTEST (ID, INFO.ACCOUNT, INFO.PASSWD) values('001', 'admin', 'admin')"</span>;
+        String querySql = <span class="hljs-string">"select count(1) from PHOENIXTEST"</span>; <span class="hljs-comment">// 大小写敏感</span>
+
+        <span class="hljs-comment">// 获取一个Phoenix连接</span>
+        Connection conn = HPhoenixClientUtil.getConnection(<span class="hljs-string">"hadoop"</span>, <span class="hljs-string">"2181"</span>);
+        <span class="hljs-keyword">if</span> (conn == <span class="hljs-keyword">null</span>) {
+            System.out.println(<span class="hljs-string">"Phoenix DB连接超时！"</span>);
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// 检查数据表是否存在</span>
+            <span class="hljs-keyword">boolean</span> tbExists = checkTableExists(conn, <span class="hljs-keyword">null</span>, <span class="hljs-string">"PHOENIXTEST"</span>);
+            <span class="hljs-keyword">if</span> (!tbExists) {
+                tbExists = executeDDLSql(conn, ddlSql);
+            }
+
+            <span class="hljs-keyword">if</span> (tbExists &amp;&amp; executeUpdateSql(conn, updateSql)) {
+                String result = executeCountSql(conn, querySql);
+                System.out.println(<span class="hljs-string">"统计数量："</span> + result);
+            }
+        }
+
+        closeConnection(conn);
+
+    }
+
+}
+</code></pre>
+
+<hr>
+
+
+
+<h5 id="代码还是有许多不成熟的地方会逐步完善">代码还是有许多不成熟的地方，会逐步完善</h5>
+
+<p>参考：<a href="http://blog.csdn.net/d6619309/article/details/50358675" rel="nofollow">Phoenix使用总结</a>，<a href="http://blog.csdn.net/berylfanzi/article/details/45537675" rel="nofollow">Phoenix jdbc 插入数据</a>，<a href="https://www.baidufe.com/item/be5d573acd57ffda649f.html" rel="nofollow">利用phoenix进行Hbase数据访问</a></p>
+
+<p><br>
+<br>
+<br></p>
+
+
+
+<h2 id="趁着年轻好好奋斗一把">趁着年轻，好好奋斗一把</h2>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

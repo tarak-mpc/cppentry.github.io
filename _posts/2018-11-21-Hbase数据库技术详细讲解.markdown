@@ -1,0 +1,158 @@
+---
+layout:     post
+title:      Hbase数据库技术详细讲解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>关于Hbase与其他数据的比较和简要介绍见：<a href="https://blog.csdn.net/qq_25948717/article/details/82974058" rel="nofollow">https://blog.csdn.net/qq_25948717/article/details/82974058</a></p>
+
+<h3><strong>HBase 相关的模块以及 HBase 表格的特性</strong></h3>
+
+<p>前面我们提到过 HBase 也是构建于 HDFS 之上，这是正确的，但也不是完全正确。HBase 其实也支持直接在本地文件系统</p>
+
+<p>之上运行，不过这样的 HBase 只能运行在一台机器上，那么对于分布式大数据的环境是没有意义的（这也是所谓的 HBase</p>
+
+<p>的单机模式）。一般只用于测试或者验证某一个 HBase 的功能，后面我们在详细的介绍 HBase 的几种运行模式。这里我们</p>
+
+<p>只要记得<span style="color:#f33b45;">在分布式的生产环境中，HBase 需要运行在 HDFS 之上，以 HDFS 作为其基础的存储设施。</span>HBase 上层提供了访</p>
+
+<p>问的数据的 Java API 层，供应用访问存储在 HBase 的数据。在 HBase 的集群中主要由 Master 和 Region Server 组成，</p>
+
+<p>以及 Zookeeper，具体模块如下图所示。</p>
+
+<p><img alt="" class="has" height="292" src="https://img-blog.csdn.net/20181008222222543?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI1OTQ4NzE3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="551"></p>
+
+<p><span style="color:#f33b45;"><strong>Master</strong></span></p>
+
+<p>HBase <span style="color:#e579b6;">Master 用于协调多个 Region Server，侦测各个 Region Server 之间的状态，并平衡 Region Server 之间的负载</span>。HBase <span style="color:#e579b6;">Master 还有一个职责就是负责分配 Region 给 Region Server</span>。HBase 允许多个 Master 节点共存，但是这需要 Zookeeper 的帮助。不过<span style="color:#e579b6;">当多个 Master 节点共存时，只有一个 Master 是提供服务的</span>，其他的 Master 节点处于待命的状态。当正在工作的 Master 节点宕机时，其他的 Master 则会接管 HBase 的集群。</p>
+
+<p><span style="color:#f33b45;"><strong>Region Server</strong></span></p>
+
+<p>对于一个 Region Server 而言，其<span style="color:#e579b6;">包括了多个 Region</span>。Region Server 的作用只是<span style="color:#e579b6;">管理表格，以及实现读写操作</span>。<span style="color:#e579b6;">Client 直接连接 Region Server，并通信获取 HBase 中的数据。对于 Region 而言，则是真实存放 HBase 数据的地方，也就说 Region 是 HBase 可用性和分布式的基本单位</span>。如果当一个表格很大，并由多个 CF 组成时，那么表的数据将存放在多个 Region 之间，并且在每个 Region 中会关联多个存储的单元（Store）。</p>
+
+<p><span style="color:#f33b45;"><strong>Zookeeper</strong></span></p>
+
+<p>对于 HBase 而言，Zookeeper 的作用是至关重要的。首先 Zookeeper 是作为 HBase Master 的 HA 解决方案。也就是说，是 <span style="color:#e579b6;">Zookeeper 保证了至少有一个 HBase Master 处于运行状态</span>。<span style="color:#e579b6;">并且 Zookeeper 负责 Region 和 Region Server 的注册</span>。其实 Zookeeper 发展到目前为止，已经成为了分布式大数据框架中容错性的标准框架。不光是 HBase，几乎所有的分布式大数据相关的开源框架，都依赖于 Zookeeper 实现 HA。</p>
+
+<p>一个完整分布式的 HBase 的工作原理示意图如下：</p>
+
+<p><img alt="" class="has" height="486" src="https://img-blog.csdn.net/20181008223027458?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI1OTQ4NzE3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="599"></p>
+
+<p>结合上图整个 HBase 的工作流程如下：</p>
+
+<p>首先我们需要知道 HBase 的集群是通过 Zookeeper 来进行机器之前的协调，也就是说 HBase Master 与 Region Server</p>
+
+<p>之间的关系是依赖 Zookeeper 来维护。<span style="color:#e579b6;">当一个 Client 需要访问 HBase 集群时，Client 需要先和 Zookeeper 来通信，然后</span></p>
+
+<p><span style="color:#e579b6;">才会找到对应的 Region Server。</span>每一个 Region Server 管理着很多个 Region。对于 HBase 来说，<span style="color:#e579b6;">Region 是 HBase 并</span></p>
+
+<p><span style="color:#e579b6;">行化的基本单元。</span>因此，数据也都存储在 Region 中。这里我们需要特别注意，<span style="color:#f33b45;">每一个 Region 都只存储一个 Column </span></p>
+
+<p><span style="color:#f33b45;">Family 的数据，并且是该 CF 中的一段（按 Row 的区间分成多个 Region）</span>。<span style="color:#e579b6;">Region 所能存储的数据大小是有上限的，</span></p>
+
+<p><span style="color:#e579b6;">当达到该上限时（Threshold），Region 会进行分裂，数据也会分裂到多个 Region 中，这样便可以提高数据的并行化，</span></p>
+
+<p>以及提高数据的容量。<span style="color:#f33b45;">每个 Region 包含着多个 Store 对象。每个 Store 包含一个 MemStore，和一个或多个 HFile</span>。</p>
+
+<p>MemStore 便是数据在内存中的实体，并且一般都是有序的。<span style="color:#e579b6;">当数据向 Region 写入的时候，会先写入 MemStore。当 </span></p>
+
+<p><span style="color:#e579b6;">MemStore 中的数据需要向底层文件系统倾倒</span>（Dump）时（例如 MemStore 中的数据体积到达 MemStore 配置</p>
+
+<p>的最大值），<span style="color:#e579b6;">Store 便会创建 StoreFile，而 StoreFile 就是对 HFile 一层封装</span>。<span style="color:#e579b6;">所以 MemStore 中的数据会最终写入</span></p>
+
+<p><span style="color:#e579b6;">到 HFile 中，也就是磁盘 IO。由于</span> <span style="color:#e579b6;">HBase 底层依靠 HDFS，因此 HFile 都存储在 HDFS 之中</span>。这便是整个 HBase 工作的原理简述。</p>
+
+<p> </p>
+
+<p><span style="color:#f33b45;"><strong>HLog机制：保证数据的可靠性</strong></span></p>
+
+<p>HBase 中的 HLog 机制是 WAL 的一种实现，而 WAL（一般翻译为预写日志）是事务机制中常见的一致性的实现方式。</p>
+
+<p>每个 Region Server 中都会有一个 HLog 的实例，<span style="color:#e579b6;">Region Server 会将更新操作（如 Put，Delete）</span><span style="color:#f33b45;"><strong>先</strong></span><span style="color:#e579b6;">记录到 WAL</span></p>
+
+<p><span style="color:#e579b6;">（也就是 HLog）中，然后将其写入到 Store 的 MemStore，最终 MemStore 会将数据写入到持久化的 HFile 中</span></p>
+
+<p><span style="color:#e579b6;">（MemStore 到达配置的内存阀值）。这样就保证了 HBase 的写的可靠性。</span>如果没有 WAL，当 Region Server</p>
+
+<p>宕掉的时候，MemStore 还没有写入到 HFile，或者 StoreFile 还没有保存，数据就会丢失。或许有的读者会担心 <span style="color:#e579b6;">HFile </span></p>
+
+<p><span style="color:#e579b6;">本身会不会丢失，这是由 HDFS 来保证的</span>。在 HDFS 中的数据默认会有 3 份。因此这里并不考虑 HFile 本身的可靠性。</p>
+
+<p><span style="color:#f33b45;"><strong>HFile 的结构</strong></span></p>
+
+<p><img alt="" class="has" height="260" src="https://img-blog.csdn.net/20181008224423501?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI1OTQ4NzE3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="624"></p>
+
+<p>从图中我们可以看到 HFile 由很多个数据块（Block）组成，并且有一个固定的结尾块。其中的数据块是由一个</p>
+
+<p>Header 和多个 Key-Value 的键值对组成。<span style="color:#e579b6;">在结尾的数据块中包含了数据相关的索引信息</span>，系统也是通过结尾的索引信息</p>
+
+<p>找到 HFile 中的数据。<span style="color:#e579b6;">HFile 中的数据块大小默认为 64KB。如果访问 HBase 数据库的场景多为有序的访问，那么建议将</span></p>
+
+<p><span style="color:#e579b6;">该值设置的大一些。如果场景多为随机访问，那么建议将该值设置的小一些。一般情况下，通过调整该值可以提高 HBase </span></p>
+
+<p><span style="color:#e579b6;">的性能。</span></p>
+
+<p>一句话总结 HBase，可以认为 HBase 就是一个有序的多维 Map，其中每一个 Row-key 映射了许多数据，这些数据存储在</p>
+
+<p>CF 中的 Column。我们可以用下图来表示这句话。</p>
+
+<p><img alt="" class="has" height="377" src="https://img-blog.csdn.net/20181009090645477?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI1OTQ4NzE3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="557"></p>
+
+<p><strong>Hbase使用场景：</strong></p>
+
+<p>之前介绍了很多 HBase 与 RDBMS 的区别，以及一些优势的地方。那么什么时候最需要 HBase，或者说 HBase 是否可以</p>
+
+<p>替代原有的 RDBMS？对于这个问题，我们必须时刻谨记——HBase 并不适合所有问题，其设计目标并不是替代 RDBMS，</p>
+
+<p>而是对 RDBMS 的一个重要补充，尤其是对大数据的场景。当需要考量 HBase 作为一个备选项时，需要考虑一下方面。</p>
+
+<p>首先，要确信有足够多数据，如果有上亿或上千亿行数据，HBase 才会是一个很好的备选。</p>
+
+<p>其次，需要确信业务上可以不依赖 RDBMS 的额外特性，例如，列数据类型, 二级索引，SQL 查询语言等。</p>
+
+<p>再而，需要确保有足够硬件。且不说 HBase，一般情况下当 HDFS 的集群小于 5 个数据节点时，也干不好什么事情 (HDFS</p>
+
+<p>默认会将每一个 Block 数据备份 3 分)，还要加上一个 NameNode。</p>
+
+<p><span style="color:#f33b45;"><strong>Hbase表格设计建议：</strong></span></p>
+
+<p>一个 HBase 数据库是否高效，很大程度会和 Row-Key 的设计有关。因此，如何设计 Row-key 是使用 HBase 时，一个非常</p>
+
+<p>重要的话题。随着数据访问方式的不同，Row-Key 的设计也会有所不同。不过概括起来的宗旨只有一个，那就是<span style="color:#e579b6;">尽可能选择</span></p>
+
+<p><span style="color:#e579b6;">一个 Row-Key，可以使你的数据均匀的分布在集群中</span>。这也很容易理解，因为 HBase 是一个分布式环境，Client 会访问</p>
+
+<p>不同 Region Server 获取数据。如果数据排布均匀在不同的多个节点，那么在批量的 Client 便可以从不同的 Region Server</p>
+
+<p>上获取数据，而不是瓶颈在某一个节点，性能自然会有所提升。对于具体的建议我们一般有几条：</p>
+
+<ul><li>
+	<p>当客户端需要频繁的写一张表，随机的 RowKey 会获得更好的性能。</p>
+	</li>
+	<li>
+	<p>当客户端需要频繁的读一张表，有序的 RowKey 则会获得更好的性能。</p>
+	</li>
+	<li>
+	<p>对于时间连续的数据（例如 log），有序的 RowKey 会很方便查询一段时间的数据（Scan 操作）</p>
+	</li>
+</ul><p><span style="color:#f33b45;"> Column Family </span>也会在不同的场景需要不同的设计方案。不过 CF 跟 Row-key 比较的话，确实也简单一些，但这并不意味着</p>
+
+<p>CF 的设计就是一个琐碎的话题。在 RDBMS（传统关系数据库）系统中，我们知道如果当用户的信息分散在不同的表中，</p>
+
+<p>便需要根据一个 Key 进行 Join 操作。而在 HBase 中，我们需要设计 CF 来聚合用户所有相关信息。简单来说，就是需要<span style="color:#f33b45;">将</span></p>
+
+<p><span style="color:#f33b45;">数据按类别（或者一个特性）聚合在一个或多个 CF 中</span>。这样，便可以根据 CF 获取这类信息。上面，我们讲解过<span style="color:#f33b45;">一个</span></p>
+
+<p><span style="color:#f33b45;">Region 对应于一个 CF</span>。那么设想，如果在一个表中定义了多个 CF 时，就必然会有多个 Region。当 Client 查询数据时，</p>
+
+<p>就不得不查询多个 Region。这样性能自然会有所下降，尤其当 Region 夸机器的时候。因此在大多数的情况下，一个表格不</p>
+
+<p>会超过 2 到 3 个 CF，而且很多情况下都是 1 个 CF 就足够了。</p>
+
+<p> </p>
+
+<p>原文地址：<a href="https://mp.weixin.qq.com/s/id2swMK9pHXHmkRK6qSdmA" rel="nofollow">https://mp.weixin.qq.com/s/id2swMK9pHXHmkRK6qSdmA</a></p>
+
+<p> </p>            </div>
+                </div>

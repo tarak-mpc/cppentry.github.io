@@ -1,0 +1,110 @@
+---
+layout:     post
+title:      hbase基本命令，api操作
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h3>hbase单节点安装</h3>    启动一个单节点的hbase方便我们测试，学习。在官网下载hbase.tar.gz安装包 <a href="https://hbase.apache.org/" rel="nofollow">https://hbase.apache.org/</a><p>修改配置文件${hbase}/conf/hbase-env.sh,指定jdk位置</p><p>【hbase-env.sh】</p><pre><code class="language-plain">export JAVA_HOME=/usr/local/jdk</code></pre><p>【hbase-site.xml】</p><p>指定hbase的data路径，zookeeper的data路径</p><pre><code class="language-html">&lt;configuration&gt;
+  &lt;property&gt;
+    &lt;name&gt;hbase.rootdir&lt;/name&gt;
+    &lt;value&gt;file:///home/hadoop/hbase/data&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;hbase.zookeeper.property.dataDir&lt;/name&gt;
+    &lt;value&gt;/home/hadoop/hbase/zkData&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;hbase.unsafe.stream.capability.enforce&lt;/name&gt;
+    &lt;value&gt;false&lt;/value&gt;
+    &lt;description&gt;
+      Controls whether HBase will check for stream capabilities (hflush/hsync).
+      Disable this if you intend to run on LocalFileSystem, denoted by a rootdir
+      with the 'file://' scheme, but be mindful of the NOTE below.
+      WARNING: Setting this to false blinds you to potential data loss and
+      inconsistent system state in the event of process and/or node failures. If
+      HBase is complaining of an inability to use hsync or hflush it's most
+      likely not a false positive.
+    &lt;/description&gt;
+  &lt;/property&gt;
+&lt;/configuration&gt;</code></pre><h5>hbase单节点启动</h5><pre><code class="language-html">//start-hbase.sh
+&gt;start-hbase.sh
+//查看webUI，“localhost:16010”</code></pre><h3><img src="https://img-blog.csdn.net/20180702100747471?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2ZhbnRhc3RpY3FpYW5n/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></h3><h3>hbase_shell操作<br><br></h3><table border="1" width="200" cellspacing="1" cellpadding="1"><tbody><tr><td><pre><code class="language-java">$&gt;hbase shell  //登录shell终端
+$hbase&gt;help								//查看帮助
+$hbase&gt;help	'list_namespace'			//查看（特定命令）名称空间命令帮助
+$hbase&gt;list_namespace					//列出名字空间(数据库)
+$hbase&gt;list_namespace_tables 'defalut'	//列出名字空间(数据库)
+$hbase&gt;create_namespace 'ns1'			//创建名字空间
+$hbase&gt;help 'create'
+$hbase&gt;create 'ns1:t1','f1'				//创建表,指定空间下
+$hbase&gt;put 'ns1:t1','row1','f1:id',100		//插入数据
+$hbase&gt;put 'ns1:t1','row1','f1:name','tom'	//
+
+$hbase&gt;get 'ns1:t1','row1'					//查询指定row
+$hbase&gt;scan 'ns1:t1'						//扫描表
+$hbase&gt;flush 'ns1:t1'<span>		</span>//清理内存数据到磁盘。
+$hbase&gt;count 'ns1:t1'<span>		</span>//统计函数
+$hbase&gt;disable 'ns1:t1'<span>		</span>//删除表之前需要禁用表
+$hbase&gt;drop 'ns1:t1'<span>		</span>//
+$hbase&gt;scan 'hbase:meta'<span>	</span>//查看元数据表
+$hbase&gt;split 'ns1:t1'<span>		</span>//切割表 
+$hbase&gt;split ''<span>			</span>//切割区域
+</code></pre></td></tr></tbody></table><table border="1" width="200" cellspacing="1" cellpadding="1"><tbody><tr><td><pre><code class="language-java">//给表添加列簇,先禁用表
+&gt;disable 'test'
+//如果表在default空间中，可以不加空间限定
+&gt;disable 'default:test'
+//修改表，列簇是“NAME=&gt;'cf2'”，最多保留3个版本的数据
+&gt;alter 'test',{NAME=&gt;'cf2',VERSIONS=&gt;3}
+//然后enable表
+&gt;enable 'test'
+
+</code></pre></td></tr></tbody></table><h3>java api操作</h3><p>需要把“hbase-site.xml”放到类路径下</p><p style="text-align:left;"><span style="font-family:Arial, Verdana, sans-serif;"><span style="font-size:18px;background-color:rgb(255,255,255);"><strong>1.put get</strong></span></span></p><pre><code class="language-java">import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.util.Bytes;
+import org.junit.Test;
+
+public class TestCRUD {
+
+    @Test
+    public void testPut() throws Exception {
+        //创建配置文件
+        Configuration conf = HBaseConfiguration.create();
+        //创建连接
+        Connection conn = ConnectionFactory.createConnection(conf);
+        TableName tableName = TableName.valueOf("default:test");
+        //根据表名获得表对象
+        Table table = conn.getTable(tableName);
+        byte[] row1 = Bytes.toBytes("row2");
+        //利用put对象向表中插入数据,new的时候需要指定rowkey
+        Put put = new Put(row1);
+        byte[] cf1 = Bytes.toBytes("cf1");
+        byte[] col = Bytes.toBytes("id");
+        byte[] value = Bytes.toBytes("101");
+        //put对象添加一列，需要参数列簇，列，值
+        put.addColumn(cf1,col,value);
+        table.put(put);
+        conn.close();
+    }
+    /**
+     * 根据rowkey,列簇，列，查询value
+     * @throws Exception
+     */
+    @Test
+    public void testGet() throws Exception{
+        Configuration conf = HBaseConfiguration.create();
+        Connection conn = ConnectionFactory.createConnection(conf);
+        TableName tableName = TableName.valueOf("default:test");
+        Table table = conn.getTable(tableName);
+        byte[] row2 = Bytes.toBytes("row1");
+        //通过get对象，执行对表中一行的get操作
+        Get get_row2 = new Get(row2);
+        Result r = table.get(get_row2);
+        byte[] cf1 = Bytes.toBytes("cf1");
+        byte[] col = Bytes.toBytes("id");
+        byte[] idvalue = r.getValue(cf1,col);
+        System.out.println(Bytes.toString(idvalue));
+    }
+}</code></pre><h3>hbase中的一些概念</h3><h5>写前日志</h5><p>WAL,"write ahead log"，写前日志。位于、hbase/meta下，表的操作先写WAL里<br>如果插入大量数据<br>    table.setAutoFlush(false);//关闭表的自动flush<br>    put.setWriteToWAL(false);//关闭写前日志<br>    table.flushCommits();//提交日志<br></p><h5>hbase基于hdfs</h5><p>相同列簇的数据存放在一个文件中。hdfs://ip:port/hbase/data/${名称空间}/${表名}/${区域名称}/${列簇名称}/${文件名}<br>[WAL目录结构构成]<br><span>	</span>hdfs://s201:8020/hbase/WALs/${区域服务器名称,主机名,端口号,时间戳}/<br></p><p></p><h5>client端交互过程</h5><span>	</span>0.hbase集群启动时，master负责分配区域到指定区域服务器。<br><span>	</span>1.联系zk，找出meta表所在rs(regionserver)<br><span>		</span>/hbase/meta-region-server<br><span>	</span>2.定位row key,找到对应region server<span>	</span><br><span>	</span>3.缓存信息在本地。<br><span>	</span>4.联系RegionServer<br><span>	</span>5.HRegionServer负责open HRegion对象，为每个列族创建Store对象，Store包含多个StoreFile实例，<br><span>	</span>  他们是对HFile的轻量级封装。每个Store还对应了一个MemStore，用于内存存储数据。            </div>
+                </div>

@@ -1,0 +1,346 @@
+---
+layout:     post
+title:      Hbase 数据迁移的常见方式（四）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/kinglyjn/article/details/77685672				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<blockquote>
+  <p>要使用Hadoop，需要将现有的各种类型的数据库或数据文件中的数据导入HBase。一般而言，有三种常见方式：使用HBase的API中的Put方法，使用HBase 的bulk load工具和使用定制的MapReduce Job方式。本文均有详细描述。</p>
+</blockquote>
+
+
+
+<h3 id="数据导入hbase的常见方法">数据导入hbase的常见方法</h3>
+
+<p>数据的来源：</p>
+
+<ul>
+<li>日志</li>
+<li>RDBMS</li>
+</ul>
+
+<p><br></p>
+
+<p>导入的常见方法：</p>
+
+<ul>
+<li><p>使用hbase put API（sqoop、kettle）</p>
+
+<ul><li>使用HBase的API中的Put是最直接的方法，用法也很容易学习。但针对大部分情况，它并非都是最高效的方式。当需要将海量数据在规定时间内载入HBase中时，效率问题体现得尤为明显。待处理的数据量一般都是巨大的，这也许是为何我们选择了HBase而不是其他数据库的原因。在项目开始之前，你就该思考如何将所有能够很好的将数据转移进HBase，否则之后可能面临严重的性能问题。</li></ul></li>
+<li><p>使用hbase内置的importtsv 或 自定义的MR job</p>
+
+<ul><li>importtsv 是从TSV文件直接加载内容至HBase的一个内置工具。它通过运行一个MapReduce Job，将数据从TSV文件中直接写入HBase的表或者写入一个HBase的自有格式数据文件。importtsv工具默认直接将数据加载到hbase数据库。</li></ul></li>
+<li><p><code>bulk load方式快速加载巨量数据（优雅常用）</code></p>
+
+<p>hbase支持bulk load的入库方式，它是利用hbase的数据信息按照特定的格式存储在hdfs这一原理，直接在hdfs中生成持久化的HFile数据格式文件，然后上传至合适的位置，即完成巨量数据快速入库的方法。配合mapreduce完成，高效便捷，而且不占用region资源，在大数据量写入时能极大地提高写入效率，并降低对hbase节点的写入压力。</p>
+
+<ol><li>hbase自带的<code>importtsv</code>工具默认直接将数据加载到hbase数据库，我们也可以选择先生成HFile数据文件，importtsv源码参照 hbase-server-0.98.6-hadoop2.jar的org.apache.hadoop.hbase.mapreduce:ImportTsv类。</li>
+<li>如果使用importtsv工具生成HFile数据文件，还需要使用hbase自带的MR工具<code>completebulkload</code>来将生成的hfile文件移动到hbase regions对应的hdfs路径，以完成hbase数据的加载。</li></ol>
+
+<pre class="prettyprint"><code class="language-shell hljs livecodeserver">$ hadoop-<span class="hljs-number">2.5</span><span class="hljs-number">.0</span>/bin/yarn jar hbase-<span class="hljs-number">0.98</span><span class="hljs-number">.6</span>-hadoop2/lib/hbase-server-<span class="hljs-number">0.98</span><span class="hljs-number">.6</span>-hadoop2.jar importtsv
+...
+By default importtsv will <span class="hljs-built_in">load</span> data directly <span class="hljs-keyword">into</span> HBase. To instead generate
+HFiles <span class="hljs-operator">of</span> data <span class="hljs-built_in">to</span> prepare <span class="hljs-keyword">for</span> <span class="hljs-operator">a</span> bulk data <span class="hljs-built_in">load</span>, pass <span class="hljs-operator">the</span> option:
+-Dimporttsv.bulk.output=/path/<span class="hljs-keyword">for</span>/output
+Note: <span class="hljs-keyword">if</span> you <span class="hljs-built_in">do</span> <span class="hljs-operator">not</span> use this option, <span class="hljs-keyword">then</span> <span class="hljs-operator">the</span> target table must already exist <span class="hljs-operator">in</span> HBase
+
+Other options that may be specified <span class="hljs-operator">with</span> -D <span class="hljs-built_in">include</span>:
+-Dimporttsv.skip.bad.<span class="hljs-keyword">lines</span>=<span class="hljs-constant">false</span> - fail <span class="hljs-keyword">if</span> encountering <span class="hljs-operator">an</span> invalid <span class="hljs-built_in">line</span>
+<span class="hljs-string">'-Dimporttsv.separator=|'</span> - eg separate <span class="hljs-command"><span class="hljs-keyword">on</span> <span class="hljs-title">pipes</span> <span class="hljs-title">instead</span> <span class="hljs-title">of</span> <span class="hljs-title">tabs</span></span>
+-Dimporttsv.timestamp=currentTimeAsLong - use <span class="hljs-operator">the</span> specified timestamp <span class="hljs-keyword">for</span> <span class="hljs-operator">the</span> import
+-Dimporttsv.mapper.class=my.Mapper - A user-defined Mapper <span class="hljs-built_in">to</span> use instead <span class="hljs-operator">of</span> org.apache.hadoop.hbase.mapreduce.TsvImporterMapper
+-Dmapred.job.name=jobName - use <span class="hljs-operator">the</span> specified mapreduce job name <span class="hljs-keyword">for</span> <span class="hljs-operator">the</span> import
+For performance consider <span class="hljs-operator">the</span> following options:
+-Dmapred.map.tasks.speculative.execution=<span class="hljs-constant">false</span>
+-Dmapred.reduce.tasks.speculative.execution=<span class="hljs-constant">false</span></code></pre></li>
+</ul>
+
+<p><br></p>
+
+
+
+<h3 id="使用hbase-put-api向hbase导入数据">使用hbase put API向hbase导入数据</h3>
+
+<p>下面我们将通过单个客户端向hbase导入MySQL数据。</p>
+
+<p>数据合并最常见的应用场景就是从已经存在的关系型数据库将数据导入到HBase中。对于此类型任务，最简单直接的方式就是从一个单独的客户端获取数据，然后通过HBase的API中Put方法将数据存入HBase中。这种方式适合处理数据不是太多的情况。</p>
+
+<p>本节描述的是使用Put方法将MySQL数据导入HBase中的方式。所有的操作均是在一个单独的客户端执行，并且不会使用到MapReduce。本节将会带领你通过HBase Shell创建HBase表格，通过Java来连接集群，并将数据导入HBase。</p>
+
+<p>1) 数据准备工作</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-comment">-- 数据源：mysql 数据结构(测试数据55480条，耗时90s)</span>
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> <span class="hljs-string">`company`</span> (
+  <span class="hljs-string">`id`</span> bigint(<span class="hljs-number">20</span>) <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">NULL</span> AUTO_INCREMENT,
+  <span class="hljs-string">`city`</span> <span class="hljs-keyword">varchar</span>(<span class="hljs-number">255</span>) <span class="hljs-keyword">DEFAULT</span> <span class="hljs-keyword">NULL</span>,
+  <span class="hljs-string">`eMail`</span> <span class="hljs-keyword">varchar</span>(<span class="hljs-number">255</span>) <span class="hljs-keyword">DEFAULT</span> <span class="hljs-keyword">NULL</span>,
+  <span class="hljs-string">`name`</span> <span class="hljs-keyword">varchar</span>(<span class="hljs-number">255</span>) <span class="hljs-keyword">DEFAULT</span> <span class="hljs-keyword">NULL</span>,
+  <span class="hljs-string">`num`</span> <span class="hljs-keyword">int</span>(<span class="hljs-number">11</span>) <span class="hljs-keyword">DEFAULT</span> <span class="hljs-string">'0'</span>,
+  <span class="hljs-string">`priority`</span> <span class="hljs-keyword">int</span>(<span class="hljs-number">11</span>) <span class="hljs-keyword">DEFAULT</span> <span class="hljs-string">'0'</span>,
+  <span class="hljs-string">`state`</span> <span class="hljs-keyword">int</span>(<span class="hljs-number">11</span>) <span class="hljs-keyword">DEFAULT</span> <span class="hljs-string">'0'</span>,
+  <span class="hljs-string">`total_num`</span> <span class="hljs-keyword">int</span>(<span class="hljs-number">11</span>) <span class="hljs-keyword">DEFAULT</span> <span class="hljs-string">'0'</span>,
+  <span class="hljs-string">`webAddress`</span> <span class="hljs-keyword">varchar</span>(<span class="hljs-number">255</span>) <span class="hljs-keyword">DEFAULT</span> <span class="hljs-keyword">NULL</span>,
+  <span class="hljs-keyword">PRIMARY</span> <span class="hljs-keyword">KEY</span> (<span class="hljs-string">`id`</span>),
+  <span class="hljs-keyword">UNIQUE</span> <span class="hljs-keyword">KEY</span> <span class="hljs-string">`UK_ccs28shnfm7mtptg0u7gjbm0a`</span> (<span class="hljs-string">`city`</span>,<span class="hljs-string">`name`</span>)
+) ENGINE=InnoDB AUTO_INCREMENT=<span class="hljs-number">77580</span> <span class="hljs-keyword">DEFAULT</span> CHARSET=utf8
+
+-- hbase 数据库表
+<span class="hljs-keyword">create</span> namespace <span class="hljs-string">'test'</span>
+<span class="hljs-keyword">create</span> <span class="hljs-string">'test:company'</span>, {NAME=&gt;<span class="hljs-string">'info'</span>, VERSIONS=&gt;<span class="hljs-string">'1'</span>}</span></code></pre>
+
+<p>2) 编写java api：</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">package</span> com.hbase.test03_etl_with_put_api;
+<span class="hljs-keyword">import</span> java.io.IOException;
+<span class="hljs-keyword">import</span> java.sql.Connection;
+<span class="hljs-keyword">import</span> java.sql.DriverManager;
+<span class="hljs-keyword">import</span> java.sql.PreparedStatement;
+<span class="hljs-keyword">import</span> java.sql.ResultSet;
+<span class="hljs-keyword">import</span> java.sql.Statement;
+<span class="hljs-keyword">import</span> org.apache.hadoop.conf.Configuration;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.HBaseConfiguration;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.client.HTable;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.client.Put;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.util.Bytes;
+
+<span class="hljs-javadoc">/**
+ * CompanyEtlWithPutTool
+ *<span class="hljs-javadoctag"> @author</span> zhangqingli
+ *
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">CompanyEtlWithPutTool</span> {</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">volatile</span> CompanyEtlWithPutTool INSTANCE;
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> CompanyEtlWithPutTool <span class="hljs-title">getInstance</span>() {
+        <span class="hljs-keyword">if</span> (INSTANCE==<span class="hljs-keyword">null</span>) {
+            <span class="hljs-keyword">synchronized</span> (CompanyEtlWithPutTool.class) {
+                <span class="hljs-keyword">if</span> (INSTANCE==<span class="hljs-keyword">null</span>) {
+                    INSTANCE = <span class="hljs-keyword">new</span> CompanyEtlWithPutTool();
+                }
+            }
+        }
+        <span class="hljs-keyword">return</span> INSTANCE;
+    }
+
+    <span class="hljs-javadoc">/**
+     * connect hbase
+     */</span>
+    <span class="hljs-keyword">public</span> HTable <span class="hljs-title">getHTable</span>(String tablename) <span class="hljs-keyword">throws</span> Exception {
+        Configuration conf = HBaseConfiguration.create();
+        <span class="hljs-keyword">return</span> <span class="hljs-keyword">new</span> HTable(conf, tablename);
+    }
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">releaseHTable</span>(HTable htable) {
+        <span class="hljs-keyword">try</span> {
+            <span class="hljs-keyword">if</span> (htable != <span class="hljs-keyword">null</span>) {
+                htable.close();
+            }
+        } <span class="hljs-keyword">catch</span> (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     * connect mysql
+     */</span>
+    <span class="hljs-keyword">public</span> Connection <span class="hljs-title">getConn</span>() <span class="hljs-keyword">throws</span> Exception {
+        String userName = <span class="hljs-string">"root"</span>;
+        String password = <span class="hljs-string">"23wesdxc"</span>;
+        String url = <span class="hljs-string">"jdbc:mysql://dbserver:3306/gsxt"</span>;
+        Class.forName(<span class="hljs-string">"com.mysql.jdbc.Driver"</span>).newInstance();
+        <span class="hljs-keyword">return</span> DriverManager.getConnection(url, userName, password);
+    }
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">releaseConn</span>(Connection conn, Statement st, ResultSet rs) {
+        <span class="hljs-keyword">try</span> {
+            <span class="hljs-keyword">if</span> (conn != <span class="hljs-keyword">null</span>) {
+                conn.close();
+            }
+            <span class="hljs-keyword">if</span> (st != <span class="hljs-keyword">null</span>) {
+                st.close();
+            }
+            <span class="hljs-keyword">if</span> (rs != <span class="hljs-keyword">null</span>) {
+                rs.close();
+            }
+        } <span class="hljs-keyword">catch</span> (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     * extract data from mysql to hbase
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">etl</span>() {
+        Connection conn = <span class="hljs-keyword">null</span>;
+        PreparedStatement pst = <span class="hljs-keyword">null</span>;
+        ResultSet rs = <span class="hljs-keyword">null</span>;
+        String sql = <span class="hljs-string">"select * from company"</span>;
+        HTable htable = <span class="hljs-keyword">null</span>;
+
+        <span class="hljs-keyword">try</span> {
+            conn = getConn();
+            htable = getHTable(<span class="hljs-string">"test:company"</span>);
+
+            pst = conn.prepareStatement(sql);
+            rs = pst.executeQuery();
+            <span class="hljs-keyword">while</span> (rs.next()) {
+                <span class="hljs-keyword">long</span> id = rs.getLong(<span class="hljs-string">"id"</span>);
+                String city = rs.getString(<span class="hljs-string">"city"</span>);
+                String email = rs.getString(<span class="hljs-string">"eMail"</span>);
+                String name = rs.getString(<span class="hljs-string">"name"</span>);
+                <span class="hljs-keyword">int</span> num = rs.getInt(<span class="hljs-string">"num"</span>);
+                <span class="hljs-keyword">int</span> priority = rs.getInt(<span class="hljs-string">"priority"</span>);
+                <span class="hljs-keyword">int</span> state = rs.getInt(<span class="hljs-string">"state"</span>);
+                <span class="hljs-keyword">int</span> total_num = rs.getInt(<span class="hljs-string">"total_num"</span>);
+                String webAddress = rs.getString(<span class="hljs-string">"webAddress"</span>);
+
+                System.out.println(city + <span class="hljs-string">" : "</span> + name);
+                String rowKey = id+<span class="hljs-string">""</span>;
+                Put put = <span class="hljs-keyword">new</span> Put(Bytes.toBytes(rowKey));
+                <span class="hljs-keyword">byte</span>[] family1 = Bytes.toBytes(<span class="hljs-string">"info"</span>);
+
+                <span class="hljs-keyword">if</span> (city!=<span class="hljs-keyword">null</span>) {
+                    put.add(family1, Bytes.toBytes(<span class="hljs-string">"city"</span>), Bytes.toBytes(city));
+                }
+                <span class="hljs-keyword">if</span> (email!=<span class="hljs-keyword">null</span>) {
+                    put.add(family1, Bytes.toBytes(<span class="hljs-string">"eMail"</span>), Bytes.toBytes(email));
+                }
+                <span class="hljs-keyword">if</span> (name!=<span class="hljs-keyword">null</span>) {
+                    put.add(family1, Bytes.toBytes(<span class="hljs-string">"name"</span>), Bytes.toBytes(name));
+                }
+                put.add(family1, Bytes.toBytes(<span class="hljs-string">"num"</span>), Bytes.toBytes(num));
+                put.add(family1, Bytes.toBytes(<span class="hljs-string">"priority"</span>), Bytes.toBytes(priority));
+                put.add(family1, Bytes.toBytes(<span class="hljs-string">"state"</span>), Bytes.toBytes(state));
+                put.add(family1, Bytes.toBytes(<span class="hljs-string">"total_num"</span>), Bytes.toBytes(total_num));
+                <span class="hljs-keyword">if</span> (webAddress!=<span class="hljs-keyword">null</span>) {
+                    put.add(family1, Bytes.toBytes(<span class="hljs-string">"webAddress"</span>),
+                            Bytes.toBytes(webAddress));
+                }
+                htable.put(put);
+            }
+        } <span class="hljs-keyword">catch</span> (Exception e) {
+            e.printStackTrace();
+        } <span class="hljs-keyword">finally</span> {
+            releaseConn(conn, pst, rs);
+            releaseHTable(htable);
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) {
+        getInstance().etl();
+    }
+}</code></pre>
+
+<p>3) 打包执行，在hbase shell客户端验证导入是否成功</p>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs livecodeserver">&gt; count <span class="hljs-string">'test:company'</span>
+<span class="hljs-number">55480</span> row(s) <span class="hljs-operator">in</span> <span class="hljs-number">2.1610</span> <span class="hljs-built_in">seconds</span></code></pre>
+
+<p><br></p>
+
+
+
+<h3 id="通过hbase-importtsv-mr任务导入数据">通过hbase-importtsv MR任务导入数据</h3>
+
+<p>1) 准备数据</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-comment">-- 数据源：mysql 数据结构(测试数据55480条，整个过程耗时16s)</span>
+<span class="hljs-comment">-- 这个参数是根据RFC4180文档设置的</span>
+<span class="hljs-comment">-- 该文档全称Common Format and MIME Type for Comma-Separated Values (CSV) Files</span>
+<span class="hljs-comment">-- 其中详细描述了CSV格式，其要点包括：</span>
+<span class="hljs-comment">-- (1)字段之间以制表符分隔，数据行之间以\r\n分隔；</span>
+<span class="hljs-comment">-- (2)字符串以半角双引号包围，字符串本身的双引号用两个双引号表示。</span>
+<span class="hljs-comment">-- (3)如果遇到访问权限的问题，可以查看和更改 /etc/apparmor.d/usr.sbin.mysqld 文件</span>
+<span class="hljs-operator"><span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> gsxt.company   
+<span class="hljs-keyword">into</span> outfile <span class="hljs-string">'/var/lib/mysql/company2.tsv'</span>   
+fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">'\t'</span> optionally enclosed <span class="hljs-keyword">by</span> <span class="hljs-string">'"'</span> escaped <span class="hljs-keyword">by</span> <span class="hljs-string">'"'</span>   
+lines terminated <span class="hljs-keyword">by</span> <span class="hljs-string">'\r\n'</span>;</span>
+
+<span class="hljs-operator"><span class="hljs-keyword">load</span> data infile <span class="hljs-string">'/var/lib/mysql/company2.tsv'</span>  
+<span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> gsxt.company 
+fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">'\t'</span>  optionally enclosed <span class="hljs-keyword">by</span> <span class="hljs-string">'"'</span> escaped <span class="hljs-keyword">by</span> <span class="hljs-string">'"'</span>  
+lines terminated <span class="hljs-keyword">by</span> <span class="hljs-string">'\r\n'</span>;</span>
+
+
+<span class="hljs-comment">-- hbase 数据库表</span>
+<span class="hljs-comment">-- create namespace 'test'</span>
+<span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-string">'test:company2'</span>, {NAME=&gt;<span class="hljs-string">'info'</span>, VERSIONS=&gt;<span class="hljs-string">'1'</span>}</span></code></pre>
+
+<p>2) 运行hbase自带的importtsv-MR任务向hbase导入数据</p>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs nginx"><span class="hljs-comment"># 设置环境变量HADOOP_CLASSPATH</span>
+<span class="hljs-title">export</span> HBASE_HOME=/opt/modules/hbase-<span class="hljs-number">0</span>.<span class="hljs-number">98</span>.<span class="hljs-number">6</span>-hadoop2
+export HADOOP_HOME=/opt/modules/hadoop-<span class="hljs-number">2</span>.<span class="hljs-number">5</span>.<span class="hljs-number">0</span>
+export HADOOP_CLASSPATH=`<span class="hljs-variable">${HBASE_HOME}</span>/bin/hbase mapredcp`
+
+<span class="hljs-comment"># 将准备的tsv数据文件上传到hdfs(我上传到了/user/datas/company2目录)</span>
+$ hadoop-<span class="hljs-number">2</span>.<span class="hljs-number">5</span>.<span class="hljs-number">0</span>/bin/hdfs -put /opt/datas/company2.tsv /user/ubuntu/datas/company2 
+
+<span class="hljs-comment"># 运行hbase自带的importtsv-MR任务向hbase导入数据</span>
+$ hadoop-<span class="hljs-number">2</span>.<span class="hljs-number">5</span>.<span class="hljs-number">0</span>/bin/yarn jar hbase-<span class="hljs-number">0</span>.<span class="hljs-number">98</span>.<span class="hljs-number">6</span>-hadoop2/lib/hbase-server-<span class="hljs-number">0</span>.<span class="hljs-number">98</span>.<span class="hljs-number">6</span>-hadoop2.jar importtsv \
+-Dimporttsv.columns=HBASE_ROW_KEY,\ <span class="hljs-built_in">info</span>:id,<span class="hljs-built_in">info</span>:city,<span class="hljs-built_in">info</span>:email,<span class="hljs-built_in">info</span>:name,<span class="hljs-built_in">info</span>:num,<span class="hljs-built_in">info</span>:priority,<span class="hljs-built_in">info</span>:state,<span class="hljs-built_in">info</span>:total_num,<span class="hljs-built_in">info</span>:webAddress \
+test:company2 \
+/user/ubuntu/datas/company2
+
+<span class="hljs-comment"># 在hbase shell客户端验证导入是否成功</span>
+count <span class="hljs-string">'test:company'</span>
+<span class="hljs-number">55480</span> row(s) in <span class="hljs-number">2</span>.<span class="hljs-number">1610</span> seconds</code></pre>
+
+<p><br></p>
+
+
+
+<h3 id="bulk-load方式快速加载巨量数据">bulk load方式快速加载巨量数据</h3>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs bash"><span class="hljs-comment"># 0. 在hdfs /user/datas/company3 (自定义)目录准备待导入的tsv数据文件</span>
+$ hadoop-<span class="hljs-number">2.5</span>.<span class="hljs-number">0</span>/bin/hdfs dfs -mkdir -p /user/ubuntu/datas/company3
+$ hadoop-<span class="hljs-number">2.5</span>.<span class="hljs-number">0</span>/bin/hdfs dfs -put /opt/datas/company3.tsv /user/ubuntu/datas/company3 
+
+<span class="hljs-comment"># 1. 设置HADOOP_CLASSPATH环境变量</span>
+<span class="hljs-keyword">export</span> HBASE_HOME=/opt/modules/hbase-<span class="hljs-number">0.98</span>.<span class="hljs-number">6</span>-hadoop2
+<span class="hljs-keyword">export</span> HADOOP_HOME=/opt/modules/hadoop-<span class="hljs-number">2.5</span>.<span class="hljs-number">0</span>
+<span class="hljs-keyword">export</span> HADOOP_CLASSPATH=`<span class="hljs-variable">${HBASE_HOME}</span>/bin/hbase mapredcp`
+
+
+<span class="hljs-comment"># 2. 使用importtsv工具生成HFile文件(注意：字段个数需要对应，不然不能生成hfile文件)</span>
+$ hadoop-<span class="hljs-number">2.5</span>.<span class="hljs-number">0</span>/bin/yarn jar hbase-<span class="hljs-number">0.98</span>.<span class="hljs-number">6</span>-hadoop2/lib/hbase-server-<span class="hljs-number">0.98</span>.<span class="hljs-number">6</span>-hadoop2.jar importtsv \
+-Dimporttsv.columns=HBASE_ROW_KEY,\
+info:id,info:city,info:email,info:name,info:num,info:priority,info:state,info:total_num,info:webAddress \
+-Dimporttsv.bulk.output=/user/ubuntu/hbase/hfileoutput \
+test:company3 \
+/user/ubuntu/datas/company3
+
+
+<span class="hljs-comment"># 3. 如果使用importtsv工具生成HFile数据文件，还需要使用hbase自带的MR工具completebulkload来将生成的hfile文件移动到hbase regions对应的hdfs路径，以完成hbase数据的加载。</span>
+$ hadoop-<span class="hljs-number">2.5</span>.<span class="hljs-number">0</span>/bin/yarn jar hbase-<span class="hljs-number">0.98</span>.<span class="hljs-number">6</span>-hadoop2/lib/hbase-server-<span class="hljs-number">0.98</span>.<span class="hljs-number">6</span>-hadoop2.jar completebulkload \
+/user/ubuntu/hbase/hfileoutput \
+test:company3
+
+<span class="hljs-comment"># 4. 在hbase shell客户端验证导入是否成功</span>
+count <span class="hljs-string">'test:company'</span>
+<span class="hljs-number">55480</span> row(s) <span class="hljs-keyword">in</span> <span class="hljs-number">2.1610</span> seconds</code></pre>
+
+<p>使用importtsv工具生成的HFile文件：</p>
+
+<p><img src="https://img-blog.csdn.net/20170829190926723?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQva2luZ2x5am4=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p><img src="https://img-blog.csdn.net/20170829190943450?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQva2luZ2x5am4=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>使用completebulkload工具将生成的hfile文件移动到hbase regions对应的hdfs路径，以完成hbase数据的加载，这个时候importtsv工具生成的HFile文件被【移动】到company3表regions对应的hdfs文件路径，数据加载完成。</p>
+
+<p><img src="https://img-blog.csdn.net/20170829193339852?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQva2luZ2x5am4=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

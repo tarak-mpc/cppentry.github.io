@@ -1,0 +1,140 @@
+---
+layout:     post
+title:      HBase分布式数据库基本原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/github_35758702/article/details/52311347				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="hbase概述"><font color="green">HBase概述</font></h2>
+
+<blockquote>
+  <p>&gt; <br>
+  * HBase是一个构建在HDFS上的分布式列存储系统 <br>
+  * HBase是基于Google BigTable模型开发的，典型的key/value系统 <br>
+  * HBase是Apache Hadoop生态系统中的重要一员，主要用于海量结构化数据存储 <br>
+  * 从逻辑上讲，HBase将数据按照表、行和列进行存储 <br>
+  * 与hadoop一样，Hbase目标主要依靠横向扩展，通过不断增加廉价的商用服务器，来增加计算和存储能力  </p>
+  
+  <p><img src="http://i.imgur.com/QD0A9NS.png" alt="" title=""></p>
+  
+  <h3 id="hbase表的特点"><font color="red">HBase表的特点</font></h3>
+  
+  <p>&gt; <br>
+  * 大：一个表可以有数十亿行，上百万列 <br>
+  * 无模式：每行都有一个可排序的主键和任意多的列，列可以根据需要动态的增加，同一张表中不同的行可以有截然不同的列 <br>
+  * 面向列：面向列（族）的存储和权限控制，列（族）独立检索 <br>
+  * 稀疏：空（null）列并不占用存储空间，表可以设计的非常稀疏 <br>
+  * 数据多版本：每个单元中的数据可以有多个版本，默认情况下版本号自动分配，是单元格插入时的时间戳 <br>
+  * 数据类型单一：Hbase中的数据都是字符串，没有类型 <br>
+  <img src="http://i.imgur.com/5LWdaj2.jpg" alt="" title=""> <br>
+  <img src="http://i.imgur.com/IboDtH5.jpg" alt="" title=""></p>
+  
+  <h3 id="hbase数据逻辑视图"><font color="red">HBase数据逻辑视图</font></h3>
+  
+  <p><img src="http://i.imgur.com/mJQrlH9.png" alt="" title="">  </p>
+  
+  <h3 id="物理存储"><font color="red">物理存储</font></h3>
+  
+  <p>&gt; <br>
+  * Table中所有行都按照row key的字典序排列 <br>
+  * Table在行的方向上分割为多个Region <br>
+  * Region按大小分割的，每个表开始只有一个region，随着数据增多，region不断增大，当增大到一个阀值的时候，region就会等分会两个新的region，之后会有越来越多的region <br>
+  * Region是Hbase中分布式存储和负载均衡的最小单元，不同Region分布到不同RegionServer上 <br>
+    如图：</p>
+  
+  <p><img src="http://i.imgur.com/e1VbIbg.png" alt="" title=""></p>
+</blockquote>
+
+
+
+<h2 id="hbase写入数据流程"><font color="green">HBase写入数据流程</font></h2>
+
+<blockquote>
+  <p>如下是官方给出的数据架构图： <br>
+  <img src="http://i.imgur.com/7z4LRnd.jpg" alt="" title=""></p>
+  
+  <blockquote>
+    <p>当client向HRegionServer发起Table.put(put)请求时，会将请求给对应的HRegion实例来处理。 <br>
+    第一步是决定数据是否需要写入由HLog类实现的预写日志中（WAL）； <br>
+    一旦数据被写入WAL中，数据接下来被放到memstore内存模块中。同时还会检查memstore是否已经满了， <br>
+    如果满了，就会被请求刷写内存数据到磁盘中，由后台另外一个HRegionServer的线程把数据写成HDFS <br>
+    中的一个新HFile，保存最后的写入序列号，系统就知道那些数据现在被持久化了。 <br>
+    （shell中的flush命令手动持久化内存数据）  </p>
+  </blockquote>
+</blockquote>
+
+
+
+<h2 id="hbase读取数据流程"><font color="green">HBase读取数据流程</font></h2>
+
+<blockquote>
+  <p><img src="http://i.imgur.com/Kjrahda.png" alt="" title="">  </p>
+  
+  <h3 id="root-和-meta-表"><font color="red">-ROOT- 和 .meta. 表</font></h3>
+  
+  <p>&gt; <br>
+  从存储结构和操作方法的角度来说，-ROOT-、.META.与其他表没有任何区别。 <br>
+  它们与众不同的地方是HBase用它们来存贮一个重要的系统信息： <br>
+  &gt; <br>
+  *  -ROOT-：记录.META.表的Region信息 <br>
+  *  .META.：记录用户表的Region信息 <br>
+  &gt; <br>
+  其中-ROOT-表本身只会有一个region，这样保证了只需要三次跳转，就能定位到任意region</p>
+  
+  <blockquote>
+    <h5 id="meta-表结构"><font color="blue">.meta. 表结构</font></h5>
+    
+    <p>&gt;</p>
+    
+    <blockquote>
+      <p>逻辑视图如下： <br>
+      <img src="http://i.imgur.com/Vm2mcog.png" alt="" title=""></p>
+      
+      <p>.META.表中每一行记录了一个Region的信息 <br>
+      <strong>1). RowKey</strong> <br>
+      RowKey就是Region Name，它的命名形式是TableName,StartKey,TimeStamp.Encoded. <br>
+      其中 Encoded 是TableName,StartKey,TimeStamp的md5值。 <br>
+      例如：  </p>
+
+<pre><code>mytable,,1438832261249.ea2b47e1eba6dd9a7121315cdf0e4f67.  
+</code></pre>
+      
+      <p>表名是mytable，StartKey为空，时间戳是1438832261249，前面三部分的md5是：  </p>
+
+<pre><code>echo -n "mytable,,1438832261249" | md5sum   # -n选项表示不输出换行符
+2ea2b47e1eba6dd9a7121315cdf0e4f67  -
+</code></pre>
+      
+      <p>2) <strong>Column Family</strong> <br>
+      .META.表有两个Column Family：info 和 historian <br>
+      其中info包含了三个Column：</p>
+      
+      <ul>
+      <li>regioninfo：region的详细信息，包括StartKey、EndKey以及Table信息等等  </li>
+      <li>server：管理该region的 RegionServer 的地址</li>
+      <li>serverstartcode：RegionServer 开始托管该region的时间  </li>
+      </ul>
+      
+      <p>这个Column Family是用来追踪一些region操作的，例如open、close、compact等。事实证明这非常的麻烦，所以在想出一个更好的解决方案之前我们禁用了此功能。这个列族会保持向后兼容。 <br>
+      综上所述，.META.表中保存了所有用户表的region信息，在进行数据访问时，它是必不可少的一个环节。当Region被拆分、合并或者重新分配的时候，都需要来修改这张表的内容 来保证访问数据时能够正确地定位region。  </p>
+    </blockquote>
+    
+    <h5 id="root-表结构"><font color="blue">-ROOT- 表结构</font></h5>
+    
+    <blockquote>
+      <p>当用户表特别大时，用户表的region也会非常多。.META.表存储了这些region信息，也变得非常大，这时.META.自己也需要划分成多个Region，托管到多个RegionServer上。 <br>
+      这时就出现了一个问题：当.META.被托管在多个RegionServer上，如何去定位.META.呢？HBase的做法是用另外一个表来记录.META.的Region信息，就和.META.记录用户表的Region信息一样，这个表就是-ROOT-表。 <br>
+      在 HBase Shell 里对-ROOT-表进行 scan 和 describe ：  </p>
+      
+      <p>逻辑视图如下： <br>
+      <img src="http://i.imgur.com/5cOeqAv.png" alt="" title=""> <br>
+      可以看出，除了没有historian列族之外，-ROOT-表的结构与.META.表的结构是一样的。另外，-ROOT-表的 RowKey 没有采用时间戳，也没有Encoded值，而是直接指定一个数字。 <br>
+      -ROOT-表永远只有一个Region，也就只会存放在一台RegionServer上。—— 在进行数据访问时，需要知道管理-ROOT-表的RegionServer的地址。这个地址被存在 ZooKeeper 中。</p>
+    </blockquote>
+  </blockquote>
+</blockquote>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

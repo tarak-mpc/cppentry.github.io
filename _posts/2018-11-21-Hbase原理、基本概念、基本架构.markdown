@@ -1,0 +1,119 @@
+---
+layout:     post
+title:      Hbase原理、基本概念、基本架构
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div class="bog_copyright" style="color:rgb(51,51,51);font-family:Arial, Console, Verdana, 'Courier New';">
+<p class="copyright_p" style="line-height:14px;border-left-style:solid;border-left-width:3px;border-left-color:rgb(228,28,30);color:rgb(102,102,102);font-size:14px;">
+<span style="text-align:right;color:rgb(51,51,51);font-size:12px;background-color:rgb(238,238,238);">目录</span><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#" rel="nofollow" title="系统根据文章中H1到H6标签自动生成文章目录" style="text-align:right;font-size:12px;color:rgb(51,102,153);text-decoration:none;background-color:rgb(238,238,238);">(?)</a></p>
+</div>
+<div style="color:rgb(51,51,51);font-family:Arial, Console, Verdana, 'Courier New';border:1px solid rgb(204,204,204);min-width:200px;background-color:rgb(238,238,238);">
+<p style="text-align:right;"><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#" rel="nofollow" title="收起" style="color:rgb(51,102,153);text-decoration:none;">[-]</a></p>
+<ol style="margin-left:14px;line-height:18.6667px;"><li><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#t0" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">概述</a></li><li><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#t1" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">Hbase数据模型</a></li><li><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#t2" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">Hbase物理模型</a></li><li><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#t3" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">HBase架构及基本组件</a></li><li><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#t4" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">Hbase使用场景</a></li><li><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#t5" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">Hbase与HDFS对比</a></li><li><a href="http://blog.csdn.net/woshiwanxin102213/article/details/17584043#t6" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">参考文档</a></li></ol></div>
+<div style="color:rgb(51,51,51);font-family:Arial, Console, Verdana, 'Courier New';clear:both;">
+</div>
+<div id="article_content" class="article_content" style="font-size:14px;line-height:26px;font-family:Arial;color:rgb(51,51,51);">
+<h2><a name="t0" style="color:rgb(51,102,153);"></a>
+</h2><ul><li><span style="font-family:'Microsoft YaHei';"><span style="font-size:18px;">概述</span></span></li></ul>
+<blockquote style="border:none;"></blockquote>
+<img src="https://img-blog.csdn.net/20131226152639203?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="" width="453" height="245" style="border:none;font-family:'Microsoft YaHei';"><br><br>
+HBase是一个构建在HDFS上的分布式列存储系统；<br>
+HBase是基于Google BigTable模型开发的，典型的key/value系统；<br>
+HBase是Apache Hadoop生态系统中的重要一员，主要用于海量结构化数据存储；<br>
+从逻辑上讲，HBase将数据按照表、行和列进行存储。<br>
+与hadoop一样，Hbase目标主要依靠横向扩展，通过不断增加廉价的商用服务器，来增加计算和存储能力。<br><span style="font-weight:bold;">Hbase表的特点</span><br>
+大：一个表可以有数<span style="color:rgb(255,0,0);">十亿行</span>，上<span style="color:rgb(255,0,0);">百万列</span>；<br>
+无模式：每行都有一个可排序的主键和任意多的列，列可以根据需要动态的增加，同一张表中<span style="color:rgb(255,0,0);">不同的行可以有截然不同的列</span>；<br>
+面向列：面向列（族）的存储和权限控制，<span style="color:rgb(255,0,0);">列（族）独立检索</span>；<br>
+稀疏：<span style="color:rgb(255,0,0);">空（null）列并不占用存储空间</span>，表可以设计的非常稀疏；<br>
+数据多版本：每个单元中的数据可以有多个版本，默认情况下版本号自动分配，是单元格插入时的时间戳；<br>
+数据类型单一：Hbase中的数据都是字符串，没有类型。<br><h2><a name="t1" style="color:rgb(51,102,153);"></a>
+</h2><ul><li><span style="font-family:'Microsoft YaHei';"><span style="font-size:18px;">Hbase数据模型</span></span></li></ul>
+<p><span style="font-family:'Microsoft YaHei';"><strong><img src="http://blog.csdn.net/woshiwanxin102213/article/details/17584043" alt="" style="border:none;">Hbase逻辑视图</strong></span></p>
+<img src="https://img-blog.csdn.net/20131226173226562?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" width="552" height="290" alt="" style="border:none;font-family:'Microsoft YaHei';"><br><blockquote style="border:none;">
+<p><span style="font-family:'Microsoft YaHei';color:rgb(255,0,0);">注意上图中的英文说明</span></p>
+</blockquote>
+<p><span style="font-family:'Microsoft YaHei';"><strong>Hbase基本概念</strong></span></p>
+<blockquote style="border:none;">RowKey：是Byte array，是表中每条记录的“主键”，方便快速查找，Rowkey的设计非常重要。<br>
+Column Family：列族，拥有一个名称(string)，包含一个或者多个相关列<br>
+Column：属于某一个columnfamily，familyName:columnName，每条记录可动态添加<br>
+Version Number：类型为Long，默认值是系统时间戳，可由用户自定义<br>
+Value(Cell)：Byte array<br></blockquote>
+<h2><a name="t2" style="color:rgb(51,102,153);"></a>
+</h2><ul><li><span style="font-size:18px;">Hbase物理模型</span></li></ul>
+每个column family存储在HDFS上的一个单独文件中，空值不会被保存。<br>
+Key 和 Version number在每个 column family中均有一份；<br>
+HBase 为每个值维护了多级索引，即：&lt;key, column family, column name, timestamp&gt;<br><p>物理存储:<br>
+1、Table中所有行都按照row key的字典序排列；<br>
+2、Table在行的方向上分割为多个Region；<br>
+3、Region按大小分割的，每个表开始只有一个region，随着数据增多，region不断增大，当增大到一个阀值的时候，region就会等分会两个新的region，之后会有越来越多的region；<br>
+4、Region是Hbase中分布式存储和负载均衡的最小单元，不同Region分布到不同RegionServer上。<br></p>
+<p></p>
+<blockquote style="border:none;"><img src="https://img-blog.csdn.net/20131226173410546?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="" width="400" height="221" style="border:none;font-family:'Microsoft YaHei';"><br></blockquote>
+5、Region虽然是分布式存储的最小单元，但并不是存储的最小单元。Region由一个或者多个Store组成，每个store保存一个columns family；每个Strore又由一个memStore和0至多个StoreFile组成，StoreFile包含HFile；memStore存储在内存中，StoreFile存储在HDFS上。<br><blockquote style="border:none;">
+<p><span style="font-family:'Microsoft YaHei';"><img src="https://img-blog.csdn.net/20131226173700718?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="" width="386" height="197" style="border:none;"></span></p>
+</blockquote>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><img src="http://blog.csdn.net/woshiwanxin102213/article/details/17584043" alt="" style="border:none;"><br></span></p>
+<p></p>
+<h2><a name="t3" style="color:rgb(51,102,153);"></a>
+</h2><ul><li><span style="font-family:'Microsoft YaHei';"><span style="font-size:18px;">HBase架构及基本组件</span></span></li></ul>
+<p></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><img src="http://blog.csdn.net/woshiwanxin102213/article/details/17584043" alt="" style="border:none;"><img src="https://img-blog.csdn.net/20131226173618000?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="" width="649" height="338" style="border:none;"></span></p>
+<p><span style="font-family:'Microsoft YaHei';"><strong>Hbase基本组件说明：</strong></span></p>
+<blockquote style="border:none;">
+<p></p>
+<p align="left"><strong>Client</strong></p>
+<p align="left">包含访问HBase的接口，并维护cache来加快对HBase的访问，比如region的位置信息</p>
+<p align="left"><strong>Master</strong></p>
+<p align="left">为Region server分配region</p>
+<p align="left">负责Region server的负载均衡</p>
+<p align="left">发现失效的Region server并重新分配其上的region</p>
+<p align="left">管理用户对table的增删改查操作</p>
+<p align="left"><strong>Region Server</strong></p>
+<p align="left">Regionserver维护region，处理对这些region的IO请求</p>
+<p align="left">Regionserver负责切分在运行过程中变得过大的region</p>
+<p align="left"><strong>Zookeeper作用</strong></p>
+<p align="left">通过选举，保证任何时候，集群中只有一个master，Master与RegionServers 启动时会向ZooKeeper注册</p>
+<p align="left">存贮所有Region的寻址入口</p>
+<p align="left">实时监控Region server的上线和下线信息。并实时通知给Master</p>
+<p align="left">存储HBase的schema和table元数据</p>
+<p align="left">默认情况下，HBase 管理ZooKeeper 实例，比如， 启动或者停止ZooKeeper<br></p>
+<p align="left">Zookeeper的引入使得Master不再是单点故障</p>
+</blockquote>
+<blockquote style="border:none;"><img src="https://img-blog.csdn.net/20131226173747937?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" width="294" height="298" alt="" style="border:none;font-family:'Microsoft YaHei';"></blockquote>
+<blockquote style="border:none;">
+<p><span style="font-family:'Microsoft YaHei';"><br></span></p>
+</blockquote>
+<strong><span style="font-family:'Microsoft YaHei';">Write-A</span><span style="font-family:'Microsoft YaHei';">head-Log（WAL）</span><span style="font-family:'Microsoft YaHei';"><img src="http://blog.csdn.net/woshiwanxin102213/article/details/17584043" alt="" style="border:none;"></span></strong><br><p><span style="font-family:'Microsoft YaHei';"><img src="http://blog.csdn.net/woshiwanxin102213/article/details/17584043" alt="" style="border:none;"><br></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><img src="https://img-blog.csdn.net/20131226173931750?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" width="424" height="241" alt="" style="border:none;"></span></p>
+<p><span style="font-family:'Microsoft YaHei';">该机制用于数据的容错和恢复：</span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(102,102,102);line-height:22px;">每个HRegionServer中都有一个HLog对象，HLog是一个实现Write Ahead Log的类，在每次用户操作写入MemStore的同时，也会写一份数据到HLog文件中（HLog文件格式见后续），HLog文件定期会滚动出新的，并删除旧的文件（已持久化到StoreFile中的数据）。当HRegionServer意外终止后，HMaster会通过Zookeeper感知到，HMaster首先会处理遗留的
+ HLog文件，将其中不同Region的Log数据进行拆分，分别放到相应region的目录下，然后再将失效的region重新分配，领取 到这些region的HRegionServer在Load Region的过程中，会发现有历史HLog需要处理，因此会Replay HLog中的数据到MemStore中，然后flush到StoreFiles，完成数据恢复</span></span></p>
+<p><span style="font-family:'Microsoft YaHei';"><strong></strong></span></p>
+<span style="font-weight:bold;">HBase容错性</span><br><strong>Master容错</strong>：Zookeeper重新选择一个新的Master<br>
+无Master过程中，数据读取仍照常进行；<br>
+无master过程中，region切分、负载均衡等无法进行；<br><strong>RegionServer容错</strong>：定时向Zookeeper汇报心跳，如果一旦时间内未出现心跳，Master将该RegionServer上的Region重新分配到其他RegionServer上，失效服务器上“预写”日志由主服务器进行分割并派送给新的RegionServer<br><strong>Zookeeper容错</strong>：Zookeeper是一个可靠地服务，一般配置3或5个Zookeeper实例<br><span style="font-weight:bold;">Region定位流程：</span><br><img src="https://img-blog.csdn.net/20131226174043000?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="" style="border:none;font-family:'Microsoft YaHei';"><br><span style="font-family:'Microsoft YaHei';"><strong>寻找RegionServer</strong></span><br><p><span style="font-family:'Microsoft YaHei';">ZooKeeper--&gt; -ROOT-(单Region)--&gt; .META.--&gt; 用户表</span></p>
+<span style="font-family:'Microsoft YaHei';"><strong>-ROOT-</strong></span><br><span style="font-family:'Microsoft YaHei';">表包含.META.表所在的region列表，该表只会有一个Region；</span><br><p><span style="font-family:'Microsoft YaHei';">Zookeeper中记录了-ROOT-表的location。</span></p>
+<span style="font-family:'Microsoft YaHei';"><strong>.META.</strong></span><br><p><span style="font-family:'Microsoft YaHei';">表包含所有的用户空间region列表，以及RegionServer的服务器地址。</span></p>
+<h2><a name="t4" style="color:rgb(51,102,153);"></a>
+</h2><ul><li><span style="font-family:'Microsoft YaHei';"><span style="font-size:18px;">Hbase使用场景</span></span></li></ul>
+<p><span style="font-family:'Microsoft YaHei';">storing large amounts  of data(100s of TBs)<br>
+need high write throughput<br>
+need efficient random access(key lookups) within large data sets<br>
+need to scale gracefully with data<br>
+for structured and semi-structured data<br>
+don't need fullRDMS capabilities(cross row/cross table transaction, joins,etc.)<br></span></p>
+<p><span style="font-family:'Microsoft YaHei';">大数据量存储，大数据量高并发操作</span></p>
+<p><span style="font-family:'Microsoft YaHei';">需要对数据随机读写操作</span></p>
+<p><span style="font-family:'Microsoft YaHei';">读写访问均是非常简单的操作</span></p>
+<h2><a name="t5" style="color:rgb(51,102,153);"></a>
+</h2><ul><li><span style="font-size:18px;">Hbase与HDFS对比</span></li></ul>
+<span style="font-family:'Microsoft YaHei';">两者都具有良好的容错性和扩展性，都可以扩展到成百上千个节点；</span><br><span style="font-family:'Microsoft YaHei';">HDFS适合批处理场景</span><br><span style="font-family:'Microsoft YaHei';">不支持数据随机查找</span><br><span style="font-family:'Microsoft YaHei';">不适合增量数据处理</span><br><p><span style="font-family:'Microsoft YaHei';">不支持数据更新</span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><img src="https://img-blog.csdn.net/20131226173115312?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd29zaGl3YW54aW4xMDIyMTM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" width="453" height="214" alt="" style="border:none;"></span></p>
+<div><span style="font-family:'Microsoft YaHei';font-size:12px;"><br></span></div>
+</div>
+            </div>
+                </div>

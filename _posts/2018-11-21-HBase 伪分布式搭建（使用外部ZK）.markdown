@@ -1,0 +1,171 @@
+---
+layout:     post
+title:      HBase 伪分布式搭建（使用外部ZK）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/HG_Harvey/article/details/79594552				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>环境说明： <br>
+(1).JDK 1.8 <br>
+(2).ZooKeeper 3.4.9 <br>
+(3).Hadoop 3 <br>
+(4).HBase 1.3.1</p>
+
+<p>以上一到三，笔者已经完成，HBase伪分布式安装配置如下</p>
+
+<ul>
+<li>配置环境变量</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-comment"># HBase Environment Variable</span>
+<span class="hljs-keyword">export</span> HBASE_HOME=/home/hadoop/software/hbase
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">$HBASE_HOME</span>/bin:<span class="hljs-variable">$PATH</span></code></pre>
+
+<p>配置hbase-env.sh</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-comment"># hbase 安装目录下创建logs目录</span>
+<span class="hljs-keyword">export</span> HBASE_LOG_DIR=<span class="hljs-variable">${HBASE_HOME}</span>/logs
+<span class="hljs-comment"># hbase 安装目录下创建pids目录</span>
+<span class="hljs-keyword">export</span> HBASE_PID_DIR=<span class="hljs-variable">${HBASE_HOME}</span>/pids
+<span class="hljs-comment"># 使用外部zk，true表示使用hbase自带的zk</span>
+<span class="hljs-keyword">export</span> HBASE_MANAGES_ZK=<span class="hljs-literal">false</span>
+<span class="hljs-comment"># 指定hadoop 目录</span>
+<span class="hljs-keyword">export</span> HADOOP_HOME=/home/hadoop/software/hadoop</code></pre>
+
+<ul>
+<li>配置hbase-site.xml</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-comment">&lt;!-- 设置HRegionServers共享目录，用来持久化 HBase
+         注意：hbase.rootdir 里面的 HDFS 地址是要跟 Hadoop 的 core-site.xml 里面的 fs.defaultFS 的 HDFS 的 IP 地址或者域名、端口必须一致
+    --&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.rootdir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://harvey:9000/hbase<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-comment">&lt;!-- 此处必须为true，不然hbase仍用自带的zk，若启动了外部的zookeeper，会导致冲突，hbase启动不起来 --&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.cluster.distributed<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-comment">&lt;!-- 本地文件系统的临时文件夹（/tmp会在重启时清除） --&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.tmp.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/home/hadoop/software/hbase/tmp<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-comment">&lt;!-- ZooKeeper的zoo.conf中的配置（dataDir所设定的位置），快照的存储位置 --&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.zookeeper.property.dataDir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/home/hadoop/software/zookeeper/data<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-comment">&lt;!-- ZooKeeper 会话超时。Hbase 把这个值传递给 zk 集群，向它推荐一个会话的最大超时时间 --&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>zookeeper.session.timeout<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>120000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-comment">&lt;!-- 当 regionserver 遇到 ZooKeeper session expired ， regionserver 将选择 restart 而不是 abort --&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.regionserver.restart.on.zk.expire<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-comment">&lt;!-- ZK位置（HBase使用外部ZK，hbase-env.sh中属性HBASE_MANAGES_ZK要设置为false），必须ZK数量必须为奇数，多个可用逗号分隔 --&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>  
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.zookeeper.quorum<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>  
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>localhost<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>  
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<ul>
+<li>启动hbase</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">start</span>-hbase.sh</span></code></pre>
+
+<p>查看进程</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ">6160 HMaster
+1780 SecondaryNameNode
+2006 ResourceManager
+2150 NodeManager
+1449 NameNode
+6954 Jps
+1563 DataNode
+2507 QuorumPeerMain
+6319 HRegionServer</code></pre>
+
+<ul>
+<li><p>访问HBase Web UI 界面（http:harvey:16010），harvey可替换为ip <br>
+<img src="//img-blog.csdn.net/20180317183302982?watermark/2/text/Ly9ibG9nLmNzZG4ubmV0L0hHX0hhcnZleQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></p></li>
+<li><p>访问Hadoop Web UI界面，可以看到多了一个hbase的目录 <br>
+<img src="//img-blog.csdn.net/20180317183713745?watermark/2/text/Ly9ibG9nLmNzZG4ubmV0L0hHX0hhcnZleQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></p></li>
+</ul>
+
+<p><strong>错误记录及解决</strong></p>
+
+<ul>
+<li>HBase 启动不起来，启动失败</li>
+</ul>
+
+<p>查看日志可以看到如下错误信息（HBase安装目录的log目录下）</p>
+
+<p><font color="red">Could not start ZK at requested port of 2181.  ZK was started at port: 2182.  Aborting as clients (e.g. shell) will not be able to find this ZK quorum.</font></p>
+
+<p>错误原因：已经启动ZK，但是HBase并没有使用外部的ZK，导致冲突</p>
+
+<p>解决方法： <br>
+1).hbase-env.sh 将 export HBASE_MANAGES_ZK 属性设置为false <br>
+2).hbase-site.xml 将 hbase.cluster.distributed 设置为true</p>
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.cluster.distributed<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span></code></pre>
+
+<ul>
+<li>HBase 访问HDFS拒绝连接</li>
+</ul>
+
+<p>查看日志，错误信息如下 <br>
+<font color="red">java.net.ConnectException: Call From harvey/192.168.191.65 to harvey:8020 failed on connection exception: java.net.ConnectException: 拒绝连接; For more details see: <a href="http://wiki.apache.org/hadoop/ConnectionRefused" rel="nofollow">http://wiki.apache.org/hadoop/ConnectionRefused</a></font></p>
+
+<p>解决方法如下：hbase-site.xml 中 hbase.rootdir 配置错误，harvey可以替换为ip地址</p>
+
+<p>错误：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.rootdir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://harvey/hbase<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span></code></pre>
+
+<p>正确：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.rootdir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://harvey:9000/hbase<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span></code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

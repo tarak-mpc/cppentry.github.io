@@ -1,0 +1,366 @@
+---
+layout:     post
+title:      Flume NG 简介及配置实战
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span>Flume 作为 cloudera 开发的实时日志收集系统，受到了业界的认可与广泛应用。Flume 初始的发行版本目前被统称为 Flume OG（original generation），属于 cloudera。但随着 FLume 功能的扩展，Flume OG 代码工程臃肿、核心组件设计不合理、核心配置不标准等缺点暴露出来，尤其是在 Flume OG 的最后一个发行版本 0.94.0 中，日志传输不稳定的现象尤为严重，为了解决这些问题，2011 年 10
+ 月 22 号，cloudera 完成了 Flume-728，对 Flume 进行了里程碑式的改动：重构核心组件、核心配置以及代码架构，重构后的版本统称为 Flume NG（next generation）；改动的另一原因是将 Flume 纳入 apache 旗下，cloudera Flume 改名为 Apache Flume。IBM 的这篇文章：《<a href="http://www.ibm.com/developerworks/cn/data/library/bd-1404flumerevolution/index.html" rel="nofollow"><span>Flume
+ NG：Flume 发展史上的第一次革命</span></a>》，从基本组件以及用户体验的角度阐述 Flume OG 到 Flume NG 发生的革命性变化。本文就不再赘述各种细枝末节了，不过这里还是简要提下 Flume NG （1.x.x）的主要变化：</span></p>
+<ul><li><span></span><span>sources和sinks 使用channels 进行链接</span></li><li><span></span><span>两个主要channel 。1，  in-memory channel  非持久性支持，速度快。2 ， JDBC-based channel 持久性支持。</span></li><li><span></span><span>不再区分逻辑和物理node，所有物理节点统称为 “agents”,每个agents 都能运行0个或多个sources 和sinks</span></li><li><span></span><span>不再需要master节点和对zookeeper的依赖，配置文件简单化。</span></li><li><span></span><span>插件化，一部分面对用户，工具或系统开发人员。</span></li><li><span></span><span>使用Thrift、Avro Flume sources 可以从flume0.9.4 发送 events  到flume 1.x</span></li></ul><p><span>注：本文所使用的 Flume 版本为 flume-1.4.0-cdh4.7.0，不需要额外的安装过程，解压缩即可用。 <br></span></p>
+<span id="OSC_h1_1"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h1 id="h1_0"><span><span>1、Flume 的</span><span></span><span>一些核心概念：</span><span></span><span></span></span></h1>
+<p><span></span></p>
+<table><tbody><tr><th>组件</th>
+<th>功能</th>
+</tr><tr><td>Agent</td>
+<td>使用JVM 运行Flume。每台机器运行一个agent，但是可以在一个agent中包含多个sources和sinks。</td>
+</tr><tr><td>Client</td>
+<td>生产数据，运行在一个独立的线程。</td>
+</tr><tr><td>Source</td>
+<td>从Client收集数据，传递给Channel。</td>
+</tr><tr><td>Sink</td>
+<td>从Channel收集数据，运行在一个独立线程。</td>
+</tr><tr><td>Channel</td>
+<td>连接 sources 和 sinks ，这个有点像一个队列。</td>
+</tr><tr><td>Events</td>
+<td>可以是日志记录、 avro 对象等。</td>
+</tr></tbody></table><span id="OSC_h2_2"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_1"><span><span>1.1 数</span><span></span><span>据流模型</span></span></h2>
+<p><span>Flume以agent为最小的独立运行单位。一个agent就是一个JVM。单agent由Source、Sink和Channel三大组件构成，如下图：</span></p>
+<p><span><img src="http://static.oschina.net/uploads/img/201407/08014622_8PBx.png" alt="Agent component diagram">  图一</span></p>
+<p><span>Flume的数据流由事件(Event)贯穿始终。事件是Flume的基本数据单位，它携带日志数据(字节数组形式)并且携带有头信息，这些Event由Agent外部的Source，比如上图中的Web Server生成。当Source捕获事件后会进行特定的格式化，然后Source会把事件推入(单个或多个)Channel中。你可以把Channel看作是一个缓冲区，它将保存事件直到Sink处理完该事件。Sink负责持久化日志或者把事件推向另一个Source。<br>
+很直白的设计，其中值得注意的是，Flume提供了大量内置的Source、Channel和Sink类型。不同类型的Source,Channel和Sink可以自由组合。组合方式基于用户设置的配置文件，非常灵活。比如：Channel可以把事件暂存在内存里，也可以持久化到本地硬盘上。Sink可以把日志写入HDFS, HBase，甚至是另外一个Source等等。<br>
+如果你以为Flume就这些能耐那就大错特错了。Flume支持用户建立多级流，也就是说，多个agent可以协同工作，并且支持Fan-in、Fan-out、Contextual Routing、Backup Routes。如下图所示：</span></p>
+<p><span><img src="http://static.oschina.net/uploads/img/201407/08014622_pD3e.png" alt="A fan-out flow using a (multiplexing) channel selector"></span></p>
+<span id="OSC_h2_3"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_2"><span>1.2 高可靠性</span></h2>
+<span>作为生产环境运行的软件，高可靠性是必须的。<br>
+从单agent来看，Flume使用基于事务的数据传递方式来保证事件传递的可靠性。Source和Sink被封装进一个事务。事件被存放在Channel中直到该事件被处理，Channel中的事件才会被移除。这是Flume提供的点到点的可靠机制。<br>
+从多级流来看，前一个agent的sink和后一个agent的source同样有它们的事务来保障数据的可靠性。<br></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span><span id="OSC_h2_4"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_3"><span>1.3 可恢复性</span></h2>
+<span>还是靠Channel。推荐使用FileChannel，事件持久化在本地文件系统里(性能较差)。<br></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span><span id="OSC_h1_5"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h1 id="h1_4"><span><span></span><span>2、Flume 整体架构介绍</span></span></h1>
+<p><span>Flume架构整体上看就是 <span>source</span>--&gt;c<span>hannel</span>--&gt;<span><span>sink </span></span>的三层架构（参见最上面的 图一），类似生成者和消费者的架构，他们之间通过queue（channel）传输，解耦。</span></p>
+<p><span>Source:完成对日志数据的收集，分成 transtion 和 event 打入到channel之中。 <br>
+Channel:主要提供一个队列的功能，对source提供中的数据进行简单的缓存。 <br>
+Sink:取出Channel中的数据，进行相应的存储文件系统，数据库，或者提交到远程服务器。 <br>
+对现有程序改动最小的使用方式是使用是直接读取程序原来记录的日志文件，基本可以实现无缝接入，不需要对现有程序进行任何改动。 <br>
+对于直接读取文件Source, 主要有两种方式： <br></span></p>
+<span id="OSC_h2_6"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_5"><span><span>2.1 Exec </span><span></span><span>source</span></span></h2>
+<span>可通过写Unix command的方式组织数据，最常用的就是tail -F [file]。<br>
+可以实现实时传输，但在flume不运行和脚本错误时，会丢数据，也不支持断点续传功能。因为没有记录上次文件读到的位置，从而没办法知道，下次再读时，从什么地方开始读。特别是在日志文件一直在增加的时候。flume的source挂了。等flume的source再次开启的这段时间内，增加的日志内容，就没办法被source读取到了。不过flume有一个execStream的扩展，可以自己写一个监控日志增加情况，把增加的日志，通过自己写的工具把增加的内容，传送给flume的node。再传送给sink的node。要是能在tail类的source中能支持，在node挂掉这段时间的内容，等下次node开启后在继续传送，那就更完美了。<br></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span><span id="OSC_h2_7"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_6"><span><span>2.2 Spooling </span><span></span><span>Directory Source</span></span></h2>
+<span>SpoolSource:是监测配置的目录下新增的文件，并将文件中的数据读取出来，可实现准实时。需要注意两点：1、拷贝到spool目录下的文件不可以再打开编辑。2、spool目录下不可包含相应的子目录。在实际使用的过程中，可以结合log4j使用，使用log4j的时候，将log4j的文件分割机制设为1分钟一次，将文件拷贝到spool的监控目录。log4j有一个TimeRolling的插件，可以把log4j分割的文件到spool目录。基本实现了实时的监控。Flume在传完文件之后，将会修改文件的后缀，变为.COMPLETED（后缀也可以在配置文件中灵活指定） <br>
+ExecSource，SpoolSource对比：ExecSource可以实现对日志的实时收集，但是存在Flume不运行或者指令执行出错时，将无法收集到日志数据，无法何证日志数据的完整性。SpoolSource虽然无法实现实时的收集数据，但是可以使用以分钟的方式分割文件，趋近于实时。如果应用无法实现以分钟切割日志文件的话，可以两种收集方式结合使用。 <br>
+Channel有多种方式：有MemoryChannel, JDBC Channel, MemoryRecoverChannel, FileChannel。MemoryChannel可以实现高速的吞吐，但是无法保证数据的完整性。MemoryRecoverChannel在官方文档的建议上已经建义使用FileChannel来替换。FileChannel保证数据的完整性与一致性。在具体配置FileChannel时，建议FileChannel设置的目录和程序日志文件保存的目录设成不同的磁盘，以便提高效率。 <br>
+Sink在设置存储数据时，可以向文件系统中，数据库中，hadoop中储数据，在日志数据较少时，可以将数据存储在文件系中，并且设定一定的时间间隔保存数据。在日志数据较多时，可以将相应的日志数据存储到Hadoop中，便于日后进行相应的数据分析。 <br></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span><span id="OSC_h1_8"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h1 id="h1_7"><span><span></span><span></span><span>3、常用架构、功能配</span><span></span><span>置示例</span></span></h1>
+<span id="OSC_h2_9"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_8"><span><span>3.1 先来个简</span><span></span><span>单的：单节点 Flume 配置</span></span></h2>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs tcl"><code class="hljs tcl"><span class="hljs-comment"># example.conf: A single-node Flume configuration</span>
+
+<span class="hljs-comment"># Name the components on this agent</span>
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+<span class="hljs-comment"># Describe/configure the source</span>
+a1.sources.r1.type = netcat
+a1.sources.r1.bind = localhost
+a1.sources.r1.port = <span class="hljs-number">44444</span>
+
+<span class="hljs-comment"># Describe the sink</span>
+a1.sinks.k1.type = logger
+
+<span class="hljs-comment"># Use a channel which buffers events in memory</span>
+a1.channels.c1.type = <span class="hljs-keyword">memory</span>
+a1.channels.c1.capacity = <span class="hljs-number">1000</span>
+a1.channels.c1.transactionCapacity = <span class="hljs-number">100</span>
+
+<span class="hljs-comment"># Bind the source and sink to the channel</span>
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1</code></pre>
+<span>将上述配置存为：example.conf</span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<p><span>然后我们就可以启动 Flume 了：</span></p>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs lua"><code class="hljs lua">bin/flume-ng agent <span class="hljs-comment">--conf conf --conf-file example.conf --name a1 -Dflume.root.logger=INFO,console</span></code></pre>
+<p><span>PS：-Dflume.root.logger=INFO,console 仅为 debug 使用，请勿生产环境生搬硬套，否则大量的日志会返回到终端。。。</span></p>
+<p><span><span><span>-c/--conf 后跟配置目录，-f/</span></span><span><span>--conf-file </span></span><span><span></span></span><span><span>后跟具体的配置文件，-n/</span></span><span><span>--name</span></span><span><span></span></span><span><span> 指定agent的名称</span></span><span><span></span></span><br></span></p>
+<span>然后我们再开一个 shell 终端窗口，telnet 上配置中侦听的端口，就可以发消息看到效果了：</span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs erlang"><code class="hljs erlang">$ telnet localhost <span class="hljs-number">44444</span>
+Trying <span class="hljs-number">127.0</span>.<span class="hljs-number">0.1</span>...
+Connected to localhost.localdomain (<span class="hljs-number">127.0</span>.<span class="hljs-number">0.1</span>).
+Escape character is '^]'.
+Hello world! &lt;ENTER&gt;
+OK</code></pre>
+<span>Flume 终端窗口此时会打印出如下信息，就表示成功了：</span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs less"><code class="hljs less"><span class="hljs-selector-tag">12</span>/<span class="hljs-selector-tag">06</span>/<span class="hljs-selector-tag">19</span> <span class="hljs-selector-tag">15</span><span class="hljs-selector-pseudo">:32</span><span class="hljs-selector-pseudo">:19</span> <span class="hljs-selector-tag">INFO</span> <span class="hljs-selector-tag">source</span><span class="hljs-selector-class">.NetcatSource</span>: <span class="hljs-selector-tag">Source</span> <span class="hljs-selector-tag">starting</span>
+<span class="hljs-selector-tag">12</span>/<span class="hljs-selector-tag">06</span>/<span class="hljs-selector-tag">19</span> <span class="hljs-selector-tag">15</span><span class="hljs-selector-pseudo">:32</span><span class="hljs-selector-pseudo">:19</span> <span class="hljs-selector-tag">INFO</span> <span class="hljs-selector-tag">source</span><span class="hljs-selector-class">.NetcatSource</span>: <span class="hljs-selector-tag">Created</span> <span class="hljs-selector-tag">serverSocket</span><span class="hljs-selector-pseudo">:sun.nio.ch.ServerSocketChannelImpl</span><span class="hljs-selector-attr">[/127.0.0.1:44444]</span>
+<span class="hljs-selector-tag">12</span>/<span class="hljs-selector-tag">06</span>/<span class="hljs-selector-tag">19</span> <span class="hljs-selector-tag">15</span><span class="hljs-selector-pseudo">:32</span><span class="hljs-selector-pseudo">:34</span> <span class="hljs-selector-tag">INFO</span> <span class="hljs-selector-tag">sink</span><span class="hljs-selector-class">.LoggerSink</span>: <span class="hljs-selector-tag">Event</span>: { <span class="hljs-attribute">headers</span>:{} <span class="hljs-attribute">body</span>: <span class="hljs-number">48</span> <span class="hljs-number">65</span> <span class="hljs-number">6</span>C <span class="hljs-number">6</span>C <span class="hljs-number">6</span>F <span class="hljs-number">20</span> <span class="hljs-number">77</span> <span class="hljs-number">6</span>F <span class="hljs-number">72</span> <span class="hljs-number">6</span>C <span class="hljs-number">64</span> <span class="hljs-number">21</span> <span class="hljs-number">0</span>D          Hello world!. }</code></pre>
+<span>至此，咱们的第一个 Flume Agent 算是部署成功了！</span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span><span id="OSC_h2_10"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_9"><span><span>3.2 </span><span>单节点 Flume</span><span></span><span> 直接写入 HDFS</span></span></h2>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs bash"><code class="hljs bash"><span class="hljs-comment"># Define a memory channel called ch1 on agent1</span>
+agent1.channels.ch1.type = memory
+agent1.channels.ch1.capacity = 100000
+agent1.channels.ch1.transactionCapacity = 100000
+agent1.channels.ch1.keep-alive = 30
+
+<span class="hljs-comment"># Define an Avro source called avro-source1 on agent1 and tell it</span>
+<span class="hljs-comment"># to bind to 0.0.0.0:41414. Connect it to channel ch1.</span>
+<span class="hljs-comment">#agent1.sources.avro-source1.channels = ch1</span>
+<span class="hljs-comment">#agent1.sources.avro-source1.type = avro</span>
+<span class="hljs-comment">#agent1.sources.avro-source1.bind = 0.0.0.0</span>
+<span class="hljs-comment">#agent1.sources.avro-source1.port = 41414</span>
+<span class="hljs-comment">#agent1.sources.avro-source1.threads = 5</span>
+
+<span class="hljs-comment">#define source monitor a file</span>
+agent1.sources.avro-source1.type = <span class="hljs-built_in">exec</span>
+agent1.sources.avro-source1.shell = /bin/bash -c
+agent1.sources.avro-source1.command = tail -n +0 -F /home/storm/tmp/id.txt
+agent1.sources.avro-source1.channels = ch1
+agent1.sources.avro-source1.threads = 5
+
+<span class="hljs-comment"># Define a logger sink that simply logs all events it receives</span>
+<span class="hljs-comment"># and connect it to the other end of the same channel.</span>
+agent1.sinks.log-sink1.channel = ch1
+agent1.sinks.log-sink1.type = hdfs
+agent1.sinks.log-sink1.hdfs.path = hdfs://192.168.1.111:8020/flumeTest
+agent1.sinks.log-sink1.hdfs.writeFormat = Text
+agent1.sinks.log-sink1.hdfs.fileType = DataStream
+agent1.sinks.log-sink1.hdfs.rollInterval = 0
+agent1.sinks.log-sink1.hdfs.rollSize = 1000000
+agent1.sinks.log-sink1.hdfs.rollCount = 0
+agent1.sinks.log-sink1.hdfs.batchSize = 1000
+agent1.sinks.log-sink1.hdfs.txnEventMax = 1000
+agent1.sinks.log-sink1.hdfs.callTimeout = 60000
+agent1.sinks.log-sink1.hdfs.appendTimeout = 60000
+
+<span class="hljs-comment"># Finally, now that we've defined all of our components, tell</span>
+<span class="hljs-comment"># agent1 which ones we want to activate.</span>
+agent1.channels = ch1
+agent1.sources = avro-source1
+agent1.sinks = <span class="hljs-built_in">log</span>-sink1</code></pre>
+<span>启动如下命令，就可以在 hdfs 上看到效果了。</span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<p><span><span>../bin/flume-ng agent --conf ../conf/ -f flume_directHDFS.conf -n agent1 -Dflume.root.logger=INFO,console</span><br></span></p>
+<p><span>PS：实际环境中有这样的需求，通过在多个agent端tail日志，发送给collector，collector再把数据收集，统一发送给HDFS存储起来，当HDFS文件大小超过一定的大小或者超过在规定的时间间隔会生成一个文件。<br>
+Flume 实现了两个Trigger，分别为SizeTriger（在调用HDFS输出流写的同时，count该流已经写入的大小总和，若超过一定大小，则创建新的文件和输出流，写入操作指向新的输出流，同时close以前的输出流）和TimeTriger（开启定时器，当到达该点时，自动创建新的文件和输出流，新的写入重定向到该流中，同时close以前的输出流）。<br></span></p>
+<span id="OSC_h2_11"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_10"><span><span>3.3 来一个常见架</span><span></span><span>构：多 agent 汇聚写入 HDFS</span></span></h2>
+<p><span><img src="http://static.oschina.net/uploads/img/201407/08014623_InSH.png" alt="A fan-in flow using Avro RPC to consolidate events in one place"></span></p>
+<p><br></p>
+<span id="OSC_h3_12"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h3 id="h3_11"><span>3.3.1 在各个webserv日志机上配置 Flume Client</span></h3>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs haskell"><code class="hljs haskell"><span class="hljs-meta"># clientMainAgent</span>
+<span class="hljs-title">clientMainAgent</span>.channels = c1
+<span class="hljs-title">clientMainAgent</span>.sources  = s1
+<span class="hljs-title">clientMainAgent</span>.sinks    = k1 k2
+<span class="hljs-meta"># clientMainAgent sinks group</span>
+<span class="hljs-title">clientMainAgent</span>.sinkgroups = g1
+<span class="hljs-meta"># clientMainAgent Spooling Directory Source</span>
+<span class="hljs-title">clientMainAgent</span>.sources.s1.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = spooldir</span></span>
+<span class="hljs-title">clientMainAgent</span>.sources.s1.spoolDir  =/dsap/rawdata/
+<span class="hljs-title">clientMainAgent</span>.sources.s1.fileHeader = true
+<span class="hljs-title">clientMainAgent</span>.sources.s1.deletePolicy =immediate
+<span class="hljs-title">clientMainAgent</span>.sources.s1.batchSize =<span class="hljs-number">1000</span>
+<span class="hljs-title">clientMainAgent</span>.sources.s1.channels =c1
+<span class="hljs-title">clientMainAgent</span>.sources.s1.deserializer.maxLineLength =<span class="hljs-number">1048576</span>
+<span class="hljs-meta"># clientMainAgent FileChannel</span>
+<span class="hljs-title">clientMainAgent</span>.channels.c1.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = file</span></span>
+<span class="hljs-title">clientMainAgent</span>.channels.c1.checkpointDir = /var/flume/fchannel/spool/checkpoint
+<span class="hljs-title">clientMainAgent</span>.channels.c1.dataDirs = /var/flume/fchannel/spool/<span class="hljs-class"><span class="hljs-keyword">data</span></span>
+<span class="hljs-title">clientMainAgent</span>.channels.c1.capacity = <span class="hljs-number">200000000</span>
+<span class="hljs-title">clientMainAgent</span>.channels.c1.keep-alive = <span class="hljs-number">30</span>
+<span class="hljs-title">clientMainAgent</span>.channels.c1.write-timeout = <span class="hljs-number">30</span>
+<span class="hljs-title">clientMainAgent</span>.channels.c1.checkpoint-timeout=<span class="hljs-number">600</span>
+<span class="hljs-meta"># clientMainAgent Sinks</span>
+<span class="hljs-meta"># k1 sink</span>
+<span class="hljs-title">clientMainAgent</span>.sinks.k1.channel = c1
+<span class="hljs-title">clientMainAgent</span>.sinks.k1.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = avro</span></span>
+<span class="hljs-meta"># connect to CollectorMainAgent</span>
+<span class="hljs-title">clientMainAgent</span>.sinks.k1.hostname = flume115
+<span class="hljs-title">clientMainAgent</span>.sinks.k1.port = <span class="hljs-number">41415</span> 
+<span class="hljs-meta"># k2 sink</span>
+<span class="hljs-title">clientMainAgent</span>.sinks.k2.channel = c1
+<span class="hljs-title">clientMainAgent</span>.sinks.k2.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = avro</span></span>
+<span class="hljs-meta"># connect to CollectorBackupAgent</span>
+<span class="hljs-title">clientMainAgent</span>.sinks.k2.hostname = flume116
+<span class="hljs-title">clientMainAgent</span>.sinks.k2.port = <span class="hljs-number">41415</span>
+<span class="hljs-meta"># clientMainAgent sinks group</span>
+<span class="hljs-title">clientMainAgent</span>.sinkgroups.g1.sinks = k1 k2
+<span class="hljs-meta"># load_balance type</span>
+<span class="hljs-title">clientMainAgent</span>.sinkgroups.g1.processor.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = load_balance</span></span>
+<span class="hljs-title">clientMainAgent</span>.sinkgroups.g1.processor.backoff   = true
+<span class="hljs-title">clientMainAgent</span>.sinkgroups.g1.processor.selector  = random</code></pre>
+<p><span><span>../bin/flume-ng agent --conf ../conf/ -f flume_Consolidation.conf -n clientMainAgent -Dflume.root.logger=DEBUG,console</span><br></span></p>
+<span id="OSC_h3_13"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h3 id="h3_12"><span>3.3.2 在汇聚节点配置 Flume server</span></h3>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs haskell"><code class="hljs haskell"><span class="hljs-meta"># collectorMainAgent</span>
+<span class="hljs-title">collectorMainAgent</span>.channels = c2
+<span class="hljs-title">collectorMainAgent</span>.sources  = s2
+<span class="hljs-title">collectorMainAgent</span>.sinks    =k1 k2
+<span class="hljs-meta"># collectorMainAgent AvroSource</span>
+<span class="hljs-meta">#</span>
+<span class="hljs-title">collectorMainAgent</span>.sources.s2.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = avro</span></span>
+<span class="hljs-title">collectorMainAgent</span>.sources.s2.bind = flume115
+<span class="hljs-title">collectorMainAgent</span>.sources.s2.port = <span class="hljs-number">41415</span>
+<span class="hljs-title">collectorMainAgent</span>.sources.s2.channels = c2
+
+<span class="hljs-meta"># collectorMainAgent FileChannel</span>
+<span class="hljs-meta">#</span>
+<span class="hljs-title">collectorMainAgent</span>.channels.c2.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = file</span></span>
+<span class="hljs-title">collectorMainAgent</span>.channels.c2.checkpointDir =/opt/var/flume/fchannel/spool/checkpoint
+<span class="hljs-title">collectorMainAgent</span>.channels.c2.dataDirs = /opt/var/flume/fchannel/spool/<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">data</span></span></span><span class="hljs-class">,/work/flume/fchannel/spool/</span><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">data</span></span></span></span>
+<span class="hljs-title">collectorMainAgent</span>.channels.c2.capacity = <span class="hljs-number">200000000</span>
+<span class="hljs-title">collectorMainAgent</span>.channels.c2.transactionCapacity=<span class="hljs-number">6000</span>
+<span class="hljs-title">collectorMainAgent</span>.channels.c2.checkpointInterval=<span class="hljs-number">60000</span>
+<span class="hljs-meta"># collectorMainAgent hdfsSink</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = hdfs</span></span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.channel = c2
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.path = hdfs://db-cdh-cluster/flume%{dir}
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.filePrefix =k2_%{file}
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.inUsePrefix =_
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.inUseSuffix =.tmp
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.rollSize = <span class="hljs-number">0</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.rollCount = <span class="hljs-number">0</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.rollInterval = <span class="hljs-number">240</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.writeFormat = <span class="hljs-type">Text</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.fileType = <span class="hljs-type">DataStream</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.batchSize = <span class="hljs-number">6000</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k2.hdfs.callTimeout = <span class="hljs-number">60000</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.<span class="hljs-class"><span class="hljs-keyword"><span class="hljs-class"><span class="hljs-keyword">type</span></span></span><span class="hljs-class"> = hdfs</span></span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.channel = c2
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.path = hdfs://db-cdh-cluster/flume%{dir}
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.filePrefix =k1_%{file}
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.inUsePrefix =_
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.inUseSuffix =.tmp
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.rollSize = <span class="hljs-number">0</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.rollCount = <span class="hljs-number">0</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.rollInterval = <span class="hljs-number">240</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.writeFormat = <span class="hljs-type">Text</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.fileType = <span class="hljs-type">DataStream</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.batchSize = <span class="hljs-number">6000</span>
+<span class="hljs-title">collectorMainAgent</span>.sinks.k1.hdfs.callTimeout = <span class="hljs-number">60000</span></code></pre>
+<p><span><span>../bin/flume-ng agent --conf ../conf/ -f flume_Consolidation.conf -n collectorMainAgent -Dflume.root.logger=DEBUG,console</span><br></span></p>
+<span>上面采用的就是类似 cs 架构，各个 flume agent 节点先将各台机器的日志汇总到 Consolidation 节点，然后再由这些节点统一写入 HDFS，并且采用了负载均衡的方式，你还可以配置高可用的模式等等。</span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span><span id="OSC_h1_14"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h1 id="h1_13"><span>4、可能遇到的问题：</span></h1>
+<span id="OSC_h2_15"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_14"><span><span>4.1 OOM </span><span></span><span>问题：</span></span></h2>
+<pre><code class="language-css"><code class="hljs css"><span class="hljs-selector-tag">flume</span> 报错：
+<span class="hljs-selector-tag">java</span><span class="hljs-selector-class">.lang</span><span class="hljs-selector-class">.OutOfMemoryError</span>: <span class="hljs-selector-tag">GC</span> <span class="hljs-selector-tag">overhead</span> <span class="hljs-selector-tag">limit</span> <span class="hljs-selector-tag">exceeded</span>
+或者：
+<span class="hljs-selector-tag">java</span><span class="hljs-selector-class">.lang</span><span class="hljs-selector-class">.OutOfMemoryError</span>: <span class="hljs-selector-tag">Java</span> <span class="hljs-selector-tag">heap</span> <span class="hljs-selector-tag">space</span>
+<span class="hljs-selector-tag">Exception</span> <span class="hljs-selector-tag">in</span> <span class="hljs-selector-tag">thread</span> "<span class="hljs-selector-tag">SinkRunner-PollingRunner-DefaultSinkProcessor</span>" <span class="hljs-selector-tag">java</span><span class="hljs-selector-class">.lang</span><span class="hljs-selector-class">.OutOfMemoryError</span>: <span class="hljs-selector-tag">Java</span> <span class="hljs-selector-tag">heap</span> <span class="hljs-selector-tag">space</span></code></code></pre>
+<p><span>Flume 启动时的最大堆内存大小默认是 20M，线上环境很容易 OOM，因此需要你在 flume-env.sh 中添加 JVM 启动参数: <br></span></p>
+<pre><code class="language-java"><code class="hljs ini"><span class="hljs-attr">JAVA_OPTS</span>=<span class="hljs-string">"-Xms8192m -Xmx8192m -Xss256k -Xmn2g -XX:+UseParNewGC -XX:+UseConcMarkSweepGC -XX:-UseGCOverheadLimit"</span></code></code></pre>
+<p><span>然后在启动 agent 的时候一定要带上 -c conf 选项，否则 flume-env.sh 里配置的环境变量不会被加载生效。</span></p>
+<p><span>具体参见：</span></p>
+<p><span><a href="http://stackoverflow.com/questions/1393486/error-java-lang-outofmemoryerror-gc-overhead-limit-exceeded" rel="nofollow"><span>http://stackoverflow.com/questions/1393486/error-java-lang-outofmemoryerror-gc-overhead-limit-exceeded</span></a></span></p>
+<p><a href="http://marc.info/?l=flume-user&amp;m=138933303305433&amp;w=2" rel="nofollow"><span>http://marc.info/?l=flume-user&amp;m=138933303305433&amp;w=2</span></a><span></span></p>
+<span id="OSC_h2_16"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_15"><span>4.2 JDK 版本不兼容问题：</span></h2>
+<p><span></span></p>
+<pre><code class="language-java"><code class="hljs groovy"><span class="hljs-number">2014</span><span class="hljs-number">-07</span><span class="hljs-number">-07</span> <span class="hljs-number">14</span>:<span class="hljs-number">44</span>:<span class="hljs-number">17</span>,<span class="hljs-number">902</span> (agent-shutdown-hook) [WARN - org.apache.flume.sink.hdfs.HDFSEventSink.stop(HDFSEventSink.<span class="hljs-string">java:</span><span class="hljs-number">504</span>)] Exception <span class="hljs-keyword">while</span> closing <span class="hljs-string">hdfs:</span><span class="hljs-comment">//192.168.1.111:8020/flumeTest/FlumeData. Exception follows.</span>
+java.lang.<span class="hljs-string">UnsupportedOperationException:</span> This is supposed to be overridden by subclasses.
+        at com.google.protobuf.GeneratedMessage.getUnknownFields(GeneratedMessage.<span class="hljs-string">java:</span><span class="hljs-number">180</span>)
+        at org.apache.hadoop.hdfs.protocol.proto.ClientNamenodeProtocolProtos$GetFileInfoRequestProto.getSerializedSize(ClientNamenodeProtocolProtos.<span class="hljs-string">java:</span><span class="hljs-number">30108</span>)
+        at com.google.protobuf.AbstractMessageLite.toByteString(AbstractMessageLite.<span class="hljs-string">java:</span><span class="hljs-number">49</span>)
+        at org.apache.hadoop.ipc.ProtobufRpcEngine$Invoker.constructRpcRequest(ProtobufRpcEngine.<span class="hljs-string">java:</span><span class="hljs-number">149</span>)
+        at org.apache.hadoop.ipc.ProtobufRpcEngine$Invoker.invoke(ProtobufRpcEngine.<span class="hljs-string">java:</span><span class="hljs-number">193</span>)</code></code></pre>
+<p><span>把你的 jdk7 换成 jdk6 试试。</span></p>
+<span id="OSC_h2_17"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_16"><span>4.3 小文件写入 HDFS 延时的问题</span></h2>
+<p><span>其实上面 3.2 中已有说明，flume 的 sink 已经实现了几种最主要的持久化触发器：</span></p>
+<p><span>比如按大小、按间隔时间、按消息条数等等，针对你的文件过小迟迟没法写入 HDFS 持久化的问题，</span></p>
+<p><span>那是因为你此时还没有满足持久化的条件，比如你的行数还没有达到配置的阈值或者大小还没达到等等，</span></p>
+<p><span>可以针对上面 3.2 小节的配置微调下，例如：</span></p>
+<p><span></span></p>
+<pre><code class="language-cpp"><code class="hljs cpp">agent1.sinks.<span class="hljs-built_in">log</span>-sink1.hdfs.rollInterval = <span class="hljs-number">20</span></code></code></pre>
+<span>当迟迟没有新日志生成的时候，如果你想很快的 flush，那么让它每隔 20s flush 持久化一下，agent 会根据多个条件，优先执行满足条件的触发器。</span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<p><span>下面贴一些常见的持久化触发器：</span></p>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs typescript"><code class="hljs typescript"># <span class="hljs-built_in">Number</span> of seconds to wait before rolling current file (<span class="hljs-keyword">in</span> <span class="hljs-number">600</span> seconds)
+agent.sinks.sink.hdfs.rollInterval=<span class="hljs-number">600</span>
+
+# File size to trigger roll, <span class="hljs-keyword">in</span> bytes (<span class="hljs-number">256</span>Mb)
+agent.sinks.sink.hdfs.rollSize = <span class="hljs-number">268435456</span>
+
+# never roll based on <span class="hljs-built_in">number</span> of events
+agent.sinks.sink.hdfs.rollCount = <span class="hljs-number">0</span>
+
+# Timeout after which inactive files <span class="hljs-keyword">get</span> closed (<span class="hljs-keyword">in</span> seconds)
+agent.sinks.sink.hdfs.idleTimeout = <span class="hljs-number">3600</span>
+
+agent.sinks.HDFS.hdfs.batchSize = <span class="hljs-number">1000</span></code></pre>
+<span>更多关于 sink 的触发机制与参数配置请参见： </span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span><a href="http://flume.apache.org/FlumeUserGuide.html#hdfs-sink" rel="nofollow"><span>http://flume.apache.org/FlumeUserGuide.html#hdfs-sink</span></a><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<p><span><a href="http://stackoverflow.com/questions/20638498/flume-not-writing-to-hdfs-unless-killed" rel="nofollow"><span>http://stackoverflow.com/questions/20638498/flume-not-writing-to-hdfs-unless-killed</span></a></span></p>
+<p><span><span>注意：对于 HDFS 来说应当竭力避免小文件问题，所以请慎重对待你配置的持久化触发机制。</span></span></p>
+<span id="OSC_h2_18"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_17"><span><span>4.4 数据重复写入、丢失问题</span></span></h2>
+<p><span><span>Flume的HDFSsink在数据写入/读出Channel时，都有Transcation的保证。当Transaction失败时，会回滚，然后重试。但由于HDFS不可修改文件的内容，假设有1万行数据要写入HDFS，而在写入5000行时，网络出现问题导致写入失败，Transaction回滚，然后重写这10000条记录成功，就会导致第一次写入的5000行重复。这些问题是 HDFS 文件系统设计上的特性缺陷，并不能通过简单的Bugfix来解决。我们只能关闭批量写入，单条事务保证，或者启用监控策略，两端对数。<br></span></span></p>
+<p><span><span>Memory和exec的方式可能会有数据丢失，file 是 end to end 的可靠性保证的，但是性能较前两者要差。</span></span></p>
+<p><span>end to end、store on failure 方式 ACK 确认时间设置过短（特别是高峰时间）也有可能引发数据的重复写入</span><span>。</span></p>
+<span id="OSC_h2_19"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_18"><span>4.5 tail 断点续传的问题：</span></h2>
+<p><span>可以在 tail 传的时候记录行号，下次再传的时候，取上次记录的位置开始传输，类似：</span></p>
+<p><span></span></p>
+<pre class="brush:shell; toolbar: true; auto-links: false; hljs groovy"><code class="hljs groovy">agent1.sources.avro-source1.command = <span class="hljs-regexp">/usr/</span>local<span class="hljs-regexp">/bin/</span>tail  -n +$(tail -n1 <span class="hljs-regexp">/home/</span>storm<span class="hljs-regexp">/tmp/</span>n) --max-unchanged-stats=<span class="hljs-number">600</span> -F  <span class="hljs-regexp">/home/</span>storm<span class="hljs-regexp">/tmp/</span>id.txt | awk <span class="hljs-string">'ARNGIND==1{i=$0;next}{i++; if($0~/文件已截断/)i=0; print i &gt;&gt; "/home/storm/tmp/n";print $1"---"i}'</span> <span class="hljs-regexp">/home/</span>storm<span class="hljs-regexp">/tmp/</span>n -</code></pre>
+<span>需要注意如下几点：</span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<p><span><span>（1）文件被 rotation 的时候，需要同步更新你的断点记录“指针”，</span></span></p>
+<p><span><span>（2）需要按文件名来追踪文件，</span></span></p>
+<p><span><span>（3）flume 挂掉后需要累加断点续传“指针”</span></span></p>
+<p><span><span>（4）flume 挂掉后，如果恰好文件被 rotation，那么会有丢数据的风险，</span></span></p>
+<p><span><span>       只能监控尽快拉起或者加逻辑判断文件大小重置指针。</span></span></p>
+<p><span>（5）tail 注意你的版本，请更新 coreutils 包到最新。</span></p>
+<span id="OSC_h2_20"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h2 id="h2_19"><span>4.6 在 Flume 中如何修改、丢弃、按预定义规则分类存储数据？</span></h2>
+<p><span>这里你需要利用 Flume 提供的拦截器（Interceptor）机制来满足上述的需求了，具体请参考下面几个链接：</span></p>
+<p><span><span>（1）Flume-NG源码阅读之Interceptor(原创)  </span></span></p>
+<p><span><span><a href="http://www.cnblogs.com/lxf20061900/p/3664602.html" rel="nofollow">http://www.cnblogs.com/lxf20061900/p/3664602.html</a><br></span></span></p>
+<p><span><span>（2）Flume-NG自定义拦截器</span></span></p>
+<p><span><span><a href="http://sep10.com/posts/2014/04/15/flume-interceptor/" rel="nofollow">http://sep10.com/posts/2014/04/15/flume-interceptor/</a><br></span></span></p>
+<p><span><span>（3）Flume-ng生产环境实践（四）实现log格式化interceptor</span></span></p>
+<p><span><span><a href="http://blog.csdn.net/rjhym/article/details/8450728" rel="nofollow">http://blog.csdn.net/rjhym/article/details/8450728</a></span></span></p>
+<p><span><span>（4）flume-ng如何根据源文件名输出到HDFS文件名</span></span></p>
+<p><span><span><a href="http://abloz.com/2013/02/19/flume-ng-output-according-to-the-source-file-name-to-the-hdfs-file-name.html" rel="nofollow">http://abloz.com/2013/02/19/flume-ng-output-according-to-the-source-file-name-to-the-hdfs-file-name.html</a></span></span></p>
+<span id="OSC_h1_21"></span><span style="color:rgb(61,70,77);font-family:'Pingfang SC', STHeiti, 'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', SimSun, sans-serif;font-size:16px;line-height:28px;background-color:rgb(248,248,248);"></span>
+<h1 id="h1_20"><span><span>5、Refe</span><span></span><span>r：</span></span></h1>
+<p><span><span>（1）</span><span>scribe、chukwa、kafka、flume日志系统对比  </span></span></p>
+<p><span><a href="http://www.ttlsa.com/log-system/scribe-chukwa-kafka-flume-log-system-contrast/" rel="nofollow"><span>http://www.ttlsa.com/log-system/scribe-chukwa-kafka-flume-log-system-contrast/</span></a></span></p>
+<p><span><span>（2）</span><span>关于Flume-ng那些事  </span><a href="http://www.ttlsa.com/?s=flume" rel="nofollow"><span>http://www.ttlsa.com/?s=flume</span></a></span></p>
+<p><span>         </span><span>关于Flume-ng那些事（三）：常见架构测试  </span><a href="http://www.ttlsa.com/log-system/about-flume-ng-3/" rel="nofollow"><span>http://www.ttlsa.com/log-system/about-flume-ng-3/</span></a></p>
+<p><span><span>（3）</span><span></span><span></span><span></span><span>Flume 1.4.0 User Guide</span></span></p>
+<p><span><a href="http://archive.cloudera.com/cdh4/cdh/4/flume-ng-1.4.0-cdh4.7.0/FlumeUserGuide.html" rel="nofollow"><span>http://archive.cloudera.com/cdh4/cdh/4/flume-ng-1.4.0-cdh4.7.0/FlumeUserGuide.html</span></a></span></p>
+<p><span><span>（4）</span><span>flume日志采集  </span><a href="http://blog.csdn.net/sunmeng_007/article/details/9762507" rel="nofollow"><span>http://blog.csdn.net/sunmeng_007/article/details/9762507</span></a></span></p>
+<p><span><span>（5）</span><span>Flume-NG + HDFS + HIVE 日志收集分析</span></span></p>
+<p><span><a href="http://eyelublog.wordpress.com/2013/01/13/flume-ng-hdfs-hive-%E6%97%A5%E5%BF%97%E6%94%B6%E9%9B%86%E5%88%86%E6%9E%90/" rel="nofollow"><span>http://eyelublog.wordpress.com/2013/01/13/flume-ng-hdfs-hive-%E6%97%A5%E5%BF%97%E6%94%B6%E9%9B%86%E5%88%86%E6%9E%90/</span></a></span></p>
+<p><span><span>（6）</span><span>【Twitter Storm系列】flume-ng+Kafka+Storm+HDFS 实时系统搭建</span></span></p>
+<p><span><a href="http://blog.csdn.net/weijonathan/article/details/18301321" rel="nofollow"><span>http://blog.csdn.net/weijonathan/article/details/18301321</span></a></span></p>
+<p><span><span>（7）</span><span>Flume-NG + HDFS + PIG 日志收集分析</span></span></p>
+<p><span><a href="http://hi.baidu.com/life_to_you/item/a98e2ec3367486dbef183b5e" rel="nofollow"><span>http://hi.baidu.com/life_to_you/item/a98e2ec3367486dbef183b5e</span></a><span></span></span></p>
+<p><span><span>flume 示例一收集tomcat日志  </span><a href="http://my.oschina.net/88sys/blog/71529" rel="nofollow"><span>http://my.oschina.net/88sys/blog/71529</span></a></span></p>
+<p><span><span>flume-ng 多节点集群示例  </span><a href="http://my.oschina.net/u/1401580/blog/204052" rel="nofollow"><span>http://my.oschina.net/u/1401580/blog/204052</span></a></span></p>
+<p><span><span>试用flume-ng 1.1</span><span></span><span>  </span><span><a href="http://heipark.iteye.com/blog/1617995" rel="nofollow"><span>http://heipark.iteye.com/blog/1617995</span></a></span><span></span><span></span><span></span><span></span><span></span><br></span></p>
+<p><span>（8）Flafka: Apache Flume Meets Apache Kafka for Event Processing</span></p>
+<p><span><span><a href="http://blog.cloudera.com/blog/2014/11/flafka-apache-flume-meets-apache-kafka-for-event-processing/" rel="nofollow"><span>http://blog.cloudera.com/blog/2014/11/flafka-apache-flume-meets-apache-kafka-for-event-processing/</span></a></span></span></p>
+<p><span><span>（9）</span><span>Flume-ng的原理和使用</span></span></p>
+<p><span><a href="http://segmentfault.com/blog/javachen/1190000002532284" rel="nofollow"><span>http://segmentfault.com/blog/javachen/1190000002532284</span></a></span></p>
+<p><span><span>（10）</span><span>基于Flume的美团日志收集系统(一)架构和设计</span></span></p>
+<p><span><a href="http://tech.meituan.com/mt-log-system-arch.html" rel="nofollow"><span>http://tech.meituan.com/mt-log-system-arch.html</span></a></span></p>
+<p><span><span>（11）</span><span>基于Flume的美团日志收集系统(二)改进和优化</span></span></p>
+<p><span><span><a href="http://tech.meituan.com/mt-log-system-optimization.html" rel="nofollow">http://tech.meituan.com/mt-log-system-optimization.html</a></span><span></span><span></span><span></span><span></span><span></span><span></span></span></p>
+<p><span><span>（12）</span><span>How-to: Do Real-Time Log Analytics with Apache Kafka, Cloudera Search, and Hue</span></span></p>
+<p><span><span><a href="http://blog.cloudera.com/blog/2015/02/how-to-do-real-time-log-analytics-with-apache-kafka-cloudera-search-and-hue/" rel="nofollow">http://blog.cloudera.com/blog/2015/02/how-to-do-real-time-log-analytics-with-apache-kafka-cloudera-search-and-hue/</a></span><span></span><span></span></span></p>
+<p><span><span><span>（13）</span><span>Real-time analytics in Apache Flume - Part 1</span></span></span></p>
+<p><span><span><a href="http://jameskinley.tumblr.com/post/57704266739/real-time-analytics-in-apache-flume-part-1" rel="nofollow"><span>http://jameskinley.tumblr.com/post/57704266739/real-time-analytics-in-apache-flume-part-1</span></a></span></span></p>
+            </div>
+                </div>

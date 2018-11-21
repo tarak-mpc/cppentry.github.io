@@ -1,0 +1,132 @@
+---
+layout:     post
+title:      HBase1.2.4使用Java API创建和删除Table示例程序
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>刚开始接触Java API操作HBase，碰到了zookeeper，hbase的配置问题，后来报错：HMaser is not running的错误，最后从HBase官网找了一段Java操作HBase的Demo，稍微改动一下，运行成功了！直接上代码：</p>
+<p><br></p>
+<p></p>
+<pre><code class="language-java">import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.*;
+import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.Connection;
+import org.apache.hadoop.hbase.client.ConnectionFactory;
+import org.apache.hadoop.hbase.io.compress.Compression.Algorithm;
+
+import java.io.IOException;
+
+
+/**
+ * Created by SunYanbo on 2016/11/10.
+ */
+public class HBaseOper {
+    private static final String TABLE_NAME = "myuser";
+    private static final String CF_DEFAULT = "info";
+
+    public static void createOrOverwrite(Admin admin, HTableDescriptor table) throws IOException {
+        TableName tableName = table.getTableName();
+
+        if(admin.isTableDisabled(tableName)){
+            //如果表不可用，先置为可用
+            admin.enableTable(tableName);
+        }
+        if (admin.tableExists(tableName)) {
+            admin.disableTable(tableName);
+            System.out.print("Table exists, delete it first... ");
+            admin.deleteTable(tableName);
+            System.out.print("Table deleted, Done. ");
+        }
+        admin.createTable(table);
+    }
+
+    public static void createSchemaTables(Configuration config) throws IOException {
+        try {
+
+            Connection connection = ConnectionFactory.createConnection(config);
+            Admin admin = connection.getAdmin();
+
+            HTableDescriptor table = new HTableDescriptor(TableName.valueOf(TABLE_NAME));
+            table.addFamily(new HColumnDescriptor(CF_DEFAULT).setCompressionType(Algorithm.NONE));
+
+            System.out.print("Creating table. ");
+            createOrOverwrite(admin, table);
+            System.out.println(" Done.");
+        }catch (Exception e){
+            System.out.println("Creating table failure：" + e.getMessage());
+            System.out.println("Creating table failure：" + e.getStackTrace());
+            System.out.println("Creating table failure：" + e.getCause());
+        }
+    }
+
+    public static void modifySchema (Configuration config) throws IOException {
+        try{
+
+            Connection connection = ConnectionFactory.createConnection(config);
+            Admin admin = connection.getAdmin();
+
+            TableName tableName = TableName.valueOf(TABLE_NAME);
+            if (!admin.tableExists(tableName)) {
+                System.out.println("Table does not exist.");
+                System.exit(-1);
+            }
+
+            HTableDescriptor table = admin.getTableDescriptor(tableName);
+
+            // Update existing table
+            HColumnDescriptor newColumn = new HColumnDescriptor("name");
+            newColumn.setCompactionCompressionType(Algorithm.GZ);
+            newColumn.setMaxVersions(HConstants.ALL_VERSIONS);
+            admin.addColumn(tableName, newColumn);
+
+            // Update existing column family
+            HColumnDescriptor existingColumn = new HColumnDescriptor(CF_DEFAULT);
+            existingColumn.setCompactionCompressionType(Algorithm.GZ);
+            existingColumn.setMaxVersions(HConstants.ALL_VERSIONS);
+            table.modifyFamily(existingColumn);
+            admin.modifyTable(tableName, table);
+
+            // Disable an existing table
+            admin.disableTable(tableName);
+
+            // Delete an existing column family
+            admin.deleteColumn(tableName, CF_DEFAULT.getBytes("UTF-8"));
+
+            // Delete a table (Need to be disabled first)
+            admin.deleteTable(tableName);
+        }catch (Exception e){
+            System.out.println("modifySchema failure：" + e.getMessage());
+            System.out.println("modifySchema failure：" + e.getStackTrace());
+            System.out.println("modifySchema failure：" + e.getCause());
+        }
+    }
+
+    public static void main(String[] args) throws IOException {
+        Configuration config = HBaseConfiguration.create();
+
+        /*
+        * 默认会从项目编译后的calss文件的根目录寻找文件，可以不指定
+        * 添加资源文件有以下几种方式：
+        * */
+        /**
+         * config.addResource(input);
+         */
+        //InputStream input = HBaseOper.class.getResourceAsStream("/core-site.xml");
+        //config.addResource(input);
+
+        /**
+         * 官网给出的例子程序使用的是这种方法
+         * config.addResource(Path);
+         * Path可以为绝对路径，例如：D:\\Program Files\\hbase\\conf\\hbase-site.xml
+         */
+        //Add any necessary configuration files (hbase-site.xml, core-site.xml)
+        //config.addResource(new Path("D:\\Program Files\\hbase\\conf\\hbase-site.xml"));
+        //config.addResource(new Path("D:\\Program Files\\hadoop\\etc\\hadoop\\core-site.xml"));
+        createSchemaTables(config);
+        //modifySchema(config);
+    }
+}</code></pre><br><br><p></p>
+            </div>
+                </div>

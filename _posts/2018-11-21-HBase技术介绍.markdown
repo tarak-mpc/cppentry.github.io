@@ -1,0 +1,165 @@
+---
+layout:     post
+title:      HBase技术介绍
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="0-原文章地址">0 <a href="http://www.searchtb.com/2011/01/understanding-hbase.html" rel="nofollow">原文章地址</a></h1>
+
+<h1 id="1-hbase简介">1 HBase简介</h1>
+
+<ul>
+<li>HBase：Hadoop Database，是一个高可靠性、高性能、<font color="red">面向列</font>、可伸缩的分布式存储系统，利用HBase技术可在廉价PC Server上搭建起大规模结构化存储集群。</li>
+</ul>
+
+<p><img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0010.jpg" alt="此处输入图片的描述" title=""></p>
+
+<ul>
+<li>Hadoop <strong>HDFS</strong>为HBase提供了高可靠性的底层<strong>存储支持</strong>；Hadoop <strong>MapReduce</strong>为HBase提供了高性能的<strong>计算能力</strong>；<strong>Zookeeper</strong>为HBase提供了<strong>稳定服务和failover机制</strong>；<strong>Pig和Hive</strong>还为HBase提供了<strong>高层语言支持</strong>，使得在HBase上<strong>进行数据统计</strong>处理变的非常简单； <strong>Sqoop</strong>则为HBase提供了方便的<strong>RDBMS数据导入功能</strong>，使得传统数据库数据向HBase中迁移变的非常方便。</li>
+</ul>
+
+
+
+<h1 id="2-hbase访问接口">2 HBase访问接口</h1>
+
+<ul>
+<li>Native Java API：最常规和高效的访问方式，适合Hadoop MapReduce Job并行批处理HBase表数据。</li>
+<li>HBase Shell：HBase的命令行工具，最简单的接口，<strong>适合HBase管理使用</strong>。</li>
+<li>Pig，可以使用Pig Latin流式编程语言来操作HBase中的数据，和Hive类似，本质最终也是编译成MapReduce Job来处理HBase表数据，适合做数据统计。</li>
+</ul>
+
+
+
+<h1 id="3-hbase数据模型">3 HBase数据模型</h1>
+
+
+
+<h2 id="31-table-column-family">3.1 Table &amp; Column Family</h2>
+
+<ul>
+<li>Row Key: 行键，Table的主键，<strong>Table中的记录按照Row Key排序</strong>。</li>
+<li>Timestamp: 时间戳，每次数据操作对应的时间戳，可以看作是数据的version number。</li>
+<li>Column Family：列簇，Table在水平方向有一个或者多个Column Family组成，<strong>一个Column Family中可以由任意多个Column组成</strong>，即Column Family支持动态扩展，无需预先定义Column的数量以及类型，<strong>所有Column均以二进制格式存储</strong>，用户需要自行进行类型转换。</li>
+</ul>
+
+
+
+<h2 id="32-table-region">3.2 Table &amp; Region</h2>
+
+<ul>
+<li>当Table随着记录数不断增加而变大后，会逐渐分裂成多份splits，成为regions，一个region由[startkey,endkey)表示，不同的region会被Master分配给相应的RegionServer进行管理： <br>
+<img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0021.jpg" alt="此处输入图片的描述" title=""></li>
+</ul>
+
+
+
+<h2 id="33-root-meta-table">3.3 -ROOT- &amp;&amp; .META. Table</h2>
+
+<ul>
+<li>HBase中有两张特殊的Table，<code>-ROOT-</code>和<code>.META.</code>： <br>
+<ul><li><code>-ROOT-</code>：记录了<code>.META.</code>表的Region信息，<code>-ROOT-</code>只有一个region。</li>
+<li><code>.META.</code>：记录了用户表的Region信息，<code>.META.</code>可以有多个regoin。</li>
+<li>Zookeeper中记录了<code>-ROOT-</code>表的location。</li></ul></li>
+</ul>
+
+<p><img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0030.jpg" alt="此处输入图片的描述" title=""></p>
+
+
+
+<h2 id="34-mapreduce-on-hbase">3.4 MapReduce on HBase</h2>
+
+<ul>
+<li><p>在HBase系统上运行批处理运算，最方便和实用的模型依然是MapReduce： <br>
+<img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0040.jpg" alt="此处输入图片的描述" title=""></p></li>
+<li><p>HBase Table和Region的关系，比较类似HDFS File和Block的关系，HBase提供了配套的<code>TableInputFormat</code>和<code>TableOutputFormat</code> API，可以方便的将HBase Table作为Hadoop MapReduce的Source和Sink，对于MapReduce Job应用开发人员来说，基本不需要关注HBase系统自身的细节。</p></li>
+</ul>
+
+
+
+<h1 id="4-hbase系统架构">4 HBase系统架构</h1>
+
+<p><img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0050.jpg" alt="此处输入图片的描述" title=""></p>
+
+
+
+<h2 id="41-client">4.1 Client</h2>
+
+<ul>
+<li>HBase Client使用HBase的RPC机制与HMaster和HRegionServer进行通信： <br>
+<ul><li>对于管理类操作，Client与HMaster进行RPC。</li>
+<li>对于数据读写类操作，Client与HRegionServer进行RPC。</li></ul></li>
+</ul>
+
+
+
+<h2 id="42-hmaster">4.2 HMaster</h2>
+
+<ul>
+<li>HMaster没有单点问题，HBase中可以启动多个HMaster，通过Zookeeper的Master Election机制保证总有一个Master运行，HMaster在功能上主要负责Table和Region的管理工作： <br>
+<ul><li>管理用户对Table的增、删、改、查操作。</li>
+<li>管理HRegionServer的负载均衡，调整Region分布。</li>
+<li>在Region Split后，负责新Region的分配。</li>
+<li>在HRegionServer停机后，负责失效HRegionServer 上的Regions迁移。</li></ul></li>
+</ul>
+
+
+
+<h2 id="43-hregionserver">4.3 HRegionServer</h2>
+
+<ul>
+<li>HRegionServer主要负责<strong>响应用户I/O请求</strong>，<strong>向HDFS文件系统中读写数据</strong>，是HBase中最核心的模块</li>
+</ul>
+
+<p><img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0060.jpg" alt="此处输入图片的描述" title=""></p>
+
+<ul>
+<li>HRegionServer内部管理了一系列HRegion对象，<strong>每个HRegion对应了Table中的一个Region</strong>，<strong>HRegion中由多个HStore组成</strong>。<strong>每个HStore对应了Table中的一个Column Family的存储</strong>，可以看出每个Column Family其实就是一个集中的存储单元，因此最好将具备共同IO特性的column放在一个Column Family中，这样最高效。</li>
+<li><p>HStore存储是HBase存储的核心了，其中由两部分组成，一部分是MemStore，一部分是StoreFiles。</p>
+
+<ul><li>MemStore是Sorted Memory Buffer，用户写入的数据首先会放入MemStore，当MemStore满了以后会Flush成一个StoreFile（底层实现是HFile）。</li>
+<li>当StoreFile文件数量增长到一定阈值，会触发Compact合并操作，将多个StoreFiles合并成一个StoreFile，合并过程中会进行版本合并和数据删除。</li>
+<li>因此可以看出HBase其实只有增加数据，所有的更新和删除操作都是在后续的compact过程中进行的，这使得用户的写操作只要进入内存中就可以立即返回，保证了HBase I/O的高性能。</li>
+<li>当StoreFiles Compact后，会逐步形成越来越大的StoreFile，当单个StoreFile大小超过一定阈值后，会触发Split操作，同时把当前Region Split成2个Region，父Region会下线，新Split出的2个孩子Region会被HMaster分配到相应的HRegionServer上，使得原先1个Region的压力得以分流到2个Region上。下图描述了Compaction和Split的过程： <br>
+<img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0070.gif" alt="此处输入图片的描述" title=""></li></ul></li>
+<li><p>一旦HRegionServer意外退出，MemStore中的内存数据将会丢失，这就需要引入HLog了。</p>
+
+<ul><li>每个HRegionServer中都有一个HLog对象，HLog是一个实现Write Ahead Log的类，在每次用户操作写入MemStore的同时，也会写一份数据到HLog文件中，HLog文件定期会滚动出新的，并删除旧的文件（已持久化到StoreFile中的数据）。</li>
+<li>当HRegionServer意外终止后，HMaster会通过Zookeeper感知到，HMaster首先会处理遗留的 HLog文件，将其中不同Region的Log数据进行拆分，分别放到相应region的目录下，然后再将失效的region重新分配，领取 到这些region的HRegionServer在Load Region的过程中，会发现有历史HLog需要处理，因此会Replay HLog中的数据到MemStore中，然后flush到StoreFiles，完成数据恢复。</li></ul></li>
+</ul>
+
+
+
+<h2 id="44-zookeeper">4.4 Zookeeper</h2>
+
+<ul>
+<li>Zookeeper Quorum中除了存储了-ROOT-表的地址和HMaster的地址，HRegionServer也会把自己以Ephemeral方式注册到Zookeeper中，使得HMaster可以随时感知到各个HRegionServer的健康状态。此外，Zookeeper也避免了HMaster的单点问题。</li>
+</ul>
+
+
+
+<h1 id="5-hbase存储格式">5 HBase存储格式</h1>
+
+<ul>
+<li>HBase中的所有数据文件都存储在Hadoop HDFS文件系统上，主要包括上述提出的两种文件类型： <br>
+<ul><li>HFile， HBase中KeyValue数据的存储格式，HFile是Hadoop的二进制格式文件，实际上StoreFile就是对HFile做了轻量级包装，即StoreFile底层就是HFile。</li>
+<li>HLog File，HBase中WAL（Write Ahead Log） 的存储格式，物理上是Hadoop的Sequence File。</li></ul></li>
+</ul>
+
+
+
+<h2 id="51-hfile">5.1 HFile</h2>
+
+<ul>
+<li>HFile的存储格式： <br>
+<img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0080.jpg" alt="此处输入图片的描述" title=""></li>
+</ul>
+
+
+
+<h2 id="52-hlogfile">5.2 HLogFile</h2>
+
+<p><img src="http://www.searchtb.com/wp-content/uploads/2011/01/image0100.jpg" alt="此处输入图片的描述" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

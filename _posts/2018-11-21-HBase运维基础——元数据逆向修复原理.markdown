@@ -1,0 +1,87 @@
+---
+layout:     post
+title:      HBase运维基础——元数据逆向修复原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1 id="1" style='margin:0px; font-size:22px; font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; line-height:1.1; padding:0px'>
+背景</h1>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+    鉴于上次一篇文章——“云HBase小组成功抢救某公司自建HBase集群，挽救30+T数据”的读者反馈，对HBase的逆向工程比较感兴趣，并咨询如何使用相应工具进行运维等等。总的来说，就是想更深层理解HBase运维原理，提高运维HBase生产环境的能力，应对各种常见异常现象。不同的读者对hbase的了解程度不同，本文不打算着重编写一个工具怎么使用，而是从HBase的运维基础知识介绍开始讲解。为了能帮助大部分读者提高HBase运维能力，后续会写个“HBase运维系列” 专题系列文章，欢迎到最下方扫码关注钉钉交流。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px; text-align:center'>
+<img src="https://yqfile.alicdn.com/5d8291a7eaad73d5ee198c6f017867597e43a164.jpeg" width="350" height="216" alt="5d8291a7eaad73d5ee198c6f017867597e43a164" style="border:0px; vertical-align:middle; max-width:100%; height:auto"><br style="">
+</p>
+<h1 id="2" style='margin:0px; font-size:22px; font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; line-height:1.1; padding:0px'>
+介绍</h1>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+    相信很多自建HBase的企业会经常碰到各种各样的hbase运维问题。比如使用HBase的时候，HBase写入一段时间后开始RegionServer节点开始挂掉，重启RegionServer发现启动很慢，很多region出现RTI问题，导致读写某个region的业务hang住了 。还有一些人的HBase集群多次运维尝试后，直接HBase启动不了了，meta表上线就开始报错，导致最终业务不能正常上线运行等等系列问题。本文就HBase运维的原理基础开始入手，重点讲解数据完整性，以及元数据“逆向工程”恢复数据完整性的原理方法。开启后续一系列的HBase运维知识讲解。</p>
+<h2 id="3" style='font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-weight:500; line-height:1.1; margin:0px; font-size:18px; padding:0px'>
+HBase目录结构</h2>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+    本文就1.x版本进行讲解，不同版本大致相通。HBase在HDFS上会单独使用一个目录为HBase文件目录的根目录，通常为 “/hbase”。基于这个目录下，会有以下目录组织结构：</p>
+<br style='color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+<pre class=" language-none" style='overflow:auto; font-family:Consolas,Monaco,"Andale Mono","Ubuntu Mono",monospace; font-size:13px; padding:1em; margin-top:0.5em; margin-bottom:0.5em; line-height:1.5; color:rgb(248,248,242); word-break:normal; word-wrap:normal; background:rgb(39,40,34); border:1px solid rgb(204,204,204); direction:ltr'><code class=" language-none" style='font-family:Consolas,Monaco,"Andale Mono","Ubuntu Mono",monospace; font-size:undefined; background-color:transparent; padding:0px; margin:0px; direction:ltr; word-spacing:normal; word-break:normal; word-wrap:normal; line-height:1.5'>/hbase/archive (1)
+/hbase/corrupt (2) 
+/hbase/data/default/TestTable/.tabledesc/.tableinfo.0000000001 (3)
+/hbase/data/default/TestTable/fc06f27a6c5bc2ff57ea38018b4dd399/info/2e58b3e274ba4d889408b05e526d4b7b (4)
+/hbase/data/default/TestTable/fc06f27a6c5bc2ff57ea38018b4dd399/recovered.edits/340.seqid (5)
+/hbase/data/default/TestTable/fc06f27a6c5bc2ff57ea38018b4dd399/.regioninfo (6)
+/hbase/data/default/TestTable/fc06f27a6c5bc2ff57ea38018b4dd399/.tmp (7)
+/hbase/data/default/TestTable/fc06f27a6c5bc2ff57ea38018b4dd399/.splits (8)
+/hbase/data/default/TestTable/fc06f27a6c5bc2ff57ea38018b4dd399/.merges (9)
+/hbase/data/hbase/acl (10)
+/hbase/data/hbase/meta (11)
+/hbase/hbase.id (12)
+/hbase/hbase.version (13)
+/hbase/MasterProcWALs (14)
+/hbase/oldWALs (15)
+/hbase/.tmp (16)
+/hbase/.trashtables/data (17)
+/hbase/WALs/tins-donot-rm-test-hb1-004.hbase.9b78df04-b.rds.aliyuncs.com,16020,1523502350378/tins-donot-rm-test-hb1-004.hbase.9b78df04-b.rds.aliyuncs.com%2C16020%2C1523502350378.default.1524538284034 (18)</code></pre>
+<br style='color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(1) 进行snapshot或者升级的时候使用到的归档目录。compaction删除hfile的时候，也会把就的hfile归档到这里等。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+<a target="_blank" href="https://promotion.aliyun.com/ntms/act/ambassador/sharetouser.html?userCode=lyscx44d&amp;amp;utm_source=lyscx44d" rel="nofollow" style='outline:0px; color:rgb(202,12,22); word-break:break-all; font-size:16px; background:transparent; margin:0px; padding:0px; font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; text-align:center; white-space:pre-wrap; letter-spacing:0.5px'>我有几张阿里云幸运券分享给你，用券购买或者升级阿里云相应产品会有特惠惊喜哦！把想要买的产品的幸运券都领走吧！快下手，马上就要抢光了。</a><br>
+</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(2) splitlog的corrupt目录，以及corrupt hfile的目录。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(3) 表的基本属性信息元文件tableinfo。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(4) 对应表下的hfile数据文件。<br style="">
+(5) 当splitlog发生时，一个RS的wal会按照region级别split WALs写到对应目录下的的recovered.edits目录上，使得此region再次被open的时候，回放这些recovered.edits 日志。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(6) regioninfo文件。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(7) compaction等的临时tmp目录。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(8) split时临时目录，如果上次region的split没有完成被中断了，这个region再open的时候会自动清理这个目录，一般不需要人工干预。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(9) merges时的临时目录，和split一样，如果没有正常完成的时候被中断了，那么他会在下次被open的时候自动清理。一般也不需要人工干预。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(10) acl 开启HBase权限控制时的权限记录系统表</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(11) meta 元数据表，记录region相关信息</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(12) hbase.id 集群启动初始化的时候，创建的集群唯一id。可以重新fix生成<br style="">
+(13) hbase.version hbase 软件版本文件，代码静态版本，现在都是8<br style="">
+(14) master执行过程程序的状态保存，用于中断恢复执行使用。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(15) oldWALs 历史wal，即wal记录的数据已经确认持久化了，那么这些wal就会被移到这里。splitlog完成的那些就日志，也会被放到这里。</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(16) tmp 临时辅助目录，比如写一个hbase.id文件，在这里写成功后，rename到 /hbase/hbase.id</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(17) /hbase/.trashtables/data 当truncate table或者delete table的时候，这些数据会临时放在这里，默认1小时内被清</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+(18) 记录着一台RegionServer上的WAL日志文件。可以看到它是regionserver名字是有时间的，即下一次启动时RS的wal目录就会使用新的目录结构存放wal，这个旧的RS wal 目录就会被splitlog过程拆分回放<br style="">
+</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif; font-size:16px'>
+<br>
+</p>
+<p style='margin-top:0px; margin-bottom:16px; padding-top:0px; padding-bottom:0px; color:rgb(51,51,51); font-family:PingFangSC,"helvetica neue","hiragino sans gb",arial,"microsoft yahei ui","microsoft yahei",simsun,sans-serif'>
+<a target="_blank" href="https://yq.aliyun.com/articles/586755?utm_content=m_48536" rel="nofollow" style=""><span style="font-size:32px">原文链接</span></a></p>
+            </div>
+                </div>

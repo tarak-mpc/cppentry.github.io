@@ -1,0 +1,283 @@
+---
+layout:     post
+title:      Hbase入门简介
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1>Hbase入门</h1>
+<h2>1．hbase关系图</h2>
+<p align="left"><img src="https://img-blog.csdn.net/20171208171659484" alt=""><br></p>
+<p align="left">HBase位于结构化存储层，围绕HBase，各部件对HBase的支持情况：</p>
+<p align="left"> </p>
+<table border="1" cellspacing="0" cellpadding="0" width="584"><tbody><tr><td valign="top">
+<p align="left"> </p>
+<p align="left">Hadoop部件</p>
+</td>
+<td valign="top">
+<p align="left"> </p>
+<p align="left">作用</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">HDFS</p>
+</td>
+<td valign="top">
+<p align="left">高可靠的底层存储支持</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">MapReduce</p>
+</td>
+<td valign="top">
+<p align="left">高性能的计算能力</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">Zookeeper</p>
+</td>
+<td valign="top">
+<p align="left">稳定服务和failover机制</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">Pig&amp;Hive</p>
+</td>
+<td valign="top">
+<p align="left">高层语言支持，便于数据统计</p>
+</td>
+</tr><tr><td valign="top">
+<p>Sqoop</p>
+</td>
+<td valign="top">
+<p>提供RDBMS数据导入，便于传统数据库向HBase迁移</p>
+</td>
+</tr></tbody></table><p> </p>
+<h2>2．Hbase架构</h2>
+<h3>2.1.    Zookeeper</h3>
+<p align="left">Zookeeper群：HBase集群中不可缺少的重要部分，主要用于存储Master地址、协调Master和RegionServer等上下线、存储临时数据等等。</p>
+<p align="left">Zookeeper Quorum存储-ROOT-表地址、HMaster地址</p>
+<p align="left">HRegionServer把自己以Ephedral方式注册到Zookeeper中，HMaster随时感知各个HRegionServer的健康状况</p>
+<p align="left">Zookeeper避免HMaster单点问题</p>
+<h3>2.2.    Hmaster</h3>
+<p align="left">Master群：Master主要是做一些管理操作，如：region的分配，手动管理操作下发等等，一般数据的读写操作并不需要经过Master集群，所以Master一般不需要很高的配置即可。</p>
+<p align="left"> </p>
+<p align="left">HMaster没有单点问题，HBase中可以启动多个HMaster，通过Zookeeper的Master Election机制保证总有一个Master在运行</p>
+<p align="left"> </p>
+<p align="left">主要负责Table和Region的管理工作：</p>
+<p align="left">1 管理用户对表的增删改查操作</p>
+<p align="left">2 管理HRegionServer的负载均衡，调整Region分布</p>
+<p align="left">3 Region Split后，负责新Region的分布</p>
+<p>4 在HRegionServer停机后，负责失效HRegionServer上Region迁移</p>
+<p> </p>
+<h3>2.3.    HregionServer</h3>
+<h4>2.3.1. RegionServer定位</h4>
+<div><img src="https://img-blog.csdn.net/20171208171708272" alt=""><br></div>
+<h5>2.3.3.1.Client</h5>
+<p align="left">使用HBase RPC机制与HMaster和HRegionServer进行通信</p>
+<p align="left">Client与HMaster进行通信进行管理类操作</p>
+<p align="left">Client与HRegionServer进行数据读写类操作</p>
+<p align="left"> </p>
+<p align="left">访问HBase通过HBase客户端(或API)进行，整个HBase提供给外部的地址，其实是ZK的入口，ZK中有保存-ROOT-所在的RS地址，从-ROOT-表可以获取.META.表信息，根据.META.表可以获取region在RS上的分布，整个region寻址过程大致如下：</p>
+<p align="left"><span style="color:#FF0000;">RS定位过程</span></p>
+<p align="left">1.首先，Client通过访问ZK来请求目标数据的地址。</p>
+<p align="left">2.ZK中保存了-ROOT-表的地址，所以ZK通过访问-ROOT-表来请求数据地址。</p>
+<p align="left">3.同样，-ROOT-表中保存的是.META.的信息，通过访问.META.表来获取具体的RS。</p>
+<p align="left">4..META.表查询到具体RS信息后返回具体RS地址给Client。</p>
+<p align="left">5.Client端获取到目标地址后，然后直接向该地址发送数据请求。</p>
+<p align="left"> </p>
+<p align="left">上述过程其实是一个三层索引结构，从ZK获取-ROOT-信息，再从-ROOT-获取.META.表信息，最后从.META.表中查到RS地址后缓存。这里有几个问题：</p>
+<p align="left"><span style="color:#FF0000;">既然ZK中能保存-ROOT-信息，那么为什么不把.META.信息直接保存在ZK中，而需要通过-ROOT-表来定位？</span></p>
+<p align="left"><span style="color:#FF0000;">Client查找到目标地址后，下一次请求还需要走ZK  </span><span style="color:#FF0000;">—</span><span style="color:#FF0000;">&gt; -ROOT-</span><span style="color:#FF0000;">—</span><span style="color:#FF0000;">&gt; .META.这个流程么？</span></p>
+<p align="left">先来回答第一个问题：为什么不直接把.META.表信息直接保存到ZK中？主要是为了保存的数据量考虑，ZK中不宜保存大量数据，而.META.表主要是保存Region和RS的映射信息，region的数量没有具体约束，只要在内存允许的范围内，region数量可以有很多，如果保存在ZK中，ZK的压力会很大。所以，通过一个-ROOT-表来转存到RS中是一个比较理想的方案，相比直接保存在ZK中，也就多了一层-ROOT-表的查询，对性能来说影响不大。</p>
+<p>第二个问题：每次访问都需要走ZK –&gt; -ROOT- —&gt; .META.的流程么？当然不需要，Client端有缓存，第一次查询到相应region所在RS后，这个信息将被缓存到Client端，以后每次访问都直接从缓存中获取RS地址即可。当然这里有个意外：访问的region若果在RS上发生了改变，比如被balancer迁移到其他RS上了，这个时候，通过缓存的地址访问会出现异常，在出现异常的情况下，Client需要重新走一遍上面的流程来获取新的RS地址。总体来说，region的变动只会在极少数情况下发生，一般变动不会很大，所以在整个集群访问过程中，影响可以忽略。</p>
+<p> </p>
+<h4>2.3.2. RegionServer数据写入</h4>
+<p align="left">HBase通过ZK —&gt; -ROOT-  —&gt; .META.的访问获取RS地址后，直接向该RS上进行数据写入操作，整个过程如下图：</p>
+<p align="left"><img src="https://img-blog.csdn.net/20171208171728532" alt=""><strong></strong></p>
+<p align="left">RegionServer数据操作过程</p>
+<p align="left">Client通过三层索引获得RS的地址后，即可向指定RS的对应region进行数据写入，HBase的数据写入采用WAL(write aheadlog)的形式，先写log，后写数据。HBase是一个append类型的数据库，没有关系型数据库那么复杂的操作，所以记录HLog的操作都是简单的put操作(delete/update操作都被转化为put进行)</p>
+<p> </p>
+<h4>2.3.3. RegionServer数据分配</h4>
+<p><strong></strong></p>
+<p><img src="https://img-blog.csdn.net/20171208171734897" alt=""><strong></strong></p>
+<p align="left"><img src="https://img-blog.csdn.net/20171208171741974" alt=""><br></p>
+<p align="left">create 'tw002', 'f', SPLITS =&gt; ['000005', '000009','000013']</p>
+<p align="left"> </p>
+<p><span style="color:#FF0000;">region </span><span style="color:#FF0000;">每个</span><span style="color:#FF0000;">region</span><span style="color:#FF0000;">都有</span><span style="color:#FF0000;">[Start Key,End Key)</span><span style="color:#FF0000;">组成</span><span style="color:#FF0000;">，</span><span style="color:#FF0000;">通过</span><span style="color:#FF0000;">Rowkey</span><span style="color:#FF0000;">的范围确定存入哪个</span><span style="color:#FF0000;">region</span></p>
+<h3>2.4.    Hstore</h3>
+<h4>2.4.1.数据存储</h4>
+<p align="left">memstore是region内部缓存，其大小通过HBase参数hbase.hregion.memstore.flush.size进行配置。RS在写完HLog以后，数据写入的下一个目标就是region的memstore，memstore在HBase内部通过LSM-tree结构组织，所以能够合并大量对于相同rowkey上的更新操作。</p>
+<p align="left">正是由于memstore的存在，HBase的数据写入都是异步的，而且性能非常不错，写入到memstore后，该次写入请求就可以被返回，HBase即认为该次数据写入成功。这里有一点需要说明，写入到memstore中的数据都是预先按照rowkey的值进行排序的，这样有利于后续数据查找。</p>
+<p> </p>
+<h4>2.4.2.数据存储</h4>
+<p align="left"><img src="https://img-blog.csdn.net/20171208171749319" alt=""><strong></strong></p>
+<p align="left">memstore中的数据在一定条件下会进行刷写操作，使数据持久化到相应的存储设备上，触发memstore刷盘的操作有多种不同的方式如上图：</p>
+<p align="left">Memstore刷写流程</p>
+<p align="left"> </p>
+<p align="left">以上1,2,3都可以触发memstore的flush操作，但是实现的方式不同：</p>
+<p>通过全局内存控制，触发memstore刷盘操作。memstore整体内存占用上限通过参数hbase.regionserver.global.memstore.upperLimit进行设置，当然在达到上限后，memstore的刷写也不是一直进行，在内存下降到hbase.regionserver.global.memstore.lowerLimit配置的值后，即停止memstore的刷盘操作。这样做，主要是为了防止长时间的memstore刷盘，会影响整体的性能。</p>
+<h4>2.4.3. 刷盘影响</h4>
+<p align="left">memstore在不同的条件下会触发数据刷盘，那么整个数据在刷盘过程中，对region的数据写入等有什么影响？memstore的数据刷盘，对region的直接影响就是：在数据刷盘开始到结束这段时间内，该region上的访问都是被拒绝的，这里主要是因为在数据刷盘结束时，RS会对改region做一个snapshot，同时HLog做一个checkpoint操作，通知ZK哪些HLog可以被移到.oldlogs下。从前面图上也可以看到，在memstore写盘开始，相应region会被加上UpdateLock锁，写盘结束后该锁被释放。</p>
+<h4>2.4.4. StoreFile</h4>
+<p align="left">memstore在触发刷盘操作后会被写入底层存储，每次memstore的刷盘就会相应生成一个存储文件HFile，storeFile即HFile在HBase层的轻量级分装。数据量的持续写入，造成memstore的频繁flush，每次flush都会产生一个HFile，这样底层存储设备上的HFile文件数量将会越来越多。不管是HDFS还是Linux下常用的文件系统如Ext4、XFS等，对小而多的文件上的管理都没有大文件来的有效，比如小文件打开需要消耗更多的文件句柄；在大量小文件中进行指定rowkey数据的查询性能没有在少量大文件中查询来的快等等。</p>
+<p align="left"> </p>
+<h4>2.4.5. Compact</h4>
+<p align="left">大量HFile的产生，会消耗更多的文件句柄，同时会造成RS在数据查询等的效率大幅度下降，HBase为解决这个问题，引入了compact操作，RS通过compact把大量小的HFile进行文件合并，生成大的HFile文件。</p>
+<p>RS上的compact根据功能的不同，可以分为两种不同类型，即：minorcompact和major compact。</p>
+<h5>2.4.5.1.Minor Compact</h5>
+<p align="left">minor compact又叫small compact，在RS运行过程中会频繁进行，主要通过参数hbase.hstore.compactionThreshold进行控制，该参数配置了HFile数量在满足该值时，进行minor compact，minorcompact只选取region下部分HFile进行compact操作，并且选取的HFile大小不能超过hbase.hregion.max.filesize参数设置。</p>
+<h5>2.4.5.1.Major Compact</h5>
+<p align="left">相反major compact也被称之为large compact，majorcompact会对整个region下相同列簇的所有HFile进行compact，也就是说major compact结束后，同一个列簇下的HFile会被合并成一个。majorcompact是一个比较长的过程，对底层I/O的压力相对较大。</p>
+<p align="left">major compact除了合并HFile外，另外一个重要功能就是清理过期或者被删除的数据。前面提到过，HBase的delete操作也是通过append的方式写入，一旦某些数据在HBase内部被删除了，在内部只是被简单标记为删除，真正在存储层面没有进行数据清理，只有通过majorcompact对HFile进行重组时，被标记为删除的数据才能被真正的清理。</p>
+<p>compact操作都有特定的线程进行，一般情况下不会影响RS上数据写入的性能，当然也有例外：在compact操作速度跟不上region中HFile增长速度时，为了安全考虑，RS会在HFile达到一定数量时，对写入进行锁定操作，直到HFile通过compact降到一定的范围内才释放锁。</p>
+<p> </p>
+<p> </p>
+<p align="left"> </p>
+<h4>2.4.6. Split</h4>
+<p align="left"><img src="https://img-blog.csdn.net/20171208171756313" alt=""><br></p>
+<p align="left">compact将多个HFile合并单个HFile文件，随着数据量的不断写入，单个HFile也会越来越大，大量小的HFile会影响数据查询性能，大的HFile也会，HFile越大，相对的在HFile中搜索的指定rowkey的数据花的时间也就越长，HBase同样提供了region的split方案来解决大的HFile造成数据查询时间过长问题。</p>
+<p align="left">一个较大的region通过split操作，会生成两个小的region，称之为Daughter，一般Daughter中的数据是根据rowkey的之间点进行切分的，region的split过程大致如下图：</p>
+<p align="left"><strong></strong></p>
+<p align="left"><span style="color:#FF0000;">regionsplit流程</span></p>
+<p align="left"> </p>
+<p align="left">1.region先更改ZK中该region的状态为SPLITING。</p>
+<p align="left">2.Master检测到region状态改变。</p>
+<p align="left">3.region会在存储目录下新建.split文件夹用于保存split后的daughter region信息。</p>
+<p align="left">4.Parent region关闭数据写入并触发flush操作，保证所有写入Parent region的数据都能持久化。</p>
+<p align="left">5.在.split文件夹下新建两个region，称之为daughter A、daughter B。</p>
+<p align="left">6.Daughter A、Daughter B拷贝到HBase根目录下，形成两个新的region。</p>
+<p align="left">7.Parent region通知修改.META.表后下线，不再提供服务。</p>
+<p align="left">8.Daughter A、Daughter B上线，开始向外提供服务。</p>
+<p align="left">9.如果开启了balance_switch服务，split后的region将会被重新分布。</p>
+<p align="left">上面1 ~ 9就是region split的整个过程，split过程非常快，速度基本会在秒级内，那么在这么快的时间内，region中的数据怎么被重新组织的？</p>
+<p align="left">其实，split只是简单的把region从逻辑上划分成两个，并没有涉及到底层数据的重组，split完成后，Parent region并没有被销毁，只是被做下线处理，不再对外部提供服务。而新产生的regionDaughter A和Daughter B，内部的数据只是简单的到Parent region数据的索引，Parent region数据的清理在DaughterA和Daughter B进行major compact以后，发现已经没有到其内部数据的索引后，Parent region才会被真正的清理。</p>
+<p align="left"> </p>
+<h3>2.5.    HLog</h3>
+<p align="left">引入HLog原因：</p>
+<p align="left">在分布式系统环境中，无法避免系统出错或者宕机，一旦HRegionServer以外退出，MemStore中的内存数据就会丢失，引入HLog就是防止这种情况</p>
+<p align="left">工作机制：</p>
+<p align="left">每 个HRegionServer中都会有一个HLog对象，HLog是一个实现Write Ahead Log的类，每次用户操作写入Memstore的同时，也会写一份数据到HLog文件，HLog文件定期会滚动出新，并删除旧的文件(已持久化到StoreFile中的数据)。当HRegionServer意外终止后，HMaster会通过Zookeeper感知，HMaster首先处理遗留的 HLog文件，将不同region的log数据拆分，分别放到相应region目录下，然后再将失效的region重新分配，领取到这些region的HRegionServer在Load
+ Region的过程中，会发现有历史HLog需要处理，因此会Replay HLog中的数据到MemStore中，然后flush到StoreFiles，完成数据恢复。</p>
+<p> </p>
+<h4>2.5.1. Hlog写入</h4>
+<p align="left">HLog是HBase实现WAL方式产生的日志信息，其内部是一个简单的顺序日志，每个RS上的region都共享一个HLog，所有对于该RS上的region数据写入都被记录到该HLog中。HLog的主要作用就是在RS出现意外崩溃的时候，可以尽量多的恢复数据，这里说是尽量多，因为在一般情况下，客户端为了提高性能，会把HLog的autoflush关掉，这样HLog日志的落盘全靠操作系统保证，如果出现意外崩溃，短时间内没有被fsync的日志会被丢失。</p>
+<p>    </p>
+<h4>2.5.1. Hlog过期</h4>
+<p align="left">    HLog的大量写入会造成HLog占用存储空间会越来越大，HBase通过HLog过期的方式进行HLog的清理，每个RS内部都有一个HLog监控线程在运行，其周期可以通过hbase.master.cleaner.interval进行配置。</p>
+<p align="left">HLog在数据从memstore flush到底层存储上后，说明该段HLog已经不再被需要，就会被移动到.oldlogs这个目录下，HLog监控线程监控该目录下的HLog，当该文件夹下的HLog达到hbase.master.logcleaner.ttl设置的过期条件后，监控线程立即删除过期的HLog。</p>
+<p> </p>
+<h3>2.6.    Hbase存储格式</h3>
+<p align="left">HBase中的所有数据文件都存储在Hadoop HDFS文件系统上，格式主要有两种：</p>
+<p align="left">1．HFile HBase中KeyValue数据的存储格式，HFile是Hadoop的二进制格式文件，实际上StoreFile就是对HFile做了轻量级包装，即StoreFile底层就是HFile</p>
+<p align="left">2 .HLog File，HBase中WAL（Write Ahead Log） 的存储格式，物理上是Hadoop的Sequence File</p>
+<p> </p>
+<h3>2.7.    HFile</h3>
+<p align="left"><img src="https://img-blog.csdn.net/20171208171802541" alt=""><strong></strong></p>
+<p align="left">图片解释：</p>
+<p align="left">HFile文件不定长，长度固定的块只有两个：Trailer和FileInfo</p>
+<p align="left">Trailer中指针指向其他数据块的起始点</p>
+<p align="left">File Info中记录了文件的一些Meta信息，例如：AVG_KEY_LEN, AVG_VALUE_LEN, LAST_KEY,COMPARATOR, MAX_SEQ_ID_KEY等</p>
+<p align="left">Data Index和Meta Index块记录了每个Data块和Meta块的起始点</p>
+<p align="left">Data Block是HBase I/O的基本单元，为了提高效率，HRegionServer中有基于LRU的Block Cache机制</p>
+<p align="left">每个Data块的大小可以在创建一个Table的时候通过参数指定，大号的Block有利于顺序Scan，小号Block利于随机查询</p>
+<p align="left">每个Data块除了开头的Magic以外就是一个个KeyValue对拼接而成, Magic内容就是一些随机数字，目的是防止数据损坏</p>
+<p align="left"> </p>
+<p align="left">HFile里面的每个KeyValue对就是一个简单的byte数组。这个byte数组里面包含了很多项，并且有固定的结构。</p>
+<p align="left"><img src="https://img-blog.csdn.net/20171208171808116" alt=""><strong></strong></p>
+<p align="left">KeyLength和ValueLength：两个固定的长度，分别代表Key和Value的长度</p>
+<p align="left">Key部分：Row Length是固定长度的数值，表示RowKey的长度，Row 就是RowKey</p>
+<p align="left">Column Family Length是固定长度的数值，表示Family的长度</p>
+<p align="left">接着就是Column Family，再接着是Qualifier，然后是两个固定长度的数值，表示Time Stamp和Key Type（Put/Delete）</p>
+<p align="left">Value部分没有这么复杂的结构，就是纯粹的二进制数据</p>
+<h3>2.8.    Hlog File</h3>
+<p align="left"><img src="https://img-blog.csdn.net/20171208171813919" alt=""><strong></strong></p>
+<p align="left">HLog文件就是一个普通的Hadoop Sequence File，Sequence File 的Key是HLogKey对象，HLogKey中记录了写入数据的归属信息，除了table和region名字外，同时还包括sequence number和timestamp，timestamp是“写入时间”，sequence number的起始值为0，或者是最近一次存入文件系统中sequencenumber。</p>
+<p>HLog Sequece File的Value是HBase的KeyValue对象，即对应HFile中的KeyValue</p>
+<p> </p>
+<p> </p>
+<h2>3.   访问Hbase</h2>
+<table border="1" cellspacing="0" cellpadding="0" width="590"><tbody><tr><td valign="top">
+<p align="left">方式</p>
+</td>
+<td valign="top">
+<p align="left">特点</p>
+</td>
+<td valign="top">
+<p align="left">场合</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">Native Java API</p>
+</td>
+<td valign="top">
+<p align="left">最常规和高效</p>
+<p align="left">并行处理HBase表数据</p>
+</td>
+<td valign="top">
+<p align="left"> </p>
+<p align="left">Hadoop </p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">HBase Shell</p>
+</td>
+<td valign="top">
+<p align="left">最简单接口</p>
+</td>
+<td valign="top">
+<p align="left">MapReduce Job</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">Thrift Gateway</p>
+</td>
+<td valign="top">
+<p align="left">利用Thrift序列化支持多种语言</p>
+</td>
+<td valign="top">
+<p align="left">HBase管理使用</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">Rest Gateway</p>
+</td>
+<td valign="top">
+<p align="left">HBase表数据解除语言限制</p>
+</td>
+<td valign="top">
+<p align="left">异构系统在线访问</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">Pig</p>
+</td>
+<td valign="top">
+<p align="left">Pig Latin六十编程语言处理数据</p>
+</td>
+<td valign="top">
+<p align="left">Rest风格Http API访问</p>
+</td>
+</tr><tr><td valign="top">
+<p align="left">Hive</p>
+</td>
+<td valign="top">
+<p align="left">简单，SqlLike</p>
+</td>
+<td valign="top">
+<p align="left">数据统计</p>
+</td>
+</tr></tbody></table><p> </p>
+<h2>4.   Hbase rowkey设计</h2>
+<h3>4.1.    Hbase设计</h3>
+<p align="left">HBase是一个分布式数据库，其性能的好坏主要取决于内部表的设计和资源的分配是否合理。</p>
+<p align="left"><span style="color:#FF0000;"> </span></p>
+<h3>4.2. Row Key设计</h3>
+<p align="left">rowkey是HBase实现分布式的基础，HBase通过rowkey范围划分不同的region，分布式系统的基本要求就是在任何时候，系统的访问都不要出现明显的热点现象，所以rowkey的设计至关重要，一般我们建议rowkey的开始部分以hash或者MD5进行散列，尽量做到rowkey的头部是均匀分布的。禁止采用时间、用户id等明显有分段现象的标志直接当作rowkey来使用。</p>
+<h3>4.3. 列簇设计</h3>
+<p align="left">HBase的表设计时，根据不同需求有不同选择，需要做在线查询的数据表，尽量不要设计多个列簇，我们知道，不同的列簇在存储上是被分开的，多列簇设计会造成在数据查询的时候读取更多的文件，从而消耗更多的I/O。</p>
+<h3>4.4. TTL设计</h3>
+<p align="left">选择合适的数据过期时间也是表设计中需要注意的一点，HBase中允许列簇定义数据过期时间，数据一旦超过过期时间，可以被major compact进行清理。大量无用历史数据的残余，会造成region体积增大，影响查询效率。</p>
+<h3>4.5. Region设计</h3>
+<p align="left">一般地，region不宜设计成很大，除非应用对阶段性性能要求很多，但是在将来运行一段时间可以接受停服处理。region过大会导致majorcompact调用的周期变长，而单次major compact的时间也相应变长。major compact对底层I/O会造成压力，长时间的compact操作可能会影响数据的flush，compact的周期变长会导致许多删除或者过期的数据不能被及时清理，对数据的读取速度等都有影响。</p>
+<p align="left">相反，小的region意味着major compact会相对频繁，但是由于region比较小，major compact的相对时间较快，而且相对较多的majorcompact操作，会加速过期数据的清理。</p>
+<p align="left">当然，小region的设计意味着更多的region split风险，region容量过小，在数据量达到上限后，region需要进行split来拆分，其实split操作在整个HBase运行过程中，是被不怎么希望出现的，因为一旦发生split，涉及到数据的重组，region的再分配等一系列问题。所以我们在设计之初就需要考虑到这些问题，尽量避免region的运行过程中发生split。</p>
+<p align="left">HBase可以通过在表创建的时候进行region的预分配来解决运行过程中region的split产生，在表设计的时候，预先分配足够多的region数，在region达到上限前，至少有部分数据会过期，通过majorcompact进行清理后， region的数据量始终维持在一个平衡状态。</p>
+<p align="left">region数量的设计还需要考虑内存上的限制，通过前面的介绍我们知道每个region都有memstore，memstore的数量与region数量和region下列簇的数量成正比,一个RS下memstore内存    消耗：</p>
+<p align="left">Memory = memstore大小 * region数量 * 列簇数量</p>
+<p> </p>
+<p> </p>
+            </div>
+                </div>

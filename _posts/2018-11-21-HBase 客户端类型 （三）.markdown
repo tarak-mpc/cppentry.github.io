@@ -1,0 +1,876 @@
+---
+layout:     post
+title:      HBase 客户端类型 （三）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>继  <a href="https://blog.csdn.net/devalone/article/details/81126363" rel="nofollow">HBase 客户端类型 （二） </a></p>
+
+<p>4. HBase Shell 交互接口</p>
+
+<p>HBase shell 是 HBase 集群的命令行接口。可以使用它连接到本地或远程服务器并与之交互。shell 提供了客户端和系统管理操作。</p>
+
+<p> </p>
+
+<p><br>
+4.1 基础 (Basics)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+体验 shell 的第一步就是启动它：</p>
+
+<p>    $ $HBASE_HOME/bin/hbase shell<br>
+    HBase Shell; enter 'help&lt;RETURN&gt;' for list of supported commands.<br>
+    Type "exit&lt;RETURN&gt;" to leave the HBase Shell<br>
+    Version 1.0.0, r6c98bff7b719efdb16f71606f3b7d8229445eb81, \<br>
+    Sat Feb 14 19:49:22 PST 2015<br>
+    hbase(main):001:0&gt;</p>
+
+<p>HBase shell 是基于 JRuby 的，JRuby 是基于 Ruby 实现的 Java 虚拟机。更确切地说，它使用的是交互式 Ruby Shell(Interactive Ruby Shell, IRB)<br>
+即输入 Ruby 命令并立刻得到响应。HBase 携带的 Ruby 脚本扩展了 IRB，带有基于 Java API 的特殊命令。它继承了内置的命令历史和命令补全的支持，<br>
+以及所有的 Ruby 命令。</p>
+
+<p><br>
+    NOTE:<br>
+    -------------------------------------------------------------------------------------------------------------------------------------<br>
+    没有必要在机器上安装 Ruby, 因为 HBase 自带了执行 JRuby shell 必要的 JAR 文件。用户使用所提供的脚本在 Java 上启动 shell。<br>
+    <br>
+    <br>
+shell 启动后，可以输入 help 获得帮助文本：</p>
+
+<p>    hbase(main):001:0&gt; help<br>
+    HBase Shell, version 1.0.0,<br>
+    r6c98bff7b719efdb16f71606f3b7d8229445eb81, \<br>
+    Sat Feb 14 19:49:22 PST 2015<br>
+    Type 'help "COMMAND"', (e.g. 'help "get"' -- the quotes are necessary)<br>
+    \<br>
+    for help on a specific command.<br>
+    Commands are grouped. Type 'help "COMMAND_GROUP"', (e.g. 'help<br>
+    "general"') \<br>
+    for help on a command group.<br>
+    COMMAND GROUPS:<br>
+    Group name: general<br>
+    Commands: status, table_help, version, whoami<br>
+    Group name: ddl<br>
+    Commands: alter, alter_async, alter_status, create, describe,<br>
+    disable, \<br>
+    disable_all, drop, drop_all, enable, enable_all, exists,<br>
+    get_table, \<br>
+    is_disabled, is_enabled, list, show_filters<br>
+    ...<br>
+    SHELL USAGE:<br>
+    Quote all names in HBase Shell such as table and column names.<br>
+    Commas<br>
+    delimit command parameters. Type &lt;RETURN&gt; after entering a command to run it.<br>
+    Dictionaries of configuration used in the creation and alteration of tables<br>
+    are Ruby Hashes. They look like this:<br>
+    ...</p>
+
+<p>如帮助文本中所描述的，可以请求特定命令的帮助，在调用 help 时将命令添加到后面，或者 help  命令后连接一个组名称，打印出这个组内所有命令的<br>
+帮助信息。命令或者组名称(command or group name) 必须使用引号括起来。</p>
+
+<p>离开 shell, 输入 exit 或 quit:</p>
+
+<p>    hbase(main):002:0&gt; exit<br>
+    $</p>
+
+<p>shell 也包含特定的命令行选项，添加 -h 或 --help, 切换到命令行时会看到这些命令行选项：</p>
+
+<p>    $ $HBASE_HOME/bin/hbase shell -h<br>
+    Usage: shell [OPTIONS] [SCRIPTFILE [ARGUMENTS]]</p>
+
+<p>    --format=OPTION     Formatter for outputting results. Valid options are: console, html. (Default: console)</p>
+
+<p>    -d | --debug Set DEBUG log levels.<br>
+    -h | --help This help</p>
+
+<p><br>
+    Debugging:<br>
+    -------------------------------------------------------------------------------------------------------------------------------------<br>
+    将 -d 或 --debug 开关添加到 shell 启动命令启用调试模式(debug mode), 即将日志级别切换到 DEBUG, 并且使 shell 打印出任何 backtrace 信息，<br>
+    其类似于 Java 中的 stacktraces 信息。<br>
+    <br>
+    如果已经在 shell 中，可以使用 debug 命令在调试模式间切换：<br>
+    <br>
+        hbase(main):001:0&gt; debug<br>
+        Debug mode is ON<br>
+        hbase(main):002:0&gt; debug<br>
+        Debug mode is OFF</p>
+
+<p>    可以使用 debug? 命令检查调试模式：<br>
+    <br>
+        hbase(main):003:0&gt; debug?<br>
+        Debug mode is OFF<br>
+    <br>
+    非调试模式下，shell 的日志级别为 ERROR, 并且不会在控制台上打印 backtrace 信息。<br>
+    <br>
+有一个选项用于切换在 shell 中的输出格式，至本文为止，虽然 CLI 帮助说也支持 html, 但只有 console 可用。设置除 console 以外的格式会产生错误<br>
+消息。    </p>
+
+<p><br>
+shell 启动脚本自动使用 $HBASE_HOME 目录配置相同的目录。用户可以使用其它设置覆盖这个位置，但最重要的是可以连接到不同的集群。新建一个包含<br>
+hbase-site.xml 文件的单独的目录，配置 hbase.zookeeper.quorum 属性指向一个不同的集群，然后像下面这样启动 shell:</p>
+
+<p>    $ HBASE_CONF_DIR="/&lt;your-other-config-dir&gt;/" bin/hbase shell</p>
+
+<p>注意，必须指定一个完整的目录，而不仅仅是 hbase-site.xml 文件。</p>
+
+<p> </p>
+
+<p>4.2 命令 (Commands)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+命令被分组为五个不同的类别，分别代表了它们的语义关系。在输入命令时，必须遵循下列原则：</p>
+
+<p><br>
+    ● 引用名称 (Quote Names)<br>
+    -------------------------------------------------------------------------------------------------------------------------------------<br>
+    命令需要表或列的名称时，要将名称用单引号或双引号括起来。通常建议使用单引号。</p>
+
+<p><br>
+    ● 引用值 (Quote Values)<br>
+    -------------------------------------------------------------------------------------------------------------------------------------<br>
+    shell 支持使用十六进制数或八进制表示二进制的输入和输出。必须使用双引号将它们括起来，否则 shell 会将它们解释为字面文本(literal)。<br>
+    <br>
+        hbase&gt; get 't1', "key\x00\x6c\x65\x6f\x6e"<br>
+        hbase&gt; get 't1', "key\000\154\141\165\162\141"<br>
+        hbase&gt; put 't1', "test\xef\xff", 'f1:', "\x01\x33\x70"</p>
+
+<p>    注意上述的混合引用，必须确保使用正确的引用，否则无法获取预期的结果。在单引号中的文本被当做字面文本(literal), 而双引号中的文本是被替换的<br>
+    (interpolated), 也就是说，它会转换八进制或十六进制数值为多个字节。<br>
+    <br>
+    <br>
+    ● 使用逗号分隔参数 (Comma Delimiters for Parameters)<br>
+    -------------------------------------------------------------------------------------------------------------------------------------<br>
+    使用逗号分隔命令参数。例如：<br>
+    <br>
+        hbase(main):001:0&gt; get 'testtable', 'row-1', 'colfam1:qual1'</p>
+
+<p>    <br>
+    ● Ruby 哈希属性 (Ruby Hashes for Properties)<br>
+    -------------------------------------------------------------------------------------------------------------------------------------<br>
+    对于某些命令，需要输入带有 key/value 对的 map 属性。使用 Ruby 哈希形式：<br>
+    <br>
+        {'key1' =&gt; 'value1', 'key2' =&gt; 'value2', ...}<br>
+    <br>
+    keys/value 对被包含在花括号中，key 和 value 之间使用 "=&gt;" 分隔。通常 key 是预定义的常量，例如 NAME, VERSIONS, or COMPRESSION, 并且不<br>
+    需要引号括起来。例如：<br>
+    <br>
+        hbase(main):001:0&gt; create 'testtable', { NAME =&gt; 'colfam1', VERSIONS =&gt; 1, TTL =&gt; 2592000, BLOCKCACHE =&gt; true }<br>
+    <br>
+    <br>
+    限制输出 (Restricting Output)<br>
+    -------------------------------------------------------------------------------------------------------------------------------------<br>
+    get 命令有一个可选参数可以用于限制被打印值的长度。这对有多个列含有不同长度的值很有用。为了快速获得实际列的整体视图，可以抑制太长的值<br>
+    打印完整的数据，否则控制台很快就变得难以控制。<br>
+    <br>
+    下面的例子中，插入一个很长的值，并在之后的检索时使用 MAXLENGTH 参数限制了长度：</p>
+
+<p>    hbase(main):001:0&gt; put 'testtable','rowlong','colfam1:qual1','abcdefghijklmnopqrstuvwxyzabcdefghi \<br>
+    jklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcde \<br>
+    ...<br>
+    xyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz'<br>
+    <br>
+    hbase(main):018:0&gt; get 'testtable', 'rowlong', MAXLENGTH =&gt; 60<br>
+    COLUMN CELL<br>
+    colfam1:qual1 timestamp=1306424577316, value=abcdefghijklmnopqrstuvwxyzabc</p>
+
+<p>    MAXLENGTH 从行的开始处计算，也就是说，包括列的名称。设置的值为控制台的宽度或略小，这样可以在一行中显示每个列。</p>
+
+<p>    <br>
+对于任何的命令，可以通过输入 help '&lt;command&gt;' 获取详细的帮助信息，例如：</p>
+
+<p>    hbase(main):001:0&gt; help 'status'<br>
+    Show cluster status. Can be 'summary', 'simple', 'detailed', or 'replication'. The default is 'summary'. Examples:<br>
+    hbase&gt; status<br>
+    hbase&gt; status 'simple'<br>
+    hbase&gt; status 'summary'<br>
+    hbase&gt; status 'detailed'<br>
+    hbase&gt; status 'replication'<br>
+    hbase&gt; status 'replication', 'source'<br>
+    hbase&gt; status 'replication', 'sink'    <br>
+    <br>
+    <br>
+大多数命令都有一个直接匹配的客户端 API 或管理 API。后面几节将简要介绍每个命令以及这些 API 的功能。它们按照目的分组，并按分组中的命令排列：</p>
+
+<p><br>
+    Command Groups in HBase Shell<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | Group                | Description<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | general            | Comprises general commands that do not fit into any other category, for example status.<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | configuration        | Some configuration properties can be changed at runtime, and reloaded with these commands<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | ddl                | Contains all commands for data-definition tasks, such as creating a table<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | namespace            | Similar to the former, but for namespace related operations.<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | dml                | Has all the data-maipulation commands, which are used to insert or delete data, for example.<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | snapshots            | Tables can be saved using snapshots, which are created, deleted, restored, etc.<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | tools                | There are tools supplied with the shell that can help run expert-level, cluster wide operations.    <br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | replication        | All replication related commands are within this group, for example, adding a peer cluster<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | security            | The contained commands handle security related tasks<br>
+    +-------------------+---------------------------------------------------------------------------------------------------<br>
+    | visibility labels    | These commands handle cell label related functionality, such as adding or listing labels<br>
+    +-------------------+---------------------------------------------------------------------------------------------------</p>
+
+<p>可以使用任何组名称来获得帮助信息，使用 help '&lt;groupname&gt;' 语法，与命令的帮助语法相同。例如输入 help ddl 会打印出数据定义命令的完整帮助文本</p>
+
+<p> </p>
+
+<p>■ 通用命令 (General Commands)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+general 命令列于下表：</p>
+
+<p>    General Shell Commands<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | Command        | Description<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | status        | Returns various levels of information contained in the ClusterStatus class. See the help to get the simple,    <br>
+    |                | summary, and detailed status information<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | version        | Returns the current version, repository revision, and compilation date of your HBase cluster.  <br>
+    |                | See ClusterStatus.getHBaseVersion()<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | table_help    | Prints a help text explaining the usage of table references in the Ruby shell<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | whoami        | Shows the current OS user and group membership known to HBase about the shell user<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------</p>
+
+<p>没有任何限定符运行 status 与执行 status 'summary' 相同，都打印出活动的和死掉的服务器数量，以及平均负载。平均负载是每台服务器持有的平均<br>
+region 的数量。status 'simple' 打印出有关活动服务器和死掉的服务器的详细信息，它们的服务器名，对于活动服务器还有高级的统计信息，类似于<br>
+web UI 中包含的请求数量，堆内存信息，磁盘以及 memstore 信息等等。最后，对于 detailed 版本的 status 命令，除了以上信息，还会打印出每个<br>
+region 当前所在的服务器信息。</p>
+
+<p>另一组通用命令是与运行时更新服务器配置相关的：</p>
+
+<p>    Configuration Commands<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | Commands            | Description<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | update_config        | Update the configuration for a particular server. The name must be given as a valid server name<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | update_all_config    | Updates all region servers<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------</p>
+
+<p>可以先用 status 命令获取服务器列表，然后使用返回的服务器名称调用更新配置命令。注意，需要对返回的服务器名称格式做些调整：服务<br>
+器名称组件由逗号分隔，而不是冒号或空格，如下示例：</p>
+
+<p>    hbase(main):001:0&gt; status 'simple'<br>
+    1 live servers<br>
+    127.0.0.1:62801 1431177060772<br>
+    ...<br>
+    Aggregate load: 0, regions: 4</p>
+
+<p>    hbase(main):002:0&gt; update_config '127.0.0.1,62801,1431177060772'<br>
+    0 row(s) in 0.1290 seconds</p>
+
+<p>    hbase(main):003:0&gt; update_all_config<br>
+    0 row(s) in 0.0560 seconds</p>
+
+<p> </p>
+
+<p>■ 名称空间和数据定义命令 (Namespace and Data Definition Commands)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+namespace 组的命令提供 shell 的功能，用于处理创建，修改，以及删除名称空间。</p>
+
+<p><br>
+    Namespace Shell Commands:<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | Commands                | Description<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | create_namespace        | Creates a namespace with the provided name.<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | drop_namespace        | Removes the namespace, which must be empty, that is, it must not contain any tables.<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | alter_namespace        | Changes the namespace details by altering its configuration properties<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | describe_namespace    | Prints the details of an existing namespace<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | list_namespace        | Lists all known namespaces<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | list_namespace_tables    | Lists all tables contained in the given namespace<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------</p>
+
+<p><br>
+数据定义(data definition) 命令列于下表，大多数来源于管理 API (administrative API):</p>
+
+<p>    Data Definition Shell Commands<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | Commands        | Description<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | alter            | Modifies an existing table schema using modifyTable().<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | alter_async    | Same as above, but returns immediately without waiting for the changes to take effect<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | alter_status    | Can be used to query how many regions have the changes applied to them. Use this after making asynchronous<br>
+    |                | alterations.<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | create        | Creates a new table. See the createTable() call<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | describe        | Prints the HTableDescriptor. A shortcut for this command is desc<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | disable        | Disables a table. See the disableTable() method.<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | disable_all    | Uses a regular expression to disable all matching tables in a single command<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | drop            | Drops a table. See the deleteTable() method<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | drop_all        | Drops all matching tables. The parameter is a regular expression<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | enable        | Enables a table. See the enableTable() call<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | enable_all    | Using a regular expression to enable all matching tables<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | exists        | Checks if a table exists. It uses the tableExists() call<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | is_disabled    | Checks if a table is disabled. See the isTableDisabled() method<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | is_enabled    | Checks if a table is enabled. See the isTableEnabled() method<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | list            | Returns a list of all user tables. Uses the listTables() method<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | show_filters    | Lists all known filter classes.<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | get_table        | Returns a table reference that can used in scripting<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------</p>
+
+<p>以 _all 结尾的命令接受正则表达式经命令应用到所有匹配的表。例如，假设系统中有一个名为 test 的表：</p>
+
+<p>    hbase(main):001:0&gt; drop_all '.*'<br>
+    test</p>
+
+<p>    Drop the above 1 tables (y/n)?<br>
+    y<br>
+    1 tables successfully dropped</p>
+
+<p>    hbase(main):002:0&gt; drop_all '.*'<br>
+    No tables matched the regex .*</p>
+
+<p> </p>
+
+<p>■ 数据操纵命令 (Data Manipulation Commands)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+数据操纵(data manipulation)命令列于下表，它们大多数由客户端 API 提供：</p>
+
+<p>    Data Manipulation Shell Commands<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | Commands            | Description<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | put                | Stores a cell. Uses the Put class<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | get                | Retrieves a cell. See the Get class<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | delete            | Deletes a cell<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | deleteall            | Similar to delete but does not require a column. Deletes an entire family or row<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | append            | Allows to append data to cells<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | incr                | Increments a counter. Uses the Increment class<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | get_counter        | Retrieves a counter value. Same as the get command but converts the raw counter value into a readable number<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | scan                | Scans a range of rows. Relies on the Scan class<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | count                | Counts the rows in a table. Uses a Scan internally<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | truncate            | Truncates a table, which is the same as executing the disable and drop commands, followed by a create,<br>
+    |                    | using the same schema<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | truncate_preserve    | Same as the previous command, but retains the regions with their start and end keys.<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------</p>
+
+<p><br>
+多个命令有扩展的可选参数，在 shell 中查看帮助获取详细信息。</p>
+
+<p><br>
+    格式化二进制数据 (Formatting Binary Data)<br>
+    -------------------------------------------------------------------------------------------------------------------------------------<br>
+    在 get 操作期间打印 cell 值时，shell 隐式使用 Bytes.toStringBinary() 转换二进制数据。可以在基于列的设置上改变这种行为，通过设定不同的<br>
+    格式化方法。该方法必须接受一个 byte[] 数组并返回一个可打印的值的表现形式。它作为列名的一部分定义，作为 get 调用的可选参数输入：<br>
+    <br>
+        &lt;column family&gt;[:&lt;column qualifier&gt;[:format method]]<br>
+    <br>
+    对于 get 调用，可以忽略任何的列信息，但如果添加了信息，它们可以作为列族，或者列族和列限定符。第三个可选部分就是格式化方法，指向一个<br>
+    Bytes 类的方法，或者一个自定义类的方法。因为其隐式地指明了列族和列限定符，因此意味着只能对一个特定的列指定一个格式化方法，而不能对整个<br>
+    列族，甚至整个行设定。<br>
+    <br>
+    下表列出了两个选项及其示例：<br>
+    <br>
+    Possible Format Methods<br>
+    +---------------+-------------------------------+--------------------------------------------------------------------------------<br>
+    | Method        | Examples                        | Description<br>
+    +---------------+-------------------------------+--------------------------------------------------------------------------------<br>
+    | Bytes Method    | toInt, toLong                    | Refers to a known method from the Bytes class.<br>
+    +---------------+-------------------------------+--------------------------------------------------------------------------------<br>
+    | CustomMethod    | c(CustomFormatClass).format    | Specifies a custom class and method converting byte[] to text.<br>
+    +---------------+-------------------------------+--------------------------------------------------------------------------------</p>
+
+<p>    Bytes Method 是对显式的 Bytes 类简单的快捷方式，例如，colfam:qual:c(org.apache.hadoop.hbase.util.Bytes).toInt 与 colfam:qual:toInt<br>
+    相同。下面的示例使用了不同的命令展示讨论的内容：<br>
+    <br>
+    hbase(main):001:0&gt; create 'testtable', 'colfam1'<br>
+    0 row(s) in 0.2020 seconds<br>
+    =&gt; Hbase::Table - testtable</p>
+
+<p>    hbase(main):002:0&gt; incr 'testtable', 'row-1', 'colfam1:cnt1'<br>
+    0 row(s) in 0.0580 seconds</p>
+
+<p>    hbase(main):003:0&gt; get_counter 'testtable', 'row-1', 'col<br>
+    fam1:cnt1', 1<br>
+    COUNTER VALUE = 1</p>
+
+<p>    hbase(main):004:0&gt; get 'testtable', 'row-1', 'colfam1:cnt1'<br>
+    COLUMN CELL<br>
+    colfam1:cnt1 timestamp=..., value=\x00\x00\x00\x00\x00\x00\x00\x01<br>
+    1 row(s) in 0.0150 seconds</p>
+
+<p>    hbase(main):005:0&gt; get 'testtable', 'row-1', { COLUMN =&gt; 'colfam1:cnt1' }<br>
+    COLUMN CELL<br>
+    colfam1:cnt1 timestamp=..., value=\x00\x00\x00\x00\x00\x00\x00\x01<br>
+    1 row(s) in 0.0160 seconds</p>
+
+<p>    hbase(main):006:0&gt; get 'testtable', 'row-1', { COLUMN =&gt; ['colfam1:cnt1:toLong'] }<br>
+    COLUMN CELL<br>
+    colfam1:cnt1 timestamp=..., value=1<br>
+    1 row(s) in 0.0050 seconds</p>
+
+<p>    hbase(main):007:0&gt; get 'testtable', 'row-1', 'colfam1:cnt1:toLong'<br>
+    COLUMN CELL<br>
+    colfam1:cnt1 timestamp=..., value=1<br>
+    1 row(s) in 0.0060 seconds</p>
+
+<p>    <br>
+    <br>
+■ 快照命令 (Snapshot Commands)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+这些命令反应了管理 API 功能。可以给一个表创建快照，用于之后的恢复或克隆，以及列出所有可用的快照等等。</p>
+
+<p>    Snapshot Shell Commands<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | Command                | Description<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | snapshot                | Creates a snapshot. Use the SKIP_FLUSH =&gt; true option to not flush the table before the snapshot.<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | clone_snapshot        | Clones an existing snapshot into a new table<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | restore_snapshot        | Restores a snapshot under the same table name as it was created<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | delete_snapshot        | Deletes a specific snapshot. The given name must match the name of a previously created snapshot<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | delete_all_snapshot    | Deletes all snapshots using a regular expression to match any number of names<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | list_snapshots        | Lists all snapshots that have been created so far<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------</p>
+
+<p>创建一个快照可以指定模式，类似于 API 调用指定的模式，即可以强制刷写表的内存中的数据(默认行为)，或者只创建以及在磁盘上的文件的快照。</p>
+
+<p>    hbase(main):001:0&gt; create 'testtable', 'colfam1'<br>
+    0 row(s) in 0.4950 seconds<br>
+    =&gt; Hbase::Table - testtable<br>
+    hbase(main):002:0&gt; for i in 'a'..'z' do \<br>
+    for j in 'a'..'z' do put 'testtable', "row-#{i}#{j}", "col<br>
+    fam1:#{j}", \<br>
+    "#{j}" end end<br>
+    0 row(s) in 0.0830 seconds<br>
+    0 row(s) in 0.0070 seconds<br>
+    ...</p>
+
+<p>    hbase(main):003:0&gt; count 'testtable'<br>
+    676 row(s) in 0.1620 seconds</p>
+
+<p>    =&gt; 676</p>
+
+<p>    hbase(main):004:0&gt; snapshot 'testtable', 'snapshot1', { SKIP_FLUSH =&gt; true }<br>
+    0 row(s) in 0.4300 seconds<br>
+    hbase(main):005:0&gt; snapshot 'testtable', 'snapshot2'<br>
+    0 row(s) in 0.3180 seconds</p>
+
+<p>    hbase(main):006:0&gt; list_snapshots<br>
+    SNAPSHOT TABLE + CREATION TIME<br>
+    snapshot1 testtable (Sun May 10 20:05:11 +0200 2015)<br>
+    snapshot2 testtable (Sun May 10 20:05:18 +0200 2015)<br>
+    2 row(s) in 0.0560 seconds</p>
+
+<p>    =&gt; ["snapshot1", "snapshot2"]<br>
+    hbase(main):007:0&gt; disable 'testtable'<br>
+    0 row(s) in 1.2010 seconds</p>
+
+<p>    hbase(main):008:0&gt; restore_snapshot 'snapshot1'<br>
+    0 row(s) in 0.3430 seconds</p>
+
+<p>    hbase(main):009:0&gt; enable 'testtable'<br>
+    0 row(s) in 0.1920 seconds</p>
+
+<p>    hbase(main):010:0&gt; count 'testtable'<br>
+    0 row(s) in 0.0130 seconds<br>
+    =&gt; 0<br>
+    <br>
+    hbase(main):011:0&gt; disable 'testtable'<br>
+    0 row(s) in 1.1920 seconds</p>
+
+<p>    hbase(main):012:0&gt; restore_snapshot 'snapshot2'<br>
+    0 row(s) in 0.4710 seconds</p>
+
+<p>    hbase(main):013:0&gt; enable 'testtable'<br>
+    0 row(s) in 0.3850 seconds</p>
+
+<p>    hbase(main):014:0&gt; count 'testtable'<br>
+    676 row(s) in 0.1670 seconds<br>
+    =&gt; 676</p>
+
+<p> </p>
+
+<p>■ 工具命令 (Tool Commands)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+tools 命令列于下表，这些命令都由管理 API 提供。这些命令很多是低级别的，也就是说，可能具有破坏性动作，因此确保仔细阅读每个命令的 shell 帮助<br>
+以理解它们的影响。</p>
+
+<p>    Tools Shell Commands<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | Command                | Description<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | assign                | Assigns a region to a server<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | balance_switch        | Toggles the balancer switch<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | balancer                | Starts the balancer<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | close_region            | Closes a region. Uses the closeRegion() method<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | compact                | Starts the asynchronous compaction of a region or table. Uses compact()<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | compact_rs            | Compact all regions of a given region server. The optional boolean flag decided between major and minor<br>
+    |                        | compactions<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | flush                    | Starts the asynchronous flush of a region or table. Uses flush()<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | major_compact            | Starts the asynchronous major compaction of a region or table. Uses majorCompact()<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | move                    | Moves a region to a different server. See the move() call<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | split                    | Splits a region or table. See the split() call<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | merge_region            | Merges two regions, specified as hashed names. The optional boolean flag allows merging of<br>
+    |                        | non-subsequent regions<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | unassign                | Unassigns a region. See the unassign() call<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | wal_roll                | Rolls the WAL, which means close the current and open a new one<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | catalogjanitor_run    | Runs the system catalog janitor process, which operates in the background and cleans out obsolete files<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | catalogjanitor_switch    | Toggles the system catalog janitor process, either enabling or disabling it<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    |catalogjanitor_enabled    | Returns the status of the catalog janitor background process<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | zk_dump                | Dumps the ZooKeeper details pertaining to HBase. This is a special function offered by an internal class.<br>
+    |                        | The web-based UI of the HBase Master exposes the same information<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | trace                    | Starts or stops a trace, using the HTrace framework<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------</p>
+
+<p> </p>
+
+<p>■ 复制命令 (Replication Commands)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------</p>
+
+<p>    Replication Shell Commands<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | Command                | Description<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | add_peer                | Adds a replication peer<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | remove_peer            | Removes a replication peer<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | enable_peer            | Enables a replication peer<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | disable_peer            | Disables a replication peer<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | list_peers            | List all previously added peers<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | list_replicated_tables| Lists all tables and column families that have replication enabled on the current cluster<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | set_peer_tableCFs        | Sets specific column families that should be replicated to the given peer<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | append_peer_tableCFs    | Adds the given column families to the specified peer’s list of replicated column families<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | remove_peer_tableCFs    | Removes the given list of column families from the list of replicated families for the given peer<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------<br>
+    | show_peer_tableCFs    | Lists the currently replicated column families for the given peer<br>
+    +-----------------------+-------------------------------------------------------------------------------------------------------</p>
+
+<p>大多数的命令需要一个 peer ID, 应用各自的功能到指定的 peer 配置。可以添加一个 peer, 之后移除它，对已存在的 peer 启用或禁用复制，列出所有已知的<br>
+peer 或复制的表。</p>
+
+<p> </p>
+
+<p>■ 安全命令 (Security Commands)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+这组命令可以划分为两个部分，一部分是访问控制列表(access control list)，另一部分是 visibility label 相关的命令。对于访问控制列表组可以授权<br>
+(grant), 吊销(revoke), 以及列出用户许可权限。注意，这些命令只有在 AccessController 协处理器启用时可用。</p>
+
+<p>    Security Shell Commands<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | Command            | Description<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | grant                | Grant the named access rights to the given user<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | revoke            | Revoke the previously granted rights of a given user<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------<br>
+    | user_permission    | Lists the current permissions of a user. The optional regular expression filters the list<br>
+    +-------------------+-----------------------------------------------------------------------------------------------------------</p>
+
+<p><br>
+第二组安全相关的命令处理 cell 级别可视性标签(visibility labels), 再次提醒需要一些额外的配置才能使其工作，这里是在服务器进程中<br>
+启用额外的 VisibilityController 协处理器。</p>
+
+<p>    Visibility Label Shell Commands<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | Command        | Description<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | add_labels    | Adds a list of visibility labels to the system<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | list_labels    | Lists all previously defined labels. An optional regular expression can be used to filter the list<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | set_auths        | Assigns the given list of labels to the provided user ID.<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | get_auths        | Returns the list of assigned labels for the given user<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    | clear_auths    | Removes all or only the specified list of labels from the named user.<br>
+    +---------------+---------------------------------------------------------------------------------------------------------------<br>
+    |set_visibility    | Adds a visibility expression to one or more cell    <br>
+    +---------------+---------------------------------------------------------------------------------------------------------------</p>
+
+<p> </p>
+
+<p>4.3 脚本应用 (Scripting)<br>
+-----------------------------------------------------------------------------------------------------------------------------------------<br>
+在 shell 中，可以交互式执行命令，立刻得到反馈信息。有时候，只想发送一个命令，或许是一个脚本由调度维护系统(如 cron 或 at)调用。用户还可以<br>
+通过管道(piping) 的形式运行命令：</p>
+
+<p>    $ echo "status" | bin/hbase shell<br>
+    HBase Shell; enter 'help&lt;RETURN&gt;' for list of supported commands.<br>
+    Type "exit&lt;RETURN&gt;" to leave the HBase Shell<br>
+    Version 1.0.0, r6c98bff7b719efdb16f71606f3b7d8229445eb81, \<br>
+    Sat Feb 14 19:49:22 PST 2015<br>
+    status<br>
+    1 servers, 2 dead, 3.0000 average load</p>
+
+<p>一旦命令运行完成，shell 会关闭并将控制返回给调用者。最后，可以输入整个脚本，由 shell 启动时执行：</p>
+
+<p>    $ cat ~/hbase-shell-status.rb<br>
+    status<br>
+    $ bin/hbase shell ~/hbase-shell-status.rb<br>
+    1 servers, 2 dead, 3.0000 average load<br>
+    HBase Shell; enter 'help&lt;RETURN&gt;' for list of supported commands.<br>
+    Type "exit&lt;RETURN&gt;" to leave the HBase Shell<br>
+    Version 1.0.0, r6c98bff7b719efdb16f71606f3b7d8229445eb81, Sat Feb<br>
+    14 19:49:22 PST 2015</p>
+
+<p>    hbase(main):001:0&gt; exit</p>
+
+<p>一旦脚本执行完成，可以继续在 shell 中工作，或者正常退出。也有选项可以使用原生 JRuby 解释器执行脚本，直接将它作为一个 Java 应用程序执行。<br>
+hbase 脚本设置的类路径(class path) 能够使用任何必要的 Java 类。下面示例简单地从远程集群检索 table 列表：</p>
+
+<p>    $ cat ~/hbase-shell-status-2.rb<br>
+    include Java<br>
+    import org.apache.hadoop.hbase.HBaseConfiguration<br>
+    import org.apache.hadoop.hbase.client.HBaseAdmin<br>
+    import org.apache.hadoop.hbase.client.ConnectionFactory<br>
+    conf = HBaseConfiguration.create<br>
+    connection = ConnectionFactory.createConnection(conf)<br>
+    admin = connection.getAdmin<br>
+    tables = admin.listTables<br>
+    tables.each { |table| puts table.getNameAsString() }</p>
+
+<p>    $ bin/hbase org.jruby.Main ~/hbase-shell-status-2.rb<br>
+    testtable</p>
+
+<p>由于 HBase shell 基于 JRuby’s IRB, 因此可以使用 IRB 内置特性，如，命令补全和命令历史(command completion and history)。启用或配置这些特性<br>
+要在用户的 home 目录中创建一个 .irbrc 文件，该文件会在 shell 启动时读取：</p>
+
+<p>    $ cat ~/.irbrc<br>
+    require 'irb/ext/save-history'<br>
+    IRB.conf[:SAVE_HISTORY] = 100<br>
+    IRB.conf[:HISTORY_FILE] = "#{ENV['HOME']}/.irb-save-history"<br>
+    Kernel.at_exit do<br>
+        IRB.conf[:AT_EXIT].each do |i|<br>
+            i.call<br>
+        end<br>
+    end</p>
+
+<p>启用命令历史能保存执行过的 shell 命令。命令补全功能已由 HBase 脚本启用了。</p>
+
+<p>交互式解释器具有执行 HBase 类和功能函数的优点，例如，某些应用要求写一个 Java 应用程序。下面的示例将从 Bytes.toBytes() 调用输出的二进制输出<br>
+转换为整型值：</p>
+
+<p>    hbase(main):001:0&gt;<br>
+    org.apache.hadoop.hbase.util.Bytes.toInt( "\x00\x01\x06[".to_java_bytes)<br>
+    =&gt; 67163</p>
+
+<p>注意 shell 如何将前三个不可见的字符编码为十六进制值，而第四个字符"[" 则作为一个字符打印。</p>
+
+<p>另一个例子是将一个日期转换为 Linux 纪元数，再转换回人类可读的日期：</p>
+
+<p>    hbase(main):002:0&gt; java.text.SimpleDateFormat.new("yyyy/MM/dd HH:mm:ss").parse("2015/05/12 20:56:29").getTime<br>
+    =&gt; 1431456989000<br>
+        <br>
+    hbase(main):002:0&gt; java.util.Date.new(1431456989000).toString<br>
+    =&gt; "Tue May 12 20:56:29 CEST 2015"</p>
+
+<p>也可以在一个循环中添加很多的 cell, 例如，使用测试数据填充表：</p>
+
+<p>    hbase(main):003:0&gt; for i in 'a'..'z' do for j in 'a'..'z' do \<br>
+    put 'testtable', "row-#{i}#{j}", "colfam1:#{j}", "#{j}" end end</p>
+
+<p>一个更复杂的循环填充计数器可能类似如下：</p>
+
+<p>    hbase(main):004:0&gt; require 'date';<br>
+    import java.lang.Long<br>
+    import org.apache.hadoop.hbase.util.Bytes<br>
+    (Date.new(2011, 01, 01)..Date.today).each { |x| put "testtable", "daily", \<br>
+    "colfam1:" + x.strftime("%Y%m%d"), Bytes.toBytes(Long.new(rand * 4000).longValue).to_a.pack("CCCCCCCC") }</p>
+
+<p>shell 的 JRuby 代码封装了很多 Java 类，例如 Table, Admin 为其自己的版本，更便于访问它们自己的功能，在执行复杂的脚本任务时，可以使用这些类<br>
+执行 table_help 命令，可以访问内建的帮助文本，说明如何使用 shell 封装的类，以及特别是 table 参考。这时可能会比较好奇，为什么 shell 执行某些<br>
+特定命令，如 create 时，它的响应有时会带有哈希箭头(hash rocket, or fat comma, 即 =&gt;)：</p>
+
+<p>    hbase(main):005:0&gt; create 'testtable', 'colfam1'<br>
+    0 row(s) in 0.1740 seconds<br>
+    <br>
+    =&gt; Hbase::Table - testtable</p>
+
+<p>create 命令实际上返回一个引用，指向一个 Hbase::Table 实例，也就是指向新创建的 testtable. 可以利用这个引用在一个变量中对其排序，并且可以<br>
+使用 shell 的双 tab (double tab) 特性获取它提供的所有功能(functions it exposes)：</p>
+
+<p>        NOTE:<br>
+        ---------------------------------------------------------------------------------------------------------------------------------<br>
+        进行下面的步骤时要删除之前创建的测试表，使用 disable 'testtable' , 然后在执行 drop 'testtable'<br>
+    <br>
+    hbase(main):006:0&gt; tbl = create 'testtable', 'colfam1'<br>
+    0 row(s) in 0.1520 seconds<br>
+    =&gt; Hbase::Table - testtable<br>
+    hbase(main):006:0&gt; tbl. TAB TAB<br>
+    ...<br>
+    tbl.append         tbl.close<br>
+    tbl.delete<br>
+    tbl.deleteall     tbl.describe<br>
+    tbl.disable<br>
+    ...<br>
+    tbl.help         tbl.incr<br>
+    tbl.name<br>
+    tbl.put         tbl.snapshot<br>
+    tbl.table<br>
+    ...    </p>
+
+<p>可以看到 table Ruby 类(这里是变量名 tbl)显露出的具有相同名称的所有 shell 命令。例如 put 命令实际上是 table.put 方法的快捷方式。table.help<br>
+打印出与 table_help 相同的内容，table.table 是 Java Table 实例的引用。如果没有其它选择可用，可以使用后者访问原生 API.</p>
+
+<p>获取同一 Ruby table 引用的另一个方法时利用 get_table 命令，如果表已经存在这个方法很有用。</p>
+
+<p>    hbase(main):006:0&gt; tbl = get_table 'testtable'<br>
+    0 row(s) in 0.0120 seconds</p>
+
+<p>    =&gt; Hbase::Table - testtable</p>
+
+<p>一旦拥有了引用，就可以使用匹配的方法调用任何命令，不需要再输入表的名称：</p>
+
+<p>    hbase(main):007:0&gt; tbl.put 'row-1', 'colfam1:qual1', 'val1'<br>
+    0 row(s) in 0.0050 seconds</p>
+
+<p>使用给定的值插入到测试表的命名的行和列。以同样的方法可以访问数据：</p>
+
+<p>    hbase(main):008:0&gt; tbl.get 'row-1'<br>
+    COLUMN CELL<br>
+    colfam1:qual1 timestamp=1431506646925, value=val1<br>
+    1 row(s) in 0.0390 seconds</p>
+
+<p>也可以使用 tbl.scan 等方法读取数据。所有与表相关的命令，都将表名作为第一个参数，也应使用表引用语法。输入 tbl.help '&lt;command&gt;' 命令以查看<br>
+shell 内置的命令帮助，通常也包含引用语法的示例。</p>
+
+<p>一般的管理操作也是直接作用到一个表上，例如，enable, disable, 以及 drop 等，通过输入 tbl.enable, tbl.flush 等执行操作。注意，删除(drop)<br>
+一个表之后，它的引用就变得没用了，再使用它是未定义的，不建议这样使用。</p>
+
+<p>最后，另一个例子是围绕自定义序列化和格式化的。假设已存储 Java 对象到一个表中，并且打算重建实例，打印出所存储对象的文本表示。之前已经看到，<br>
+可以在通过 get 命令获取列时提供一个自定义的格式化方法。另外，HBase 携带的 Apache Commons Lang artifacts 使用其包含的 SerializationUtils 类<br>
+该类有静态的 serialize() 和 deserialize() method, 可以处理任何实现了 Serializable 接口的 Java 对象。下面的示例深入 shell 环境中，必须创建<br>
+自己的 Put 实例。这是必要的，因为 shell 提供的 put 命令假设其值为一个字符串。让我们的例子工作，需要访问原生 Put 类方法：</p>
+
+<p>    hbase(main):004:0&gt; import org.apache.commons.lang.SerializationUtils<br>
+    =&gt; Java::OrgApacheCommonsLang::SerializationUtils</p>
+
+<p>    hbase(main):002:0&gt; create 'testtable', 'colfam1'<br>
+    0 row(s) in 0.1480 seconds</p>
+
+<p>    hbase(main):003:0&gt; p = org.apache.hadoop.hbase.client.Put.new("row-1000".to_java_bytes)<br>
+    =&gt; #&lt;Java::OrgApacheHadoopHbaseClient::Put:0x6d6bc0eb&gt;</p>
+
+<p>    hbase(main):004:0&gt; p.addColumn("colfam1".to_java_bytes,<br>
+    "qual1".to_java_bytes, SerializationUtils.serialize(java.util.ArrayList.new([1,2,3])))<br>
+    =&gt; #&lt;Java::OrgApacheHadoopHbaseClient::Put:0x6d6bc0eb&gt;</p>
+
+<p>    hbase(main):005:0&gt; t.table.put(p)</p>
+
+<p>    hbase(main):006:0&gt; scan 'testtable'<br>
+    ROW COLUMN+CELL<br>
+    row-1000 column=colfam1:qual1, timestamp=1431353253936, \<br>
+    value=\xAC\xED\x00\x05sr\x00\x13java.util.ArrayListx\x81\xD2\x1D<br>
+    \x99...<br>
+    \x03sr\x00\x0Ejava.lang.Long;\x8B\xE4\x90\xCC\x8F#\xDF<br>
+    \x02\x00\x01J...<br>
+    \x10java.lang.Number\x86\xAC\x95\x1D\x0B\x94\xE0\x8B<br>
+    \x02\x00\x00xp...<br>
+    1 row(s) in 0.0340 seconds</p>
+
+<p>    hbase(main):007:0&gt; get 'testtable', 'row-1000', 'colfam1:qual1:c(SerializationUtils).deserialize'<br>
+    COLUMN CELL<br>
+    colfam1:qual1 timestamp=1431353253936, value=[1, 2, 3]<br>
+    1 row(s) in 0.0360 seconds</p>
+
+<p>    hbase(main):008:0&gt; p.addColumn("colfam1".to_java_bytes, "qual1".to_java_bytes, SerializationUtils.serialize( \<br>
+    java.util.ArrayList.new(["one", "two", "three"])))<br>
+    =&gt; #&lt;Java::OrgApacheHadoopHbaseClient::Put:0x6d6bc0eb&gt;<br>
+    hbase(main):009:0&gt; t.table.put(p)<br>
+    hbase(main):010:0&gt; scan 'testtable'<br>
+    ROW COLUMN+CELL<br>
+    row-1000 column=colfam1:qual1, timestamp=1431353620544, \<br>
+    value=\xAC\xED\x00\x05sr\x00\x13java.util.ArrayListx\x81\xD2\x1D\x99 \<br>
+    \xC7a\x9D\x03\x00\x01I\x00\x04sizexp\x00\x00\x00\x03w<br>
+    \x04\x00\x00\x00 \<br>
+    \x03t\x00\x03onet\x00\x03twot\x00\x05threex<br>
+    1 row(s) in 0.4470 seconds<br>
+    <br>
+    hbase(main):011:0&gt; get 'testtable', 'row-1000', 'colfam1:qual1:c(SerializationUtils).deserialize'<br>
+    COLUMN CELL<br>
+    colfam1:qual1 timestamp=1431353620544, value=[one, two, three]<br>
+    1 row(s) in 0.0190 seconds</p>
+
+<p>首先导入 org.apache.commons.lang.SerializationUtils 类(已在 HBase shell 类路径中), 然后创建了一个测试表，跟一个自定义 Put 实例。设置了 put<br>
+实例两次，一次序列化数字数组，一次序列化字符串数组。之后调用封装的 Table 实例的 put 方法，并扫描内容验证序列化内容。</p>
+
+<p>每一次序列化之后，调用了 get 命令，通过自定义的格式化方法指向 deserialize() method. 它解析原始字节反序列化为一个 Java 对象，然后打印出来。<br>
+由于 shell 应用 toString() 调用，因此可以看到打印出的数组的原始内容，如 [one, two, three]. 这确认了直接在 shell 中重建了序列化的 Java 对象。</p>
+
+<p> </p>
+
+<p>参考：</p>
+
+<p><a href="https://blog.csdn.net/devalone/article/details/81111895" rel="nofollow">HBase 客户端类型 （一）</a></p>
+
+<p><a href="https://blog.csdn.net/devalone/article/details/81126363" rel="nofollow">HBase 客户端类型 （二）</a></p>
+
+<p><a href="https://blog.csdn.net/devalone/article/details/81142043" rel="nofollow">HBase 客户端类型 （三）</a></p>
+
+<p><a href="https://blog.csdn.net/devalone/article/details/81162046" rel="nofollow">HBase 客户端类型 （四）</a></p>
+
+<p> </p>
+
+<p>参考：</p>
+
+<p>    《HBase - The Definitive Guide - 2nd Edition》Early release —— 2015.7 Lars George</p>            </div>
+                </div>

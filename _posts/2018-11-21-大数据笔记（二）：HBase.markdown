@@ -1,0 +1,306 @@
+---
+layout:     post
+title:      大数据笔记（二）：HBase
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="开篇">开篇</h2>
+
+<p>重要的视频链接在我的第一篇大数据笔记里面都已经更新了，关于环境的配置在后面的改版博客里面会陆续给出，现在新版本可能有些特性已经被修改了，但是基本思想还是在的，希望能够帮助自己记忆，也帮助大家去梳理HBase的基本知识点。话不多说，下面正式开始我们今天的博客内容。</p>
+
+
+
+<h2 id="内容提要">内容提要</h2>
+
+<ul>
+<li>HBase概述</li>
+<li>HBase访问接口</li>
+<li>HBase数据模型</li>
+<li>HBase的实现原理</li>
+<li>HBase运行机制</li>
+<li>HBase应用方案</li>
+<li>HBase编程实践</li>
+</ul>
+
+
+
+<h2 id="hbase概述">HBase概述</h2>
+
+
+
+<h3 id="bigtable">BigTable</h3>
+
+<p>BigTable是一个分布式存储系统 <br>
+BigTable起初用于解决典型的互联网搜索问题 <br>
+•建立互联网索引 <br>
+1 爬虫持续不断地抓取新页面，这些页面每页一行地存储到BigTable里 <br>
+2 MapReduce计算作业运行在整张表上，生成索引，为网络搜索应用做准备 <br>
+•搜索互联网 <br>
+3 用户发起网络搜索请求 <br>
+4 网络搜索应用查询建立好的索引，从BigTable得到网页 <br>
+5 搜索结果提交给用户</p>
+
+<p><img src="https://img-blog.csdn.net/20180510151251902?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p>•BigTable是一个分布式存储系统 <br>
+•利用谷歌提出的MapReduce分布式并行计算模型来处理海量数据 <br>
+•使用谷歌分布式文件系统GFS作为底层数据存储 <br>
+•采用Chubby提供协同服务管理 <br>
+•可以扩展到PB级别的数据和上千台机器，具备广泛应用性、可扩展性、高性能和高可用性等特点 <br>
+•谷歌的许多项目都存储在BigTable中，包括搜索、地图、财经、打印、社交网站Orkut、视频共享网站YouTube和博客网站Blogger等</p>
+
+
+
+<h3 id="hbase简介">HBase简介</h3>
+
+<p>HBase是一个高可靠、高性能、面向列、可伸缩的分布式数据库，是谷歌BigTable的开源实现，主要用来存储<strong>非结构化和半结构化</strong>的松散数据。 HBase的目标是处理非常庞大的表，可以通过<strong>水平扩展</strong>的方式，利用廉价计算机集群处理由超过10亿行数据和数百万列元素组成的数据表</p>
+
+<p><img src="https://img-blog.csdn.net/20180510151522942?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180510151557291?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><strong>关系数据库已经流行很多年，并且Hadoop已经有了HDFS和MapReduce，为什么需要HBase?</strong></p>
+
+<p>•Hadoop可以很好地解决大规模数据的离线批量处理问题，但是，受限于Hadoop <br>
+MapReduce编程框架的高延迟数据处理机制，使得Hadoop无法满足大规模数据实时处理应用的需求 <br>
+•HDFS面向批量访问模式，不是随机访问模式 <br>
+•传统的通用关系型数据库无法应对在数据规模剧增时导致的系统扩展性和性能问题（分库分表也不能很好解决） <br>
+•传统关系数据库在数据结构变化时一般需要停机维护；空列浪费存储空间 <br>
+•因此，业界出现了一类面向半结构化数据存储和处理的高可扩展、低写入/查询延迟的系统，例如，键值数据库、文档数据库和列族数据库（如BigTable和HBase等） <br>
+•HBase已经成功应用于互联网服务领域和传统行业的众多在线式数据分析处理系统中</p>
+
+
+
+<h3 id="hbase和传统的数据库的对比">HBase和传统的数据库的对比</h3>
+
+<p>• HBase与传统的关系数据库的区别主要体现在以下几个方面： <br>
+• （ 1）数据类型：关系数据库采用关系模型，具有丰富的数据类型和存储方式， <br>
+HBase则采用了更加简单的数据模型，它把数据存储为未经解释的字符串 <br>
+• （ 2）数据操作：关系数据库中包含了丰富的操作，其中会涉及复杂的多表连接。 <br>
+HBase操作则不存在复杂的表与表之间的关系，只有简单的插入、查询、删除、清空等，因为HBase在设计上就避免了复杂的表和表之间的关系 <br>
+• （ 3）存储模式：关系数据库是基于行模式存储的。 HBase是基于列存储的，每个列族都由几个文件保存，不同列族的文件是分离的 <br>
+• （ 4）数据索引：关系数据库通常可以针对不同列构建复杂的多个索引，以提高数 <br>
+据访问性能。 HBase只有一个索引——行键，通过巧妙的设计， HBase中的所有访问方法，或者通过行键访问，或者通过行键扫描，从而使得整个系统不会慢下来 <br>
+• （ 5）数据维护：在关系数据库中，更新操作会用最新的当前值去替换记录中原来的旧值，旧值被覆盖后就不会存在。而在HBase中执行更新操作时，并不会删除数据旧的版本，而是生成一个新的版本，旧有的版本仍然保留 <br>
+• （ 6）可伸缩性：关系数据库很难实现横向扩展，纵向扩展的空间也比较有限。相反， HBase和BigTable这些分布式数据库就是为了实现灵活的水平扩展而开发的，能够轻易地通过在集群中增加或者减少硬件数量来实现性能的伸缩</p>
+
+<p><img src="https://img-blog.csdn.net/20180510152523534?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+
+
+<h2 id="hbase的数据类型">HBase的数据类型</h2>
+
+
+
+<h3 id="数据模型概述">数据模型概述</h3>
+
+<p>• HBase是一个稀疏、多维度、排序的映射表，这张表的索引是行键、列族、列限定符和时间戳（具体见下图） <br>
+• 每个值是一个未经解释的字符串，没有数据类型 <br>
+• 用户在表中存储数据，每一行都有一个可排序的行键和任意多的列 <br>
+• 表在水平方向由一个或者多个列族组成，一个列族中可以包含任意多个列，同一个列族里面的数据存储在一起 <br>
+• 列族支持动态扩展，可以很轻松地添加一个列族或列，无需预先定义列的数量以及类型，所有列均以字符串形式存储，用户需要自行进行数据类型转换 <br>
+• HBase中执行更新操作时，并不会删除数据旧的版本，而是生成一个新的版本，旧有的版本仍然保留（这是和HDFS只允许追加不允许修改的特性相关的）</p>
+
+
+
+<h3 id="数据模型相关概念">数据模型相关概念</h3>
+
+<p>• 表：HBase采用表来组织数据，表由行和列组成，列划分为若干个列族 <br>
+• 行：每个HBase表都由若干行组成，每个行由行键（row key）来标识。 <br>
+• 列族：一个HBase表被分组成许多“列族”（Column Family）的集合，它是基本的访问控制单元 <br>
+• 列限定符：列族里的数据通过列限定符（或列）来定位 <br>
+• 单元格：在HBase表中，通过行、列族和列限定符确定一个“单元格”（cell），单元格中存储的数据没有数据类型，总被视为字节数组byte[] <br>
+• 时间戳：每个单元格都保存着同一份数据的多个版本，这些版本采用时间戳进行索引</p>
+
+<p><img src="https://img-blog.csdn.net/20180514174046828?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+
+
+<h3 id="数据坐标">数据坐标</h3>
+
+<p>HBase中需要根据行键、列族、列限定符和时间戳来确定一个单元格，因此，可以视为一个“四维坐标”，即[行键, 列族, 列限定符, 时间戳]</p>
+
+<p><img src="https://img-blog.csdn.net/2018051417431181?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180514174325163?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180514174338566?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180514175207567?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180514175219216?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+
+
+<h2 id="hbase的实现原理">HBase的实现原理</h2>
+
+
+
+<h3 id="hbase的功能组件">HBase的功能组件</h3>
+
+<p>• HBase的实现包括三个主要的功能组件： <br>
+– （ 1）库函数：链接到每个客户端 <br>
+– （ 2）一个Master主服务器 <br>
+– （ 3）许多个Region服务器 <br>
+• 主服务器Master负责管理和维护HBase表的分区信息，维护Region服务器列表，分配Region，负载均衡 <br>
+• Region服务器负责存储和维护分配给自己的Region，处理来自客户端的读写请求 <br>
+• 客户端并不是直接从Master主服务器上读取数据，而是在获得Region的存储位置信息后，直接从Region服务器上读取数据 <br>
+• 客户端并不依赖Master，而是通过Zookeeper来获得Region位置信息，大多数客户端甚至从来不和Master通信，这种设计方式使得Master负载很小</p>
+
+
+
+<h3 id="表和region">表和region</h3>
+
+<p><img src="https://img-blog.csdn.net/2018051420585890?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180514205909816?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+
+
+<h3 id="region的定位">region的定位</h3>
+
+<p><img src="https://img-blog.csdn.net/201805142100492?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180514210141529?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180514210212120?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180514210252672?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+
+
+<h2 id="hbase的运行机制">HBase的运行机制</h2>
+
+
+
+<h3 id="hbase的系统架构">HBase的系统架构</h3>
+
+<p><img src="https://img-blog.csdn.net/20180514212104271?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p>• 1. 客户端 <br>
+– 客户端包含访问HBase的接口，同时在缓存中维护着已经访问过的Region位置信息，用来加快后续数据访问过程 <br>
+• 2. Zookeeper服务器 <br>
+– Zookeeper可以帮助选举出一个Master作为集群的总管，并保证在任何时刻总有唯一一个Master在运行，这就避免了Master的“单点失效”问题 <br>
+• 3. Master <br>
+• 主服务器Master主要负责表和Region的管理工作： <br>
+– 管理用户对表的增加、删除、修改、查询等操作 <br>
+– 实现不同Region服务器之间的负载均衡 <br>
+– 在Region分裂或合并后，负责重新调整Region的分布 <br>
+– 对发生故障失效的Region服务器上的Region进行迁移 <br>
+• 4. Region服务器 <br>
+– Region服务器是HBase中最核心的模块，负责维护分配给自己的Region，并响应用户的读写请求</p>
+
+
+
+<h3 id="region服务器的工作原理">Region服务器的工作原理</h3>
+
+<p><img src="https://img-blog.csdn.net/20180514212601224?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<ol>
+<li><p>用户读写数据过程 <br>
+•用户写入数据时，被分配到相应Region服务器去执行 <br>
+•用户数据首先被写入到MemStore和Hlog中 <br>
+•只有当操作写入Hlog之后， commit()调用才会将其返回给客户端 <br>
+•当用户读取数据时， Region服务器会首先访问MemStore缓存，如果 <br>
+找不到，再去磁盘上面的StoreFile中寻找</p></li>
+<li><p>缓存的刷新 <br>
+•系统会周期性地把MemStore缓存里的内容刷写到磁盘的StoreFile文件中，清空缓存，并在Hlog里面写入一个标记 <br>
+•每次刷写都生成一个新的StoreFile文件，因此，每个Store包含多个StoreFile文件 <br>
+•每个Region服务器都有一个自己的HLog 文件，每次启动都检查该文件，确认最近一次执行缓存刷新操作之后是否发生新的写入操作；如果发现更新，则先写入MemStore，再刷写到StoreFile，最后删除旧的Hlog文件，开始为用户提供服务</p></li>
+<li><p>StoreFile的合并 <br>
+•每次刷写都生成一个新的StoreFile，数量太多，影响查找速度 <br>
+•调用Store.compact()把多个合并成一个 <br>
+•合并操作比较耗费资源，只有数量达到一个阈值才启动合并</p></li>
+</ol>
+
+
+
+<h3 id="store工作原理">store工作原理</h3>
+
+<p><img src="https://img-blog.csdn.net/20180514213027740?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+
+
+<h3 id="hlog工作原理">Hlog工作原理</h3>
+
+<p>• 分布式环境必须要考虑系统出错。 HBase采用HLog保证系统恢复 <br>
+• HBase系统为每个Region服务器配置了一个HLog文件，它是一种预写式日志（ Write Ahead Log） <br>
+• 用户更新数据必须首先写入日志后，才能写入MemStore缓存，并且，直到MemStore缓存内容对应的日志已经写入磁盘，该缓存内容才能被刷写到磁盘 <br>
+• Zookeeper会实时监测每个Region服务器的状态，当某个Region服务器发生故障时， Zookeeper会通知Master <br>
+• Master首先会处理该故障Region服务器上面遗留的HLog文件，这个遗留的HLog文件中包含了来自多个Region对象的日志记录 <br>
+• 系统会根据每条日志记录所属的Region对象对HLog数据进行拆分，分别放到相应Region对象的目录下，然后，再将失效的Region重新分配到可用的Region服务器中，并把与该Region对象相关的HLog日志记录也发送给相应的Region服务器 <br>
+• Region服务器领取到分配给自己的Region对象以及与之相关的HLog日志记录以后，会重新做一遍日志记录中的各种操作，把日志记录中的数据写入到MemStore缓存中，然后，刷新到磁盘的StoreFile文件中，完成数据恢复 <br>
+• 共用日志优点：提高对表的写操作性能；缺点：恢复时需要分拆日志</p>
+
+
+
+<h2 id="hbase应用方案">HBase应用方案</h2>
+
+
+
+<h3 id="实际应用中的性能优化方案">实际应用中的性能优化方案</h3>
+
+<p>•行键（ Row Key） <br>
+行键是按照字典序存储，因此，设计行键时，要充分利用这个排序特点，将经常一起读取的数据存储到一块，将最近可能会被访问的数据放在一块。 <br>
+举个例子：如果最近写入HBase表中的数据是最可能被访问的，可以考虑将时间戳作为行键的一部分，由于是字典序排序，所以可以使用Long.MAX_VALUE -timestamp作为行键，这样能保证新写入的数据在读取时可以被快速命中。</p>
+
+<p>•InMemory <br>
+创建表的时候，可以通过HColumnDescriptor.setInMemory(true)将表放到Region服务器的缓存中，保证在读取的时候被cache命中。 <br>
+•Max Version <br>
+创建表的时候，可以通过HColumnDescriptor.setMaxVersions(int maxVersions)设置表中数据的最大版本，如果只需要保存最新版本的数据，那么可以设置setMaxVersions(1)。 <br>
+•Time To Live <br>
+创建表的时候，可以通过HColumnDescriptor.setTimeToLive(int timeToLive)设置表中数据的存储生命期，过期数据将自动被删除，例如如果只需要存储最近两天的数据，那么可以设置setTimeToLive(2 * 24 * 60 * 60)。</p>
+
+
+
+<h3 id="性能监测">性能监测</h3>
+
+<p><img src="https://img-blog.csdn.net/20180515081533995?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/2018051508154454?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180515081556996?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180515081609313?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+
+
+<h3 id="在hbase上构建sql引擎">在HBase上构建sql引擎</h3>
+
+<p>NoSQL区别于关系型数据库的一点就是NoSQL不使用SQL作为查询语言，至于为何在NoSQL数据存储HBase上提供SQL接口，有如下原因： <br>
+1.易使用。使用诸如SQL这样易于理解的语言，使人们能够更加轻松地使用HBase。 <br>
+2.减少编码。使用诸如SQL这样更高层次的语言来编写，减少了编写的代码量。 <br>
+方案： <br>
+1.Hive整合HBase <br>
+Hive与HBase的整合功能从Hive0.6.0版本已经开始出现，利用两者对外的API接口互相通信，通信主要依靠hive_hbase-handler.jar工具包(Hive Storage Handlers)。由于HBase有一次比较大的版本变动，所以并不是每个版本的Hive都能和现有的HBase版本进行整合，所以在使用过程中特别注意的就是两者版本的一致性。 <br>
+2.Phoenix <br>
+Phoenix由Salesforce.com开源，是构建在Apache HBase之上的一个SQL中间层，可以让开发者在HBase上执行SQL查询。</p>
+
+
+
+<h3 id="构建hbase的二级索引">构建HBase的二级索引</h3>
+
+<p>HBase只有一个针对行健的索引访问HBase表中的行，只有三种方式： <br>
+•通过单个行健访问 <br>
+•通过一个行健的区间来访问 <br>
+•全表扫描 <br>
+使用其他产品为HBase行健提供索引功能： <br>
+•Hindex二级索引 <br>
+•HBase+Redis <br>
+•HBase+solr <br>
+原理：采用HBase0.92版本之后引入的Coprocessor特性</p>
+
+<p><img src="https://img-blog.csdn.net/20180515082445867?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p>Hindex 是华为公司开发的纯 Java 编写的HBase二级索引，兼容 Apache HBase 0.94.8。当前的特性如下： <br>
+•多个表索引 <br>
+•多个列索引 <br>
+•基于部分列值的索引</p>
+
+<p><img src="https://img-blog.csdn.net/20180515082527915?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180515082557750?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L0RpbmdfeGlhb2ZlaQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

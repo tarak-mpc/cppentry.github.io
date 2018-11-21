@@ -1,0 +1,44 @@
+---
+layout:     post
+title:      HBase专题介绍 4
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>前几篇文章讲述了 <a href="http://www.javabloger.com/article/apache-hbase-shell-and-install-key-value.html" rel="nofollow">
+HBase的安装</a>、<a href="http://www.javabloger.com/article/apache-hbase-shell-and-java-api-html.html" rel="nofollow">Hbase命令和API的使用</a>、<a href="http://www.javabloger.com/article/hbase-performance-hbase-optimized.html" rel="nofollow">HBase简单的优化技巧</a>，《HBase入门篇4》<a href="http://www.javabloger.com/article/apache-hbase-hadoop.html" rel="nofollow">这篇文章</a>是讲述把HBase的数据放在HDFS上的点滴过程。目前对与HBase我是一个绝对的新手，如果在文章中有任何我理解有错误的地方请各位指正，谢谢。</p>
+<p>Ok，进行正题 ………</p>
+<p> 在HBase中创建的一张表可以分布在多个Hregion，也就说一张表可以被拆分成多块，每一块称我们呼为一个Hregion。每个Hregion会保 存一个表里面某段连续的数据，用户创建的那个大表中的每个Hregion块是由Hregion服务器提供维护，访问Hregion块是要通过 Hregion服务器，而一个Hregion块对应一个Hregion服务器，一张完整的表可以保存在多个Hregion 上。HRegion Server 与Region的对应关系是一对多的关系。每一个HRegion在物理上会被分为三个部分：Hmemcache(缓存)、Hlog(日志)、HStore(持久层)。<br>
+上述这些关系在我脑海中的样子，如图所示：</p>
+<p>1.HRegionServer、HRegion、Hmemcache、Hlog、HStore之间的关系，如图所示：</p>
+<p style="text-align:center;"><img alt="http://zcitrq.bay.livefilestore.com/y1pdt-uarMGAWh01NH_Avl_-f8n5ZUq7zHyGaPKPp1ApP2BkJOtQFDh0H6YXwzhW4odm6zA6htPQTZC-vIX0G1x3YYolWkXMCDF/HBase-RegionServer-Region.jpg?psid=1" src="http://zcitrq.bay.livefilestore.com/y1pdt-uarMGAWh01NH_Avl_-f8n5ZUq7zHyGaPKPp1ApP2BkJOtQFDh0H6YXwzhW4odm6zA6htPQTZC-vIX0G1x3YYolWkXMCDF/HBase-RegionServer-Region.jpg?psid=1"></p>
+<p>2.HBase表中的数据与HRegionServer的分布关系，如图所示：</p>
+<p><img alt="http://public.bay.livefilestore.com/y1pjunmpIABSxL-FrxrHUCCwXZ-eFxjSUI5xAiuUpWQRo5HKEJy_2iyVl7bkobp1U5pqa8jvJmMQgirR9PQcSZ6NA/HBase-RegionServer-Region2.jpg?psid=1" src="http://public.bay.livefilestore.com/y1pjunmpIABSxL-FrxrHUCCwXZ-eFxjSUI5xAiuUpWQRo5HKEJy_2iyVl7bkobp1U5pqa8jvJmMQgirR9PQcSZ6NA/HBase-RegionServer-Region2.jpg?psid=1"></p>
+<p></p>
+<p><strong>HBase读数据</strong><br>
+HBase读取数据优先读取HMemcache中的内容，如果未取到再去读取Hstore中的数据，提高数据读取的性能。</p>
+<p><strong>HBase写数据</strong><br>
+HBase写入数据会写到HMemcache和Hlog中，HMemcache建立缓存，Hlog同步Hmemcache和Hstore的事务日志，发起Flush Cache时，数据持久化到Hstore中，并清空HMemecache。</p>
+<p> 客户端访问这些数据的时候通过Hmaster ，每个 Hregion 服务器都会和Hmaster 服务器保持一个长连接，Hmaster 是HBase分布式系统中的管理者，他的主要任务就是要告诉每个Hregion 服务器它要维护哪些Hregion。用户的这些都数据可以保存在Hadoop 分布式文件系统上。 如果主服务器Hmaster死机，那么整个系统都会无效。下面我会考虑如何解决Hmaster的SPFO的问题，这个问题有点类似Hadoop的SPFO 问题一样只有一个NameNode维护全局的DataNode，HDFS一旦死机全部挂了，也有人说采用Heartbeat来解决这个问题，但我总想找出
+ 其他的解决方案，多点时间，总有办法的。</p>
+<p>昨天在hadoop-0.21.0、hbase-0.20.6的环境中折腾了很久，一直报错，错误信息如下：<br>
+Exception in thread "main" java.io.IOException: Call to localhost/serv6:9000 failed on local exception: java.io.EOFException<br>
+10/11/10 15:34:34 ERROR master.HMaster: Can not start master<br>
+java.lang.reflect.InvocationTargetException<br>
+ at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)<br>
+ at sun.reflect.NativeConstructorAccessorImpl.newInstance(NativeConstructorAccessorImpl.java:39)<br>
+ at sun.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:27)<br>
+ at java.lang.reflect.Constructor.newInstance(Constructor.java:513)<br>
+ at org.apache.hadoop.hbase.master.HMaster.doMain(HMaster.java:1233)<br>
+ at org.apache.hadoop.hbase.master.HMaster.main(HMaster.java:1274)</p>
+<p>死活连接不上HDFS，也无法连接HMaster，郁闷啊。<br>
+我想想啊，慢慢想，我眼前一亮 java.io.EOFException 这个异常，是不是有可能是RPC 协定格式不一致导致的？也就是说服务器端和客户端的版本不一致的问题？换了一个HDFS的服务器端以后，一切都好了，果然是版本的问题，最后采用 hadoop-0.20.2 搭配hbase-0.20.6 比较稳当。<br>
+最后的效果如图所示：</p>
+<p><a href="http://farm5.static.flickr.com/4065/5165595387_d17a1bbbe4_b.jpg" rel="nofollow"><img alt="http://farm5.static.flickr.com/4065/5165595387_d17a1bbbe4.jpg" src="http://farm5.static.flickr.com/4065/5165595387_d17a1bbbe4.jpg"></a></p>
+<p><a href="http://farm5.static.flickr.com/4065/5165595387_d17a1bbbe4_b.jpg" rel="nofollow">查看大图请点击这里</a>， 上图的一些文字说明：<br>
+ 1.hadoop版本是0.20.2 ,<br>
+ 2.hbase版本是0.20.6,<br>
+ 3.在hbase中创建了一张表 tab1，退出hbase shell环境,<br>
+ 4.用hadoop命令查看，文件系统中的文件果然多了一个刚刚创建的tab1目录,<br>
+以上这张图片说明HBase在分布式文件系统Apache HDFS中运行了。</p>            </div>
+                </div>

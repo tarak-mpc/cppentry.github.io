@@ -1,0 +1,492 @@
+---
+layout:     post
+title:      flume 数据采集
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2><span style="font-size:24px;">1、flume在大数据业务中的角色</span></h2>
+<p><span style="font-size:18px;">Hadoop业务的整体开发流程： <br>
+ <img src="https://img-blog.csdn.net/20171229210014281?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZGF0aWVjaHVpMjA=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p><span style="font-size:18px;">在大数据的业务处理过程中，Flume主要负责数据的采集。</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<h3>
+</h3><h2><span style="font-size:24px;">2、Flume架构介绍 </span></h2>
+<br><span style="font-size:18px;"> <img src="https://img-blog.csdn.net/20171229210047607?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZGF0aWVjaHVpMjA=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span><br><span style="font-size:18px;">flume是分布式的日志收集系统，它将各个服务器中的数据收集起来并送到指定的地方去，比如说送到图中的HDFS，简单来说flume就是收集日志的。 </span><br><span style="font-size:18px;">2、Event </span><br><span style="font-size:18px;">在这里有必要先介绍一下flume中event的相关概念：flume的核心是把数据从数据源(source)收集过来，在将收集到的数据送到指定的目的地(sink)。为了保证输送的过程一定成功，在送到目的地(sink)之前，会先缓存数据(channel),待数据真正到达目的地(sink)后，flume在删除自己缓存的数据。 </span><br><span style="font-size:18px;">在整个数据的传输的过程中，流动的是event，即事务保证是在event级别进行的。那么什么是event呢？—–event将传输的数据进行封装，是flume传输数据的基本单位，如果是文本文件，通常是一行记录，event也是事务的基本单位。event从source，流向channel，再到sink，本身为一个字节数组，并可携带headers(头信息)信息。event代表着一个数据的最小完整单元，从外部数据源来，向外部的目的地去。 </span><br><span style="font-size:18px;">为了方便大家理解，给出一张event的数据流向图： </span>
+<h3><span style="font-size:18px;"><img src="https://img-blog.csdn.net/20171229210107434?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZGF0aWVjaHVpMjA=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span><br><span style="font-size:18px;"> </span><br><span style="font-size:18px;">一个完整的event包括：event headers、event body、event信息(即文本文件中的单行记录)，如下所以： </span><br><span style="font-size:18px;"> 其中event信息就是flume收集到的日记记录。 </span><br></h3><h2><span style="font-size:24px;">3、flume组件介绍 </span></h2>
+<span style="font-size:18px;">flume之所以这么神奇，是源于它自身的一个设计，这个设计就是agent，agent本身是一个java进程，运行在日志收集节点—所谓日志收集节点就是服务器节点。 </span><br><span style="font-size:18px;">agent里面包含3个核心的组件：source—-&gt;channel—–&gt;sink,类似生产者、仓库、消费者的架构。 </span><br><span style="font-size:18px;">source：source组件是专门用来收集数据的，可以处理各种类型、各种格式的日志数据,包括avro、thrift、exec、jms、spoolingdirectory、netcat、sequencegenerator、syslog、http、legacy、自定义。 </span>
+<p><span style="font-size:18px;"><strong>channel</strong>：source组件把数据收集来以后，临时存放在channel中，即channel组件在agent中是专门用来存放临时数据的——对采集到的数据进行简单的缓存，可以存放在memory、jdbc、file等等。 <br><br></span></p>
+<p><span style="font-size:18px;"><strong>sink</strong>：sink组件是用于把数据发送到目的地的组件，目的地包括hdfs、logger、avro、thrift、ipc、file、null、hbase、solr、自定义。 <br></span></p>
+<h2><span style="font-size:24px;">4、flume的运行机制 </span></h2>
+<span style="font-size:18px;">flume的核心就是一个agent，这个agent对外有两个进行交互的地方，一个是接受数据的输入——source，一个是数据的输出sink，sink负责将数据发送到外部指定的目的地。source接收到数据之后，将数据发送给channel，chanel作为一个数据缓冲区会临时存放这些数据，随后sink会将channel中的数据发送到指定的地方—-例如HDFS等，注意：只有在sink将channel中的数据成功发送出去之后，channel才会将临时数据进行删除，这种机制保证了数据传输的可靠性与安全性。 <br></span>
+<h2><span style="font-size:24px;">5、flume的用法 </span></h2>
+<span style="font-size:18px;">flume之所以这么神奇—-其原因也在于flume可以支持多级flume的agent，即flume可以前后相继，例如sink可以将数据写到下一个agent的source中，这样的话就可以连成串了，可以整体处理了。flume还支持扇入(fan-in)、扇出(fan-out)。所谓扇入就是source可以接受多个输入，所谓扇出就是sink可以将数据输出多个目的地destination中。 </span>
+<p></p>
+<p><span style="font-size:18px;">对于flume的原理其实很容易理解，我们更应该掌握flume的具体使用方法，flume提供了大量内置的Source、Channel和Sink类型。而且不同类型的Source、Channel和Sink可以自由组合—–组合方式基于用户设置的配置文件，非常灵活。比如：Channel可以把事件暂存在内存里，也可以持久化到本地硬盘上。Sink可以把日志写入HDFS, HBase，甚至是另外一个Source等等。<br>
+ <br><br><img src="https://img-blog.csdn.net/20171229210133888?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZGF0aWVjaHVpMjA=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p><span style="font-size:18px;"> </span></p>
+<h1><span style="font-size:24px;">案例一：监控端口数据</span></h1>
+<p><span style="font-size:18px;"><strong>目标：</strong>Flume监控一端Console，另一端Console发送消息，使被监控端实时显示。</span></p>
+<p><strong><span style="font-size:18px;">分步实现： </span></strong></p>
+<p><strong><span style="font-size:18px;">1) 创建Flume Agent配置文件flume-telnet.conf</span></strong></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;"># Name the components on this agent</span></p>
+<p><span style="font-size:18px;">a1.sources = r1</span></p>
+<p><span style="font-size:18px;">a1.sinks = k1</span></p>
+<p><span style="font-size:18px;">a1.channels = c1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.type = netcat</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.bind = localhost</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.port = 44444</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the sink</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.type = logger</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Use a channel which buffers events in memory</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.type = memory</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.channels = c1</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.channel = c1</span></p>
+</td>
+</tr></tbody></table><p><strong><span style="font-size:18px;">2) 判断44444端口是否被占用</span></strong></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;">$ netstat -tunlp | grep 44444</span></p>
+</td>
+</tr></tbody></table><p><strong><span style="font-size:18px;">3) 先开启flume先听端口</span></strong></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p align="left"><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a1 --conf-file job/flume-telnet.conf -Dflume.root.logger==INFO,console</span></p>
+</td>
+</tr></tbody></table><p><strong><span style="font-size:18px;">4) 使用telnet工具向本机的44444端口发送内容</span></strong></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;">$ telnet localhost 44444</span></p>
+</td>
+</tr></tbody></table><h1><span style="font-size:24px;">案例二：实时读取本地文件到HDFS</span></h1>
+<p><span style="font-size:18px;"><strong>目标：</strong>实时监控hive日志，并上传到HDFS中</span></p>
+<p><strong><span style="font-size:18px;">分步实现：</span></strong></p>
+<p><strong><span style="font-size:18px;">1) 拷贝Hadoop相关jar到Flume的lib目录下（<span style="color:#FF0000;">要学会根据自己的目录和版本查找jar</span>包）</span></strong></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p align="left"><span style="font-size:18px;">$ cp share/hadoop/common/lib/hadoop-auth-2.5.0-cdh5.3.6.jar ./lib/</span></p>
+<p align="left"><span style="font-size:18px;">$ cp share/hadoop/common/lib/commons-configuration-1.6.jar ./lib/</span></p>
+<p align="left"><span style="font-size:18px;">$ cp share/hadoop/mapreduce1/lib/hadoop-hdfs-2.5.0-cdh5.3.6.jar ./lib/</span></p>
+<p align="left"><span style="font-size:18px;">$ cp share/hadoop/common/hadoop-common-2.5.0-cdh5.3.6.jar ./lib/</span></p>
+<p align="left"><span style="color:#FF0000;"><span style="font-size:18px;">$ cp ./share/hadoop/hdfs/lib/htrace-core-3.1.0-incubating.jar ./lib/</span></span></p>
+<p align="left"><span style="color:#FF0000;"><span style="font-size:18px;">$ cp ./share/hadoop/hdfs/lib/commons-io-2.4.jar ./lib/</span></span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"><span style="color:#FF0000;">尖叫提示：</span>标红的jar为1.99版本flume必须引用的jar</span></p>
+<p><strong><span style="font-size:18px;">2) 创建flume-hdfs.conf文件</span></strong></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p align="left"><span style="font-size:18px;"># Name the components on this agent</span></p>
+<p align="left"><span style="font-size:18px;">a2.sources = r2</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks = k2</span></p>
+<p align="left"><span style="font-size:18px;">a2.channels = c2</span></p>
+<p align="left"><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p align="left"><span style="font-size:18px;">a2.sources.r2.type = exec</span></p>
+<p align="left"><span style="font-size:18px;">a2.sources.r2.command = tail -F /home/admin/modules/apache-hive-1.2.2-bin/hive.log</span></p>
+<p align="left"><span style="font-size:18px;">a2.sources.r2.shell = /bin/bash -c</span></p>
+<p align="left"><span style="font-size:18px;"> </span></p>
+<p align="left"><span style="font-size:18px;"># Describe the sink</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.type = hdfs</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.path = hdfs://linux01:8020/flume/%Y%m%d/%H</span></p>
+<p align="left"><span style="font-size:18px;">#上传文件的前缀</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.filePrefix = logs-</span></p>
+<p align="left"><span style="font-size:18px;">#是否按照时间滚动文件夹</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.round = true</span></p>
+<p align="left"><span style="font-size:18px;">#多少时间单位创建一个新的文件夹</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.roundValue = 1</span></p>
+<p align="left"><span style="font-size:18px;">#重新定义时间单位</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.roundUnit = hour</span></p>
+<p align="left"><span style="font-size:18px;">#是否使用本地时间戳</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.useLocalTimeStamp = true</span></p>
+<p align="left"><span style="font-size:18px;">#积攒多少个Event才flush到HDFS一次</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.batchSize = 1000</span></p>
+<p align="left"><span style="font-size:18px;">#设置文件类型，可支持压缩</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.fileType = DataStream</span></p>
+<p align="left"><span style="font-size:18px;">#多久生成一个新的文件</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.rollInterval = 600</span></p>
+<p align="left"><span style="font-size:18px;">#设置每个文件的滚动大小</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.rollSize = 134217700</span></p>
+<p align="left"><span style="font-size:18px;">#文件的滚动与Event数量无关</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.rollCount = 0</span></p>
+<p align="left"><span style="font-size:18px;">#最小冗余数</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.hdfs.minBlockReplicas = 1</span></p>
+<p align="left"><span style="font-size:18px;"> </span></p>
+<p align="left"><span style="font-size:18px;"># Use a channel which buffers events in memory</span></p>
+<p align="left"><span style="font-size:18px;">a2.channels.c2.type = memory</span></p>
+<p align="left"><span style="font-size:18px;">a2.channels.c2.capacity = 1000</span></p>
+<p align="left"><span style="font-size:18px;">a2.channels.c2.transactionCapacity = 100</span></p>
+<p align="left"><span style="font-size:18px;"> </span></p>
+<p align="left"><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p align="left"><span style="font-size:18px;">a2.sources.r2.channels = c2</span></p>
+<p align="left"><span style="font-size:18px;">a2.sinks.k2.channel = c2</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<p><strong><span style="font-size:18px;">3) 执行监控配置</span></strong></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a2 --conf-file job/flume-hdfs.conf</span></p>
+</td>
+</tr></tbody></table><h1><span style="font-size:24px;">案例三：实时读取目录文件到HDFS</span></h1>
+<p><span style="font-size:18px;"><strong>目标：</strong>使用flume监听整个目录的文件</span></p>
+<p><span style="font-size:18px;"><strong>分步实现</strong>：</span></p>
+<p><span style="font-size:18px;">1) 创建配置文件flume-dir.conf</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;">a3.sources = r3</span></p>
+<p><span style="font-size:18px;">a3.sinks = k3</span></p>
+<p><span style="font-size:18px;">a3.channels = c3</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a3.sources.r3.type = spooldir</span></p>
+<p><span style="font-size:18px;">a3.sources.r3.spoolDir = /home/admin/modules/apache-flume-1.7.0-bin/upload</span></p>
+<p><span style="font-size:18px;">a3.sources.r3.fileSuffix = .COMPLETED</span></p>
+<p><span style="font-size:18px;">a3.sources.r3.fileHeader = true</span></p>
+<p><span style="font-size:18px;">#忽略所有以.tmp结尾的文件，不上传</span></p>
+<p><span style="font-size:18px;">a3.sources.r3.ignorePattern = ([^ ]*\.tmp)</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the sink</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.type = hdfs</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.path = hdfs://linux01:8020/flume/upload/%Y%m%d/%H</span></p>
+<p><span style="font-size:18px;">#上传文件的前缀</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.filePrefix = upload-</span></p>
+<p><span style="font-size:18px;">#是否按照时间滚动文件夹</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.round = true</span></p>
+<p><span style="font-size:18px;">#多少时间单位创建一个新的文件夹</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.roundValue = 1</span></p>
+<p><span style="font-size:18px;">#重新定义时间单位</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.roundUnit = hour</span></p>
+<p><span style="font-size:18px;">#是否使用本地时间戳</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.useLocalTimeStamp = true</span></p>
+<p><span style="font-size:18px;">#积攒多少个Event才flush到HDFS一次</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.batchSize = 100</span></p>
+<p><span style="font-size:18px;">#设置文件类型，可支持压缩</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.fileType = DataStream</span></p>
+<p><span style="font-size:18px;">#多久生成一个新的文件</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.rollInterval = 600</span></p>
+<p><span style="font-size:18px;">#设置每个文件的滚动大小大概是128M</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.rollSize = 134217700</span></p>
+<p><span style="font-size:18px;">#文件的滚动与Event数量无关</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.rollCount = 0</span></p>
+<p><span style="font-size:18px;">#最小冗余数</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.hdfs.minBlockReplicas = 1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Use a channel which buffers events in memory</span></p>
+<p><span style="font-size:18px;">a3.channels.c3.type = memory</span></p>
+<p><span style="font-size:18px;">a3.channels.c3.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a3.channels.c3.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a3.sources.r3.channels = c3</span></p>
+<p><span style="font-size:18px;">a3.sinks.k3.channel = c3</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">2) 执行测试：执行如下脚本后，请向upload文件夹中添加文件试试</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a3 --conf-file job/flume-dir.conf</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"><span style="color:#FF0000;">尖叫提示：</span> 在使用SpoolingDirectory Source时</span></p>
+<p><span style="font-size:18px;">1) 不要在监控目录中创建并持续修改文件</span></p>
+<p><span style="font-size:18px;">2) 上传完成的文件会以.COMPLETED结尾</span></p>
+<p><span style="font-size:18px;">3) 被监控文件夹每600毫秒扫描一次文件变动</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"> </span></p>
+<h1><strong><span style="font-size:24px;">案例4：监听一个指定的Avro 端口</span></strong></h1>
+<p><span style="font-size:18px;">1)编写配置文件</span></p>
+<div>
+<p><span style="font-size:18px;"># Namethe components on this agent</span></p>
+<p><span style="font-size:18px;">a1.sources= r1</span></p>
+<p><span style="font-size:18px;">a1.sinks =k1</span></p>
+<p><span style="font-size:18px;">a1.channels= c1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">#Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.type= avro</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.bind= 192.168.80.80</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.port= 4141</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">#Describe the sink</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.type= hdfs</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hdfs.path= hdfs://hadoop80:9000/dataoutput</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hdfs.writeFormat= Text</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hdfs.fileType= DataStream</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hdfs.rollInterval= 10</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hdfs.rollSize= 0</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hdfs.rollCount= 0</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hdfs.filePrefix= %Y-%m-%d-%H-%M-%S</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hdfs.useLocalTimeStamp= true</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Use achannel which buffers events in file</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.type= file</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.checkpointDir= /usr/flume/checkpoint</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.dataDirs= /usr/flume/data</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bindthe source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.channels= c1</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.channel= c1</span></p>
+</div>
+<p><span style="font-size:18px;">2) 启动flume agent a1服务端</span></p>
+<p><span style="font-size:18px;">flume-ng agent -n a1  -c ../conf  -f ../conf/avro.conf   -Dflume.root.logger=DEBUG,console</span></p>
+<p><span style="font-size:18px;">3)使用avro-client发送文件</span></p>
+<p><span style="font-size:18px;">flume-ng avro-client -c  ../conf -H 192.168.80.80  -p 4141 -F/usr/local/log.file</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<h1><span style="font-size:24px;">案例五：Flume与Flume之间数据传递：单Flume多Channel、Sink， </span>
+</h1>
+<div><span style="font-size:18px;"><img src="https://img-blog.csdn.net/20171229210243762?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZGF0aWVjaHVpMjA=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></div>
+<p></p>
+<p><span style="font-size:18px;"><strong>目标：</strong>使用flume-1监控文件变动，flume-1将变动内容传递给flume-2，flume-2负责存储到HDFS。同时flume-1将变动内容传递给flume-3，flume-3负责输出到。</span></p>
+<p><span style="font-size:18px;">local filesystem。</span></p>
+<p><strong><span style="font-size:18px;">分步实现：</span></strong></p>
+<p><span style="font-size:18px;">1) 创建flume-1.conf，用于监控hive.log文件的变动，同时产生两个channel和两个sink分别输送给flume-2和flume3：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;"># Name the components on this agent</span></p>
+<p><span style="font-size:18px;">a1.sources = r1</span></p>
+<p><span style="font-size:18px;">a1.sinks = k1 k2</span></p>
+<p><span style="font-size:18px;">a1.channels = c1 c2</span></p>
+<p><span style="font-size:18px;"># 将数据流复制给多个channel</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.selector.type = replicating</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.type = exec</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.command = tail -F /home/admin/modules/apache-hive-1.2.2-bin/hive.log</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.shell = /bin/bash -c</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the sink</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.type = avro</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hostname = linux01</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.port = 4141</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">a1.sinks.k2.type = avro</span></p>
+<p><span style="font-size:18px;">a1.sinks.k2.hostname = linux01</span></p>
+<p><span style="font-size:18px;">a1.sinks.k2.port = 4142</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the channel</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.type = memory</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">a1.channels.c2.type = memory</span></p>
+<p><span style="font-size:18px;">a1.channels.c2.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a1.channels.c2.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.channels = c1 c2</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.channel = c1</span></p>
+<p><span style="font-size:18px;">a1.sinks.k2.channel = c2</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">2) 创建flume-2.conf，用于接收flume-1的event，同时产生1个channel和1个sink，将数据输送给hdfs：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;"># Name the components on this agent</span></p>
+<p><span style="font-size:18px;">a2.sources = r1</span></p>
+<p><span style="font-size:18px;">a2.sinks = k1</span></p>
+<p><span style="font-size:18px;">a2.channels = c1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a2.sources.r1.type = avro</span></p>
+<p><span style="font-size:18px;">a2.sources.r1.bind = linux01</span></p>
+<p><span style="font-size:18px;">a2.sources.r1.port = 4141</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the sink</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.type = hdfs</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.path = hdfs://linux01:8020/flume2/%Y%m%d/%H</span></p>
+<p><span style="font-size:18px;">#上传文件的前缀</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.filePrefix = flume2-</span></p>
+<p><span style="font-size:18px;">#是否按照时间滚动文件夹</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.round = true</span></p>
+<p><span style="font-size:18px;">#多少时间单位创建一个新的文件夹</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.roundValue = 1</span></p>
+<p><span style="font-size:18px;">#重新定义时间单位</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.roundUnit = hour</span></p>
+<p><span style="font-size:18px;">#是否使用本地时间戳</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.useLocalTimeStamp = true</span></p>
+<p><span style="font-size:18px;">#积攒多少个Event才flush到HDFS一次</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.batchSize = 100</span></p>
+<p><span style="font-size:18px;">#设置文件类型，可支持压缩</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.fileType = DataStream</span></p>
+<p><span style="font-size:18px;">#多久生成一个新的文件</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.rollInterval = 600</span></p>
+<p><span style="font-size:18px;">#设置每个文件的滚动大小大概是128M</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.rollSize = 134217700</span></p>
+<p><span style="font-size:18px;">#文件的滚动与Event数量无关</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.rollCount = 0</span></p>
+<p><span style="font-size:18px;">#最小冗余数</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hdfs.minBlockReplicas = 1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the channel</span></p>
+<p><span style="font-size:18px;">a2.channels.c1.type = memory</span></p>
+<p><span style="font-size:18px;">a2.channels.c1.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a2.channels.c1.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a2.sources.r1.channels = c1</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.channel = c1</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">3) 创建flume-3.conf，用于接收flume-1的event，同时产生1个channel和1个sink，将数据输送给本地目录：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;"># Name the components on this agent</span></p>
+<p><span style="font-size:18px;">a3.sources = r1</span></p>
+<p><span style="font-size:18px;">a3.sinks = k1</span></p>
+<p><span style="font-size:18px;">a3.channels = c1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a3.sources.r1.type = avro</span></p>
+<p><span style="font-size:18px;">a3.sources.r1.bind = linux01</span></p>
+<p><span style="font-size:18px;">a3.sources.r1.port = 4142</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the sink</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.type = file_roll</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.sink.directory = /home/admin/Desktop/flume3</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the channel</span></p>
+<p><span style="font-size:18px;">a3.channels.c1.type = memory</span></p>
+<p><span style="font-size:18px;">a3.channels.c1.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a3.channels.c1.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a3.sources.r1.channels = c1</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.channel = c1</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"><span style="color:#FF0000;">尖叫提示：</span>输出的本地目录必须是已经存在的目录，如果该目录不存在，并不会创建新的目录。</span></p>
+<p><span style="font-size:18px;">4) 执行测试：分别开启对应flume-job（依次启动flume-3，flume-2，flume-1），同时产生文件变动并观察结果：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p align="left"><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a3 --conf-file job/group-job1/flume-3.conf</span></p>
+<p align="left"><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a2 --conf-file job/group-job1/flume-2.conf</span></p>
+<p align="left"><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a1 --conf-file job/group-job1/flume-1.conf</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<h1><span style="font-size:24px;">案例六：Flume与Flume之间数据传递，多Flume汇总数据到单Flume</span></h1>
+<div><span style="font-size:18px;"><img src="https://img-blog.csdn.net/20171229210312562?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZGF0aWVjaHVpMjA=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></div>
+<p></p>
+<p><span style="font-size:18px;"><strong>目标：</strong>flume-1监控文件hive.log，flume-2监控某一个端口的数据流，flume-1与flume-2将数据发送给flume-3，flume3将最终数据写入到HDFS。</span></p>
+<p><strong><span style="font-size:18px;">分步实现：</span></strong></p>
+<p><span style="font-size:18px;">1) 创建flume-1.conf，用于监控hive.log文件，同时sink数据到flume-3：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;"># Name the components on this agent</span></p>
+<p><span style="font-size:18px;">a1.sources = r1</span></p>
+<p><span style="font-size:18px;">a1.sinks = k1</span></p>
+<p><span style="font-size:18px;">a1.channels = c1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.type = exec</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.command = tail -F /home/admin/modules/apache-hive-1.2.2-bin/hive.log</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.shell = /bin/bash -c</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the sink</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.type = avro</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.hostname = linux01</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.port = 4141</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the channel</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.type = memory</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a1.channels.c1.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a1.sources.r1.channels = c1</span></p>
+<p><span style="font-size:18px;">a1.sinks.k1.channel = c1</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">2) 创建flume-2.conf，用于监控端口44444数据流，同时sink数据到flume-3：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;"># Name the components on this agent</span></p>
+<p><span style="font-size:18px;">a2.sources = r1</span></p>
+<p><span style="font-size:18px;">a2.sinks = k1</span></p>
+<p><span style="font-size:18px;">a2.channels = c1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a2.sources.r1.type = netcat</span></p>
+<p><span style="font-size:18px;">a2.sources.r1.bind = linux01</span></p>
+<p><span style="font-size:18px;">a2.sources.r1.port = 44444</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the sink</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.type = avro</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.hostname = linux01</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.port = 4141</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Use a channel which buffers events in memory</span></p>
+<p><span style="font-size:18px;">a2.channels.c1.type = memory</span></p>
+<p><span style="font-size:18px;">a2.channels.c1.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a2.channels.c1.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a2.sources.r1.channels = c1</span></p>
+<p><span style="font-size:18px;">a2.sinks.k1.channel = c1</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">3) 创建flume-3.conf，用于接收flume-1与flume-2发送过来的数据流，最终合并后sink到HDFS：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;"># Name the components on this agent</span></p>
+<p><span style="font-size:18px;">a3.sources = r1</span></p>
+<p><span style="font-size:18px;">a3.sinks = k1</span></p>
+<p><span style="font-size:18px;">a3.channels = c1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe/configure the source</span></p>
+<p><span style="font-size:18px;">a3.sources.r1.type = avro</span></p>
+<p><span style="font-size:18px;">a3.sources.r1.bind = linux01</span></p>
+<p><span style="font-size:18px;">a3.sources.r1.port = 4141</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the sink</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.type = hdfs</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.path = hdfs://linux01:8020/flume3/%Y%m%d/%H</span></p>
+<p><span style="font-size:18px;">#上传文件的前缀</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.filePrefix = flume3-</span></p>
+<p><span style="font-size:18px;">#是否按照时间滚动文件夹</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.round = true</span></p>
+<p><span style="font-size:18px;">#多少时间单位创建一个新的文件夹</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.roundValue = 1</span></p>
+<p><span style="font-size:18px;">#重新定义时间单位</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.roundUnit = hour</span></p>
+<p><span style="font-size:18px;">#是否使用本地时间戳</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.useLocalTimeStamp = true</span></p>
+<p><span style="font-size:18px;">#积攒多少个Event才flush到HDFS一次</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.batchSize = 100</span></p>
+<p><span style="font-size:18px;">#设置文件类型，可支持压缩</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.fileType = DataStream</span></p>
+<p><span style="font-size:18px;">#多久生成一个新的文件</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.rollInterval = 600</span></p>
+<p><span style="font-size:18px;">#设置每个文件的滚动大小大概是128M</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.rollSize = 134217700</span></p>
+<p><span style="font-size:18px;">#文件的滚动与Event数量无关</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.rollCount = 0</span></p>
+<p><span style="font-size:18px;">#最小冗余数</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.hdfs.minBlockReplicas = 1</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Describe the channel</span></p>
+<p><span style="font-size:18px;">a3.channels.c1.type = memory</span></p>
+<p><span style="font-size:18px;">a3.channels.c1.capacity = 1000</span></p>
+<p><span style="font-size:18px;">a3.channels.c1.transactionCapacity = 100</span></p>
+<p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;"># Bind the source and sink to the channel</span></p>
+<p><span style="font-size:18px;">a3.sources.r1.channels = c1</span></p>
+<p><span style="font-size:18px;">a3.sinks.k1.channel = c1</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<p><span style="font-size:18px;">4) 执行测试：分别开启对应flume-job（依次启动flume-3，flume-2，flume-1），同时产生文件变动并观察结果：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p align="left"><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a3 --conf-file job/group-job2/flume-3.conf</span></p>
+<p align="left"><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a2 --conf-file job/group-job2/flume-2.conf</span></p>
+<p><span style="font-size:18px;">$ bin/flume-ng agent --conf conf/ --name a1 --conf-file job/group-job2/flume-1.conf</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"><span style="color:#FF0000;">尖叫提示：</span>测试时记得启动hive产生一些日志，同时使用telnet向44444端口发送内容，如：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" style="background:#E7E6E6;">
+<p><span style="font-size:18px;">$ bin/hive </span></p>
+<p><span style="font-size:18px;">$ telnet linux01 44444</span></p>
+</td>
+</tr></tbody></table><p><span style="font-size:18px;"> </span></p>
+<h3><span style="font-size:18px;">总结：</span></h3>
+<p><span style="font-size:18px;">通过上面的几个案例，我们可以发现：flume配置文件的书写是相当灵活的—-不同类型的Source、Channel和Sink可以自由组合！</span></p>
+<p><span style="font-size:18px;">最后对上面用的几个flume source进行适当总结： <br>
+① NetCat Source：监听一个指定的网络端口，即只要应用程序向这个端口里面写数据，这个source组件 <br>
+就可以获取到信息。 <br>
+②Spooling Directory Source：监听一个指定的目录，即只要应用程序向这个指定的目录中添加新的文 <br>
+件，source组件就可以获取到该信息，并解析该文件的内容，然后写入到channle。写入完成后，标记 <br>
+该文件已完成或者删除该文件。 <br>
+③Exec Source：监听一个指定的命令，获取一条命令的结果作为它的数据源 <br>
+常用的是tail -F file指令，即只要应用程序向日志(文件)里面写数据，source组件就可以获取到日志(文件)中最新的内容 。 <br>
+④Avro Source：监听一个指定的Avro 端口，通过Avro端口可以获取到Avro client发送过来的文件 。即只要应用程序通过Avro 端口发送文件，source组件就可以获取到该文件中的内容。</span></p>
+<p><span style="font-size:18px;"> </span></p>
+            </div>
+                </div>

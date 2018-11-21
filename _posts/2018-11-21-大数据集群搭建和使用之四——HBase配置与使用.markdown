@@ -1,0 +1,472 @@
+---
+layout:     post
+title:      大数据集群搭建和使用之四——HBase配置与使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/moquancsdn/article/details/81700320				</div>
+								            <div id="content_views" class="markdown_views prism-github-gist">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc">
+<ul>
+<li><a href="#hbase" rel="nofollow">HBase</a><ul>
+<li><a href="#%E9%85%8D%E7%BD%AE" rel="nofollow">配置</a></li>
+<li><a href="#%E4%B8%BB%E4%BB%8E%E9%85%8D%E7%BD%AE%E5%90%8C%E6%AD%A5" rel="nofollow">主从配置同步</a></li>
+<li><a href="#%E5%90%AF%E5%8A%A8" rel="nofollow">启动</a></li>
+</ul>
+</li>
+<li><a href="#%E4%BD%BF%E7%94%A8hbase" rel="nofollow">使用HBase</a><ul>
+<li><a href="#hbase%E8%A1%A8%E7%BB%93%E6%9E%84" rel="nofollow">HBase表结构</a><ul>
+<li><a href="#%E5%B8%B8%E8%A7%84%E8%A1%A8%E7%BB%93%E6%9E%84" rel="nofollow">常规表结构</a></li>
+<li><a href="#hbase%E8%A1%A8%E7%BB%93%E6%9E%84-1" rel="nofollow">HBASE表结构</a></li>
+</ul>
+</li>
+<li><a href="#%E8%A1%A8%E5%AF%BB%E5%9D%80%E6%9C%BA%E5%88%B6" rel="nofollow">表寻址机制</a></li>
+<li><a href="#hbase%E7%B3%BB%E7%BB%9F%E6%9E%B6%E6%9E%84" rel="nofollow">HBase系统架构</a></li>
+<li><a href="#hbase-shell%E6%93%8D%E4%BD%9C" rel="nofollow">HBase Shell操作</a></li>
+<li><a href="#hbaseeclipse" rel="nofollow">HBase+Eclipse</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+
+<p><strong><code>这个系列指南使用真实集群搭建环境，不是伪集群，用了三台腾讯云服务器</code></strong></p>
+
+<p>或者访问我的个人博客站点，<a href="http://blog.leanote.com/moquan" rel="nofollow">链接</a></p>
+
+<h1 id="hbase"><strong>HBase</strong></h1>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-8-15/30342552.jpg" alt="" title=""></p>
+
+
+
+<h2 id="配置"><strong>配置</strong></h2>
+
+<ul>
+<li><p>准备目录树，环境变量配置</p></li>
+<li><p>修改/opt/hbase/hbase1.x/conf/hbase-env.sh，<code>根据自己的版本设置</code></p></li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-keyword">export</span> JAVA_HOME=/opt/java/jdk1.<span class="hljs-number">8</span>
+<span class="hljs-keyword">export</span> HADOOP_HOME=/opt/hadoop/hadoop2.<span class="hljs-number">8</span>
+<span class="hljs-keyword">export</span> HBASE_HOME=/opt/hbase/hbase1.<span class="hljs-number">2</span>
+<span class="hljs-keyword">export</span> HBASE_CLASSPATH=/opt/hadoop/hadoop2.<span class="hljs-number">8</span>/etc/hadoop
+<span class="hljs-keyword">export</span> HBASE_PID_DIR=/root/hbase/pids
+<span class="hljs-keyword">export</span> HBASE_MANAGES_ZK=<span class="hljs-literal">false</span></code></pre>
+
+<ul>
+<li>修改hbase-site.xml</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.rootdir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://master:9000/hbase<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>The directory shared byregion servers.<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+ <span class="hljs-comment">&lt;!-- hbase端口 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.zookeeper.property.clientPort<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>2181<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-comment">&lt;!-- 超时时间 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>zookeeper.session.timeout<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>120000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-comment">&lt;!--防止服务器时间不同步出错 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.master.maxclockskew<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>150000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-comment">&lt;!-- 集群主机配置 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.zookeeper.quorum<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>master,slave1,slave2<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-comment">&lt;!--   路径存放 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.tmp.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/root/hbase/tmp<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-comment">&lt;!-- true表示分布式 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.cluster.distributed<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+ <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+  <span class="hljs-comment">&lt;!-- 指定master --&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.master<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>master:60000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+  <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span></code></pre>
+
+<ul>
+<li>修改regionservers <br>
+指定hbase的主从关系，类似hadoop的主从关系配置 <br>
+添加slave1和slave2即可</li>
+</ul>
+
+
+
+<h2 id="主从配置同步"><strong>主从配置同步</strong></h2>
+
+<p>scp -r /opt/hbase root@slave1:/opt <br>
+scp -r /opt/hbase root@slave2:/opt</p>
+
+
+
+<h2 id="启动"><strong>启动</strong></h2>
+
+<p>starthbase（别名），在各个主机上使用jps查看进程 <br>
+master上是HMaster，slave1上是HRegionServer <br>
+查看web端口<a href="http://134.175.xxx.xxx:16010" rel="nofollow">http://134.175.xxx.xxx:16010</a>，有两个slave表示配置成功 <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-7-19/19009697.jpg" alt="" title=""></p>
+
+
+
+<h1 id="使用hbase"><strong>使用HBase</strong></h1>
+
+<p>hbase不提供表的关联，处理表之间关系的能力弱。如果需要处理很复杂的逻辑关系，不适合hbase</p>
+
+<p>HIVE和HBASE<code>区别</code>点<a href="https://www.cnblogs.com/justinzhang/p/4273470.html" rel="nofollow">这里</a> <br>
+HBASE的运行<strong><code>必须</code></strong>依赖zookeeper</p>
+
+
+
+<h2 id="hbase表结构">HBase表结构</h2>
+
+
+
+<h3 id="常规表结构">常规表结构</h3>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-7-18/95025599.jpg" alt="" title=""> <br>
+表的字段是事先定义好的，如果想临时添加字段，就必须改变整个表结构，既麻烦，也浪费了存储空间。</p>
+
+
+
+<h3 id="hbase表结构-1">HBASE表结构</h3>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-7-18/43268302.jpg" alt="" title=""> <br>
+定义表的时候，没有列，而是列族。插入数据时，列族中可以存储任意多个列（KV，列名&amp;列值） <br>
+要查询某一个字段的值，需要指定的坐标：表名-&gt;行键-&gt;列族(ColumnFamily)：列名(Qualifier)-&gt;版本。如果不指定版本，那么默认最新版本的值。 <br>
+巨大的表被切分为很多个region，region放在服务器上，这些服务器被称为region server。 <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-8-13/12745203.jpg" alt="" title=""> <br>
+上图有两个table1的region，一个table2的region。每个region被存放在hdfs上，称为一个HFile。 <br>
+事实上，为了数据存取方便，往往region server和datanode运行在同一台机器上。 <br>
+为了管理很多region server，Hbase提供了HMaster机制，它不负责存储表数据，而是管理region server的状态，并负责负载均衡。</p>
+
+
+
+<h2 id="表寻址机制">表寻址机制</h2>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-7-18/35526679.jpg" alt="" title=""> <br>
+root表由zookeeper（zookeeper <strong><code>必须</code></strong> 使用三台及以上节点组成集群才能真正发挥作用）来管理，因此<strong>HBase的使用必须依赖集群</strong></p>
+
+
+
+<h2 id="hbase系统架构">HBase系统架构</h2>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-7-19/70989668.jpg" alt="" title=""></p>
+
+<p><strong>MenStore是HBase支持高速随机访问的关键</strong>，它把当前最热（频次最高的）数据放在MenStore里。</p>
+
+
+
+<h2 id="hbase-shell操作">HBase Shell操作</h2>
+
+<ul>
+<li>建表</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs php">create <span class="hljs-string">'table_name'</span>,{NAME=&gt;<span class="hljs-string">'name'</span>,VERSIONS=&gt;<span class="hljs-number">1</span>},{NAME=&gt;<span class="hljs-string">'name'</span>}</code></pre>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-7-19/47264634.jpg" alt="" title=""></p>
+
+<ul>
+<li>查看表信息</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">describe <span class="hljs-string">'table_name'</span></code></pre>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-7-19/83932266.jpg" alt="" title=""></p>
+
+<ul>
+<li>更多shell命令 <br>
+点<a href="https://blog.csdn.net/szzt_lingpeng/article/details/78151777" rel="nofollow">这里</a>和<a href="http://www.cnblogs.com/nexiyi/p/hbase_shell.html" rel="nofollow">这里</a></li>
+</ul>
+
+<p><strong><code>shell 脚本不是很方便</code></strong>，建议使用java api</p>
+
+
+
+<h2 id="hbaseeclipse">HBase+Eclipse</h2>
+
+<p>配置eclipse的时候注意必要的xml属性文件，建议使用maven。 <br>
+如果没有使用maven，而是使用自己添加依赖的形式的话，项目配置完了之后的目录树长这样： <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-7-20/60916276.jpg" alt="" title=""> <br>
+<strong>值得注意的是，项目文件里要添加一些配置文件，例如hbase-site.xml，这些文件是从集群配置上复制的</strong> <br>
+样例代码（代码的注释还没有写） <br>
+更多<strong><code>关于JUnit使用</code></strong>的介绍点<a href="http://wiki.jikexueyuan.com/project/junit/" rel="nofollow">这里</a></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">package cn<span class="hljs-preprocessor">.colony</span><span class="hljs-preprocessor">.cloudhadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-comment">;</span>
+
+import java<span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.IOException</span><span class="hljs-comment">;</span>
+import java<span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.ArrayList</span><span class="hljs-comment">;</span>
+import java<span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.List</span><span class="hljs-comment">;</span>
+
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.conf</span><span class="hljs-preprocessor">.Configuration</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.Cell</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.HBaseConfiguration</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.HColumnDescriptor</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.HTableDescriptor</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.MasterNotRunningException</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.ZooKeeperConnectionException</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.Admin</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.Connection</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.ConnectionFactory</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.Get</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.Put</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.Result</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.ResultScanner</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.Scan</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.client</span><span class="hljs-preprocessor">.Table</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.BinaryComparator</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.BinaryPrefixComparator</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.ByteArrayComparable</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.ColumnPrefixFilter</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.CompareFilter</span><span class="hljs-preprocessor">.CompareOp</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.FamilyFilter</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.Filter</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.MultipleColumnPrefixFilter</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.PrefixFilter</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.QualifierFilter</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.RegexStringComparator</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.RowFilter</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.SingleColumnValueFilter</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.filter</span><span class="hljs-preprocessor">.SubstringComparator</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.Bytes</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.junit</span><span class="hljs-preprocessor">.Before</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.junit</span><span class="hljs-preprocessor">.Test</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hbase</span><span class="hljs-preprocessor">.TableName</span><span class="hljs-comment">;</span>
+
+public class HbaseDemo {
+
+    private Configuration testConf = null<span class="hljs-comment">;</span>
+
+    @Before
+    public void init(){
+        testConf = HBaseConfiguration<span class="hljs-preprocessor">.create</span>()<span class="hljs-comment">;</span>
+    }
+
+    @Test
+    public void testCreate() throws MasterNotRunningException, ZooKeeperConnectionException, IOException{
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Admin admin = connection<span class="hljs-preprocessor">.getAdmin</span>()<span class="hljs-comment">;</span>
+        TableName name = TableName<span class="hljs-preprocessor">.valueOf</span>(<span class="hljs-string">"testTable"</span>)<span class="hljs-comment">;</span>
+        HTableDescriptor desc = new HTableDescriptor(name)<span class="hljs-comment">;</span>
+        HColumnDescriptor cd = new HColumnDescriptor(<span class="hljs-string">"baseInfo"</span>)<span class="hljs-comment">;</span>
+        desc<span class="hljs-preprocessor">.addFamily</span>(cd)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.createTable</span>(desc)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+
+    @Test
+    public void testDrop() throws MasterNotRunningException, ZooKeeperConnectionException, IOException{
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Admin admin = connection<span class="hljs-preprocessor">.getAdmin</span>()<span class="hljs-comment">;</span>
+        TableName tablename = TableName<span class="hljs-preprocessor">.valueOf</span>(<span class="hljs-string">"testTable"</span>)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.disableTable</span>(tablename)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.deleteTable</span>(tablename)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+
+    @Test
+    public void testPut() throws IOException, Exception{
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Table table = connection<span class="hljs-preprocessor">.getTable</span>(TableName<span class="hljs-preprocessor">.valueOf</span>(<span class="hljs-string">"testTable"</span>))<span class="hljs-comment">;</span>
+        Put p = new Put(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"rk001"</span>))<span class="hljs-comment">;//行键</span>
+        p<span class="hljs-preprocessor">.addColumn</span>(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"baseInfo"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"name"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"dingqimin"</span>))<span class="hljs-comment">;</span>
+        table<span class="hljs-preprocessor">.put</span>(p)<span class="hljs-comment">;</span>
+        table<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+
+    }
+
+    @Test
+    public void testInsert() throws IOException{
+
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Table table = connection<span class="hljs-preprocessor">.getTable</span>(TableName<span class="hljs-preprocessor">.valueOf</span>(<span class="hljs-string">"testTable"</span>))<span class="hljs-comment">;</span>
+
+        //不要使用String<span class="hljs-preprocessor">.getBytes</span>()，可能会出现编码错误
+        Put name = new Put(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"rk001"</span>))<span class="hljs-comment">;//行键</span>
+        name<span class="hljs-preprocessor">.addColumn</span>(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"baseInfo"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"name"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"one"</span>))<span class="hljs-comment">;</span>
+
+        Put age = new Put(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"rk001"</span>))<span class="hljs-comment">;//行键</span>
+        age<span class="hljs-preprocessor">.addColumn</span>(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"baseInfo"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"age"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"6"</span>))<span class="hljs-comment">;</span>
+
+        ArrayList&lt;Put&gt; puts = new ArrayList&lt;&gt;()<span class="hljs-comment">;</span>
+        puts<span class="hljs-preprocessor">.add</span>(name)<span class="hljs-comment">;</span>
+        puts<span class="hljs-preprocessor">.add</span>(age)<span class="hljs-comment">;</span>
+
+        table<span class="hljs-preprocessor">.put</span>(puts)<span class="hljs-comment">;</span>
+        table<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+
+    @Test
+    public void testGet() throws IOException{
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Table table = connection<span class="hljs-preprocessor">.getTable</span>(TableName<span class="hljs-preprocessor">.valueOf</span>(<span class="hljs-string">"testTable"</span>))<span class="hljs-comment">;</span>
+        Get get = new Get(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"rk001"</span>))<span class="hljs-comment">;</span>
+//      get<span class="hljs-preprocessor">.setMaxVersions</span>(<span class="hljs-number">3</span>)<span class="hljs-comment">;</span>
+        Result result = table<span class="hljs-preprocessor">.get</span>(get)<span class="hljs-comment">;</span>
+        List&lt;Cell&gt; cells = result<span class="hljs-preprocessor">.listCells</span>()<span class="hljs-comment">;</span>
+        //使用 CellUtil<span class="hljs-preprocessor">.getRowByte</span>(Cell, int)会有乱码
+        for (Cell cell:cells){
+            System<span class="hljs-preprocessor">.out</span><span class="hljs-preprocessor">.println</span>(Bytes<span class="hljs-preprocessor">.toString</span>(cell<span class="hljs-preprocessor">.getRow</span>()))<span class="hljs-comment">;</span>
+            System<span class="hljs-preprocessor">.out</span><span class="hljs-preprocessor">.println</span>(Bytes<span class="hljs-preprocessor">.toString</span>(cell<span class="hljs-preprocessor">.getFamily</span>()))<span class="hljs-comment">;</span>
+            System<span class="hljs-preprocessor">.out</span><span class="hljs-preprocessor">.println</span>(Bytes<span class="hljs-preprocessor">.toString</span>(cell<span class="hljs-preprocessor">.getQualifier</span>()))<span class="hljs-comment">;</span>
+            System<span class="hljs-preprocessor">.out</span><span class="hljs-preprocessor">.println</span>(Bytes<span class="hljs-preprocessor">.toString</span>(cell<span class="hljs-preprocessor">.getValue</span>()))<span class="hljs-comment">;</span>
+        }
+        table<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+
+    @Test
+    public void testScan() throws IOException{
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Table table = connection<span class="hljs-preprocessor">.getTable</span>(TableName<span class="hljs-preprocessor">.valueOf</span>(<span class="hljs-string">"testTable"</span>))<span class="hljs-comment">;</span>
+        Scan scan = new Scan(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"person_rk_bj_zhang_000001"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"person_rk_bj_zhang_000002"</span>))<span class="hljs-comment">;</span>
+
+        //前缀过滤器----针对行键
+        Filter filter = new PrefixFilter(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"rk"</span>))<span class="hljs-comment">;</span>
+
+        //行过滤器
+        ByteArrayComparable rowComparator = new BinaryComparator(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"person_rk_bj_zhang_000001"</span>))<span class="hljs-comment">;</span>
+        RowFilter rf = new RowFilter(CompareOp<span class="hljs-preprocessor">.LESS</span>_OR_EQUAL, rowComparator)<span class="hljs-comment">;</span>
+
+        <span class="hljs-comment">/**
+         * 假设RowKey格式为：创建日期_发布日期_ID_TITLE
+         * 目标：查找  发布日期  为  2014-12-21  的数据
+         */</span>
+        rf = new RowFilter(CompareOp<span class="hljs-preprocessor">.EQUAL</span> , new SubstringComparator(<span class="hljs-string">"_2014-12-21_"</span>))<span class="hljs-comment">;</span>
+
+
+        //单值过滤器 <span class="hljs-number">1</span> 完整匹配字节数组
+        new SingleColumnValueFilter(<span class="hljs-string">"base_info"</span><span class="hljs-preprocessor">.getBytes</span>(), <span class="hljs-string">"name"</span><span class="hljs-preprocessor">.getBytes</span>(), CompareOp<span class="hljs-preprocessor">.EQUAL</span>, <span class="hljs-string">"zhangsan"</span><span class="hljs-preprocessor">.getBytes</span>())<span class="hljs-comment">;</span>
+        //单值过滤器<span class="hljs-number">2</span> 匹配正则表达式
+        ByteArrayComparable comparator = new RegexStringComparator(<span class="hljs-string">"zhang."</span>)<span class="hljs-comment">;</span>
+        new SingleColumnValueFilter(<span class="hljs-string">"info"</span><span class="hljs-preprocessor">.getBytes</span>(), <span class="hljs-string">"NAME"</span><span class="hljs-preprocessor">.getBytes</span>(), CompareOp<span class="hljs-preprocessor">.EQUAL</span>, comparator)<span class="hljs-comment">;</span>
+
+        //单值过滤器<span class="hljs-number">2</span> 匹配是否包含子串,大小写不敏感
+        comparator = new SubstringComparator(<span class="hljs-string">"wu"</span>)<span class="hljs-comment">;</span>
+        new SingleColumnValueFilter(<span class="hljs-string">"info"</span><span class="hljs-preprocessor">.getBytes</span>(), <span class="hljs-string">"NAME"</span><span class="hljs-preprocessor">.getBytes</span>(), CompareOp<span class="hljs-preprocessor">.EQUAL</span>, comparator)<span class="hljs-comment">;</span>
+
+        //键值对元数据过滤-----family过滤----字节数组完整匹配
+        FamilyFilter ff = new FamilyFilter(
+                CompareOp<span class="hljs-preprocessor">.EQUAL</span> , 
+                new BinaryComparator(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"base_info"</span>))   //表中不存在inf列族，过滤结果为空
+                )<span class="hljs-comment">;</span>
+        //键值对元数据过滤-----family过滤----字节数组前缀匹配
+        ff = new FamilyFilter(
+                CompareOp<span class="hljs-preprocessor">.EQUAL</span> , 
+                new BinaryPrefixComparator(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"inf"</span>))   //表中存在以inf打头的列族info，过滤结果为该列族所有行
+                )<span class="hljs-comment">;</span>
+
+
+       //键值对元数据过滤-----qualifier过滤----字节数组完整匹配
+
+        filter = new QualifierFilter(
+                CompareOp<span class="hljs-preprocessor">.EQUAL</span> , 
+                new BinaryComparator(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"na"</span>))   //表中不存在na列，过滤结果为空
+                )<span class="hljs-comment">;</span>
+        filter = new QualifierFilter(
+                CompareOp<span class="hljs-preprocessor">.EQUAL</span> , 
+                new BinaryPrefixComparator(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"na"</span>))   //表中存在以na打头的列name，过滤结果为所有行的该列数据
+                )<span class="hljs-comment">;</span>
+
+        //基于列名(即Qualifier)前缀过滤数据的ColumnPrefixFilter
+        filter = new ColumnPrefixFilter(<span class="hljs-string">"na"</span><span class="hljs-preprocessor">.getBytes</span>())<span class="hljs-comment">;</span>
+
+        //基于列名(即Qualifier)多个前缀过滤数据的MultipleColumnPrefixFilter
+        byte[][] prefixes = new byte[][] {Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"na"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"me"</span>)}<span class="hljs-comment">;</span>
+        filter = new MultipleColumnPrefixFilter(prefixes)<span class="hljs-comment">;</span>
+
+        //为查询设置过滤条件
+        scan<span class="hljs-preprocessor">.setFilter</span>(filter)<span class="hljs-comment">;</span>
+
+
+        scan<span class="hljs-preprocessor">.addFamily</span>(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"base_info"</span>))<span class="hljs-comment">;</span>
+        ResultScanner scanner = table<span class="hljs-preprocessor">.getScanner</span>(scan)<span class="hljs-comment">;</span>
+        for(Result r : scanner){
+            <span class="hljs-comment">/**
+            for(KeyValue kv : r.list()){
+                String family = new String(kv.getFamily());
+                System.out.println(family);
+                String qualifier = new String(kv.getQualifier());
+                System.out.println(qualifier);
+                System.out.println(new String(kv.getValue()));
+            }
+            */</span>
+            //直接从result中取到某个特定的value
+            byte[] value = r<span class="hljs-preprocessor">.getValue</span>(Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"base_info"</span>), Bytes<span class="hljs-preprocessor">.toBytes</span>(<span class="hljs-string">"name"</span>))<span class="hljs-comment">;</span>
+            System<span class="hljs-preprocessor">.out</span><span class="hljs-preprocessor">.println</span>(new String(value))<span class="hljs-comment">;</span>
+        }
+        table<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+
+    public static void createTable(String tableName, String[] familyNames, int[] maxVersions, Configuration conf) throws MasterNotRunningException, ZooKeeperConnectionException, IOException{
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Admin admin = connection<span class="hljs-preprocessor">.getAdmin</span>()<span class="hljs-comment">;</span>
+        TableName tablename = TableName<span class="hljs-preprocessor">.valueOf</span>(tableName)<span class="hljs-comment">;</span>
+        HTableDescriptor desc = new HTableDescriptor(tablename)<span class="hljs-comment">;</span>
+        for (int index = <span class="hljs-number">0</span><span class="hljs-comment">; index&lt;familyNames.length; index++){</span>
+            HColumnDescriptor cd = new HColumnDescriptor(familyNames[index])<span class="hljs-comment">;</span>
+            cd<span class="hljs-preprocessor">.setMaxVersions</span>(maxVersions[index])<span class="hljs-comment">;</span>
+            desc<span class="hljs-preprocessor">.addFamily</span>(cd)<span class="hljs-comment">;</span>
+        }
+        admin<span class="hljs-preprocessor">.createTable</span>(desc)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+
+    public static void dropTable(String tableName, Configuration conf) throws MasterNotRunningException, ZooKeeperConnectionException, IOException{
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Admin admin = connection<span class="hljs-preprocessor">.getAdmin</span>()<span class="hljs-comment">;</span>
+        TableName tablename = TableName<span class="hljs-preprocessor">.valueOf</span>(tableName)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.disableTable</span>(tablename)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.deleteTable</span>(tablename)<span class="hljs-comment">;</span>
+        admin<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+
+    public static void putData(String tableName, String rowKey, String columnFamily, String qualifier, String value, Configuration conf) throws IOException{
+        Connection connection = ConnectionFactory<span class="hljs-preprocessor">.createConnection</span>()<span class="hljs-comment">;</span>
+        Table table = connection<span class="hljs-preprocessor">.getTable</span>(TableName<span class="hljs-preprocessor">.valueOf</span>(<span class="hljs-string">"testTable"</span>))<span class="hljs-comment">;</span>
+        Put p = new Put(Bytes<span class="hljs-preprocessor">.toBytes</span>(rowKey))<span class="hljs-comment">;</span>
+        p<span class="hljs-preprocessor">.addColumn</span>(columnFamily<span class="hljs-preprocessor">.getBytes</span>(), qualifier<span class="hljs-preprocessor">.getBytes</span>(), value<span class="hljs-preprocessor">.getBytes</span>())<span class="hljs-comment">;</span>
+        table<span class="hljs-preprocessor">.put</span>(p)<span class="hljs-comment">;</span>
+        table<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+
+
+
+    public static void main(String[] args) throws MasterNotRunningException, ZooKeeperConnectionException, IOException{
+        Configuration myConf = HBaseConfiguration<span class="hljs-preprocessor">.create</span>()<span class="hljs-comment">;</span>
+//      String tableName = <span class="hljs-string">"testTable"</span><span class="hljs-comment">;</span>
+//      String[] familyNames = {<span class="hljs-string">"baseInfo"</span>,<span class="hljs-string">"extraInfo"</span>}<span class="hljs-comment">;</span>
+//      int[] maxVersions = {<span class="hljs-number">2</span>, <span class="hljs-number">2</span>}<span class="hljs-comment">;</span>
+//      createTable(tableName, familyNames, maxVersions, myConf)<span class="hljs-comment">;</span>
+        dropTable(<span class="hljs-string">"testTable"</span>, myConf)<span class="hljs-comment">;</span>
+    }
+}
+</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

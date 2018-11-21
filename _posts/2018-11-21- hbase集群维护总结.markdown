@@ -1,0 +1,213 @@
+---
+layout:     post
+title:       hbase集群维护总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>                                                                    hbase<strong>集群维护总结</strong></p>
+<p>1、集群故障现象以及解决方法</p>
+<p> </p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td style="background:#cccccc;" valign="top">
+<p>故障现象</p>
+</td>
+<td style="background:#cccccc;" valign="top">
+<p>解决方法</p>
+</td>
+</tr><tr><td valign="top">
+<p>“hbase shell”命令无法显示list以及meta丢失</p>
+</td>
+<td valign="top">
+<p>查看集群hbase的regionserver日志；一般重启hbase</p>
+</td>
+</tr><tr><td valign="top">
+<p>Hbase表显示不全</p>
+</td>
+<td valign="top">
+<p>“Hbase hbck”命令查看具体细节，很有可能有”no empty start key”的错误</p>
+</td>
+</tr><tr><td valign="top">
+<p>First region should start with an empty key</p>
+</td>
+<td valign="top">
+<p>hbase 5599；创建一个新的region，startkey为空</p>
+</td>
+</tr><tr><td valign="top">
+<p>“hbase hbck”产生黑洞和 Found inconsistency</p>
+</td>
+<td valign="top">
+<p>1.  移出hbase表报错和不一致的region块到hdfs的自定义文件夹</p>
+<p>2.  从 .META.表中delete对应的错误和不一致块</p>
+<p>3.  Merge上一个region的 endkey和下一个region的startkey不一致的region块；merge时需要停hbase/disable table</p>
+</td>
+</tr><tr><td valign="top">
+<p>Hbase merge时，提示hbase-site.xml中fs.default.name配置错误</p>
+</td>
+<td valign="top">
+<p>需要配置fs.default.name项和core-site.xml一致</p>
+<p> </p>
+</td>
+</tr></tbody></table><p> </p>
+<p> </p>
+<p>2、附具体操作：</p>
+<p>Ø  找出“hbase hbck”产生黑洞和 Found inconsistency的region块脚本。</p>
+<p> </p>
+<p>Ø  “hbase hbck”产生黑洞和 Found inconsistency的region块放到一起并从.META.表删除的脚本，hbase_mvdelete_region.sh：</p>
+<p> </p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p>#!/bin/bash</p>
+<p> </p>
+<p>Files=`hadoop fs -ls /tmp | awk '{print$8}'`</p>
+<p> </p>
+<p>for file in $Files</p>
+<p>do</p>
+<p> </p>
+<p>#get the block rowkey</p>
+<p> </p>
+<p>rowkey=`hadoop fs -cat $file/.regioninfo | awk -F "REGION =&gt; {NAME =&gt; '" '{print $2}'  | awk -F "', STARTKEY" '{print $1}' | awk END'{print $0}'`</p>
+<p> </p>
+<p>#1:delete region block</p>
+<p>echo "deleteall '.META.', '$rowkey'" | hbase shell</p>
+<p> </p>
+<p>#2: mv tmp block</p>
+<p>hadoop fs -mv $file /done</p>
+<p> </p>
+<p>done</p>
+</td>
+</tr></tbody></table><p> </p>
+<p> </p>
+<p>Ø  找出表对应region的startkey和endkey, hbase_region.sh，为merge做准备:</p>
+<p> </p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p>#!/bin/bash</p>
+<p>if [ $# -ne 2 ]</p>
+<p>then</p>
+<p>        echo "usage:/done /hbase/ACC_ZDR param =&gt; 2"</p>
+<p>        exit 1</p>
+<p>fi</p>
+<p> </p>
+<p>#/done, /hbase/ACC_ZDR</p>
+<p>badfiles=`hadoop fs -ls $1 | awk '{print$8}'`</p>
+<p> </p>
+<p> </p>
+<p>for file in $badfiles</p>
+<p>do</p>
+<p>tablename=`hadoop fs -cat $file/.regioninfo | awk -F "REGION =&gt; {NAME =&gt; '" '{print $2}' | awk -F ',' '{print $1}' | awk END'{print $0}'`</p>
+<p>regionname=`hadoop fs -cat $file/.regioninfo | awk -F " ENCODED =&gt; " '{print $2}'  | awk -F ", TABLE =&gt;" '{print $1}' | awk END'{print $0}'`</p>
+<p>startkey=`hadoop fs -cat $file/.regioninfo | awk -F "STARTKEY =&gt; '" '{print $2}'  | awk -F "', ENDKEY" '{print $1}' | awk END'{print $0}'`</p>
+<p>endkey=`hadoop fs -cat $file/.regioninfo | awk -F "ENDKEY =&gt; '" '{print $2}'  | awk -F "', ENCODED" '{print $1}' | awk END'{print $0}'`</p>
+<p> </p>
+<p>#ctr+v+tab=&gt;"\t"</p>
+<p>echo "$startkey      $endkey   $regionname   $tablename     0" &gt;&gt; /home/hadoop/hbase_merge.txt</p>
+<p>done</p>
+<p> </p>
+<p>#/hbase/ACC_ZDR</p>
+<p>goodfiles=`hadoop fs -ls $2 | awk '{print$8}'`</p>
+<p> </p>
+<p> </p>
+<p>for file in $goodfiles</p>
+<p>do</p>
+<p>tablename=`hadoop fs -cat $file/.regioninfo | awk -F "REGION =&gt; {NAME =&gt; '" '{print $2}' | awk -F ',' '{print $1}' | awk END'{print $0}'`</p>
+<p>regionname=`hadoop fs -cat $file/.regioninfo | awk -F " ENCODED =&gt; " '{print $2}'  | awk -F ", TABLE =&gt;" '{print $1}' | awk END'{print $0}'`</p>
+<p>startkey=`hadoop fs -cat $file/.regioninfo | awk -F "STARTKEY =&gt; '" '{print $2}'  | awk -F "', ENDKEY" '{print $1}' | awk END'{print $0}'`</p>
+<p>endkey=`hadoop fs -cat $file/.regioninfo | awk -F "ENDKEY =&gt; '" '{print $2}'  | awk -F "', ENCODED" '{print $1}' | awk END'{print $0}'`</p>
+<p> </p>
+<p>#ctr+v+tab=&gt;"\t"</p>
+<p>echo "$startkey      $endkey   $regionname   $tablename     1" &gt;&gt; /home/hadoop/hbase_merge.txt</p>
+<p>done</p>
+<p> </p>
+<p>sort -t $'\t' -k 4,1 /home/hadoop/hbase_merge.txt &gt; /home/hadoop/result_hbase_merge.txt</p>
+<p> </p>
+</td>
+</tr></tbody></table><p> </p>
+<p>Ø  Merge命令：hbase org.apache.hadoop.hbase.util.Merge tablename region1 region2</p>
+<p>例如：“hbase org.apache.hadoop.hbase.util.Merge CHAT_INFO  'CHAT_INFO,1328275311100000000229959,1329200178825.1aebf5e813a21d329911e84fc2bc7229.''CHAT_INFO,1326276556100000000059123,1328873143348.2c544bbaa549746ebd43aa2e6288c584.'”</p>
+<p> </p>
+<p>Ø  Hbase-site.xml中参数fs.default.name配置如下：</p>
+<p> </p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p>&lt;property&gt;</p>
+<p>  &lt;name&gt;fs.default.name&lt;/name&gt;</p>
+<p>  &lt;value&gt;hdfs://master0:9000&lt;/value&gt;</p>
+<p>  &lt;/property&gt;</p>
+</td>
+</tr></tbody></table><p> </p>
+<p> </p>
+<p>Ø  创建新的region块：</p>
+<p><span style="color:#3f7f5f;">列举所有配置了zookeeper</span>节点，以逗号分割conf.set(<span style="color:#2a00ff;">"hbase.zookeeper.quorum"</span>, args[0]);<span style="color:#3f7f5f;">//master0,slave1,slave2</span><span style="color:#3f7f5f;">；</span></p>
+<p> </p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p align="left"><strong><span style="color:#7f0055;">package</span></strong> com.run.hbase.dataImport;</p>
+<p align="left"> </p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> java.io.IOException;</p>
+<p align="left"> </p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.conf.Configuration;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.HBaseConfiguration;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.HColumnDescriptor;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.HConstants;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.HRegionInfo;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.HTableDescriptor;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.MasterNotRunningException;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.ZooKeeperConnectionException;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.client.HBaseAdmin;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.client.HTable;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.client.Put;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.util.Bytes;</p>
+<p align="left"><strong><span style="color:#7f0055;">import</span></strong> org.apache.hadoop.hbase.util.Writables;</p>
+<p align="left"> </p>
+<p align="left"><strong><span style="color:#7f0055;">public</span> <span style="color:#7f0055;">class</span></strong> CreateRegion {</p>
+<p align="left">    <strong><span style="color:#7f0055;">public</span> <span style="color:#7f0055;">static</span></strong> HTable getMetaTable(Configuration conf) <strong><span style="color:#7f0055;">throws</span></strong> IOException {</p>
+<p align="left">       <strong><span style="color:#7f0055;">return</span> <span style="color:#7f0055;">new</span></strong> HTable(conf, HConstants.<em><span style="color:#0000c0;">META_TABLE_NAME</span></em>);</p>
+<p align="left">    }</p>
+<p align="left"> </p>
+<p align="left">    <strong><span style="color:#7f0055;">public</span> <span style="color:#7f0055;">static</span></strong> HBaseAdmin getHBaseAdmin(Configuration conf) <strong><span style="color:#7f0055;">throws</span></strong> MasterNotRunningException,</p>
+<p align="left">           ZooKeeperConnectionException {</p>
+<p align="left">       <strong><span style="color:#7f0055;">return</span> <span style="color:#7f0055;">new</span></strong> HBaseAdmin(conf);</p>
+<p align="left">    }</p>
+<p align="left"> </p>
+<p align="left">    <strong><span style="color:#7f0055;">public</span> <span style="color:#7f0055;">static</span> <span style="color:#7f0055;">void</span></strong> createEmptyRegion(Configuration <span style="text-decoration:underline;"><span style="color:#0000FF;">conf</span></span>, HTableDescriptor tblDes,</p>
+<p align="left">           <strong><span style="color:#7f0055;">byte</span></strong>[] startKey, <strong><span style="color:#7f0055;">byte</span></strong>[] endKey) <strong><span style="color:#7f0055;">throws</span></strong> IllegalArgumentException, IOException,</p>
+<p align="left">           InterruptedException {</p>
+<p align="left">       HRegionInfo hri = <strong><span style="color:#7f0055;">new</span></strong> HRegionInfo(tblDes, startKey, endKey);</p>
+<p align="left">       Put put = <strong><span style="color:#7f0055;">new</span></strong> Put(hri.getRegionName());</p>
+<p align="left">       put</p>
+<p align="left">              .add(HConstants.<em><span style="color:#0000c0;">CATALOG_FAMILY</span></em>, HConstants.<em><span style="color:#0000c0;">REGIONINFO_QUALIFIER</span></em>, Writables</p>
+<p align="left">                     .<em>getBytes</em>(hri));</p>
+<p align="left"> </p>
+<p align="left">       HTable metatable = <em>getMetaTable</em>(conf);</p>
+<p align="left">       metatable.put(put);</p>
+<p align="left">       HBaseAdmin admin = <em>getHBaseAdmin</em>(conf);</p>
+<p align="left">       <span style="color:#3f7f5f;">// flush .META. data to hdfs.</span></p>
+<p align="left">       admin.flush(metatable.getTableName());</p>
+<p align="left">       admin.assign(hri.getRegionName(), <strong><span style="color:#7f0055;">true</span></strong>);</p>
+<p align="left">    }</p>
+<p align="left"> </p>
+<p align="left">    <strong><span style="color:#7f0055;">public</span> <span style="color:#7f0055;">static</span> <span style="color:#7f0055;">void</span></strong> main(String[] args) {</p>
+<p align="left">       System.<em><span style="color:#0000c0;">out</span></em>.println(<span style="color:#2a00ff;">"masterip  2181  startkey  endkey tablename columnfamily"</span>);</p>
+<p align="left"> </p>
+<p align="left">       Configuration conf = HBaseConfiguration.<em>create</em>();</p>
+<p align="left">       conf.set(<span style="color:#2a00ff;">"hbase.zookeeper.quorum"</span>, args[0]);<span style="color:#3f7f5f;">//master0,slave1,slave2</span></p>
+<p align="left">       conf.set(<span style="color:#2a00ff;">"hbase.zookeeper.property.clientPort"</span>, args[1]);</p>
+<p align="left">       conf.set(<span style="color:#2a00ff;">"hbase.master"</span>, args[0] + <span style="color:#2a00ff;">":60000"</span>);</p>
+<p align="left"> </p>
+<p align="left">       HTableDescriptor tblDes = <strong><span style="color:#7f0055;">new</span></strong> HTableDescriptor(args[4]);</p>
+<p align="left">       HColumnDescriptor cf = <strong><span style="color:#7f0055;">new</span></strong> HColumnDescriptor(args[5]);</p>
+<p align="left">       tblDes.addFamily(cf);</p>
+<p align="left"> </p>
+<p align="left">       <strong><span style="color:#7f0055;">byte</span></strong>[] startKeys = Bytes.<em>toBytes</em>(args[2]);</p>
+<p align="left">       <strong><span style="color:#7f0055;">byte</span></strong>[] endKeys = Bytes.<em>toBytes</em>(args[3]);</p>
+<p align="left"> </p>
+<p align="left">       <strong><span style="color:#7f0055;">try</span></strong> {</p>
+<p align="left">           <em>createEmptyRegion</em>(conf, tblDes, startKeys, endKeys);</p>
+<p align="left">       } <strong><span style="color:#7f0055;">catch</span></strong> (IllegalArgumentException e) {</p>
+<p align="left">           e.printStackTrace();</p>
+<p align="left">       } <strong><span style="color:#7f0055;">catch</span></strong> (IOException e) {</p>
+<p align="left">           e.printStackTrace();</p>
+<p align="left">       } <strong><span style="color:#7f0055;">catch</span></strong> (InterruptedException e) {</p>
+<p align="left">           e.printStackTrace();</p>
+<p align="left">       }</p>
+<p align="left">    }</p>
+<p align="left">}</p>
+</td>
+</tr></tbody></table>            </div>
+                </div>

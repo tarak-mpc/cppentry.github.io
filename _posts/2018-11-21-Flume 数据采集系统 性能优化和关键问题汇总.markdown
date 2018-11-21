@@ -1,0 +1,100 @@
+---
+layout:     post
+title:      Flume 数据采集系统 性能优化和关键问题汇总
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/ldds_520/article/details/51558298				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-size:18px;"></span></p>
+<p><span style="font-size:18px;background-color:inherit;">flume 性能优化</span></p>
+<p><span style="font-size:18px;background-color:inherit;">flume的整体基础架构包括三个，分别是source,chanel, sink. 下面是官网的截图：</span></p>
+<p><span style="font-size:18px;background-color:inherit;"><img src="" alt="" style="background-color:inherit;display:inline-block;"><img src="https://img-blog.csdn.net/20160601200716342?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br style="background-color:inherit;"></span></p>
+<p><span style="font-size:18px;background-color:inherit;"><img src="" alt=""><br></span></p>
+<p><span style="font-size:18px;background-color:inherit;">因此，优化要从三个组件的角度去分别优化。</span></p>
+<p style="font-size:14px;line-height:21px;">
+<span style="background-color:inherit;font-size:22px;">1、source  </span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;">sources是flume日志采集的起点，监控日志文件系统目录。其中最常用的是 Spooling Directory Source ， Exec Source 和 Avro Source 。</span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;">关键参数讲解：</span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;">（1）batchSize： 这个参数当你采用的是 Exec Source 时，含义是一次读入channel的数据的行数，当你采用Spooling Directory Source含义是 Granularity（粒度） at which to batch transfer to the channel ，据我分析应该是events（flume最小处理数据单元）的数量。<br style="background-color:inherit;"></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;">这个参数一般 会设置比较大，一般的数值跟每秒要处理的数值相当。</span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;">（2）inputCharset 这个很重要，就是文本文件的编码，默认是flume按照utf-8处理，如果文本数据是gbk，则要增加此参数,</span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;">（3）interceptors flume自带的拦截器，可以根据正则表达式去过滤数据，但是据我实际经验总结，这个配置很影响入库性能，因此这部分工作我基本都在sink代码里面做。</span></p>
+<p><br style="background-color:inherit;"></p>
+<p><br style="background-color:inherit;"></p>
+<p style="font-size:14px;line-height:21px;">
+<span style="background-color:inherit;"><span style="background-color:inherit;font-family:Simsun;"><span style="font-size:22px;background-color:inherit;">2、<span style="background-color:inherit;">channel </span></span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;">channel 是flume的中间数据缓存管道，有点类似kafka的机制，因此个组件的性能很重要。</span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;">我在项目中主要采用的是menmory channel,原因是数据量大，要求极大的数据吞吐量和速度，但是有一点不好的是</span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;">如果一旦flume进程down掉，是没有“续点传输”的机制的，filechannel 和它正好相反。 </span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="background-color:inherit;"><span style="font-family:Simsun;font-size:18px;background-color:inherit;"><br style="background-color:inherit;"></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;">关键参数讲解：</span></span></span></p>
+<span style="font-family:Simsun;font-size:18px;"><span style="background-color:inherit;"> (1)   <span style="line-height:27px;">capacity  :   存储在channel中的events的最大数量</span></span></span>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;"> (2)   transactionCapacity ： 每次数据由channel到sink传输的最大events的数量</span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;"> (3)   byteCapacity  ：该channel的内存大小，单位是 byte 。</span></span></span></p>
+<p><span style="font-size:18px;background-color:inherit;"><span style="background-color:inherit;font-family:Simsun;font-size:16px;"><span style="background-color:inherit;font-size:18px;"><span style="font-size:16px;background-color:inherit;"><span style="background-color:inherit;font-size:18px;"><span style="background-color:inherit;"> <img src="https://img-blog.csdn.net/20160601200430633?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></span></span></span></span></span></p>
+<p><span style="font-size:18px;background-color:inherit;"><span style="background-color:inherit;font-family:Simsun;font-size:16px;"><span style="background-color:inherit;font-size:18px;"><span style="font-size:16px;background-color:inherit;"><span style="background-color:inherit;font-size:18px;"><span style="background-color:inherit;"><br style="background-color:inherit;"></span></span></span></span></span></span></p>
+<p><span style="font-size:18px;background-color:inherit;"><span style="background-color:inherit;font-family:Simsun;font-size:16px;"><span style="background-color:inherit;font-size:18px;"><span style="font-size:16px;background-color:inherit;"><span style="background-color:inherit;font-size:18px;"><span style="background-color:inherit;"><br style="background-color:inherit;"></span></span></span></span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;"><span style="font-family:Simsun;font-size:18px;background-color:inherit;">其中<strong><span style="font-weight:normal;">transactionCapacity关键中最容易忽略的</span></strong>，因为每个sink的终端不一样，批处理的数量要严格限制。还有一点，events的数量值和channel大小不是一回事，一个event包括单位数据的内容+头数据+数据传输状态。可以说
+ （</span><span style="font-weight:bold;"><span style="font-family:Simsun;font-size:18px;background-color:inherit;">events的数量值*单位数据所占字节数）* 0.9 = 所占空间内存数值（就是想说明</span><span style="font-family:Simsun;font-size:18px;"><span style="color:#ff0000;background-color:inherit;">transactionCapacity 的大小和<span style="font-size:14px;"><span style="font-size:18px;background-color:inherit;">byteCapacity
+  不能简答的数值比较</span></span></span> </span><span style="font-size:18px;background-color:inherit;font-family:Simsun;">）。</span></span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;"><strong><br style="background-color:inherit;"></strong></span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;"><strong><span style="background-color:inherit;font-size:22px;"><span style="font-weight:normal;">3、</span><strong>sink
+  </strong></span><br style="background-color:inherit;"></strong></span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;">sink组件的核心工作是把channel中数据进行输出到特定的终端，比如hdfs,hbase,database，avro等等。</span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;">因此这块的核心优化工作在 优化各个终端（hdfs,hbase,database，avro）的数据插入性能。在这里面我只优化过hbase的数据插入性能(具体的做法就是打开flume hbasesink源码，修改然后打包)，当然这块的工作不在flume本身，这也不是flume所能控制的。</span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;"><strong><br style="background-color:inherit;"></strong></span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;"><strong><br style="background-color:inherit;"></strong></span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;"><strong><br style="background-color:inherit;"></strong></span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;background-color:inherit;"><span style="background-color:inherit;line-height:27px;font-size:22px;"><span style="background-color:inherit;">4、整体架构</span></span></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<br style="background-color:inherit;"></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="font-family:Simsun;font-size:18px;background-color:inherit;"><span style="background-color:inherit;line-height:27px;"><span style="background-color:inherit;">    这三个组件当然顺序不能颠倒，但是每个组件的数量你可以自定义规定。 一个flume agent 就好比一个进程，一个source就好比进程里面的一个大组件，但是这里面注意的是每个<strong><strong><strong>sink
+ 你又可以定义多个子线程，就是说<strong>一个flume agent进程可以多个sink,每个sink又可以多个线程（具体参数是 </strong></strong></strong></strong></span></span></span><span style="background-color:inherit;line-height:1.5;">threadsPoolSize</span><span style="line-height:27px;font-family:Simsun;font-size:18px;"><strong><strong><strong><strong>）。</strong></strong></strong></strong></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="line-height:27px;font-family:Simsun;font-size:18px;"><strong><strong><strong><br style="background-color:inherit;"></strong></strong></strong></span></p>
+<p style="font-family:'微软雅黑';font-size:14px;line-height:21px;">
+<span style="background-color:inherit;font-size:22px;"><span style="line-height:27px;font-family:Simsun;"><strong><strong><strong>5、</strong></strong></strong></span><span style="background-color:inherit;line-height:1.5;"> JAVA内存的设计 </span><span style="line-height:27px;font-family:Simsun;"><strong><strong><strong> </strong></strong></strong></span></span></p>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;">主要通过修改 conf/flume-env.sh文件实现</div>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;">主要设计Xmx和Xms两个参数,可以根据OS内存的大小进行合理设置,  一般以每秒处理5000行Apache日志的速度，需要配置 5-10个G 。</div>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;">-Xms&lt;size&gt;        set initial Java heap size.........................</div>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;">-Xmx&lt;size&gt;        set maximum Java heap size.........................</div>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;"><br style="background-color:inherit;"></div>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;"><br style="background-color:inherit;"></div>
+<p style="font-size:14px;line-height:21px;">
+<span style="background-color:inherit;font-size:22px;"><span style="background-color:inherit;">6 、 主要问题</span></span></p>
+<p><span style="font-size:18px;background-color:inherit;">这里面最恶心的问题是 三个组件互相传递数据速度不一致，这是要严格限制和摒除的，这也是flume的小难点之一吧。如果不一致，会严重影响采集整个系统的稳定性。当然这块我也在逐渐摸索，其他优化方面待续  ........................................</span></p>
+<p><span style="font-size:18px;background-color:inherit;"><br style="background-color:inherit;"></span></p>
+<p><img src="https://img-blog.csdn.net/20140403122459000?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvaGlqazEzOQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></p>
+<p><span style="font-size:18px;background-color:inherit;"><br style="background-color:inherit;"></span></p>
+<p><span style="font-size:18px;background-color:inherit;"><br style="background-color:inherit;"></span></p>
+<p><span style="font-size:18px;background-color:inherit;"><br style="background-color:inherit;"></span></p>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;"><br style="background-color:inherit;"></div>
+<p><span style="font-size:18px;"><br></span></p>
+            </div>
+                </div>

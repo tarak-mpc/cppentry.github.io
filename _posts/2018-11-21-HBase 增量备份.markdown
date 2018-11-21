@@ -1,0 +1,96 @@
+---
+layout:     post
+title:      HBase 增量备份
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2 style="color:rgb(54,46,43);font-family:Arial;line-height:26px;">
+一、概述</h2>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+使用了HBase提供的Export与Import工具。</p>
+<p class="p2" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+<span class="s1">Export：<a href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/Export.html" rel="nofollow" style="color:rgb(106,57,6);text-decoration:none;"><span class="s2">http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/Export.html</span></a></span></p>
+<p class="p2" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+<span class="s1">Import：<a href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/Import.html" rel="nofollow" style="color:rgb(106,57,6);text-decoration:none;"><span class="s2">http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/Import.html</span></a></span></p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+看到这两个类所在目录我们了解到，Export与Import的实质是MapReduce任务。</p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+关于这两个工具API中写的很清楚：</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+Export an HBase table. Writes content to sequence files up in HDFS. Use <a href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/mapreduce/Import.html" rel="nofollow" style="color:rgb(106,57,6);text-decoration:none;">Import</a> to read it back in again.</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+将HBase的表导出为HDFS的sequence files。</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+Export如其名，只是导出工具，如何完成备份功能呢？</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<h2 style="color:rgb(54,46,43);font-family:Arial;line-height:26px;">
+<a name="t1" style="color:rgb(106,57,6);"></a>二、功能实验</h2>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+测试过程涉及很多数据，这里仅提供重要结论：</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+1、Export是以表为单位导出数据的，若想完成整库的备份需要执行n遍。</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+2、Export在shell中的调用方式类似如下格式：</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+./hbase org.apache.hadoop.hbase.mapreduce.Export 表名 备份路径 （版本号） （起始时间戳） （结束时间戳） </p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+Export [-D &lt;property = value&gt;]* &lt;tableName&gt; &lt;outputDir&gt; [&lt;versions&gt; [&lt;startTime&gt; [&lt;endTime&gt;]]]</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+括号内为可选项，例如</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+./hbase org.apache.hadoop.hbase.mapreduce.Export 'contentTbl' /home/codeevoship/contentBackup20120920 1 123456789</p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+备份contentTbl这张表到/home/codeevoship/contentBackup20120920目录下（最后一级目录必须由Export自己创建），版本号为1，<span class="s4">备份记录从123456789这个时间戳开始到当前时间内所有的执行过put操作的记录。</span></p>
+<p class="p3" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+注意：为什么是所有put操作记录？因为在备份时是扫描所有表中所有时间戳大于等于123456789这个值的记录并导出。如果是delete操作，则表中这条记录已经删除，扫描时也无法获取这条记录信息。</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+3、当不指定时间戳时，备份的就是当前完整表中的数据。</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<h2 style="color:rgb(54,46,43);font-family:Arial;line-height:26px;">
+<a name="t2" style="color:rgb(106,57,6);"></a>三、实施细节</h2>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+1、如何在增量备份时体现出对数据的删除操作？</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+由于Export按时间戳备份只能反映出Put过的表项，若我在一个备份（增量包）时间区间内删除了某条已有记录，当数据库回档时，这条被删除的记录又会出现在我的表中。</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+因此，我将所有的删除操作替换为Put操作：</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+a、给每行数据添加了一个无效标志位，在删除记录时使用Put给该标志位写为1。</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+b、在单条查询时，根据rowKey取出记录后会根据这个标志位判断这条记录是否已被“删除”，以此决定是否返回这条记录。在多条查询时（scan），使用列值过滤器，过滤出所有这个标志位不为1的记录。（可参见我之前的博文《<a href="http://blog.csdn.net/pirateleo/article/details/7956965" rel="nofollow" style="color:rgb(106,57,6);text-decoration:none;">HBase 条件查询</a>》）</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+2、在备份过程中新增的数据是否会影响备份内容的准确性？</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+可以指定小于等于当前时刻的结束时间戳，以便将需要备份的数据范围明确。</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+</p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+3、如何备份到其他机器？</p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+a、Export支持提供地址的备份。最简单的方法，直接把远端存储挂载到本地，然后使用本地路径。</p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+b、使用API调用时，Path如果使用file:///home/codeevoship/backup，代表使用本地文件系统。若直接写为/home/codeevoship 代表使用HDFS层的路径。在使用Shell调用时则相反。</p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+4、如何使用API调用？</p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+通过MapReduce的Job：<a href="http://hadoop.apache.org/docs/r0.20.2/api/org/apache/hadoop/mapreduce/Job.html" rel="nofollow" style="color:rgb(106,57,6);text-decoration:none;">http://hadoop.apache.org/docs/r0.20.2/api/org/apache/hadoop/mapreduce/Job.html</a></p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+先通过Export类提供的方法创建Job实例，再调用Job的<code><strong><a href="http://hadoop.apache.org/docs/r0.20.2/api/org/apache/hadoop/mapreduce/Job.html#submit()" rel="nofollow" style="color:rgb(106,57,6);text-decoration:none;">submit</a></strong>()<span style="font-family:STHeiti;">或<code><strong><a href="http://hadoop.apache.org/docs/r0.20.2/api/org/apache/hadoop/mapreduce/Job.html#waitForCompletion(boolean)" rel="nofollow" style="color:rgb(106,57,6);text-decoration:none;">waitForCompletion</a></strong>(boolean verbose)；异步与同步。</code></span></code></p>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+<code><br></code></p>
+<h2 style="color:rgb(54,46,43);font-family:Arial;line-height:26px;">
+<a name="t3" style="color:rgb(106,57,6);"></a>四、其他解决方案</h2>
+<p class="p1" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+1、HDFS层的HDFS Replication或DistCp</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+2、Cluster Replication</p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p class="p5" style="color:rgb(54,46,43);font-family:Arial;font-size:14px;line-height:26px;">
+文章来源：http://blog.csdn.net/pirateleo/article/details/8010743</p>
+            </div>
+                </div>

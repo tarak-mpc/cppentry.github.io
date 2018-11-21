@@ -1,0 +1,280 @@
+---
+layout:     post
+title:      hbase 架构
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+ 
+<div class="post">
+<h2><a id="ctl03_TitleUrl" href="http://www.cnblogs.com/gpcuster/archive/2009/09/24/1573594.html" rel="nofollow">[翻译]HbaseArchitecture</a>
+</h2>
+<div id="cnblogs_post_body">
+<h2 id="Introduction">HBase架构</h2>
+<p>原文地址：<a title="http://wiki.apache.org/hadoop/Hbase/HbaseArchitecture" href="http://wiki.apache.org/hadoop/Hbase/HbaseArchitecture" rel="nofollow">http://wiki.apache.org/hadoop/Hbase/HbaseArchitecture</a></p>
+<p>本文来自 博客园 逖靖寒 <a href="http://gpcuster.cnblogs.com/" rel="nofollow">http://gpcuster.cnblogs.com</a></p>
+关于HBase，有一篇非常容易入门的文章，可以参考：Understanding HBase and BigTable
+<h2>介绍</h2>
+<p class="line862">为了更好地理解本文所讲的内容，强烈建议您先去阅读Google的论文<a class="http" href="http://labs.google.com/papers/bigtable.html" rel="nofollow">Bigtable paper</a>。</p>
+<p class="line862">HBase是一个Apache开源项目，它的目标是提供一个在Hadoop分布式环境中运行的类似于BigTable的存储系统。正如同Google将BigTable架设在自己的分布式存储系统GFS中一样，HBase基于HDFS。</p>
+<p class="line874">数据在逻辑上被组织成为表，行和列。我们可以使用类似于iterator的接口来遍历我们的行数据，同时也可以通过行的值来获取这一列的值。同一个行对应多个不同版本的列值。</p>
+<p class="line867"><span id="datamodel" class="anchor"></span><span id="line-22" class="anchor"></span></p>
+<h2 id="Data_Model">数据模型</h2>
+<p class="line874">HBase使用的数据模型和Bigtable类似。应用程序将数据行存储在打上标签的表中。一个数据行包含有一个排好序的行键值和任意长度的列值。</p>
+<p class="line862">一个列名的格式为<em>"&lt;family&gt;:&lt;label&gt;"</em> ，其中&lt;family&gt; 与 &lt;label&gt; 可以为任意的字节数组。一个表的&lt;family&gt;集合是固定的。如果希望修改一个表的&lt;family&gt;字段，需要使用管理员来操作。不过，你可以在任何时候新增加一个&lt;label&gt; 而无需事先声明它。HBase在磁盘上按照&lt;family&gt;储存数据，所以一个&lt;family&gt;里的所有项应该有相同的读/写方式。</p>
+<p class="line874"><span id="line-29" class="anchor"></span><span id="line-30" class="anchor">默认每次将一行数据进行锁定，行数据的写入时原子操作，不过它可以对一行数据进行锁定，然后同时进行读和写的操作。</span></p>
+<p class="line874">我们也可以一次性锁定多个行数据，不过这个操作需要我们现实去指定才可以。</p>
+<p class="line867"><span id="conceptual" class="anchor"></span><span id="line-33" class="anchor"></span></p>
+<h2 id="Conceptual_View">概念模型</h2>
+<p class="line874"><span id="line-38" class="anchor"></span><span id="line-39" class="anchor">从概念上来看，一个表由多个数据行组成，每一个数据行中的列不一定有值。下面的这个例子来自<a class="http" href="http://labs.google.com/papers/bigtable.html" rel="nofollow">Bigtable Paper</a>。</span></p>
+<p class="line867"><span id="datamodelexample" class="anchor"></span><span id="line-40" class="anchor"></span></p>
+<div>
+<table><tbody><tr><td style="text-align:center;">
+<p class="line862"><strong>Row Key</strong> </p>
+</td>
+<td style="text-align:center;">
+<p class="line862"><strong>Time Stamp</strong> </p>
+</td>
+<td style="text-align:center;">
+<p class="line862"><strong>Column</strong> <em>"contents:"</em> </p>
+</td>
+<td colspan="2" style="text-align:center;">
+<p class="line862"><strong>Column</strong> <em>"anchor:"</em> </p>
+</td>
+<td style="text-align:center;">
+<p class="line862"><strong>Column</strong> <em>"mime:"</em> </p>
+</td>
+</tr><tr><td rowspan="5" style="text-align:center;vertical-align:top;"><span id="line-41" class="anchor"></span>
+<p class="line862">"com.cnn.www" </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">t9 </p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+<td style="text-align:right;">
+<p class="line862">"anchor:cnnsi.com" </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"CNN" </p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+</tr><tr><td style="text-align:center;"><span id="line-42" class="anchor"></span>
+<p class="line862">t8 </p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+<td style="text-align:right;">
+<p class="line862">"anchor:my.look.ca" </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"CNN.com" </p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+</tr><tr><td style="text-align:center;"><span id="line-43" class="anchor"></span>
+<p class="line862">t6 </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"&lt;html&gt;..." </p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"text/html" </p>
+</td>
+</tr><tr><td style="text-align:center;"><span id="line-44" class="anchor"></span>
+<p class="line862">t5 </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"&lt;html&gt;..." </p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+</tr><tr><td style="text-align:center;"><span id="line-45" class="anchor"></span>
+<p class="line862">t3 </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"&lt;html&gt;..." </p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+<td>
+<p class="line862"></p>
+</td>
+</tr></tbody></table></div>
+<span id="line-46" class="anchor"></span><span id="line-47" class="anchor"></span>
+<p class="line867"><span id="physical" class="anchor"></span><span id="line-48" class="anchor"></span></p>
+<h2 id="Physical_Storage_View">物理存储模型</h2>
+<p class="line874"><span id="line-51" class="anchor"></span><span id="line-52" class="anchor">从概念上看，表数据是按照稀疏的行来存储的，但是物理上，他们是按照列来存储的。理解这个概念对考虑表的设计和程序设计时非常重要的。</span></p>
+<p class="line862">回到先前的那个例子，按照物理存储的图如下：</p>
+<div>
+<table><tbody><tr><td style="text-align:center;">
+<p class="line862"><strong>Row Key</strong> </p>
+</td>
+<td style="text-align:center;">
+<p class="line862"><strong>Time Stamp</strong> </p>
+</td>
+<td style="text-align:center;">
+<p class="line862"><strong>Column</strong> <em>"contents:"</em> </p>
+</td>
+</tr><tr><td rowspan="3" style="text-align:center;vertical-align:top;"><span id="line-55" class="anchor"></span>
+<p class="line862">"com.cnn.www" </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">t6 </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"&lt;html&gt;..." </p>
+</td>
+</tr><tr><td style="text-align:center;"><span id="line-56" class="anchor"></span>
+<p class="line862">t5 </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"&lt;html&gt;..." </p>
+</td>
+</tr><tr><td style="text-align:center;"><span id="line-57" class="anchor"></span>
+<p class="line862">t3 </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"&lt;html&gt;..." </p>
+</td>
+</tr></tbody></table></div>
+<span id="line-58" class="anchor"></span><span id="line-59" class="anchor"></span>
+<table border="1" cellspacing="1" cellpadding="2" width="489"><tbody><tr><td valign="top" width="133">
+<p class="line862"><strong>Row Key</strong> </p>
+</td>
+<td valign="top" width="133">
+<p class="line862"><strong>Time Stamp</strong> </p>
+</td>
+<td valign="top" width="217">
+<p class="line862"><strong>Column</strong> <em>"anchor:"</em> </p>
+</td>
+</tr><tr><td valign="top" width="133">"com.cnn.www"</td>
+<td valign="top" width="133">t9</td>
+<td valign="top" width="217">"com.cnn.www"        "CNN"</td>
+</tr><tr><td valign="top" width="133"> </td>
+<td valign="top" width="133">t8</td>
+<td valign="top" width="217">
+<p class="line862">"anchor:my.look.ca" "CNN.com"</p>
+</td>
+</tr></tbody></table><p class="line867"><span id="line-67" class="anchor"></span></p>
+<div>
+<table><tbody><tr><td style="text-align:center;">
+<p class="line862"><strong>Row Key</strong> </p>
+</td>
+<td style="text-align:center;">
+<p class="line862"><strong>Time Stamp</strong> </p>
+</td>
+<td style="text-align:center;">
+<p class="line862"><strong>Column</strong> <em>"mime:"</em> </p>
+</td>
+</tr><tr><td><span id="line-68" class="anchor"></span>
+<p class="line862">"com.cnn.www" </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">t6 </p>
+</td>
+<td style="text-align:center;">
+<p class="line862">"text/html" </p>
+</td>
+</tr></tbody></table></div>
+<p class="line862">从上面的图示可以看出来：空的列并没有被存储，因为他们并不需要面向列的存储格式。所以一个当请求列值为<em>"contents:"</em> 的时候，会返回空值。</p>
+<p class="line862">如果请求数据的时候，没有提供timestamp的值，那么最新的数据将返回最新的值，并且在实际的存储中，所有的值也是按照timestamps降序排列的。</p>
+<p class="line867"></p>
+<h3 id="Row_Ranges:_Regions">行的范围：区域</h3>
+<p class="line862">对于一个程序而言，数据表是由一系列按升序排序的数据列组成，数据行按照名字的升序，时间戳按照降序。在物理上，数据表被拆分成多个数据行的区域（这个概念对于在Bigtable中就是tablet）。每一个数据行的区域包含从开始行（包含）到中止行（排除）。所有的数据行的区域构成一个数据表。与Bigtable不同的是，在Bigtable中，一个数据行区域有表名和结束行值决定，而HBase由表名和开始行值决定。</p>
+<p class="line862">在区域中的每一个列族都被一个称为HStore的对象管理。每一个HStore由一个或多个MapFiles（这是Hadoop中的一个文件类型）组成。HStore的概念类似于Google的SSTable。MapFiles一旦被关闭，就是不可修改的类型了。MapFiles被存储在Hadoop的HDFS中，其他不同的点如下：</p>
+<ul><li>
+<p class="line891">MapFiles目前还无法进行内存的映射。</p>
+</li><li>
+<p class="line891">MapFiles由一些稀疏的索引文件来维护，而SSTable在其文件的最后。</p>
+</li><li>
+<p class="line862">HBase扩展了MapFiles，所以使用bloom filter的时候可以提高查找的性能。</p>
+</li></ul><p class="line867"><span id="arch" class="anchor"></span><span id="line-87" class="anchor"></span></p>
+<h2 id="Architecture_and_Implementation">架构与实现</h2>
+<span id="line-88" class="anchor"></span><span id="line-89" class="anchor"></span>
+<p class="line874">HBase由以下三个主要构件组成：</p>
+<ol type="1"><li>
+<p class="line862">HBaseMaster (类似于Bigtable master server) <span id="line-91" class="anchor">
+</span></p>
+</li><li>
+<p class="line862">HRegionServer(类似于Bigtable tablet server) <span id="line-92" class="anchor">
+</span></p>
+</li><li>HBase Client, 由org.apache.hadoop.hbase.client.HTable定义 <span id="line-93" class="anchor">
+</span><span id="line-94" class="anchor"></span></li></ol><p class="line874">下面，我们以此讨论这几个部分。 <span id="line-95" class="anchor"></span><span id="line-96" class="anchor"></span></p>
+<p class="line867"><span id="master" class="anchor"></span><span id="line-97" class="anchor"></span></p>
+<h3 id="HBaseMaster">HBaseMaster</h3>
+<p class="line862">HBaseMaster负责给HRegionServer分配区域。第一个分配的区域就是ROOT区域，它用于定位所有的META区域。每一个META区域用于定位一些列用户区域。一旦所有的META区域被分配好了以后，master便开始分配用户区域给HReginServer，同时维护每一个HReginServer的负载平衡。</p>
+<p class="line862">同时HBaseMaster还含有一个指向包含有ROOT区域的HReginServer地址。</p>
+<p class="line862">同时，HBaseMaster会监控每一台HReginServer的健康状况，如果某一台HReginServer不可用，它将会把不可用的HReginServer来提供服务的HLog和表由其他HReginServer来提供。</p>
+<p class="line862">另外，HBaseMaster还负责对数据表进行管理，比如让表处于有效（online）或失效（offline）的状态，改变表的结构（增加或者减少列族），等等。</p>
+<p class="line862"><span id="line-108" class="anchor"></span><span id="line-109" class="anchor">与Bigtable不同的是，目前，如果HBaseMaster失效了，整个集群就会关闭。在Bigtable中，即使Master机器失效了，Tabletserver还是可以提供服务的。Bigtable使用了而外的锁管理机制，而我们的HBase使用的单点访问模式：所有的HReginServer都访问HBaseMaster。</span></p>
+<p class="line867"></p>
+<h3 id="The_META_Table">The META Table</h3>
+<p class="line862">META 表存储了所有的用户区域的信息，同时包括HReginServer对象的信息，其中有每一个行值的开始到结束的键值，一个表是否有效或失效，每一个HReginServer的地址，等等。META 表的大小随着用户区域的增加而增加。</p>
+<p class="line867"></p>
+<h3 id="The_ROOT_Table">The ROOT Table</h3>
+<p class="line862">ROOT表被限制在一个区域中，它指定了所有的META表信息。这些信息包括每一个META所处的区域和HReginServer信息。</p>
+<p class="line862">ROOT表和META表每一行的大小大概是1KB左右。每一个区域的大小是256MB，这意味着ROOT表可以装载2.6 x 10<sup>5</sup> META区域，转化成用户区域就是6.9 x 10<sup>10</sup>，转化成可以存储的字节数就是1.8 x 10<sup>19</sup> (2<sup>64</sup>) 。</p>
+<p class="line867"><span id="hregion" class="anchor"></span><span id="line-120" class="anchor"></span></p>
+<h2 id="HRegionServer">HRegionServer</h2>
+<p class="line862">HReginServer负责处理用户的读和写的操作。HReginServer通过与HBaseMaster通信获取自己需要服务的数据表，并向HBaseMaster反馈自己的运行状况。<span id="line-123" class="anchor"></span><span id="line-124" class="anchor"></span></p>
+<p class="line867"></p>
+<h3 id="Write_Requests">Write Requests</h3>
+<p class="line862">当一个写的请求到来的时候，它首先会写到一个叫做HLog的write-ahead log中。HLog被缓存在内存中，称为<em>Memcache</em>，每一个HStore只能有一个<em>Memcache</em>。</p>
+<p class="line867"></p>
+<h3 id="Read_Requests">Read Requests</h3>
+<p class="line862">当一起读取的请求到来的时候，HReginServer会先在Memcache中寻找该数据，当找不到的时候，才会去在MapFiles 中寻找。</p>
+<p class="line867"></p>
+<h3 id="Cache_Flushes">Cache Flushes</h3>
+<p class="line862">当Memcache到达配置的大小以后，将会创建一个MapFile，将其写到磁盘中去。这将减少HReginServer的内存压力。</p>
+<p class="line862"><span id="line-137" class="anchor"></span><span id="line-138" class="anchor">在读和写的过程中，Cache flushes将会经常发生。当创建一个新的MapFile的时候，读和写的操作会被挂起，知道新的MapFile创建好，并被加入到HStroe的管理中后才可以使用。</span></p>
+<p class="line867"></p>
+<h3 id="Compactions">Compactions</h3>
+<p class="line862">当一定数量的MapFiles超过一个配置的阀值之后，压缩操作就会开始执行。压缩操作的主要工作就是周期性地将一些MapFiles合并成一个MapFile。</p>
+<p class="line862">在执行压缩操作的过程中，HReginServer的读和写操作将被挂起，直到操作执行完毕。</p>
+<p class="line867"></p>
+<h3 id="Region_Splits">Region Splits</h3>
+<p class="line862">当一个HStore所管理的MapFiles超过一个配置（当前是256MB）的值以后，将会执行区域的切分操作。区域的切分操作将原先的区域对半分割为2个新的区域。</p>
+<p class="line862">在进行区域切分的操作过程中，读和写的操作将被挂起，直到完成为止。</p>
+<p class="line867"><span id="client" class="anchor"></span><span id="line-155" class="anchor"></span></p>
+<h2 id="HBase_Client">HBase Client</h2>
+<p class="line862">HBase Client负责寻找提供需求数据的HReginServer。在这个过程中，HBase Client将首先与HBaseMaster通信，找到ROOT区域。这个操作是Client和Master之间仅有的通信操作。</p>
+<p class="line874">一旦ROOT区域被找到以后，Client就可以通过扫描ROOT区域找到相应的META区域去定位实际提供数据的HReginServer。</p>
+<p class="line874">当定位到提供数据的HReginServer以后，Client就可以通过这个HReginServer找到需要的数据了。</p>
+<p class="line874">这些信息将会被Client缓存起来，当下次请求的时候，就不需要走上面的这个流程了。</p>
+<p class="line874">当这些区域中的某个区域不可用的时候，Client将会逆向执行上面的过程，直到找到实际提供数据的HReginServer为止。</p>
+<p class="line867"></p>
+<h3 id="Client_API">Client API</h3>
+<span id="line-168" class="anchor"></span><span id="line-169" class="anchor"></span>
+<p class="line862">参考Javadoc中关于<a class="http" href="http://hadoop.apache.org/hbase/docs/current/api/org/apache/hadoop/hbase/client/HTable.html" rel="nofollow">HTable</a>和<a class="http" href="http://hadoop.apache.org/hbase/docs/current/api/org/apache/hadoop/hbase/client/HBaseAdmin.html" rel="nofollow">HBaseAdmin</a>的介绍。
+<span id="line-170" class="anchor"></span><span id="line-171" class="anchor"></span><span id="line-172" class="anchor"></span></p>
+<p class="line867"></p>
+<h3 id="Scanner_API">Scanner API</h3>
+</div>
+</div>
+<p>为了获取一个Scanner，需要实例化一个HTable，然后调用他的getScanner方法。这个方法将返回一个Scanner对象，通过这个对象你可以使用next和close的方法。</p>
+            </div>
+                </div>

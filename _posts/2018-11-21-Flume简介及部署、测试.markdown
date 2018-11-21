@@ -1,0 +1,142 @@
+---
+layout:     post
+title:      Flume简介及部署、测试
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u012834750/article/details/80817537				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="一flume简介">一、Flume简介</h2>
+
+<ul>
+<li>1) Flume提供一个分布式的，可靠的，对大数据量的日志进行高效收集、聚集、移动的服务，Flume只能在Unix环境下运行。</li>
+<li>2) Flume基于流式架构，容错性强，也很灵活简单。</li>
+<li>3) Flume、Kafka用来实时进行数据收集，Spark、Storm用来实时处理数据，impala用来实时查询。</li>
+</ul>
+
+
+
+<h2 id="二flume角色">二、Flume角色</h2>
+
+<p><img src="https://img-blog.csdn.net/20180626164815389?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTI4MzQ3NTA=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="Flume基本组成" title=""></p>
+
+
+
+<h3 id="21source">2.1、Source</h3>
+
+<p>用于采集数据，Source是产生数据流的地方，同时Source会将产生的数据流传输到Channel，这个有点类似于Java IO部分的Channel。</p>
+
+
+
+<h3 id="22channel-通道">2.2、Channel  （通道）</h3>
+
+<p>用于桥接Sources和Sinks，类似于一个队列。</p>
+
+
+
+<h3 id="23sink">2.3、Sink</h3>
+
+<p>从Channel收集数据，将数据写到目标源(可以是下一个Source，也可以是HDFS或者HBase)。</p>
+
+
+
+<h3 id="24event">2.4、Event</h3>
+
+<p>传输单元，Flume数据传输的基本单元，以事件的形式将数据从源头送至目的地。</p>
+
+
+
+<h2 id="三flume传输过程">三、Flume传输过程</h2>
+
+<p>source监控某个文件或数据流，数据源产生新的数据，拿到该数据后，将数据封装在一个Event中，并put到channel后commit提交，channel队列先进先出，sink去channel队列中拉取数据，然后写入到HDFS中。</p>
+
+
+
+<h2 id="四flume安装部署">四、Flume安装部署</h2>
+
+<p><strong>注意</strong>：本人是在之前的sqoop镜像基础上安装的，flume只强依赖JDK，但是后面需要Flume输出到HIVE或者HDFS或者Kafka，所以整个大数据相关的东西都是在之前的镜像基础上构建新的镜像，由最开始的Hadoop-&gt;Hive-&gt;sqoop-&gt;flume</p>
+
+<p>1、上传apache-flume-1.7.0-bin.tar.gz到hadoop0的/opt/module</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby"><span class="hljs-variable">$ </span>scp -r apache-flume-<span class="hljs-number">1.7</span>.<span class="hljs-number">0</span>-bin.tar.gz <span class="hljs-symbol">hadoop0:</span>/opt/<span class="hljs-class"><span class="hljs-keyword">module</span></span></code></pre>
+
+<p>2、进入容器hadoop0，解压flume的压缩包</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">$ tar <span class="hljs-attribute">-zxvf</span> apache<span class="hljs-attribute">-flume</span><span class="hljs-subst">-</span><span class="hljs-number">1.7</span><span class="hljs-number">.0</span><span class="hljs-attribute">-bin</span><span class="hljs-built_in">.</span>tar<span class="hljs-built_in">.</span>gz</code></pre>
+
+<p>3、进入flume的conf目录，重命名默认配置文件</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">mv flume-env<span class="hljs-preprocessor">.sh</span><span class="hljs-preprocessor">.templet</span> flume-env<span class="hljs-preprocessor">.sh</span></code></pre>
+
+<p>4、修改flume-env.sh</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs d"><span class="hljs-keyword">export</span> JAVA_HOME=/opt/<span class="hljs-keyword">module</span>/jdk1.8</code></pre>
+
+<p>至此，flume已经配置完成，接下来我们可以做个简单的端口监控测试！</p>
+
+
+
+<h2 id="五flume简单测试-监控端口数据">五、Flume简单测试-监控端口数据</h2>
+
+<p>目标：Flume监控一端Console，另一端Console发送消息，使被监控端实时显示。 <br>
+分步实现：</p>
+
+<p><strong>1) 安装telnet工具</strong></p>
+
+<p><strong>2）Flume目录下创建jobs目录，用于Flume相关job的配置文件，创建Flume Agent配置文件flume-telnet.conf</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor"># Name the components on this agent</span>
+a1<span class="hljs-preprocessor">.sources</span> = <span class="hljs-built_in">r1</span>
+a1<span class="hljs-preprocessor">.sinks</span> = k1
+a1<span class="hljs-preprocessor">.channels</span> = c1
+
+<span class="hljs-preprocessor"># Describe/configure the source</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = netcat
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">44444</span>
+
+<span class="hljs-preprocessor"># Describe the sink</span>
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+<span class="hljs-preprocessor"># Use a channel which buffers events in memory</span>
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor"># Bind the source and sink to the channel</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channels</span> = c1
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p><strong>3) 判断44444端口是否被占用</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby"><span class="hljs-variable">$ </span>netstat -tunlp | grep <span class="hljs-number">44444</span></code></pre>
+
+<p><strong>4) 先开启flume先听端口</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">$ bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-subst">--</span>conf conf<span class="hljs-subst">/</span> <span class="hljs-subst">--</span>name a1 <span class="hljs-subst">--</span>conf<span class="hljs-attribute">-file</span> jobs/flume<span class="hljs-attribute">-telnet</span><span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">==</span>INFO,console</code></pre>
+
+<p><strong>5) 使用telnet工具向本机的44444端口发送内容</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby"><span class="hljs-variable">$ </span>telnet localhost <span class="hljs-number">44444</span></code></pre>
+
+<p>更多Flume用法举例，在这就不一一详细列举了可以去官网<a href="http://flume.apache.org/FlumeUserGuide.html" rel="nofollow">http://flume.apache.org/FlumeUserGuide.html</a>查询，比如监听读取本地文件写到HDFS中，以及Flume之间的数据传递。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>
