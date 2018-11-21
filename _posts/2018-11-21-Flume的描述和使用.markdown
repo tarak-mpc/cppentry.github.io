@@ -1,0 +1,91 @@
+---
+layout:     post
+title:      Flume的描述和使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h2><strong>一，Flume的描述</strong></h2>
+
+<p>1、Flume的概念</p>
+
+<p><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20160530153940611"></p>
+
+<p>Flume是分布式的日志收集系统，它将各个服务器中的数据收集起来并送到指定的地方去，比如说送到HDFS，Kafka,MySql;简单来说flume就是收集日志的。 </p>
+
+<p>2、Event的概念 </p>
+
+<p>  Flume中event的相关概念：Flume的核心是把数据从数据源(source)收集过来，在将收集到的数据送到指定的目的地(sink)。为了保证输送的过程一定成功，在送到目的地(sink)之前，会先缓存数据(channel),待数据真正到达目的地(sink)后，flume在删除自己缓存的数据。 <br>
+  在整个数据的传输的过程中，流动的是event，即事务保证是在event级别进行的。那么什么是event呢？—–event将传输的数据进行封装，是flume传输数据的基本单位，如果是文本文件，通常是一行记录，event也是事务的基本单位。event从source，流向channel，再到sink，本身为一个字节数组，并可携带headers(头信息)信息。event代表着一个数据的最小完整单元，从外部数据源来，向外部的目的地去。 <br>
+  为了方便大家理解，给出一张event的数据流向图： </p>
+
+<p><img alt="" class="has" src="https://img-blog.csdn.net/20160530163300022"></p>
+
+<p>3、Flume架构介绍 </p>
+
+<p>  Flume之所以这么神奇，是源于它自身的一个设计的agent，agent本身是一个java进程，运行在日志收集节点—所谓日志收集节点就是服务器节点。 <br>
+  agent里面包含3个核心的组件：source—-&gt;channel—–&gt;sink,类似生产者、仓库、消费者的架构。 <br>
+  source：source组件是专门用来收集数据的，可以处理各种类型、各种格式的日志数据,包括avro、thrift、exec、jms、spooling directory、netcat、sequence generator、syslog、http、legacy、自定义。 <br>
+  channel：source组件把数据收集来以后，临时存放在channel中，即channel组件在agent中是专门用来存放临时数据的——对采集到的数据进行简单的缓存，可以存放在memory、jdbc、file等等。 <br>
+  sink：sink组件是用于把数据发送到目的地的组件，目的地包括hdfs、logger、avro、thrift、ipc、file、null、hbase、solr、自定义。 </p>
+
+<p>4、Flume的运行机制 </p>
+
+<p>  Flume的核心就是一个agent，这个agent对外有两个进行交互的地方，一个是接受数据的输入——source，一个是数据的输出sink，sink负责将数据发送到外部指定的目的地。source接收到数据之后，将数据发送给channel，chanel作为一个数据缓冲区会临时存放这些数据，随后sink会将channel中的数据发送到指定的地方—-例如HDFS等，注意：只有在sink将channel中的数据成功发送出去之后，channel才会将临时数据进行删除，这种机制保证了数据传输的可靠性与安全性。</p>
+
+<p>5、Flume的广义用法</p>
+
+<p>  Flume之所以这么神奇—-其原因也在于Flume可以支持多级Flume的agent，即Flume可以前后相继，例如sink可以将数据写到下一个agent的source中，这样的话就可以连成串了，可以整体处理了。Flume还支持扇入(fan-in)、扇出(fan-out)。所谓扇入就是source可以接受多个输入，所谓扇出就是sink可以将数据输出多个目的地destination中。 </p>
+
+<h2>二，Flume的安装和基本使用</h2>
+
+<p>本次安装使用的是2个节点（用的是node1和node2）</p>
+
+<p>1，安装</p>
+
+<p>1.1，直接解压安装就可以使用</p>
+
+<pre class="has">
+<code>[root@node1 tools]# tar -zxvf apache-flume-1.8.0-bin.tar.gz -C /home/bigdata/</code></pre>
+
+<p>1.2，配置环境变量</p>
+
+<pre class="has">
+<code>[root@node1 tools]# vi /etc/profile
+export FLUME_HOME=/home/bigdata/flume-1.8.0/
+export PATH=$PATH:$FLUME_HOME/bin
+
+[root@node1 tools]# source /etc/profile</code></pre>
+
+<p>2， 基本使用</p>
+
+<p>2.1，Flume收集日志文件推到Kafka</p>
+
+<pre class="has">
+<code class="hljs">a1.sources=log-source
+a1.channels=log-kafka-chnanel
+a1.sinks=kafka-sink
+
+a1.sources.log-source.type=spooldir
+a1.sources.log-source.spoolDir=/home/test/flume
+a1.sources.log-source.channels=log-kafka-chnanel
+a1.sources.log-source.inputCharset=GBK
+
+a1.channels.log-kafka-chnanel.type=memory
+a1.channels.log-kafka-chnanel.keep-alive=10
+a1.channels.log-kafka-chnanel.capacity=100000
+a1.channels.log-kafka-chnanel.transactionCapacity=100000
+
+a1.sinks.kafka-sink.type=org.apache.flume.sink.kafka.KafkaSink
+a1.sinks.kafka-sink.topic=mytopic
+a1.sinks.kafka-sink.brokerList=node2:9092,node3:9092
+a1.sinks.kafka-sink.serializer.class=kafka.serializer.StringEncoder
+
+a1.sinks.kafka-sink.channel=log-kafka-chnanel
+a1.sources.log-source.channel=log-kafka-chnanel
+~                                                </code></pre>
+
+<p> </p>
+
+<p> </p>            </div>
+                </div>

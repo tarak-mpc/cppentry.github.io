@@ -1,0 +1,385 @@
+---
+layout:     post
+title:      flume参数配置详解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>一、什么是flume</p>
+
+<p>Flume是一个高可用的，高可靠的，分布式的海量日志采集、聚合和传输的系统，Flume支持在日志系统中定制各类数据发送方，用于收集数据；同时，Flume提供对数据进行简单处理，并写到各种数据接受方（可定制）的能力。</p>
+
+<p>二、flume特点</p>
+
+<p>flume的数据流由事件(Event)贯穿始终。事件是Flume的基本数据单位，它携带日志数据(字节数组形式)并且携带有头信息，这些Event由Agent外部的Source生成，当Source捕获事件后会进行特定的格式化，然后Source会把事件推入(单个或多个)Channel中。你可以把Channel看作是一个缓冲区，它将保存事件直到Sink处理完该事件。Sink负责持久化日志或者把事件推向另一个Source。</p>
+
+<p>flume的可靠性</p>
+
+<p>当节点出现故障时，日志能够被传送到其他节点上而不会丢失。Flume提供了三种级别的可靠性保障，从强到弱依次分别为：end-to-end（收到数据agent首先将event写到磁盘上，当数据传送成功后，再删除；如果数据发送失败，可以重新发送。），Store on failure（这也是scribe采用的策略，当数据接收方crash时，将数据写到本地，待恢复后，继续发送），Besteffort（数据发送到接收方后，不会进行确认）。</p>
+
+<p>flume的可恢复性：</p>
+
+<p>还是靠Channel。推荐使用FileChannel，事件持久化在本地文件系统里(性能较差)。 </p>
+
+<p>flume的一些核心概念：</p>
+
+<p>Agent使用JVM 运行Flume。每台机器运行一个agent，但是可以在一个agent中包含多个sources和sinks。</p>
+
+<p>Client生产数据，运行在一个独立的线程。</p>
+
+<p>Source从Client收集数据，传递给Channel。</p>
+
+<p>Sink从Channel收集数据，运行在一个独立线程。</p>
+
+<p>Channel连接 sources 和 sinks ，这个有点像一个队列。</p>
+
+<p>Events可以是日志记录、 avro 对象等。</p>
+
+<p>值得注意的是，Flume提供了大量内置的Source、Channel和Sink类型。不同类型的Source,Channel和Sink可以自由组合。组合方式基于用户设置的配置文件，非常灵活。比如：Channel可以把事件暂存在内存里，也可以持久化到本地硬盘上。Sink可以把日志写入HDFS, HBase，甚至是另外一个Source等等。Flume支持用户建立多级流，也就是说，多个agent可以协同工作，并且支持Fan-in、Fan-out、Contextual Routing、Backup Routes</p>
+
+<p>三、flume架构</p>
+
+<p>Agent:</p>
+
+<p>Flume以agent为最小的独立运行单位,一个Agent包含多个source、channel、sink和其他组件</p>
+
+<p>source</p>
+
+<p>flume提供多种source供用户进行选择，尽可能多的满足大部分日志采集的需求，常用的source的类型包括avro、exec、netcat、spooling-directory和syslog等。具体的使用范围和配置方法详见source.</p>
+
+<p>channel</p>
+
+<p>flume中的channel不如source和sink那么重要，但却是不可忽视的组成部分。常用的channel为memory-channel，同时也有其他类型的channel，如JDBC、file-channel、custom-channel等，详情见channel.</p>
+
+<p>sink</p>
+
+<p>flume的sink也有很多种，常用的包括avro、logger、HDFS、Hbase以及file-roll等，除此之外还有其他类型的sink，如thrift、IRC、custom等。具体的使用范围和使用方法详见sink.</p>
+
+<p>四、flume使用</p>
+
+<p>创建配置文件（随意位置)</p>
+
+<p>vi agent.conf</p>
+
+<p>五、配置</p>
+
+<p>常见的source</p>
+
+<p>avro source:avro可以监听和收集指定端口的日志，使用avro的source需要说明被监听的主机ip和端口号</p>
+
+<p>例子：</p>
+
+<p>agent1.sources = r1</p>
+
+<p>#描述source</p>
+
+<p>agent1.sources.r1.type = avro  (类型为avro source)</p>
+
+<p>agent1.sources.r1.bind = 0.0.0.0 （指定监听的主机ip.本机是0.0.0.0.）</p>
+
+<p>agent1.sources.r1.port = 16667 (指定监听的端口号)</p>
+
+<p> </p>
+
+<p>exec source:可以通过指定的操作对日志进行读取，使用exec时需要指定shell命令，对日志进行读取</p>
+
+<p>例子：</p>
+
+<p>agent1.source = r2</p>
+
+<p>#描述source</p>
+
+<p>agent1.sources.r2.type = exec </p>
+
+<p>agent1.sources.r2.command =tail -F /root/flume/log/event.txt (监听的文件的路径)</p>
+
+<p> </p>
+
+<p>Spooling-directory source:可以读取文件夹里的日志，使用时指定一个文件夹，可以读取该文件夹中的所有文件，当出现新文件时会读取该文件并获取数据.需要注意的是该文件夹中的文件在读取过程中不能修改，同时文件名也不能修改。</p>
+
+<p>1、spoolDirectory是监控目录，不能为空，没有默认值。这个source不具有监控子目录的功能，也就是不能递归监控。如果需要，这需要自己去实现，http://blog.csdn.net/yangbutao/article/details/8835563 这里有递归检测的实现；</p>
+
+<p>2、completedSuffix是文件读取完毕后给完成文件添加的标记后缀，默认是".COMPLETED"；</p>
+
+<p>3、deletePolicy这是是否删除读取完毕的文件，默认是"never"，就是不删除，目前只支持"never"和“IMMEDIATE”；</p>
+
+<p>4、fileHeader是否在event的Header中添加文件名，boolean类型, 默认false</p>
+
+<p>5、fileHeaderKey这是event的Header中的key,value是文件名</p>
+
+<p>6、batchSize这个是一次处理的记录数，默认是100；</p>
+
+<p>7、inputCharset编码方式，默认是"UTF-8"；</p>
+
+<p>8、ignorePattern忽略符合条件的文件名</p>
+
+<p>9、trackerDirPath被处理文件元数据的存储目录，默认".flumespool"</p>
+
+<p>10、deserializerType将文件中的数据序列化成event的方式，默认是“LINE”---org.apache.flume.serialization.LineDeserializer</p>
+
+<p>11、deserializerContext这个主要用在Deserializer中设置编码方式outputCharset和文件每行最大长度maxLineLength。</p>
+
+<p> </p>
+
+<p>例子：</p>
+
+<p>agent1.sources = r3</p>
+
+<p>#描述source</p>
+
+<p>agent1.sources.r3.type = spooldir</p>
+
+<p>agent1.sources.r3.spoolDir = /root/flume/log  (监听的文件目录)</p>
+
+<p>agent1.sources.r3.fileHeader = true</p>
+
+<p>    </p>
+
+<p>NetCat source:用来监听一个指定端口，并将接收到的数据的每一行转换为一个事件。</p>
+
+<p>例子：</p>
+
+<p>agent1.sources = r4 </p>
+
+<p>#描述source</p>
+
+<p>agent1.sources.r4.type = netcat  (source类型)</p>
+
+<p>agent1.sources.r4.bind = 0.0.0.0 (指定绑定的ip或主机名)</p>
+
+<p>agent1.sources.r4.port = 16668   (指定绑定的端口号)</p>
+
+<p> </p>
+
+<p>HTTP source:接受HTTP的GET和POST请求作为Flume的事件,其中GET方式应该只用于试验。</p>
+
+<p>！type    类型，必须为"HTTP"</p>
+
+<p>！port–   监听的端口</p>
+
+<p>bind   0.0.0.0    监听的主机名或ip</p>
+
+<p>handler      org.apache.flume.source.http.JSONHandler处理器类，需要实现HTTPSourceHandler接口</p>
+
+<p>handler.*  –   处理器的配置参数</p>
+
+<p>Selector.type</p>
+
+<p>selector.*   </p>
+
+<p>interceptors  –  </p>
+
+<p>interceptors.*        </p>
+
+<p>enableSSL  false  是否开启SSL,如果需要设置为true。注意，HTTP不支持SSLv3。</p>
+
+<p>excludeProtocols  SSLv3  空格分隔的要排除的SSL/TLS协议。SSLv3总是被排除的。</p>
+
+<p>keystore      密钥库文件所在位置</p>
+
+<p>keystorePassword Keystore 密钥库密码</p>
+
+<p>例子：</p>
+
+<p>agent1.sources.r1.type  = http</p>
+
+<p>agent1.sources.r1.port  = 66666</p>
+
+<p> </p>
+
+<p>常见的channel</p>
+
+<p>memory channel:内存</p>
+
+<p>例子：</p>
+
+<p>agent1.channels = c1</p>
+
+<p>agent1.channels.c1.type = memory</p>
+
+<p>agent1.channels.c1.capacity = 100000</p>
+
+<p>agent1.channels.c1.transactionCapacity = 100000</p>
+
+<p> </p>
+
+<p>常见的sink</p>
+
+<p>logger sink:将收集到的日志写到flume的log中</p>
+
+<p>例子：</p>
+
+<p>agent1.sinks = k1</p>
+
+<p>agent2.sinks.k1.type = logger</p>
+
+<p> </p>
+
+<p>avro sink:可以将接受到的日志发送到指定端口，供级联agent的下一跳收集和接受日志，使用时需要指定目的ip和端口</p>
+
+<p>例子：</p>
+
+<p>agent1.sinks=k1</p>
+
+<p>agent1.sinks.k2.type = avro</p>
+
+<p>agent1.sinks.k2.channel = c2</p>
+
+<p>agent1.sinks.k2.hostname = hadoop03 (指定的主机名或ip)</p>
+
+<p>agent1.sinks.k2.port = 16666  (指定的端口号)</p>
+
+<p> </p>
+
+<p>file_roll sink:可以将一定时间内收集到的日志写到一个指定的文件中，具体过程为用户指定一个文件夹和一个周期，然后启动agent，这时该文件夹会产生一个文件将该周期内收集到的日志全部写进该文件内，直到下一个周期再次产生一个新文件继续写入，以此类推，周而复始。</p>
+
+<p>例子：</p>
+
+<p>agent1.sinks=k1</p>
+
+<p>agent1.sinks.k1.type = file_roll</p>
+
+<p>agent1.sinks.k1.channel = c1</p>
+
+<p>agent1.sinks.k1.sink.directory=/root/flumelog (指定文件所在目录的路径)</p>
+
+<p> </p>
+
+<p>hdfs sink:将收集到的日志写入到新创建的文件中保存起来，存储路径为分布式的文件系统hdfs的路径，同时hdfs创建新文件的周期可以是时间，也可以是文件的大小，还可以是采集日志的条数</p>
+
+<p>配置参数说明：</p>
+
+<p> </p>
+
+<p>channel</p>
+
+<p>Type:hdfs</p>
+
+<p>path:写入hdfs的路径，需要包含文件系统标识，比如：hdfs://namenode/flume/webdata/</p>
+
+<p>可以使用flume提供的日期及%{host}表达式。</p>
+
+<p>filePrefix： 默认值：FlumeData 写入hdfs的文件名前缀，可以使用flume提供的日期及%{host}表达式。</p>
+
+<p>fileSuffix：写入hdfs的文件名后缀，比如：.lzo .log等。</p>
+
+<p>inUsePrefix：临时文件的文件名前缀，hdfs sink会先往目标目录中写临时文件，再根据相关规则重命名成最终目标文件；</p>
+
+<p>inUseSuffi: 默认值：.tmp  临时文件的文件名后缀。</p>
+
+<p>rollInterval:  默认值：30  hdfs sink间隔多长将临时文件滚动成最终目标文件，单位：秒；</p>
+
+<p>如果设置成0，则表示不根据时间来滚动文件；</p>
+
+<p>注：滚动（roll）指的是，hdfs sink将临时文件重命名成最终目标文件，并新打开一个临时文件来写入数据；</p>
+
+<p>rollSize  默认值：1024 当临时文件达到该大小（单位：bytes）时，滚动成目标文件；</p>
+
+<p>如果设置成0，则表示不根据临时文件大小来滚动文件；</p>
+
+<p>rollCount  默认值：10  当events数据达到该数量时候，将临时文件滚动成目标文件；</p>
+
+<p>如果设置成0，则表示不根据events数据来滚动文件；</p>
+
+<p>idleTimeout  默认值：0</p>
+
+<p>当目前被打开的临时文件在该参数指定的时间（秒）内，没有任何数据写入，则将该临时文件关闭并重命名成目标文件；</p>
+
+<p>batchSize   默认值：100  每个批次刷新到HDFS上的events数量；</p>
+
+<p>codeC  文件压缩格式，包括：gzip, bzip2, lzo, lzop, snappy</p>
+
+<p>fileType  默认值：SequenceFile</p>
+
+<p>文件格式，包括：SequenceFile, DataStream,CompressedStream 当使用DataStream时候，文件不会被压缩，不需要设置hdfs.codeC;当使用CompressedStream时候，必须设置一个正确的hdfs.codeC值；</p>
+
+<p>maxOpenFiles  默认值：5000 最大允许打开的HDFS文件数，当打开的文件数达到该值，最早打开的文件将会被关闭；</p>
+
+<p>minBlockReplicas  默认值：HDFS副本数   写入HDFS文件块的最小副本数。该参数会影响文件的滚动配置，一般将该参数配置成1，才可以按照配置正确滚动文件。</p>
+
+<p>writeFormat  写sequence文件的格式。包含：Text, Writable（默认）</p>
+
+<p>callTimeout  默认值：10000 执行HDFS操作的超时时间（单位：毫秒）；</p>
+
+<p>threadsPoolSize  默认值：10  hdfs sink启动的操作HDFS的线程数。</p>
+
+<p>rollTimerPoolSize  默认值：1  hdfs sink启动的根据时间滚动文件的线程数。</p>
+
+<p>kerberosPrincipal： HDFS安全认证kerberos配置；</p>
+
+<p>kerberosKeytab</p>
+
+<p>HDFS安全认证kerberos配置；</p>
+
+<p>proxyUser  代理用户</p>
+
+<p>round 默认值：false  是否启用时间上的”舍弃”，这里的”舍弃”，类似于”四舍五入”，后面再介绍。如果启用，则会影响除了%t的其他所有时间表达式；</p>
+
+<p>roundValue  默认值：1   时间上进行“舍弃”的值；</p>
+
+<p>roundUnit  默认值：seconds 时间上进行”舍弃”的单位，包含：second,minute,hour</p>
+
+<p>示例：</p>
+
+<p>a1.sinks.k1.hdfs.path = /flume/events/%y-%m-%d/%H%M/%S</p>
+
+<p>a1.sinks.k1.hdfs.round = true</p>
+
+<p>a1.sinks.k1.hdfs.roundValue = 10</p>
+
+<p>a1.sinks.k1.hdfs.roundUnit = minute</p>
+
+<p>当时间为2015-10-16 17:38:59时候，hdfs.path依然会被解析为：</p>
+
+<p>/flume/events/20151016/17:30/00</p>
+
+<p>因为设置的是舍弃10分钟内的时间，因此，该目录每10分钟新生成一个。</p>
+
+<p>timeZone</p>
+
+<p>默认值：Local Time  时区。</p>
+
+<p>useLocalTimeStamp 默认值：flase  是否使用当地时间。</p>
+
+<p>closeTries：默认值：0</p>
+
+<p>hdfs sink关闭文件的尝试次数；</p>
+
+<p>如果设置为1，当一次关闭文件失败后，hdfs sink将不会再次尝试关闭文件，这个未关闭的文件将会一直留在那，并且是打开状态。</p>
+
+<p>设置为0，当一次关闭失败后，hdfs sink会继续尝试下一次关闭，直到成功。</p>
+
+<p>retryInterval</p>
+
+<p>默认值：180（秒）</p>
+
+<p>hdfs sink尝试关闭文件的时间间隔，如果设置为0，表示不尝试，相当于于将hdfs.closeTries设置成1.</p>
+
+<p>Serializer  默认值：TEXT</p>
+
+<p>序列化类型。其他还有：avro_event或者是实现了EventSerializer.Builder的类名。</p>
+
+<p>Hbase sink:hbase是一种数据库，可以储存日志，使用时需要指定存储日志的表名和列族名，然后agent就可以将收集到的日志逐条插入到数据库中。</p>
+
+<p>tableName：要写入的HBase数据表名，不能为空；</p>
+
+<p>columnFamily：数据表对应的列簇名，这个sink目前只支持一个列簇，不能为空；</p>
+
+<p>batchSize：每次事务可以处理的最大Event数量，默认是100；</p>
+
+<p>eventSerializerType：用来将event写入HBase，即将event转化为put。默认是org.apache.flume.sink.hbase.SimpleHbaseEventSerializer，还有一个是RegexHbaseEventSerializer，即适合HBaseSink的Serializer只有这俩，否则自己定制；</p>
+
+<p>serializerContext：是eventSerializerType的配置信息，就是配置文件中包含“serializer.”的项；</p>
+
+<p>例子：</p>
+
+<p>agent1.sinks = k1</p>
+
+<p>agent1.sinks.k1.type = hbase</p>
+
+<p>agent1.sinks.k1.table = flume</p>
+
+<p>agent1.sinks.k1.columnFamily=fl_conf</p>
+
+<p>agent1.sinks.k1.serializer=org.apache.flume.sink.hbase.RegexHbaseEventSerializer</p>            </div>
+                </div>

@@ -1,0 +1,153 @@
+---
+layout:     post
+title:      flume总结（安装、简介及常见异常处理）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-dracula">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2><a id="Flume_0"></a>Flume的安装与部署</h2>
+<p>一、Flume的官方网站在哪里？<br>
+　　<a href="http://flume.apache.org/" rel="nofollow">http://flume.apache.org/</a><br>
+二、Flume部署与测试<br>
+2.1 JDK安装<br>
+2.2 Flume安装<br>
+解压：# tar  -zxvf  apache-flume-1.5.0-bin.tar.gz<br>
+# tar  -zxvf  apache-flume-1.5.0-src.tar.gz<br>
+将apache-flume-1.5.0-src文件夹中的内容全部复制到apache-flume-1.5.0-bin文件中<br>
+# cp -ri apache-flume-1.5.0-src/* apache-flume-1.5.0-bin<br>
+2.3 环境变量设置：# vim /root/.bash_profile<br>
+环境变量生效：# source /root/.bash_profile<br>
+2.4 配置文件设置<br>
+2.4.1 <a href="http://flume-env.sh" rel="nofollow">flume-env.sh</a><br>
+修改 <a href="http://flume-env.sh" rel="nofollow">flume-env.sh</a> 配置文件,主要是JAVA_HOME变量设置<br>
+验证是否安装成功：flume-ng version<br>
+2.4.2 建立配置文件example<br>
+实现Flume监听文件夹 ，数据写入文件夹内时将数据汇聚到HDFS<br>
+1)首先我们建立一个/home/xdl/apache-flume-1.6.0-bin/conf/example.conf文件<br>
+2)编写配置文件<br>
+具体内容如下：</p>
+<pre><code># Name the components on this agent
+agent1.sources = source1
+agent1.channels = channel1
+agent1.sinks = sink1
+
+# Describe/configure the source 
+agent1.sources.source1.type = spooldir
+agent1.sources.source1.spoolDir=/root/flume/aboutyunlog
+
+# 配置往channel1传输数据
+agent1.sources.source1.channels = channel1
+agent1.sources.source1.fileHeader=false
+
+# Describe the sink
+agent1.sinks.sink1.type = hdfs
+agent1.sinks.sink1.hdfs.path=hdfs://node21:9000/flume/aboutyunlog
+agent1.sinks.sink1.hdfs.fileType=DataStream
+agent1.sinks.sink1.writeFormat=TEXT
+# hdfs sink间隔多长将临时文件滚动成最终目标文件，单位：秒；
+agent1.sinks.sink1.hdfs.rollInterval=4
+#配置从channel1接收数据
+agent1.sinks.sink1.channel = channel1
+
+# Use a channel which buffers events inmemory
+agent1.channels.channel1.type = file
+agent1.channels.channel1.checkpointDir=/root/flume/aboutyun_check
+agent1.channels.channel1.dataDirs=/root/flume/aboutyun_data
+</code></pre>
+<p>注意：Spooling Directory是监控指定文件夹中新文件的变化，一旦新文件出现，就解析该文件内容，然后写入到channel。写入完成后，标记该文件已完成或者删除该文件。<br>
+3)编写shell脚本<br>
+注意：<br>
+a.让日志收集任务以后后台进程运行，且将运行日志重定向到 ./flume.log保存。<br>
+b.-Dflume.root.logger=DEBUG,console &gt; ./fluem.log 2&gt;&amp;1 &amp;是输出调试信息，也可以在配置文件中配置。步骤如下：</p>
+<pre><code> # cd /root/software/apache-flume-1.5.0-bin/conf/
+ # vim log4j.properties
+</code></pre>
+<p>注释掉flume.root.logger=INFO,LOGFILE选择flume.root.logger=<br>
+DEBUG,console把日志打印到控制台。</p>
+<p>4)验证</p>
+<p>查看进程是否启动成功</p>
+<p>这时我们可以查看一下flume.log日志文件，查看一下里面的内容，看看程序有无出错。</p>
+<p>往Flume监控的目录/root/flume/aboutyunlog下创建文件</p>
+<p>查看成功上传到HDFS中的文件</p>
+<p>2.5 异常处理<br>
+1、<br>
+<img src="https://img-blog.csdnimg.cn/20181029174323904.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM5NDI5NzE0,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<p>原因：这是因为在配置文件example中设置了<br>
+agent1.channels.channel1.capacity = 100<br>
+解决方法：只需把这行去掉即可。<br>
+也可以同时设定：<br>
+#channel的event个数<br>
+agent1.channels.channel1.capacity=1000<br>
+#事务event个数<br>
+agent1.channels.channel1.transactionCapacity=100<br>
+2、Event created by Invalid Syslog data<br>
+解决：cat 日志文件 查看异常<br>
+一般是配置文件出错 : sinks找不到channel 等<br>
+3、连接异常问题：<br>
+解决：<br>
+主节点数据源类型为syslogtcp时可用bind或host绑定master<br>
+数据源类型为avro时只能用bind</p>
+<h2><a id="Flume_91"></a>Flume简介</h2>
+<h3><a id="Flume_92"></a>Flume是什么</h3>
+<ul>
+<li>由Cloudera公司开源</li>
+<li>分布式、可靠、高可用的海量日志采集系统</li>
+<li>数据源可定制，可扩展</li>
+<li>数据存储系统可定制，可扩展</li>
+<li>中间件：屏蔽了数据源和数据存储系统的异构性</li>
+</ul>
+<h3><a id="Flume_NG_100"></a>Flume NG特点</h3>
+<p>NG只有一种角色的节点：代理节点（agent）<br>
+没有collector、master节点。这是核心组件最核心的变化<br>
+agent节点的组成也发生了变化，脱离了zookeeper</p>
+<h3><a id="Flume_NG_104"></a>Flume NG架构的优势</h3>
+<p>NG 在核心组件上进行了大规模的调整<br>
+大大降低了对用户的要求<br>
+用户也不再纠结于 OG 中的模糊概念<br>
+有利于 Flume 和其他技术、hadoop 周边组件的整合<br>
+在功能上更加强大、可扩展性更高</p>
+<h3><a id="Flume_NG_110"></a>Flume NG核心概念</h3>
+<h4><a id="Event_111"></a>Event</h4>
+<p>Event是Flume数据传输的基本单元<br>
+Flume以事件的形式将数据从源头传送到最终的目的地<br>
+Event由可选的header和载有数据的一个byte array构成<br>
+载有的数据对flume是不透明的<br>
+Header是容纳了key-value字符串对的无序集合，key在集合内是唯一的。<br>
+Header可以在上下文路由中使用扩展</p>
+<h4><a id="Client_118"></a>Client</h4>
+<p>Client是一个将原始log包装成events并且发送它们到一个或多个agent的实体。<br>
+目的是从数据源系统中解耦Flume<br>
+在flume的拓扑结构中不是必须的<br>
+Client实例<br>
+Flume log4j Appender<br>
+可以使用Client SDK (org.apache.flume.api)定制特定的Client</p>
+<h4><a id="Agent_125"></a>Agent</h4>
+<p>一个Agent包含Source, Channel, Sink和其他组件<br>
+它利用这些组件将events从一个节点传输到另一个节点或最终目的地<br>
+agent是flume流的基础部分<br>
+flume为这些组件提供了配置、生命周期管理、监控支持</p>
+<ol>
+<li>Agent之Source：<br>
+Source负责接收event或通过特殊机制产生event，并将events批量的放到一个或多个Channel。<br>
+包含event驱动和轮询2种类型 不同类型的Source: 与系统集成的Source: Syslog,<br>
+Netcat、监测目录池、tcpsyslog 自动生成事件的Source: Exec 用于Agent和Agent之间通信的IPC<br>
+Source: Avro、Thrift Source必须至少和一个channel关联</li>
+<li>Agent之Channel： Channel位于Source和Sink之间，用于缓存进来的event；<br>
+当Sink成功的将event发送到下一个的channel或最终目的，event从Channel移除。<br>
+不同的Channel提供的持久化水平也是不一样的: Memory Channel: volatile(不稳定的) File<br>
+Channel: 基于WAL（预写式日志Write-Ahead Logging）实现 JDBC Channel:<br>
+基于嵌入Database实现 Channel支持事务，提供较弱的顺序保证 可以和任何数量的Source和Sink工作</li>
+<li>Agent之Sink： Sink负责将event传输到下一跳或最终目的，成功完成后将event从channel移除。<br>
+不同类型的Sink: 存储event到最终目的的终端Sink. 比如: HDFS, HBase 自动消耗的Sink. 比如: Null<br>
+Sink 用于Agent间通信的IPC sink: Avro 必须作用于一个确切的channel</li>
+<li>其他几个组件<br>
+Interceptor： 作用于Source，按照预设的顺序在必要地方装饰和过滤events  Channel 作用于Source，按照预设的顺序在必    要地方装饰和过滤events  Channel<br>
+Selector ： 允许Source基于预设的标准，从所有Channel中，选择一个或多个Channel<br>
+Sink Processor ： 多个Sink可以构成一个Sink Group Sink Processor可以通过组中所有Sink实现负载均衡<br>
+也可以在一个Sink失败时转移到另一个</li>
+</ol>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

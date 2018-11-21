@@ -1,0 +1,605 @@
+---
+layout:     post
+title:      [干货] Flume综述与实例
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div id="article_content" class="article_content tracking-ad" style="overflow:hidden;">
+<div class="markdown_views">
+<p><a href="http://flume.apache.org/" rel="nofollow">Flume</a>是一个分布式的、可靠的数据收集、集合和移动的组件。基于流式数据模型，非常健壮、支持容错、故障转移等特性。本用实例辅助说明Flume的大部分核心概念。</p>
+<p><img src="https://img-blog.csdn.net/20160723171750836" alt="这里写图片描述" title=""></p>
+<p><strong>版本记录：</strong> <br>
+2016-07-23 初稿</p>
+<hr><h1 id="安装flume">安装FLume</h1>
+<p>Flume的安装非常简单，其核心就是agent。</p>
+<p>从官网下载稳定版本：</p>
+<pre class="prettyprint"><code class="hljs avrasm has-numbering">wget http://apache<span class="hljs-preprocessor">.fayea</span><span class="hljs-preprocessor">.com</span>/flume/<span class="hljs-number">1.6</span><span class="hljs-number">.0</span>/apache-flume-<span class="hljs-number">1.6</span><span class="hljs-number">.0</span>-bin<span class="hljs-preprocessor">.tar</span><span class="hljs-preprocessor">.gz</span>
+
+tar zxvf apache-flume-<span class="hljs-number">1.6</span><span class="hljs-number">.0</span>-bin<span class="hljs-preprocessor">.tar</span><span class="hljs-preprocessor">.gz</span>
+
+mv apache-flume-<span class="hljs-number">1.6</span><span class="hljs-number">.0</span>-bin apache-flume-<span class="hljs-number">1.6</span><span class="hljs-number">.0</span></code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>为了运行方便，我们把bin目录加到Path中：</p>
+<pre class="prettyprint"><code class="hljs bash has-numbering">vim /etc/profile
+<span class="hljs-keyword">export</span> FLUME_HOME=/opt/flume/apache-flume-<span class="hljs-number">1.6</span>.<span class="hljs-number">0</span>
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">$PATH</span>:<span class="hljs-variable">$FLUME_HOME</span>/bin
+<span class="hljs-built_in">source</span> /etc/profile</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>测试一下是否安装成功：</p>
+<pre class="prettyprint"><code class="hljs bash has-numbering">flume-ng <span class="hljs-built_in">help</span></code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets_01.png" alt="save_snippets_01.png"></a></div>
+<p><img src="https://img-blog.csdn.net/20160723114839491" alt="这里写图片描述" title=""></p>
+<h1 id="入门例子">入门例子</h1>
+<p>Flume的核心工作都是通过Flume Agent来完成的，Flume agent是一个长期运行的Java进程，其中运行着source和sink，source和sink之间通过channel连接。source作为生产者，产生数据，输送到channel，sink从则从channel中读取数据，并保存到HDFS之类的数据目的地。Flume中自带了非常丰富的各个组件实现。例如从目录中拉取新文件数据的spool source，收集运行命令输出结果的exec source。channel的实现由内存memory，文件file
+ channel等。sink有简单的logger输出，HDFS sink，avro sink等。</p>
+<p>数据在Flume中用事件event来表示，因此一个运行中的Flume agent就是一个event的流动系统，由source产生，传送到channel，再传送到sink用于存储或者下一步处理。</p>
+<p>多个Flume Agent可以相互连接构成一个拓扑图，从而提供稳定的、高吞吐的数据收集系统。因此Flume系统中，核心是配置。使用Flume提供的丰富组件，构成满足自己需求的系统。如果原生组件不足以满足需求，完全可以扩展自己需要的组件，Flume提供了非常好的拓展点。</p>
+<p>Agent的示意图如下：</p>
+<p><img src="https://img-blog.csdn.net/20160723121529903" alt="这里写图片描述" title=""></p>
+<p>假设我们现在想监控/tmp/spooldir目录下的文件变动，一旦有新增文件后，读取每一行，输出到控制台。我们首先配置一个名为test-agent.properties的文件，内容如下：</p>
+<pre class="prettyprint"><code class="hljs avrasm has-numbering">agent1<span class="hljs-preprocessor">.sources</span> = source1
+agent1<span class="hljs-preprocessor">.sinks</span> = sink1
+agent1<span class="hljs-preprocessor">.channels</span> = channel1
+
+agent1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.source</span>1<span class="hljs-preprocessor">.channels</span>=channel1
+agent1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.sink</span>1<span class="hljs-preprocessor">.channel</span> = channel1
+
+agent1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.source</span>1<span class="hljs-preprocessor">.type</span>=spooldir
+agent1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.source</span>1<span class="hljs-preprocessor">.spoolDir</span>=/tmp/spooldir
+
+agent1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.sink</span>1<span class="hljs-preprocessor">.type</span>=logger
+
+agent1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.channel</span>1<span class="hljs-preprocessor">.type</span>=file</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>配置文件的属性名称采用级联的层次结构来设置各种属性。我们采用Flume自带的spooldir作为source，使用具有持久化特性的file channel以及简单的logger sink。</p>
+<p>接下来先创建监控的目录：</p>
+<pre class="prettyprint"><code class="hljs d has-numbering">mkdir /tmp/spooldir
+<span class="hljs-string">``</span><span class="hljs-string">``</span>
+
+使用flume-ng启动agent：
+
+
+
+
+&lt;div <span class="hljs-keyword">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/div&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>flume-ng agent –conf-file /opt/flume/conf/spool-to-logger.properties –name agent1 –conf $FLUME_HOME/conf -Dflume.root.logger=INFO,console</p>
+<pre class="prettyprint"><code class="hljs markdown has-numbering">
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723123511268</span>)
+
+日志中主要是一些source  sink的启动信息。
+
+接着我们在在一个终端中，往/tmp/spooldir中新增一个文件，为了保存新增文件的原子操作，我们先创建一个隐藏文件：
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>echo “Hello Flume” &gt; /tmp/spooldir/.file1.txt</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">然后使用原子性操作mv改变为可见文件：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>mv /tmp/spooldir/.file1.txt /tmp/spooldir/file1.txt </p>
+<pre class="prettyprint"><code class="hljs markdown has-numbering">
+此时日志中可以看到如下输出：
+
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723123732691</span>)
+
+成功。一行会被当做一个事件，我们写入一行，所以控制台收到一个事件的日志。多行文件的输出类似：
+
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723124245740</span>)
+
+body的输出中是UTF-8编码格式。成功处理完之后，file channel中的文件名添加了COMPLETE的后缀，表示该文件已经处理过。
+
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+
+<span class="hljs-header">#事务与可靠性</span>
+Flume使用独立的事务在source-channel和channel-sink之间传送事件。在上面的例子中，只有当事件被成功提交到file channel之后，原始文件才会被标记为完成（COMPLETE后缀）。类似的，从channel到logger输出控制台也封装在事务中，如果某种原因导致无法输出到控制台，则事务回滚，事件数据依然保存在file channel中。
+
+file channel虽然提供了持久化，但是其性能较差，吞吐量会受到一定的限制。相反，memory channel则牺牲可靠性换取吞吐量，如果内存中的事件因为机器故障重启而丢失，则这些事件无法恢复。
+
+Flume在传送事件时，保证至少一次到达（at-least-once），也就是说可能出现重复。例如，上述的spool source中，当重启Agent之后，如果文件在上次还没有被标识为完成，可能提交了部分数据到channel，因此重启后会重新处理这些未完成的文件。如果上次处理过程中，有些数据已经输出到控制台，但是事务还没有提交（在输出之后以提交之间发生故障），则这些事件会被重试，重现重复。
+
+如果需要精确的一次到达，可以使用exactly onece，要达到精确一次到达，需要使用两阶段提交协议，这样的协议开销非常昂贵。因此Flume区别于传统的消息中间件的一点在于其使用至少一次到达来达到高容量的并发。而传统的消息中间件一般采用精确的一次到达。很多场合中，完全可以在数据的其他处理环节中对重复的数据进行去重，通常是采用MapReduce或者Hive作业。
+
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+
+<span class="hljs-header">##批量处理</span>
+为了效率，Flume在一次事务中会尝试批量读取事件。这对于file channel的性能提升尤为明显，因此一次在一次file channel的事务中，需要产生一次昂贵的fsync调用。例如，在上面提到的spool source中，可以使用batchSize属性来配置一次读取多少行。在Avro sink中，在调用RPC发送事件给Avro source之前，也会尝试读取100个事件，然后再批量发送。当然，如果没有达到100个事件，不会阻塞。
+
+
+
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+
+<span class="hljs-header">#HDFS Sink</span>
+Flume最初的出发点就是用于收集大量数据到Hadoop存储中。下面是一个HDFS sink的配置例如：
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li><li style="color:rgb(153,153,153);">14</li><li style="color:rgb(153,153,153);">15</li><li style="color:rgb(153,153,153);">16</li><li style="color:rgb(153,153,153);">17</li><li style="color:rgb(153,153,153);">18</li><li style="color:rgb(153,153,153);">19</li><li style="color:rgb(153,153,153);">20</li><li style="color:rgb(153,153,153);">21</li><li style="color:rgb(153,153,153);">22</li><li style="color:rgb(153,153,153);">23</li><li style="color:rgb(153,153,153);">24</li><li style="color:rgb(153,153,153);">25</li><li style="color:rgb(153,153,153);">26</li><li style="color:rgb(153,153,153);">27</li><li style="color:rgb(153,153,153);">28</li><li style="color:rgb(153,153,153);">29</li><li style="color:rgb(153,153,153);">30</li><li style="color:rgb(153,153,153);">31</li><li style="color:rgb(153,153,153);">32</li><li style="color:rgb(153,153,153);">33</li><li style="color:rgb(153,153,153);">34</li><li style="color:rgb(153,153,153);">35</li><li style="color:rgb(153,153,153);">36</li><li style="color:rgb(153,153,153);">37</li><li style="color:rgb(153,153,153);">38</li><li style="color:rgb(153,153,153);">39</li><li style="color:rgb(153,153,153);">40</li><li style="color:rgb(153,153,153);">41</li><li style="color:rgb(153,153,153);">42</li><li style="color:rgb(153,153,153);">43</li><li style="color:rgb(153,153,153);">44</li><li style="color:rgb(153,153,153);">45</li><li style="color:rgb(153,153,153);">46</li><li style="color:rgb(153,153,153);">47</li><li style="color:rgb(153,153,153);">48</li><li style="color:rgb(153,153,153);">49</li><li style="color:rgb(153,153,153);">50</li><li style="color:rgb(153,153,153);">51</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent1.sources = source1 <br>
+agent1.sinks = sink1 <br>
+agent1.channels = channel1</p>
+<p>agent1.sources.source1.channels = channel1 <br>
+agent1.sinks.sink1.channel = channel1</p>
+<p>agent1.sources.source1.type = spooldir <br>
+agent1.sources.source1.spoolDir = /tmp/spooldir</p>
+<p>agent1.sinks.sink1.type = hdfs <br>
+agent1.sinks.sink1.hdfs.path = /tmp/flume <br>
+agent1.sinks.sink1.hdfs.filePrefix = events <br>
+agent1.sinks.sink1.hdfs.fileSuffix = .log <br>
+agent1.sinks.sink1.hdfs.inUsePrefix = _ <br>
+agent1.sinks.sink1.hdfs.fileType = DataStream</p>
+<p>agent1.channels.channel1.type = file</p>
+<pre class="prettyprint"><code class="hljs avrasm has-numbering">HDFS sink的sink 类型为hdfs，配置项包括文件路径，文件前缀后缀，文件格式等。
+
+正在处理但是还未完成的文件会有一个<span class="hljs-preprocessor">.tmp</span>后缀，正在处理的前缀使用inUsePredix属性设置，我们这里设置为下划线，在MapReduce作业中，会自动忽略下划线开头的文件。一个典型的临时文件（未完成）名称如_events<span class="hljs-number">.1386734789</span><span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.tmp</span>，其中的数字是HDFS Sink生成的时间戳。
+
+文件会一直处于打开状态，直到下面的任意条件满足：
+
+- 时间达到<span class="hljs-number">30</span>秒（通过hdfs<span class="hljs-preprocessor">.rollInterval</span>属性配置）
+- 达到hdfs<span class="hljs-preprocessor">.rollSize</span>配置的大小（默认为<span class="hljs-number">1024</span>字节）
+- 事件数量达到hdfs<span class="hljs-preprocessor">.rollCount</span>配置的数量（默认为<span class="hljs-number">10</span>）
+
+当上述任意条件满足之后，文件被关闭，前缀后缀被移除。新到来的时间写入新的文件，然后继续上述过程。
+
+HDFS sink使用运行agent的用户名写入HDFS，可以通过hdfs<span class="hljs-preprocessor">.proxyUser</span>配置。
+
+
+
+
+
+&lt;div class=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/div&gt;
+
+<span class="hljs-preprocessor">##分区与拦截器</span>
+大量的数据集经常会进行分区，使用时间来分区是很常见的一种形式，例如每天一个分区，然后MapReduce作业定期处理分区。通过设置HDFS Sink的Path，很容易对数据进行分区：
+
+
+
+
+&lt;div class=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/div&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li><li style="color:rgb(153,153,153);">14</li><li style="color:rgb(153,153,153);">15</li><li style="color:rgb(153,153,153);">16</li><li style="color:rgb(153,153,153);">17</li><li style="color:rgb(153,153,153);">18</li><li style="color:rgb(153,153,153);">19</li><li style="color:rgb(153,153,153);">20</li><li style="color:rgb(153,153,153);">21</li><li style="color:rgb(153,153,153);">22</li><li style="color:rgb(153,153,153);">23</li><li style="color:rgb(153,153,153);">24</li><li style="color:rgb(153,153,153);">25</li><li style="color:rgb(153,153,153);">26</li><li style="color:rgb(153,153,153);">27</li><li style="color:rgb(153,153,153);">28</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent1.sinks.sink1.hdfs.path = /tmp/flume/year=%Y/month=%m/day=%d</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">上述配置按照天对数据进行分区。如果使用Hive，一样可以映射到Hive中的分区和Buckets。
+
+事件被写入哪一个分区，根据事件头部中的timestamp来判断。默认情况下，事件头部中没有时间，但是可以配置一个时间拦截器来添加。Flume的拦截器（Interceptor）机制用于修改或者删除事件数据，拦截器被绑定到source中，并在事件到达channel之前运行。下面的配置为source1添加了一个拦截器：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent1.sources.source1.interceptors=interceptor1 <br>
+agent1.sources.source1.interceptors.interceptor1.type=timestamp</p>
+<pre class="prettyprint"><code class="hljs livecodeserver has-numbering">这个时间戳是在agent机器上产生事件的时间戳，如果agent运行在大规模的agent拓扑中，数据HDFS的时间可能与时间产生的时间有较大差别。HDFS Sink提供了一个属性用于配置使用数据到达HDFS的时间作为时间戳，这个属性是```hdfs.userLocalTimeStamp```.
+
+
+
+
+
+&lt;<span class="hljs-operator">div</span> class=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-operator">div</span>&gt;
+
+<span class="hljs-comment">##文件格式</span>
+通常情况下，使用二进制存储数据所需要的空间会比存储为文本所需空间小。HDFS sink提供了hdfs.fileType用于控制文件类型。
+这个属性默认为SequenceFile，这种文件格式使用时间的时间戳作为LongWritable Key，然后没有时间戳头部，则使用当前时间。事件的body作为BytesWritable写入到<span class="hljs-built_in">value</span>。如果<span class="hljs-built_in">value</span>要保存为Text，可以将hdfs.writeFormar设置为Text。
+
+如果要以Avro的文件格式写入数据，hdfs.fileType设置为DateStream。另外需要设置一个值为avro_event的serializer属性（没有hdfs.前缀）。serializer.compressionCodec属性用于设置压缩。
+
+
+
+
+&lt;<span class="hljs-operator">div</span> class=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-operator">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li><li style="color:rgb(153,153,153);">14</li><li style="color:rgb(153,153,153);">15</li><li style="color:rgb(153,153,153);">16</li><li style="color:rgb(153,153,153);">17</li><li style="color:rgb(153,153,153);">18</li><li style="color:rgb(153,153,153);">19</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent1.sinks.sink1.type=hdfs <br>
+agent1.sinks.sink1.hdfs.path=/tmp/flume <br>
+agent1.sinks.sink1.hdfs.filePrefix=events <br>
+agent1.sinks.sink1.hdfs.fileSuffix=.avro <br>
+agent1.sinks.sink1.hdfs.fileType=DataStream <br>
+agent1.sinks.sink1.hdfs.serializer=avro_event <br>
+agent1.sinks.sink1.hdfs.serializer.compressionCodec=snappy</p>
+<pre class="prettyprint"><code class="hljs vhdl has-numbering">
+一个事件将被转化为一条Avro记录，这个记录中有<span class="hljs-number">2</span>个filed：headers和<span class="hljs-keyword">body</span>。headers是一个字符串Avro <span class="hljs-keyword">Map</span>，<span class="hljs-keyword">body</span>则为Avro Bytes。avro记录的schema也可以自定义。
+
+如果要将内存中的Avro 对象发送到Flume，可以选择使用Log4jAppender，这个Appender允许我们将Avro的通用对象或者特定对象（<span class="hljs-keyword">generic</span>，specifix）写入到日志中，然后发送到Avro Source（充当Avro RPC Server）。此时serializer的值要设为：
+
+
+
+
+&lt;div class=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/div&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>org.apache.flume.sink.hdfs.AvroEventSerializer$Builder</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">Avro schema在header中设置。如果要将其他对象转化为Avro对象（进而发送给Avro Source），可以通过实现AbstractAvroEventSerializer来完成。
+
+
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+
+<span class="hljs-comment">#Fan Out</span>
+Fan out（扇出）是指一个source的数据被传送给多个channel。事件发生时，同时发送给多个channel，进而到达多个sink（一个sink只能对应一个channel）。例如我们想把数据传到HDFS进行存档，同时想把数据放到Solr或者ElasticSearch进行搜索，此时可以给source配置两个channel：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li><li style="color:rgb(153,153,153);">14</li><li style="color:rgb(153,153,153);">15</li><li style="color:rgb(153,153,153);">16</li><li style="color:rgb(153,153,153);">17</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent.sources.source1.channels=filechannel solrchannel</p>
+<pre class="prettyprint"><code class="hljs markdown has-numbering">下图是同时传送到file channel和memory的示意图：
+
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723145807378</span>)
+
+当一个source配置有多个channel时，Flume针对每个channel使用单独的事务进行数据传送。在上面的例子中，Flume将使用一个事务把数据从spool目录传送到file channel。另一个memory channel则使用另一个事务。如果两个事务都失败（例如因为空间不足），则事件不会从source中移除，而是继续保留在source，稍后再重试。
+
+如果我们对某个channel的数据完整性比较不在乎，例如上述的logger sink，我们不太关心其数据可靠性，因此我们可以把这个channel配置为可选的：
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent1.sources.source1.selector.optional = memorychannel</p>
+<pre class="prettyprint"><code class="hljs markdown has-numbering">
+此时，如果memory channel对应的事务失败了，则事件不会被留在source被在稍后重试，而是忽略掉optional channel的事务失败，把事件从source中移除。
+
+在正常的fan-out模式中，事件被复制到所有的channel，但是Flume还提供了更灵活的选择。所以我们可以把某些事件发送到channela，把另一个类型的事件发送到channelb。要达到这种多路复用的效果，可以使用multiplexing selector设置source，使得我们可以精确定义事件到channel的路由或者映射关系。
+
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+
+<span class="hljs-header">#分布式Agent拓扑</span>
+当我们有多个数据源时，在把数据送到类似HDFS的存储之前，我们可能想先做一次聚合或者预处理。例如，如果数据要存到HDFS中供MapReduce作业处理，如果数据以无数的小文件存在，对MapReduce的性能是极不利的。因此我们可以在数据原始来源处部署Agent，然后多个来源的数据先做一个去重和聚合，组成比较大的文件，然后再汇总到HDFS。此时Agent之间是分层的：
+
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723151126755</span>)
+
+上图中，tier2对tier1的数据进行聚合，他们之间的连接通过tier1一个特殊的sink和tier2一个特殊的source完成。tier1使用Avro sink通过RPC将事件远程发送给位于tier2的Avro source。此时tier1的sink充当的是RPC的客户端调用，tier2Avro source则充当RPC Server。
+注意这里的Avro sink和source并没有读写Avro文件的能力，它们之间只是使用AVRO RPC作为通信协议，传输事件。如果需要使用sink把数据写入到Avro文件中，则需要使用类似HDFS的sink来完成。
+
+第一层的agent配置如下：
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li><li style="color:rgb(153,153,153);">14</li><li style="color:rgb(153,153,153);">15</li><li style="color:rgb(153,153,153);">16</li><li style="color:rgb(153,153,153);">17</li><li style="color:rgb(153,153,153);">18</li><li style="color:rgb(153,153,153);">19</li><li style="color:rgb(153,153,153);">20</li><li style="color:rgb(153,153,153);">21</li><li style="color:rgb(153,153,153);">22</li><li style="color:rgb(153,153,153);">23</li><li style="color:rgb(153,153,153);">24</li><li style="color:rgb(153,153,153);">25</li><li style="color:rgb(153,153,153);">26</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent1.sources = source1 <br>
+agent1.sinks = sink1 <br>
+agent1.channels = channel1 <br>
+agent1.sources.source1.channels = channel1 <br>
+agent1.sinks.sink1.channel = channel1 <br>
+agent1.sources.source1.type = spooldir <br>
+agent1.sources.source1.spoolDir = /tmp/spooldir <br>
+agent1.sinks.sink1.type = avro <br>
+agent1.sinks.sink1.hostname = localhost <br>
+agent1.sinks.sink1.port = 10000 <br>
+agent1.channels.channel1.type = file <br>
+agent1.channels.channel1.checkpointDir=/tmp/agent1/file- channel/checkpoint <br>
+agent1.channels.channel1.dataDirs=/tmp/agent1/file- channel/data</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">第二层agent配置如下：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent2.sources = source2 <br>
+agent2.sinks = sink2 <br>
+agent2.channels = channel2 <br>
+agent2.sources.source2.channels = channel2 <br>
+agent2.sinks.sink2.channel = channel2 <br>
+agent2.sources.source2.type = avro <br>
+agent2.sources.source2.bind = localhost <br>
+agent2.sources.source2.port = 10000 <br>
+agent2.sinks.sink2.type = hdfs <br>
+agent2.sinks.sink2.hdfs.path = /tmp/flume <br>
+agent2.sinks.sink2.hdfs.filePrefix = events <br>
+agent2.sinks.sink2.hdfs.fileSuffix = .log <br>
+agent2.sinks.sink2.hdfs.fileType = DataStream <br>
+agent2.channels.channel2.type = file <br>
+agent2.channels.channel2.checkpointDir=/tmp/agent2/file- channel/checkpoint <br>
+agent2.channels.channel2.dataDirs=/tmp/agent2/file- channel/data</p>
+<pre class="prettyprint"><code class="hljs markdown has-numbering">最后的结构图如下：
+
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723152144034</span>)
+
+在Flume Agent中，分别使用不同的事务在source-channel和channel-sink之间传递事件，保证事件的可靠传递。在Avro Source-Sink的情况下，Flume也使用事务能确保事件可靠地从Avro sink传输到Avto source并且写入channel。
+
+在agent1中，Avro Sink从channel中读取事件（批次），并且发送给agent1的source，这一整个逻辑被包含在一个事务中，只有当sink收到来自agent2 Avro Source的确认消息之后，才会提交事务。消息确认采用异步机制。
+在agent2中，Avro source读取来自agent1的事件，并写入到channel的逻辑也封装在一个事务中，只有当数据确保写入channel之后，才会向agent1发送确认消息。从而确保事件从一个agent的channel可靠传送到另一个agent的channel。
+
+在这样的架构中，agent1和agent2只要其中一个出现故障，数据就无法被传送到HDFS。为了解决这个问题，可以使用下一节中的Sink group来达到故障转移。
+
+
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+
+<span class="hljs-header">#Sink Group</span>
+Sink group在逻辑上封装一组sink，使用时（与Channel配合时）当做一个sink使用。利用sink group，可以达到负载均衡、故障转移等目的。例如，下图中的两个tier2 agent被封装成成一个sink group，当其中一个不可用时，数据被发往另一个，避免全部中断。
+
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723104014921</span>)
+
+
+看一个sink group的配置：
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li><li style="color:rgb(153,153,153);">14</li><li style="color:rgb(153,153,153);">15</li><li style="color:rgb(153,153,153);">16</li><li style="color:rgb(153,153,153);">17</li><li style="color:rgb(153,153,153);">18</li><li style="color:rgb(153,153,153);">19</li><li style="color:rgb(153,153,153);">20</li><li style="color:rgb(153,153,153);">21</li><li style="color:rgb(153,153,153);">22</li><li style="color:rgb(153,153,153);">23</li><li style="color:rgb(153,153,153);">24</li><li style="color:rgb(153,153,153);">25</li><li style="color:rgb(153,153,153);">26</li><li style="color:rgb(153,153,153);">27</li><li style="color:rgb(153,153,153);">28</li><li style="color:rgb(153,153,153);">29</li><li style="color:rgb(153,153,153);">30</li><li style="color:rgb(153,153,153);">31</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent1.sources = source1 <br>
+agent1.sinks =sink1a sink1b</p>
+<h1 id="group">group</h1>
+<p>agent1.sinkgroups= sinkgroup1 <br>
+agent1.channels = channel1</p>
+<h1 id="link">link</h1>
+<p>agent1.sources.source1.channels= channel1 <br>
+agent1.sinks.sink1a.channel=channel1 <br>
+agent1.sinks.sink1b.channel=channel1</p>
+<h1 id="sink-group">sink group</h1>
+<p>agent1.sinkgroups.sinkgroup1.sinks=sink1a sink1b <br>
+agent1.sinkgroups.sinkgroup1.processor.type=load_balance <br>
+agent1.sinkgroups.sinkgroup1.processor.backoff=true</p>
+<h1 id="source1">source1</h1>
+<p>agent1.sources.source1.type=spooldir <br>
+agent1.sources.source1.spoolDir=/tmp/spooldir</p>
+<h1 id="sink1a">sink1a</h1>
+<p>agent1.sinks.sink1a.type=avro <br>
+agent1.sinks.sink1a.hostname=slave1 <br>
+agent1.sinks.sink1a.port=10000</p>
+<h1 id="sink1b">sink1b</h1>
+<p>agent1.sinks.sink1b.type=avro <br>
+agent1.sinks.sink1b.hostname=slave1 <br>
+agent1.sinks.sink1b.port=10001</p>
+<h1 id="channel1">channel1</h1>
+<p>agent1.channels.channel1.type=file</p>
+<p>agent1.channels.chennel1.checkpointDir=/opt/flume/checkpoint/agent1/file-channel/checkpoint
+<br>
+agent1.channels.channel1.dataDir=/opt/flume/data/agent1/file-channel/data</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">
+上述配置中，我们配置了<span class="hljs-number">2</span>个sink共享一个<span class="hljs-type">file</span> channel，并使用avro将数据传递到下一级agent。这些都是常规配置，除此之外，我们为agent定义了sink group：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent1.sinkgroups= sinkgroup1</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">以及相应的sink group属性。这个group包含sink1a和sink1b，type配置为load_balance，Flume事件将被负载均衡到这两个sink，默认采用<span class="hljs-command">round</span>-robin决定事件应该发送到哪一个sink，如果sink1a不可用，则发往sink1b，如果两个都不用，则事件保留在<span class="hljs-type">file</span> channel。负载均衡的策略可以通过processor.selector来修改。
+
+默认情况下，sink的不可用是不会被processor记住的，如果这一次sink1a不可用，下一批事件的时候，还会再次尝试sink1a，这可能导致效率很低。因此，我们配置了processor.backoff=<span class="hljs-constant">true</span>，当某个sink不可用时，就会被加入黑名单列表中，一定时间之后再从黑名单中移除，继续被尝试。黑名单的最长有效期通过processor.selector.maxTimeOut配置。
+
+另一种processor的类型是failover，这种类型的sink group，事件被发送到一个优先的sink，如果这个优先的sink不可用，则切换到备用的sink。failover sink processor在组内维护一个优先级顺序，分发事件时，按照优先级从高到低依次分发直到有可用的sink。不可用的sink将被暂时加入黑名单，时间通过processor.maxpenalty配置，最长<span class="hljs-number">30</span>秒。
+
+在下一级agent中，我们再<span class="hljs-number">10000</span>和<span class="hljs-number">10001</span>端口分配配置两个avro source。agent2a的配置如下：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent2a.sources=source2a <br>
+agent2a.sinks = sink2a <br>
+agent2a.channels = channel2a</p>
+<p>agent2a.sources.source2a.channels =channel2a <br>
+agent2a.sinks.sink2a.channel=channel2a</p>
+<p>agent2a.sources.source2a.type=avro <br>
+agent2a.sources.source2a.bind=slave1 <br>
+agent2a.sources.source2a.port=10000</p>
+<p>agent2a.sinks.sink2a.type=hdfs <br>
+agent2a.sinks.sink2a.hdfs.path=/tmp/flume</p>
+<h1 id="避免冲突">避免冲突</h1>
+<p>agent2a.sinks.sink2a.hdfs.filePrefix = events-a <br>
+agent2a.sinks.sink2a.hdfs.fileSuffix = .log <br>
+agent2a.sinks.sink2a.hdfs.fileType = DataStream</p>
+<p>agent2a.channels.channel2a.type=file</p>
+<p>agent2a.channels.chennel2a.checkpointDir=/opt/flume/checkpoint/agent2a/file-channel/checkpoint
+<br>
+agent2a.channels.channel2a.dataDir=/opt/flume/data/agent2a/file-channel/data</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">agent2b的配置完全类似:
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent2b.sources=source2b <br>
+agent2b.sinks = sink2b <br>
+agent2b.channels = channel2b</p>
+<p>agent2b.sources.source2b.channels =channel2b <br>
+agent2b.sinks.sink2b.channel=channel2b</p>
+<p>agent2b.sources.source2b.type=avro <br>
+agent2b.sources.source2b.bind=slave1 <br>
+agent2b.sources.source2b.port=10001</p>
+<p>agent2b.sinks.sink2b.type=hdfs <br>
+agent2b.sinks.sink2b.hdfs.path=/tmp/flume</p>
+<h1 id="避免冲突-1">避免冲突</h1>
+<p>agent2b.sinks.sink2b.hdfs.filePrefix = events-b <br>
+agent2b.sinks.sink2b.hdfs.fileSuffix = .log <br>
+agent2b.sinks.sink2b.hdfs.fileType = DataStream</p>
+<p>agent2b.channels.channel2b.type=file</p>
+<p>agent2b.channels.chennel2b.checkpointDir=/opt/flume/checkpoint/agent2b/file-channel/checkpoint
+<br>
+agent2b.channels.channel2b.dataDir=/opt/flume/dataagent2b/file-channel/data</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">配置了hdfs的文件前缀，是为了避免两个agent同时写入的时候出现冲突。如果二级的agent部署在不同的机器上，可以配置一个hostname拦截器，然后使用hostname作为文件前缀：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>agent2a.sinks.sink2a.hdfs.filePrefix=event-%{host}</p>
+<pre class="prettyprint"><code class="hljs markdown has-numbering">
+最终整个示意图如下：
+
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723112850381</span>)
+
+OK，我们在真实环境中运行一下这个系统：
+在/opt/fluem/conf目录下放着我们刚才的三个属性文件：
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li><li style="color:rgb(153,153,153);">11</li><li style="color:rgb(153,153,153);">12</li><li style="color:rgb(153,153,153);">13</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>spool-tier1.properties <br>
+spool-tier2-a.properties <br>
+spool-tier2-b.properties</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">
+启动HDFS：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>start-dfs.sh</p>
+<pre class="prettyprint"><code class="hljs applescript has-numbering">使用jps确保正常启动。
+
+启动tier2的agent：
+
+
+
+
+&lt;<span class="hljs-keyword">div</span> <span class="hljs-type">class</span>=<span class="hljs-string">"se-preview-section-delimiter"</span>&gt;&lt;/<span class="hljs-keyword">div</span>&gt;
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>flume-ng agent –conf-file /opt/flume/conf/spool-tier2-a.properties –name agent2a –conf $FLUME_HOME/conf -Dflume.root.logger=INFO,console</p>
+<p>flume-ng agent –conf-file /opt/flume/conf/spool-tier2-a.properties –name agent2a –conf $FLUME_HOME/conf -Dflume.root.logger=INFO,console</p>
+<pre class="prettyprint"><code class="hljs markdown has-numbering">
+![<span class="hljs-link_label">这里写图片描述</span>](<span class="hljs-link_url">https://img-blog.csdn.net/20160723144504107</span>)
+
+启动tier1的agent：
+
+
+
+
+<span class="xml"><span class="hljs-tag">&lt;<span class="hljs-title">div</span> <span class="hljs-attribute">class</span>=<span class="hljs-value">"se-preview-section-delimiter"</span>&gt;</span></span><span class="xml"><span class="hljs-tag">&lt;/<span class="hljs-title">div</span>&gt;</span></span>
+</code></pre><ul class="pre-numbering"><li style="color:rgb(153,153,153);">1</li><li style="color:rgb(153,153,153);">2</li><li style="color:rgb(153,153,153);">3</li><li style="color:rgb(153,153,153);">4</li><li style="color:rgb(153,153,153);">5</li><li style="color:rgb(153,153,153);">6</li><li style="color:rgb(153,153,153);">7</li><li style="color:rgb(153,153,153);">8</li><li style="color:rgb(153,153,153);">9</li><li style="color:rgb(153,153,153);">10</li></ul><div class="save_code tracking-ad"><a href="" rel="nofollow"><img src="http://static.blog.csdn.net/images/save_snippets.png" alt="save_snippets.png"></a></div>
+<p>flume-ng agent –conf-file /opt/flume/conf/spool-tier1.properties –name agent1 –conf $FLUME_HOME/conf -Dflume.root.logger=INFO,console
+<br>
+“`</p>
+<p>往/tmp/spooldir目录新增文件。可以在日志中看到，正常情况下，agent2a和agent2b采用round-robin方式轮流，如果我们退出其中的agent2a，则此时负载全部落到agent2b上。</p>
+<h1 id="在应用中基础flume">在应用中基础Flume</h1>
+<p>Avro Source作为一个RPC Server，可以接受RPC请求，所以可以写客户端程序往Avro Source发送事件。</p>
+<p>Flume SDK提供了Avro和Thrift Source的客户端接口，通过这个SDK，很容易将事件发送到Avro Source或者Thrift Source。同时支持负载均衡、故障转移等。</p>
+<p>Flume嵌入式的Agent提供了类似的功能，它运行在一个Java引用程序中，可以通过其暴露的EmbeddedAgent对象发送时间，事件的接受端目前只支持Avro。</p>
+<h1 id="flume组件一览">Flume组件一览</h1>
+<p>上文中只提到了Flume的部分组件，除此外还有很多组件可供使用和扩展，下表列出一些常见的组件：</p>
+<table><thead><tr><th>类别</th>
+<th>组件</th>
+<th>描述</th>
+</tr></thead><tbody><tr><td>Source</td>
+<td>Avro</td>
+<td>监听Avro RPC调用（来自Avro sink或者Flume SDK）</td>
+</tr><tr><td>Source</td>
+<td>Exec</td>
+<td>运行Unix命令，例如tail -f，并将标准输出中的每一行转化成一个事件，注意该source不保证传送事件到channel</td>
+</tr><tr><td></td>
+<td>HTTP</td>
+<td>在端口上监听，并通过可插拔的Handler将请求转化为事件</td>
+</tr><tr><td></td>
+<td>JMS</td>
+<td>从JMS队列或者topic读取消息，转化为事件</td>
+</tr><tr><td></td>
+<td>Netcat</td>
+<td>监听端口，每行文本转化为事件</td>
+</tr><tr><td></td>
+<td>Sequencegenerator</td>
+<td>递增生成序列号，用于测试</td>
+</tr><tr><td></td>
+<td>Spooling directory</td>
+<td>检测目录中新增文件，把文件中的每一行转化为事件</td>
+</tr><tr><td></td>
+<td>Syslog</td>
+<td>从系统日志中读取每一行并转化为事件</td>
+</tr><tr><td></td>
+<td>Thrift</td>
+<td>监听端口，接受Thrift RPC调用（来自Thrift Sink或者FLume SDK）</td>
+</tr><tr><td></td>
+<td>Twitter</td>
+<td>对接Twitter的Straming API</td>
+</tr><tr><td>Sink</td>
+<td>Avro</td>
+<td>通过Avro RPC发送事件到Avro Source</td>
+</tr><tr><td></td>
+<td>Elasticsearch</td>
+<td>按照Logstash的格式将事件写入ES集群</td>
+</tr><tr><td></td>
+<td>File roll</td>
+<td>将事件写入本地文件系统</td>
+</tr><tr><td></td>
+<td>HBase</td>
+<td>使用指定的serializer将事件写入HBase</td>
+</tr><tr><td></td>
+<td>HDFS</td>
+<td>以文本、序列文件、Avro或者其他格式写入事件到HDFS</td>
+</tr><tr><td></td>
+<td>IRC</td>
+<td>发送事件到IRC channel</td>
+</tr><tr><td></td>
+<td>Logger</td>
+<td>使用SLF4J将事件输出到日志,测试用</td>
+</tr><tr><td></td>
+<td>Morphline（Solr）</td>
+<td>常用与加载数据到Solr，运行一系列Marphline命令</td>
+</tr><tr><td></td>
+<td>Null</td>
+<td>忽略事件</td>
+</tr><tr><td></td>
+<td>Thrift</td>
+<td>使用Thrift RPC发送事件到Thrift Source</td>
+</tr><tr><td>Channel</td>
+<td>File</td>
+<td>事件保存在本地文件</td>
+</tr><tr><td></td>
+<td>JDBC</td>
+<td>事件写入到嵌入式的Derby数据库</td>
+</tr><tr><td></td>
+<td>Memory</td>
+<td>在内存队列中保存事件</td>
+</tr><tr><td>Interceptor</td>
+<td>Host</td>
+<td>添加agent所在的机器的host或者ip到事件头部</td>
+</tr><tr><td></td>
+<td>Morphline</td>
+<td>基于Morphline配置文件过滤事件或者修改头部</td>
+</tr><tr><td></td>
+<td>Regex extractor</td>
+<td>从事件body中提取匹配的表达式</td>
+</tr><tr><td></td>
+<td>Static</td>
+<td>设置固定的Header到事件</td>
+</tr><tr><td></td>
+<td>TimeStamp</td>
+<td>设置时间戳头部</td>
+</tr><tr><td></td>
+<td>UUID</td>
+<td>设置id头部</td>
+</tr></tbody></table><h1 id="参考资料">参考资料</h1>
+<ul><li>《Hadoop权威指南》</li></ul></div>
+</div>
+            </div>
+                </div>

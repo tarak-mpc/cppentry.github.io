@@ -1,0 +1,157 @@
+---
+layout:     post
+title:      flume高可用集群安装
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-github-gist">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>Flume OG:Flume original generation 即Flume 0.9.x版本<br>
+Flume NG:Flume next generation ，即Flume 1.x版本。</p>
+<p>简单比较一下两者的区别：<br>
+OG有三个组件agent、collector、master，agent主要负责收集各个日志服务器上的日志，将日志聚合到collector，可设置多个collector，master主要负责管理agent和collector，最后由collector把收集的日志写的HDFS中，当然也可以写到本地、给storm、给Hbase。<br>
+<img src="https://img-blog.csdnimg.cn/20181113150551232.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2ZhbnJlbjIyNA==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<p>NG最大的改动就是不再有分工角色设置，所有的都是agent，可以彼此之间相连，多个agent连到一个agent，此agent也就相当于collector了，NG也支持负载均衡<br>
+<img src="https://img-blog.csdnimg.cn/20181113150609535.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2ZhbnJlbjIyNA==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<h2><a id="_10"></a>集群架构</h2>
+
+<table>
+<thead>
+<tr>
+<th>角色</th>
+<th>主机名</th>
+<th>ip</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>agent1</td>
+<td>slave1</td>
+<td>192.168.255’121</td>
+</tr>
+<tr>
+<td>agent2</td>
+<td>slave2</td>
+<td>192.168.255.122</td>
+</tr>
+<tr>
+<td>Collector1</td>
+<td>slave3</td>
+<td>192.168.255.123</td>
+</tr>
+<tr>
+<td>collector2</td>
+<td>slave4</td>
+<td>192.168.255.124</td>
+</tr>
+</tbody>
+</table><h2><a id="1agent_19"></a>1、agent配置</h2>
+<p>两台agent上所有配置相同</p>
+<pre><code>#agent1 name
+agent1.channels = c1
+agent1.sources = r1
+agent1.sinks = k1 k2
+#set gruop
+agent1.sinkgroups = g1
+#set channel
+agent1.channels.c1.type = memory
+agent1.channels.c1.capacity = 1000
+agent1.channels.c1.transactionCapacity = 100
+agent1.sources.r1.channels = c1
+agent1.sources.r1.type = exec
+agent1.sources.r1.command = tail -F /root/test.log
+agent1.sources.r1.interceptors = i1 i2
+agent1.sources.r1.interceptors.i1.type = static
+agent1.sources.r1.interceptors.i1.key = Type
+agent1.sources.r1.interceptors.i1.value = LOGIN
+agent1.sources.r1.interceptors.i2.type = timestamp
+# set sink1
+agent1.sinks.k1.channel = c1
+agent1.sinks.k1.type = avro
+agent1.sinks.k1.hostname = slave3.hanli.com
+agent1.sinks.k1.port = 52020
+# set sink2
+agent1.sinks.k2.channel = c1
+agent1.sinks.k2.type = avro
+agent1.sinks.k2.hostname = slave4.hanli.com
+agent1.sinks.k2.port = 52020
+#set sink group
+agent1.sinkgroups.g1.sinks = k1 k2
+#set failover
+agent1.sinkgroups.g1.processor.type = failover
+agent1.sinkgroups.g1.processor.priority.k1 = 10
+agent1.sinkgroups.g1.processor.priority.k2 = 1
+agent1.sinkgroups.g1.processor.maxpenalty = 10000
+</code></pre>
+<h2><a id="2collector_59"></a>2、collector配置</h2>
+<p>在两台collector上操作，除了修改hostname，其他配置项相同</p>
+<pre><code>#set Agent name
+a1.sources = r1
+a1.channels = c1
+a1.sinks = k1
+#set channel
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+# other node,nna to nns
+a1.sources.r1.type = avro
+a1.sources.r1.bind = slave3.hanli.com   #此处修改
+a1.sources.r1.port = 52020
+a1.sources.r1.interceptors = i1
+a1.sources.r1.interceptors.i1.type = static
+a1.sources.r1.interceptors.i1.key = Collector
+a1.sources.r1.interceptors.i1.value = slave3.hanli.com  #此处修改
+a1.sources.r1.channels = c1
+#set sink to hdfs
+a1.sinks.k1.type=logger
+a1.sinks.k1.channel=c1
+</code></pre>
+<h2><a id="3serverclient_84"></a>3、先启动所有server，再启动所有client，否则会报错。</h2>
+<pre><code>[root@slave1] /usr/local/flume/conf$ ../bin/flume-ng agent -n agent1 -c ../conf -f flume-client.conf -Dflume.root.logger=DEBUG,console
+</code></pre>
+<pre><code>[root@slave3] /usr/local/flume/conf$ ../bin/flume-ng agent --conf ../conf --conf-file flume-server.conf --name a1 -Dflume.root.logger=INFO,console
+
+Info: Sourcing environment configuration script /usr/local/flume/conf/flume-env.sh
+Info: Including Hadoop libraries found via (/usr/local/hadoop/bin/hadoop) for HDFS access
+Info: Including Hive libraries found via () for Hive access
++ exec /usr/local/jdk/bin/java -Xmx20m -Dflume.root.logger=INFO,console -cp '/usr/local/flume/conf:/usr/local/flume/lib/*:/usr/local/hadoop/etc/hadoop:/usr/local/hadoop/share/hadoop/common/lib/*:/usr/local/hadoop/share/hadoop/common/*:/usr/local/hadoop/share/hadoop/hdfs:/usr/local/hadoop/share/hadoop/hdfs/lib/*:/usr/local/hadoop/share/hadoop/hdfs/*:/usr/local/hadoop/share/hadoop/yarn/lib/*:/usr/local/hadoop/share/hadoop/yarn/*:/usr/local/hadoop/share/hadoop/mapreduce/lib/*:/usr/local/hadoop/share/hadoop/mapreduce/*:/usr/local/hadoop/contrib/capacity-scheduler/*.jar:/lib/*' -Djava.library.path=:/usr/local/hadoop/lib/native org.apache.flume.node.Application --conf-file flume-server.conf --name a1
+
+......
+
+2018-11-13 16:32:01,797 (lifecycleSupervisor-1-4) [INFO - org.apache.flume.instrumentation.MonitoredCounterGroup.start(MonitoredCounterGroup.java:95)] Component type: SOURCE, name: r1 started
+2018-11-13 16:32:01,813 (lifecycleSupervisor-1-4) [INFO - org.apache.flume.source.AvroSource.start(AvroSource.java:260)] Avro source r1 started.
+</code></pre>
+<h2><a id="4_103"></a>4、测试高可用功能</h2>
+<p>（1）、agent1上创建源消息</p>
+<pre><code>[root@slave1] ~$ echo "hello failover" &gt;&gt; test.log
+</code></pre>
+<p>（2）、由于collector1的priority高，所以会收到，而collector2不会，查看控制台信息如下</p>
+<pre><code>2018-11-13 16:32:31,530 (New I/O server boss #3) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x6d3b610a, /192.168.255.121:51624 =&gt; /192.168.255.123:52020] OPEN
+2018-11-13 16:32:31,531 (New I/O worker #1) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x6d3b610a, /192.168.255.121:51624 =&gt; /192.168.255.123:52020] BOUND: /192.168.255.123:52020
+2018-11-13 16:32:31,532 (New I/O worker #1) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x6d3b610a, /192.168.255.121:51624 =&gt; /192.168.255.123:52020] CONNECTED: /192.168.255.121:51624
+2018-11-13 16:33:11,596 (New I/O server boss #3) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x079e815e, /192.168.255.122:46856 =&gt; /192.168.255.123:52020] OPEN
+2018-11-13 16:33:11,596 (New I/O worker #2) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x079e815e, /192.168.255.122:46856 =&gt; /192.168.255.123:52020] BOUND: /192.168.255.123:52020
+2018-11-13 16:33:11,596 (New I/O worker #2) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x079e815e, /192.168.255.122:46856 =&gt; /192.168.255.123:52020] CONNECTED: /192.168.255.122:46856
+2018-11-13 16:34:55,386 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{Collector=slave3.hanli.com, Type=LOGIN, timestamp=1542098088198} body: 68 65 6C 6C 6F 20 66 61 69 6C 6F 76 65 72       hello failover }
+
+</code></pre>
+<p>（3）、停止collector1，在agent1上创建源消息</p>
+<pre><code>[root@slave1] ~$ echo "hello failover1" &gt;&gt; test.log 
+</code></pre>
+<p>（4）、查看collector2控制台</p>
+<pre><code>2018-11-13 16:32:37,574 (New I/O server boss #3) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0xb58dda6a, /192.168.255.121:35108 =&gt; /192.168.255.124:52020] OPEN
+2018-11-13 16:32:37,575 (New I/O worker #1) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0xb58dda6a, /192.168.255.121:35108 =&gt; /192.168.255.124:52020] BOUND: /192.168.255.124:52020
+2018-11-13 16:32:37,575 (New I/O worker #1) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0xb58dda6a, /192.168.255.121:35108 =&gt; /192.168.255.124:52020] CONNECTED: /192.168.255.121:35108
+2018-11-13 16:33:17,625 (New I/O server boss #3) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x8d8ac1ba, /192.168.255.122:52082 =&gt; /192.168.255.124:52020] OPEN
+2018-11-13 16:33:17,625 (New I/O worker #2) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x8d8ac1ba, /192.168.255.122:52082 =&gt; /192.168.255.124:52020] BOUND: /192.168.255.124:52020
+2018-11-13 16:33:17,625 (New I/O worker #2) [INFO - org.apache.avro.ipc.NettyServer$NettyServerAvroHandler.handleUpstream(NettyServer.java:171)] [id: 0x8d8ac1ba, /192.168.255.122:52082 =&gt; /192.168.255.124:52020] CONNECTED: /192.168.255.122:52082
+2018-11-13 16:41:31,319 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{Collector=slave4.hanli.com, Type=LOGIN, timestamp=1542098475939} body: 68 65 6C 6C 6F 20 66 61 69 6C 6F 76 65 72 31    hello failover1 }
+
+</code></pre>
+<p>参考：<br>
+<a href="https://www.cnblogs.com/AK47Sonic/p/7435940.html" rel="nofollow">https://www.cnblogs.com/AK47Sonic/p/7435940.html</a><br>
+<a href="http://www.cnblogs.com/smartloli/p/4468708.html" rel="nofollow">http://www.cnblogs.com/smartloli/p/4468708.html</a></p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>
