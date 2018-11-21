@@ -1,0 +1,91 @@
+---
+layout:     post
+title:      hadoop伪分布式试运行
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u010473179/article/details/78440108				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>  伪分布式读取的是HDFS上的数据，要使用HDFS，首先在HDFS中创建用户目录：</p>
+<div>
+<pre><code class="language-none">hdfs dfs -mkdir -p /user/hadoop</code></pre>
+</div>
+<p>  接着可以将本地文件作为输入文件复制到HDFS中，比如将hadoop的配置xml文件复制到HDFS的/user/hadoop/input中。</p>
+<div>
+<pre><code class="language-none">hdfs dfs -mkdir input
+hdfs dfs -put ./etc/hadoop/*.xml input</code></pre>
+</div>
+<p>  伪分布式运行MapReduce作业的方式和单机模式相同，不过伪分布式读写的是HDFS。</p>
+<div>
+<pre><code class="language-none">hadoop jar share/hadoop/mapreduce/hadoop-mapreduce-examples-3.0.0-alpha4.jar wordcount input output</code></pre>
+</div>
+<p>  理论上是可以了，等着跑完在output下找结果。但是报这样的错:</p>
+<div>
+<pre><code class="language-none">2017-11-03 16:56:34,091 INFO mapreduce.Job: Job job_1509699271441_0001 failed with state FAILED due to: Application application_1509699271441_0001 failed 2 times due to AM Container for appattempt_1509699271441_0001_000002 exited with  exitCode: 1
+Failing this attempt.Diagnostics: [2017-11-03 16:56:33.411]Exception from container-launch.
+Container id: container_1509699271441_0001_02_000001
+Exit code: 1
+Stack trace: ExitCodeException exitCode=1: 
+    at org.apache.hadoop.util.Shell.runCommand(Shell.java:994)
+    at org.apache.hadoop.util.Shell.run(Shell.java:887)
+    at org.apache.hadoop.util.Shell$ShellCommandExecutor.execute(Shell.java:1212)
+    at org.apache.hadoop.yarn.server.nodemanager.DefaultContainerExecutor.launchContainer(DefaultContainerExecutor.java:295)
+    at org.apache.hadoop.yarn.server.nodemanager.containermanager.launcher.ContainerLaunch.launchContainer(ContainerLaunch.java:455)
+    at org.apache.hadoop.yarn.server.nodemanager.containermanager.launcher.ContainerLaunch.call(ContainerLaunch.java:275)
+    at org.apache.hadoop.yarn.server.nodemanager.containermanager.launcher.ContainerLaunch.call(ContainerLaunch.java:90)
+    at java.util.concurrent.FutureTask.run(FutureTask.java:266)
+    at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1149)
+    at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)
+    at java.lang.Thread.run(Thread.java:748)
+</code></pre>
+</div>
+<p>  解决办法呢，是按官网分别给mapred-site.xml和yarn-site.xml加了这样的配置:</p>
+<div>
+<pre><code class="language-none">&lt;property&gt;
+    &lt;name&gt;mapreduce.application.classpath&lt;/name&gt;
+    &lt;value&gt;
+        /usr/local/hadoop/share/hadoop/mapreduce/*,
+        /usr/local/hadoop/share/hadoop/mapreduce/lib/*
+    &lt;/value&gt;
+&lt;/property&gt;</code></pre>
+</div>
+<div>
+<pre><code class="language-none">&lt;property&gt;
+    &lt;name&gt;yarn.application.classpath&lt;/name&gt;
+    &lt;value&gt;
+        /usr/local/hadoop/etc/hadoop,
+        /usr/local/hadoop/share/hadoop/common/*,
+        /usr/local/hadoop/share/hadoop/common/lib/*,
+        /usr/local/hadoop/share/hadoop/hdfs/*,
+        /usr/local/hadoop/share/hadoop/hdfs/lib/*,
+        /usr/local/hadoop/share/hadoop/yarn/*,
+        /usr/local/hadoop/share/hadoop/yarn/lib/*
+    &lt;/value&gt;
+&lt;/property&gt;</code></pre>
+</div>
+<p>  不要像官网使用类似$HADOOP_HOME这样的，还是得写绝对路径，试了很多遍了，前面那种没用。  配置好重启以后，进入下一个坑。运行mapreduce后，看着是正常了，但是发现结束后output是空的。看了日志发现这个：</p>
+<div>
+<pre><code class="language-none">2017-11-03 21:25:37,004 INFO mapreduce.Job: Task Id : attempt_1509715385291_0001_m_000005_2, Status : FAILED
+[2017-11-03 21:25:34.662]Container [pid=17753,containerID=container_1509715385291_0001_01_000018] is running beyond virtual memory limits. Current usage: 126.4 MB of 1 GB physical memory used; 2.4 GB of 2.1 GB virtual memory used. Killing container.</code></pre>
+</div>
+<p>  网上查了下，大概是说虚拟内存溢出吧。需要配置yarn-site.xml中的yarn.nodemanager.vmem-check-enabled，这个默认是true的，需要加上false的配置。</p>
+<div>
+<pre><code class="language-none">&lt;property&gt;
+  &lt;name&gt;yarn.nodemanager.vmem-check-enabled&lt;/name&gt;
+  &lt;value&gt;false&lt;/value&gt;
+&lt;/property&gt;
+</code></pre>
+</div>
+<p>  OK，到这里终于是正常跑完了wordcount。可以查看输出结果：</p>
+<div>
+<pre><code class="language-none">hdfs dfs -cat output/*</code></pre>
+</div>
+<p>也可以从hdfs中拿到本地:</p>
+<div>
+<pre><code class="language-none">hdfs dfs -get output ./output</code></pre>
+</div>
+<p>OVER!</p>
+            </div>
+                </div>

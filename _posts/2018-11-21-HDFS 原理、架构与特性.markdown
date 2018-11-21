@@ -1,0 +1,125 @@
+---
+layout:     post
+title:      HDFS 原理、架构与特性
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/paicMis/article/details/72909169				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p><strong>核心</strong> <br>
+   <strong>1：hadoop1.X的HDFS架构</strong>  <br>
+   <strong>2：HDFS文件读取的解析</strong>  <br>
+   <strong>3：HDFS文件写入的解析</strong>  <br>
+   <strong>4：副本机制</strong> <br>
+   <strong>5：HDFS 文件删除恢复机制</strong> <br>
+   <strong>6：HDFS缺点</strong>    </p>
+
+<p>1：hadoop1.X的HDFS架构  <br>
+  <img src="https://img-blog.csdn.net/20170608005605239?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcGFpY01pcw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>HDFS架构  <br>
+•NameNode  <br>
+•DataNode  <br>
+•Sencondary NameNode  <br>
+数据存储细节  <br>
+<img src="https://img-blog.csdn.net/20170608005659064?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcGFpY01pcw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>NameNode 目录结构  <br>
+Namenode 的目录结构：  <br>
+           ${ dfs.name.dir}/current /VERSION <br>
+                                                  /edits <br>
+                                                  /fsimage <br>
+                                                  /fstime  <br>
+    dfs.name.dir 是 hdfs-site.xml 里配置的若干个目录组成的列表。  <br>
+NameNode  <br>
+             Namenode 上保存着 HDFS 的名字空间。对于任何对文件系统元数据产生修改的操作， Namenode 都会使用一种称为 EditLog 的事务日志记录下来。例如，在 HDFS 中创建一个文件， Namenode 就会在 Editlog 中插入一条记录来表示；同样地，修改文件的副本系数也将往 Editlog 插入一条记录。 Namenode 在本地操作系统的文件系统中存储这个 Editlog 。整个文件系统的名 字空间，包括数据块到文件的映射、文件的属性等，都存储在一个称为 FsImage 的文件中，这 个文件也是放在 Namenode 所在的本地文件系统上。  <br>
+              Namenode 在内存中保存着整个文件系统的名字空间和文件数据块映射 (Blockmap) 的映像 。这个关键的元数据结构设计得很紧凑，因而一个有 4G 内存的 Namenode 足够支撑大量的文件 和目录。当 Namenode 启动时，它从硬盘中读取 Editlog 和 FsImage ，将所有 Editlog 中的事务作 用在内存中的 FsImage 上，并将这个新版本的 FsImage 从内存中保存到本地磁盘上，然后删除 旧的 Editlog ，因为这个旧的 Editlog 的事务都已经作用在 FsImage 上了。这个过程称为一个检查 点 (checkpoint) 。在当前实现中，检查点只发生在 Namenode 启动时，在不久的将来将实现支持 周期性的检查点。 </p>
+
+<p>Secondary NameNode  <br>
+  Secondary NameNode 定期合并 fsimage 和 edits 日志，将 edits 日志文件大小控制在一个限度下。  <br>
+  <img src="https://img-blog.csdn.net/20170608005711955?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcGFpY01pcw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>Secondary NameNode处理流程  <br>
+    (1) 、 namenode 响应 Secondary namenode 请求，将 edit log 推送给 Secondary namenode ， 开始重新写一个新的 edit log 。  <br>
+    (2) 、 Secondary namenode 收到来自 namenode 的 fsimage 文件和 edit log 。  <br>
+    (3) 、 Secondary namenode 将 fsimage 加载到内存，应用 edit log ， 并生成一 个新的 fsimage 文件。  <br>
+    (4) 、 Secondary namenode 将新的 fsimage 推送给 Namenode 。  <br>
+    (5) 、 Namenode 用新的 fsimage 取代旧的 fsimage ， 在 fstime 文件中记下检查 点发生的时 </p>
+
+<p>HDFS通信协议  <br>
+所有的 HDFS 通讯协议都是构建在 TCP/IP 协议上。客户端通过一个可 配置的端口连接到 Namenode ， 通过 ClientProtocol 与 Namenode 交互。而 Datanode 是使用 DatanodeProtocol 与 Namenode 交互。再设计上， DataNode 通过周期性的向 NameNode 发送心跳和数据块来保持和 NameNode 的通信，数据块报告的信息包括数据块的属性，即数据块属于哪 个文件，数据块 ID ，修改时间等， NameNode 的 DataNode 和数据块的映射 关系就是通过系统启动时 DataNode 的数据块报告建立的。从 ClientProtocol 和 Datanodeprotocol 抽象出一个远程调用 ( RPC ）， 在设计上， Namenode 不会主动发起 RPC ， 而是是响应来自客户端和 Datanode 的 RPC 请求。 </p>
+
+<p>HDFS的安全模式  <br>
+ Namenode 启动后会进入一个称为安全模式的特殊状态。处于安全模式 的 Namenode 是不会进行数据块的复制的。 Namenode 从所有的 Datanode 接收心跳信号和块状态报告。块状态报告包括了某个 Datanode 所有的数据 块列表。每个数据块都有一个指定的最小副本数。当 Namenode 检测确认某 个数据块的副本数目达到这个最小值，那么该数据块就会被认为是副本安全 (safely replicated) 的；在一定百分比（这个参数可配置）的数据块被 Namenode 检测确认是安全之后（加上一个额外的 30 秒等待时间）， Namenode 将退出安全模式状态。接下来它会确定还有哪些数据块的副本没 有达到指定数目，并将这些数据块复制到其他 Datanode 上。 </p>
+
+<p><strong>2：HDFS文件读取的解析</strong>  <br>
+文件读取流程  <br>
+  <img src="https://img-blog.csdn.net/20170608005804393?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcGFpY01pcw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>流程分析  <br>
+•使用HDFS提供的客户端开发库Client，向远程的Namenode发起RPC请求；  <br>
+• Namenode会视情况返回文件的部分或者全部block列表，对于每个block，Namenode都会返回有该block拷贝的DataNode地址；  <br>
+•客户端开发库Client会选取离客户端最接近的DataNode来读取block；如果客户端本身就是DataNode,那么将从本地直接获取数据.  <br>
+•读取完当前block的数据后，关闭与当前的DataNode连接，并为读取下一个block寻找最佳的DataNode；  <br>
+•当读完列表的block后，且文件读取还没有结束，客户端开发库会继续向Namenode获取下一批的block列表。  <br>
+•读取完一个block都会进行checksum验证，如果读取datanode时出现错误，客户端会通知Namenode，然后再从下一个拥有该block拷贝的datanode继续读。 </p>
+
+<p><strong>3：HDFS文件写入的解析</strong>  <br>
+文件写入流程  <br>
+  <img src="https://img-blog.csdn.net/20170608005813414?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcGFpY01pcw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>流程分析  <br>
+•使用HDFS提供的客户端开发库Client，向远程的Namenode发起RPC请求；  <br>
+•Namenode会检查要创建的文件是否已经存在，创建者是否有权限进行操作，成功则会为文件 创建一个记录，否则会让客户端抛出异常；  <br>
+•当客户端开始写入文件的时候，会将文件切分成多个packets，并在内部以数据队列”data queue”的形式管理这些packets，并向Namenode申请新的blocks，获取用来存储replicas的合适的datanodes列表，列表的大小根据在Namenode中对replication的设置而定。  <br>
+•开始以pipeline（管道）的形式将packet写入所有的replicas中。把packet以流的方式写入第一个datanode，该datanode把该packet存储之后，再将其传递给在此pipeline中的下一个datanode，直到最后一个datanode，这种写数据的方式呈流水线的形式。  <br>
+•最后一个datanode成功存储之后会返回一个ack packet，在pipeline里传递至客户端，在客户端的开发库内部维护着”ack queue”，成功收到datanode返回的ack packet后会从”ack queue”移除相应的packet。  <br>
+•如果传输过程中，有某个datanode出现了故障，那么当前的pipeline会被关闭，出现故障的datanode会从当前的pipeline中移除，剩余的block会继续剩下的datanode中继续以pipeline的形式传输，同时Namenode会分配一个新的datanode，保持replicas设定的数量。 </p>
+
+<p>流水线复制 <br>
+               当客户端向 HDFS 文件写入数据的时候，一开始是写到本地临时文件中。假设该文件的副 本系数设置为 3 ，当本地临时文件累积到一个数据块的大小时，客户端会从 Namenode 获取一个 Datanode 列表用于存放副本。然后客户端开始向第一个 Datanode 传输数据，第一个 Datanode 一小部分一小部分 (4 KB) 地接收数据，将每一部分写入本地仓库，并同时传输该部分到列表中 第二个 Datanode 节点。第二个 Datanode 也是这样，一小部分一小部分地接收数据，写入本地 仓库，并同时传给第三个 Datanode 。最后，第三个 Datanode 接收数据并存储在本地。因此， Datanode 能流水线式地从前一个节点接收数据，并在同时转发给下一个节点，数据以流水线的 方式从前一个 Datanode 复制到下一个 </p>
+
+<p>更细节的原理  <br>
+           客户端创建文件的请求其实并没有立即发送给 Namenode ，事实上，在刚开始阶 段 HDFS 客户端会先将文件数据缓存到本地的一个临时文件。应用程序的写操作被透 明地重定向到这个临时文件。当这个临时文件累积的数据量超过一个数据块的大小 ，客户端才会联系 Namenode 。 Namenode 将文件名插入文件系统的层次结构中，并 且分配一个数据块给它。然后返回 Datanode 的标识符和目标数据块给客户端。接着 客户端将这块数据从本地临时文件上传到指定的 Datanode 上。当文件关闭时，在临 时文件中剩余的没有上传的数据也会传输到指定的 Datanode 上。然后客户端告诉 Namenode 文件已经关闭。此时 Namenode 才将文件创建操作提交到日志里进行存储 。如果 Namenode 在文件关闭前宕机了，则该文件将丢失。 </p>
+
+<p><strong>4：副本机制</strong>  <br>
+特点  <br>
+1. 数据类型单一  <br>
+2. 副本数比较多  <br>
+3. 写文件时副本的放置方法  <br>
+4. 动态的副本创建策略  <br>
+5. 弱化的副本一致性要求  <br>
+副本摆放策略  <br>
+  <img src="https://img-blog.csdn.net/20170608005826102?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcGFpY01pcw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>修改副本数  <br>
+1.集群只有三个Datanode，hadoop系统replication=4时，会出现什么情况？  <br>
+        对于上传文件到hdfs上时，当时hadoop的副本系数是几，这个文件的块数副本数就会有几份，无论以后你怎么更改系统副本系统，这个文件的副本数都不会改变，也就说上传到分布式系统上的文件副本数由当时的系统副本数决定，不会受replication的更改而变化，除非用命令来更改文件的副本数。因为dfs.replication实质上是client参数，在create文件时可以指定具体replication，属性dfs.replication是不指定具体replication时的采用默认备份数。文件上传后，备份数已定，修改dfs.replication是不会影响以前的文件的，也不会影响后面指定备份数的文件。只影响后面采用默认备份数的文件。但可以利用hadoop提供的命令后期改某文件的备份数：hadoop fs -setrep -R 1。如果你是在hdfs-site.xml设置了dfs.replication，这并一定就得了，因为你可能没把conf文件夹加入到你的 project的classpath里，你的程序运行时取的dfs.replication可能是hdfs-default.xml里的 dfs.replication，默认是3。可能这个就是造成你为什么dfs.replication老是3的原因。你可以试试在创建文件时，显式设定replication。replication一般到3就可以了，大了意义也不大。</p>
+
+<p><strong>5：HDFS 文件删除恢复机制</strong> <br>
+              当用户或应用程序删除某个文件时，这个文件并没有立刻从 HDFS 中删 除。实际上， HDFS 会将这个文件重命名转移到 /trash 目录。只要文件还在 /trash 目录中，该文件就可以被迅速地恢复。文件在 /trash 中保存的时间是可 配置的，当超过这个时间时， Namenode 就会将该文件从名字空间中删除。 删除文件会使得该文件相关的数据块被释放。注意，从用户删除文件到 HDFS 空闲空间的增加之间会有一定时间的延迟。 <br>
+            只要被删除的文件还在 /trash 目录中，用户就可以恢复这个文件。如果 用户想恢复被删除的文件，他 / 她可以浏览 /trash 目录找回该文件。 /trash 目 录仅仅保存被删除文件的最后副本。 /trash 目录与其他的目录没有什么区别 ，除了一点：在该目录上 HDFS 会应用一个特殊策略来自动删除文件。目前 的默认策略是删除 /trash 中保留时间超过 6 小时的文件。将来，这个策略可以 通过一个被良好定义的接口配置。    </p>
+
+<p>开启回收站       </p>
+
+<pre class="prettyprint"><code class=" hljs xml">hdfs-site.xml    
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>    
+       <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>    
+               <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>fs.trash.interval<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>    
+                <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>    1440   <span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>    
+                <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>Number ofminutes between trash checkpoints.    
+                        If zero, the trashfeature is disabled.    
+                <span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>    
+       <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>    
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span>  </code></pre>
+
+<p>1, fs.trash.interval参数设置保留时间为 1440 分钟(1天) <br>
+2, 回收站的位置：在HDFS上的 /user/$USER/.Trash/Current/      </p>
+
+<p><strong>6：HDFS缺点</strong> <br>
+大量小文件 <br>
+     因为 Namenode 把文件系统的元数据放置在内存中，所以文件系统所能 容纳的文件数目是由 Namenode 的内存大小来决定。一般来说，每一个文件 、文件夹和 Block 需要占据 150 字节左右的空间，所以，如果你有 100 万个文 件，每一个占据一个 Block ，你就至少需要 300MB 内存。当前来说，数百万 的文件还是可行的，当扩展到数十亿时，对于当前的硬件水平来说就没法实 现了。还有一个问题就是，因为 Map task 的数量是由 splits 来决定的，所以 用 MR 处理大量的小文件时，就会产生过多的 Maptask ，线程管理开销将会 增加作业时间。举个例子，处理 10000M 的文件，若每个 split 为 1M ，那就会 有 10000 个 Maptasks ，会有很大的线程开销；若每个 split 为 100M ，则只有 100 个 Maptasks ，每个 Maptask 将会有更多的事情做，而线程的管理开销也 将减小很多</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>
