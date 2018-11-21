@@ -1,0 +1,302 @@
+---
+layout:     post
+title:      Spark 1.5.2 on yarn升级问题总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u011291159/article/details/51161977				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div>
+<h1><span style="font-size:32px;">1    升级背景</span></h1>
+</div>
+<div>
+<p><span style="font-size:18px;">standlone 生产集群运行了半年，出现资源瓶颈；另外多用户资源管理问题也凸显，将spark 迁移到 yarn 上面是目前比较理想的方案。</span></p>
+<p><span style="font-size:18px;">spark on yarn 有如下两个优点：</span></p>
+<p></p>
+<ul><li><span style="font-size:18px;">充分使用集群资源，方便多用户资源管理；</span></li><li><span style="font-size:18px;">扩容更为方便；</span></li></ul><div>
+<div style="font-size:18px;">
+<h1>2    遇到问题</h1>
+</div>
+<div>
+<h2 style="font-size:18px;">1)  代码使用system.exit(-1)结果却显示正常</h2>
+<p style="font-size:18px;">测试代码：</p>
+<pre><code class="language-java">def main(args: Array[String]) {
+    val sparkConf = new SparkConf().setAppName("HiveTest")
+    val initConf = SparkConstant.initConf(sparkConf)
+    val sc = new SparkContext(initConf)
+    sc.parallelize(1 to 2000000,4).map(x=&gt;x%0.24).map{ x=&gt; x+0.1
+    System.exit(-1)
+   sc.stop()  
+}
+</code></pre>
+<div style="font-size:18px;">
+<p>任务退出后applicationmaster却显示任务成功：</p>
+<img src="https://img-blog.csdn.net/20160415152057519?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></div>
+<div style="font-size:18px;">某个别业务当程序遇到的异常的时候，直接使用System.exit(-1)退出程序，出现了上面的情况。<br></div>
+<p style="font-size:18px;">appmaster日志分析：</p>
+<pre><code class="language-html">16/04/08 11:07:29 INFO storage.MemoryStore: MemoryStore cleared
+16/04/08 11:07:29 INFO storage.BlockManager: BlockManager stopped
+16/04/08 11:07:29 INFO storage.BlockManagerMaster: BlockManagerMaster stopped
+16/04/08 11:07:29 INFO scheduler.OutputCommitCoordinator$OutputCommitCoordinatorEndpoint: OutputCommitCoordinator stopped!
+16/04/08 11:07:29 INFO spark.SparkContext: Successfully stopped SparkContext
+16/04/08 11:07:29 INFO yarn.ApplicationMaster: Final app status: SUCCEEDED, exitCode: 0, (reason: Shutdown hook called before final status was reported.)
+16/04/08 11:07:29 INFO remote.RemoteActorRefProvider$RemotingTerminator: Shutting down remote daemon.
+16/04/08 11:07:29 INFO yarn.ApplicationMaster: &lt;span style="color:#ff6666;"&gt;Unregistering ApplicationMaster with SUCCEEDED (diag message: Shutdown hook called before final status was reported.)&lt;/span&gt;
+16/04/08 11:07:29 INFO remote.RemoteActorRefProvider$RemotingTerminator: Remote daemon shut down; proceeding with flushing remote transports.
+16/04/08 11:07:29 INFO impl.AMRMClientImpl: Waiting for application to be successfully unregistered.
+16/04/08 11:07:29 INFO remote.RemoteActorRefProvider$RemotingTerminator: Remoting shut down.
+16/04/08 11:07:29 INFO yarn.ApplicationMaster: Deleting staging directory .sparkStaging/application_1460021101912_10211
+</code></pre><br><p style="font-size:18px;"><span style="color:#222222;">如日志显示：</span><span style="color:#222222;">ApplicationMaster</span><span style="color:#222222;">提示任务被提前</span><span style="color:#222222;">stop</span><span style="color:#222222;">，但是为什么显示退出</span><span style="color:#222222;">success</span><span style="color:#222222;">了？下面我们分析相关源码：</span></p>
+<pre><code class="language-java">if (!finished) {
+  // This happens when the user application calls System.exit(). We have the choice
+  // of either failing or succeeding at this point. We report success to avoid
+  // retrying applications that have succeeded (System.exit(0)), which means that
+  // applications that explicitly exit with a non-zero status will also show up as
+  // succeeded in the RM UI.
+  finish(finalStatus,
+    ApplicationMaster.EXIT_SUCCESS,
+    "Shutdown hook called before final status was reported.")
+}
+final def finish(status: FinalApplicationStatus, code: Int, msg: String = null): Unit = {
+  synchronized {
+    if (!finished) {
+      val inShutdown = ShutdownHookManager.inShutdown()
+      logInfo(s"Final app status: $status, exitCode: $code" +
+        Option(msg).map(msg =&gt; s", (reason: $msg)").getOrElse(""))
+      exitCode = code
+      finalStatus = status
+      finalMsg = msg
+      finished = true
+      if (!inShutdown &amp;&amp; Thread.currentThread() != reporterThread &amp;&amp; reporterThread != null) {
+        logDebug("shutting down reporter thread")
+        reporterThread.interrupt()
+      }
+      if (!inShutdown &amp;&amp; Thread.currentThread() != userClassThread &amp;&amp; userClassThread != null) {
+        logDebug("shutting down user thread")
+        userClassThread.interrupt()
+      }
+      if (!inShutdown) delegationTokenRenewerOption.foreach(_.stop())
+    }
+  }
+}
+</code></pre>
+<p style="font-size:18px;">   如果异常退出，将ApplicationMaster的exist code设置为0，也就是正常退出。我们看看这样做的原因，如上面说明解释，始终显示success的原因是防止applicationmaster被重试，导致任务失败会再次提交。</p>
+<p style="font-size:18px;">解决办法：</p>
+<p></p>
+<ul style="font-size:18px;"><li> 直接选择抛出异常；如果读者选择抛出异常的话，applicationmaster会选择下面代码：</li></ul><div><span style="font-size:18px;">    </span><pre><code class="language-java">case e: Throwable =&gt; {
+  failureCount += 1
+  if (!NonFatal(e) || failureCount &gt;= reporterMaxFailures) {
+    finish(FinalApplicationStatus.FAILED,
+      ApplicationMaster.EXIT_REPORTER_FAILURE, "Exception was thrown " +
+        s"$failureCount time(s) from Reporter thread.")
+直接将该任务置为错误状态，但是会导致任务重试。
+</code></pre><br><p></p>
+<ul style="font-size:18px;"><li>判断任务成功的标志应该是exitcode为0 并且Diagnostics不显示Shutdownhook called before final status was reported；</li></ul><div style="font-size:18px;">     <pre><code class="language-java"> def main(args: Array[String]) {
+    val sparkConf = new SparkConf().setAppName("HiveTest")
+    val initConf = SparkConstant.initConf(sparkConf)
+    val sc = new SparkContext(initConf)
+    sc.parallelize(1 to 2000000,4).map(x=&gt;x%0.24).map{ x=&gt; x+0.1
+    }.reduce(_+_)
+   
+      val e = new Exception("this is my exception")
+      throw e
+  }
+}
+</code></pre><br></div>
+<div>
+<h2 style="font-size:18px;">2)  driver、executor PermGen Space oom</h2>
+<div style="font-size:18px;">  在计算过程中，特别是加载hive或者HBase第三方packages的情况下，出现driver、executor大量的PermGenSpace oom。spark on yarn和standlone一样，需要配置driver、executor的jvm相关参数。目前我们的配置是：<br></div>
+<div><pre><code class="language-html">spark.driver.extraJavaOptions           -XX:MaxPermSize=512m  -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+UseParNewGC -XX:+UseConcMarkSweepGC -XX:CMSInitiatingOccupancyFraction=80  -XX:GCTimeLimit=5 -XX:GCHeapFreeLimit=95
+spark.executor.extraJavaOptions         -XX:MaxPermSize=512m   -XX:+PrintGCDetails -XX:+PrintGCTimeStamps  -XX:+UseParNewGC -XX:+UseConcMarkSweepGC -XX:CMSInitiatingOccupancyFraction=80 -XX:GCTimeLimit=5 -XX:GCHeapFreeLimit=95
+</code></pre>
+<p></p>
+<ul style="font-size:18px;"><li> -XX:MaxPermSize=512m：增加PermGen Space大小，默认是128M；会发生PermGenSpace oom；</li><li>  -XX:+PrintGCDetails-XX:+PrintGCTimeStamps：打印GC日志stdout日志，方便观察计算过程中的GC情况和内存使用情况；</li><li>  -XX:+UseConcMarkSweepGC -XX:CMSInitiatingOccupancyFraction=80  -XX:GCTimeLimit=5 -XX:GCHeapFreeLimit=95：修改GC策略，目前修改为CMS 策略，后面准备尝试G1策略；</li></ul><div>
+<h2 style="font-size:18px;">3)  自定义mysql驱动导致读写数据失败问题</h2>
+<div style="font-size:18px;">
+<p>我们对mysql驱动进行了封装，为了保证内部数据安全。在1.4.0的使用方式如下：</p>
+<pre><code class="language-html"> val sqlContext = new SQLContext(sc)
+DriverManager.registerDriver(new CBTMysqlDriver)
+val props = new java.util.TreeMap[String, String]
+props.put("url", "jdbc:CBTMysqlDriver://*******")
+props.put("dbtable", "mysql.user")//database.tablename
+props.put("driver", "CBTMysqlDriver")
+val df2: DataFrame = sqlContext.read.format("jdbc").options(props).load()
+val list = df2.collect()
+list.foreach(x =&gt; println(x))
+sc.stop()
+</code></pre><br>
+在1.4.0能够正常从mysql读取数据，但是迁移到1.5.2以后出现无法读写mysql数据。分析原因以后发现如下代码：<br></div>
+<div><pre><code class="language-java">/**
+ * :: DeveloperApi ::
+ * Default mysql dialect to read bit/bitsets correctly.
+ */
+@DeveloperApi
+case object MySQLDialect extends JdbcDialect {
+  override def canHandle(url : String): Boolean = url.startsWith("jdbc:mysql")
+  override def getCatalystType(
+      sqlType: Int, typeName: String, size: Int, md: MetadataBuilder): Option[DataType] = {
+    if (sqlType == Types.VARBINARY &amp;&amp; typeName.equals("BIT") &amp;&amp; size != 1) {
+      // This could instead be a BinaryType if we'd rather return bit-vectors of up to 64 bits as
+      // byte arrays instead of longs.
+      md.putLong("binarylong", 1)
+      Some(LongType)
+    } else if (sqlType == Types.BIT &amp;&amp; typeName.equals("TINYINT")) {
+      Some(BooleanType)
+    } else None
+  }
+
+  override def quoteIdentifier(colName: String): String = {
+    s"`$colName`"
+  }
+</code></pre><br><p style="font-size:18px;"> 在读取mysql 数据之前，driver需要读取指定表的schema，在读取的时候需要选择相应的驱动，选择的方法是：</p>
+<p style="font-size:18px;"></p>
+<pre><code class="language-java">overridedef canHandle(url : String): Boolean = url.startsWith("jdbc:mysql")</code></pre>这样就导致我们自己封装的mysql 驱动无法找到。
+<p></p>
+<p style="font-size:18px;">解决方法是实现自己的mysql驱动Dialect类：</p>
+<pre><code class="language-java">class MySQLDialect extends JdbcDialect {
+  override def canHandle(url : String): Boolean = url.startsWith("jdbc:mysql")
+  override def getCatalystType(
+                                sqlType: Int, typeName: String, size: Int, md: MetadataBuilder): Option[DataType] = {
+    if (sqlType == Types.VARBINARY &amp;&amp; typeName.equals("BIT") &amp;&amp; size != 1) {
+      // This could instead be a BinaryType if we'd rather return bit-vectors of up to 64 bits as
+      // byte arrays instead of longs.
+      md.putLong("binarylong", 1)
+      Some(LongType)
+    } else if (sqlType == Types.BIT &amp;&amp; typeName.equals("TINYINT")) {
+      Some(BooleanType)
+    } else None
+  }
+  override def quoteIdentifier(colName: String): String = {
+    s"`$colName`"
+  }
+}
+case object CBTMySQLDialect extends MySQLDialect{
+  override  def canHandle(url : String): Boolean = url.startsWith("jdbc:CBTMysqlDriver")
+}
+</code></pre><br><h2 style="font-size:18px;">4)  hive table name命名不规范</h2>
+<div style="font-size:18px;">个别业务的hivetable名称中间存在点号，比如mydatabase.my.table;在spark 1.5.2代码里面对此进行了强制检查，具体代码如下：<br></div>
+<div><pre><code class="language-java">/**
+   * It is not allowed to specifiy database name for tables stored in [[SimpleCatalog]].
+   * We use this method to check it.
+   */
+  protected def checkTableIdentifier(tableIdentifier: Seq[String]): Unit = {
+    if (tableIdentifier.length &gt; 1) {
+      throw new AnalysisException("Specifying database name or other qualifiers are not allowed " +
+        "for temporary tables. If the table name has dots (.) in it, please quote the " +
+        "table name with backticks (`).")
+    }
+  }
+}
+</code></pre><br><p style="font-size:18px;">命令规范问题需要重视。</p>
+<p style="font-size:18px;"><br></p>
+<p></p>
+<h2 style="font-size:18px;">5)  hive_metastore ConnectionPassword加密</h2>
+<div style="font-size:18px;">
+<p> spark 连接hive metastore需要使用hive-site.xml，该配置文件给用户暴露了连接的metastore的用户名和密码，这样会导致两个问题：</p>
+<p>1)   了解spark的用户能够获取到metastore 数据库的密码；</p>
+<p>2)   任意用户在获取hive-site.xml后使用我们规定版本外的spark jar包提交spark任务到集群；</p>
+<p>   基于上面两点，我们在代码里面对metastore 数据库的密码的密码加密；通过阅读下面源码：</p>
+<p></p><pre><code class="language-java">protected[hive] lazy val metadataHive: ClientInterface = {
+val metaVersion = IsolatedClientLoader.hiveVersion(hiveMetastoreVersion)
+
+// We instantiate a HiveConf here to read in the hive-site.xml file and then pass the options
+// into the isolated client loader
+val metadataConf = new HiveConf()
+val defaultWarehouseLocation = metadataConf.get("hive.metastore.warehouse.dir")
+logInfo("default warehouse location is " + defaultWarehouseLocation)
+
+// `configure` goes second to override other settings.
+val allConfig = metadataConf.iterator.map(e =&gt; e.getKey -&gt; e.getValue).toMap ++ configure
+.........
+logInfo(
+    s"Initializing HiveMetastoreConnection version $hiveMetastoreVersion using $jars")
+  new IsolatedClientLoader(
+    version = metaVersion,
+    execJars = jars.toSeq,
+    config = allConfig,
+    isolationOn = true,
+    barrierPrefixes = hiveMetastoreBarrierPrefixes,
+    sharedPrefixes = hiveMetastoreSharedPrefixes)
+}
+isolatedLoader.client
+</code></pre>     metadataHive 通过HiveConf()加载系统hive-site.xml,然后将metadataConf传输给allConfig变量，会通过IsolatedClientLoader创建于metastore连接的state变量,只需要获取metadataConf里面的HiveConf.ConfVars.METASTOREPWD.varname变量，然后对其解密，再改变HiveConf()HiveConf.ConfVars.METASTOREPWD.varname即可。加密代码如下：
+</div>
+<pre><code class="language-java">protected[hive] lazy val metadataHive: ClientInterface = {
+  val metaVersion = IsolatedClientLoader.hiveVersion(hiveMetastoreVersion)
+
+  // We instantiate a HiveConf here to read in the hive-site.xml file and then pass the options
+  // into the isolated client loader
+  val metadataConf = new HiveConf()
+  // added by Ricky
+  val passwd=metadataConf.get(HiveConf.ConfVars.METASTOREPWD.varname)
+  val passWord = PasswdDecrypt(passwd.toString)//加密模块，自己选择加密算法。
+  metadataConf.set(HiveConf.ConfVars.METASTOREPWD.varname,passWord)
+  hiveconf.set(HiveConf.ConfVars.METASTOREPWD.varname,passWord)//重置全局密码
+  // end by Ricky
+  val defaultWarehouseLocation = metadataConf.get("hive.metastore.warehouse.dir")
+  logInfo("default warehouse location is " + defaultWarehouseLocation)
+</code></pre><br><h2 style="font-size:18px;">6)  spark sql 不支持hive表的读权限控制</h2>
+<div>
+<p style="font-size:18px;"> sparksql 对所有hive表都有读权限，目前社区也遇到相似问题；</p>
+<p style="font-size:18px;">    Intel大神提交了一个patch（<a href="https://issues.apache.org/jira/browse/SPARK-8321" rel="nofollow"><span>https://issues.apache.org/jira/browse/SPARK-8321</span></a>）目前还在讨论合并到社区事宜。</p>
+<p style="font-size:18px;">    该patch的解决思路：在执行计划中添加一个authorized模块，采用hive的AuthorizerV2认证机制对当前的logicalPlan进行认证；目前我们采用的是AuthorizerV1认证方式，直接采用该patch需要升级Authorizer方式。</p>
+<p style="font-size:18px;">    我们提出的短期的解决方式是：在parsesql模块，直接调用AuthorizerV1方式对select 语句进行权限检查，这样的缺点需要生成hive的logicalPlan去进行权限检查，目前还在测试.</p>
+<p></p>
+<h2 style="font-size:18px;">7)  Dynamic Resource Allocation报错</h2>
+<div>
+<p style="font-size:18px;">测试下面代码：</p>
+<pre><code class="language-java">sc.parallelize(1 to 2000000000,20).map(x=&gt;x%3-0.1).reduce(_+_)
+sc.parallelize(1 to 2000000000,40).map(x=&gt;x%3-0.1).reduce(_+_)
+sc.parallelize(1 to 2000000000,80).map(x=&gt;x%3-0.1).reduce(_+_)
+</code></pre>
+<p style="font-size:18px;">当executor退出的时候driverstderror出现了下面的错误：</p>
+<pre><code class="language-java">6/02/17 17:48:32 WARN ReliableDeliverySupervisor: Association with remote system [akka.tcp://sparkExecutor@slave02-sit.cnsuning.com:50558] has failed, address is now gated for [5000] ms. Reason: [Disassociated] 
+16/02/17 17:48:33 ERROR YarnScheduler: Lost executor 4 on namenode1-sit.cnsuning.com: remote Rpc client disassociated
+16/02/17 17:48:33 WARN ReliableDeliverySupervisor: Association with remote system [akka.tcp://sparkExecutor@namenode1-sit.cnsuning.com:56181] has failed, address is now gated for [5000] ms. Reason: [Disassociated] 
+16/02/17 17:48:33 ERROR YarnScheduler: Lost executor 1 on namenode1-sit.cnsuning.com: remote Rpc client disassociated
+16/02/17 17:48:33 WARN ReliableDeliverySupervisor: Association with remote system [akka.tcp://sparkExecutor@namenode1-sit.cnsuning.com:39840] has failed, address is now gated for [5000] ms. Reason: [Disassociated] 
+16/02/17 17:48:34 ERROR YarnScheduler: Lost executor 5 on namenode2-sit.cnsuning.com: remote Rpc client disassociated
+16/02/17 17:48:34 WARN ReliableDeliverySupervisor: Association with remote system [akka.tcp://sparkExecutor@namenode2-sit.cnsuning.com:33914] has failed, address is now gated for [5000] ms. Reason: [Disassociated] 
+16/02/17 17:48:34 ERROR YarnScheduler: Lost executor 3 on slave01-sit.cnsuning.com: remote Rpc client disassociated
+16/02/17 17:48:34 WARN ReliableDeliverySupervisor: Association with remote system [akka.tcp://sparkExecutor@slave01-sit.cnsuning.com:52934] has failed, address is now gated for [5000] ms. Reason: [Disassociated] 
+16/02/17 17:48:34 ERROR YarnScheduler: Lost executor 8 on namenode1-sit.cnsuning.com: remote Rpc client disassociated
+16/02/17 17:48:34 WARN ReliableDeliverySupervisor: Association with remote system [akka.tcp://sparkExecutor@namenode1-sit.cnsuning.com:55408] has failed, address is now gated for [5000] ms. Reason: [Disassociated] 
+16/02/17 17:48:37 ERROR YarnScheduler: Lost executor 7 on slave01-sit.cnsuning.com: remote Rpc client disassociated
+16/02/17 17:48:37 WARN ReliableDeliverySupervisor: Association with remote system [akka.tcp://sparkExecutor@slave01-sit.cnsuning.com:39890] has failed, address is now gated for [5000] ms. Reason: [Disassociated]
+</code></pre><br><p style="font-size:18px;"> 目前还在研究该错误，本次升级放弃DynamicResource Allocation 功能。</p>
+<p style="font-size:18px;"></p>
+<h2 style="font-size:18px;">8)  使用spark.cores.max 打散数据</h2>
+<pre><code class="language-java">val maxCores=conf.get("spark.executor.instances").toInt
+if(maxCores &gt; 0){
+conf.set("spark.default.parallelism",(3*maxCores).toString)
+conf.set("spark.sql.shuffle.partitions",(3*maxCores).toString)
+}
+不要使用，yarn 模式下面spark.cores.max不生效
+val maxCores=conf.get("spark.cores.max").toInt
+if(maxCores &gt; 0){
+  conf.set("spark.default.parallelism",(3*maxCores).toString)
+  conf.set("spark.sql.shuffle.partitions",(3*maxCores).toString)
+}
+</code></pre><br><br><p></p>
+<br><br><br></div>
+<br><p></p>
+<br></div>
+<br><p></p>
+<br></div>
+<br></div>
+<br></div>
+<p></p>
+<br><br></div>
+<br></div>
+<p></p>
+</div>
+<p></p>
+<br><br><br></div>
+<br></div>
+<div><span style="font-size:18px;"><br></span></div>
+<p></p>
+<br></div>
+            </div>
+                </div>

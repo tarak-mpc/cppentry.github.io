@@ -1,0 +1,71 @@
+---
+layout:     post
+title:      Spark的运行架构分析（二）之运行模式详解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">在上一篇博客  <a href="http://blog.csdn.net/gamer_gyt/article/details/51822765" rel="nofollow">spark的运行架构分析（一）</a>中我们有谈到Spark的运行模式是多种多样的，那么在这篇博客中我们来具体谈谈Spark的运行模式</span></p>
+<h1><a name="t0"></a><span style="font-family:'Microsoft YaHei';font-size:24px;">一：Spark On Local</span></h1>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">    此种模式下，我们只需要在安装Spark时不进行hadoop和Yarn的环境配置，只要将Spark包解压即可使用，运行时Spark目录下的bin目录执行bin/spark-shell即可</span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">    具体可参考这篇博客：<a href="http://blog.csdn.net/happyanger6/article/details/47070223" rel="nofollow">http://blog.csdn.net/happyanger6/article/details/47070223</a><br></span></p>
+<h1><a name="t1"></a><span style="font-family:'Microsoft YaHei';font-size:24px;">二：Spark On Local Cluster（Spark Standalone）</span></h1>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">    即Spark的伪分布模式，安装部署可参考：<a href="http://blog.csdn.net/gamer_gyt/article/details/51638023" rel="nofollow">http://blog.csdn.net/gamer_gyt/article/details/51638023</a><br></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">    <span style="font-size:15px;">
+<span style="color:#000000;"><span lang="en-us" xml:lang="en-us">Standalone</span>模式是<span lang="en-us" xml:lang="en-us">Spark</span>实现的资源调度框架，其主要的节点有<span lang="en-us" xml:lang="en-us">Client</span>节点、<span lang="en-us" xml:lang="en-us">Master</span>节点和<span lang="en-us" xml:lang="en-us">Worker</span>节点。其中<span lang="en-us" xml:lang="en-us">Driver</span>既可以运行在<span lang="en-us" xml:lang="en-us">Master</span>节点上中，也可以运行在本地<span lang="en-us" xml:lang="en-us">Client</span>端。当用<span lang="en-us" xml:lang="en-us">spark-shell</span>交互式工具提交<span lang="en-us" xml:lang="en-us">Spark</span>的<span lang="en-us" xml:lang="en-us">Job</span>时，<span lang="en-us" xml:lang="en-us">Driver</span>在<span lang="en-us" xml:lang="en-us">Master</span>节点上运行；当使用<span lang="en-us" xml:lang="en-us">spark-submit</span>工具提交<span lang="en-us" xml:lang="en-us">Job</span>或者在<span lang="en-us" xml:lang="en-us">Eclips</span>、<span lang="en-us" xml:lang="en-us">IDEA</span>等开发平台上使用”<span lang="en-us" xml:lang="en-us">new
+ SparkConf.setManager(</span>“<span lang="en-us" xml:lang="en-us">spark://master:7077</span>”<span lang="en-us" xml:lang="en-us">)</span>”方式运行<span lang="en-us" xml:lang="en-us">Spark</span>任务时，<span lang="en-us" xml:lang="en-us">Driver</span>是运行在本地<span lang="en-us" xml:lang="en-us">Client</span>端上的。</span></span></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">       <img src="https://img-blog.csdn.net/20160705185915588?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">    其运行过程如下：</span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;"></span></p>
+<p style="background:#fefefe;"><span style="color:#333333;">    1.</span>SparkContext连接到Master，向Master注册并申请资源（CPU Core 和Memory）；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">    2.</span>Master根据SparkContext的资源申请要求和Worker心跳周期内报告的信息决定在哪个Worker上分配资源，然后在该Worker上获取资源，然后启动StandaloneExecutorBackend；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">    3.</span>StandaloneExecutorBackend向SparkContext注册；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">    4.</span>SparkContext将Applicaiton代码发送给StandaloneExecutorBackend；并且SparkContext解析Applicaiton代码，构建DAG图，并提交给DAG Scheduler分解成Stage（当碰到Action操作时，就会催生Job；每个Job中含有1个或多个Stage，Stage一般在获取外部数据和shuffle之前产生），然后以Stage（或者称为TaskSet）提交给Task
+ Scheduler，Task Scheduler负责将Task分配到相应的Worker，最后提交给StandaloneExecutorBackend执行；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">    5.</span>StandaloneExecutorBackend会建立Executor线程池，开始执行Task，并向SparkContext报告，直至Task完成。</p>
+<p style="background:#fefefe;"><span style="color:#333333;">    6.</span>所有Task完成后，SparkContext向Master注销，释放资源。</p>
+<h1><a name="t2"></a><span style="font-family:'Microsoft YaHei';font-size:24px;">三：Spark On Yarn</span></h1>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;"></span></p>
+<p align="justify"><span style="color:#000000;">    YARN</span>是一种统一资源管理机制，在其上面可以运行多套计算框架。目前的大数据技术世界，大多数公司除了使用Spark来进行数据计算，由于历史原因或者单方面业务处理的性能考虑而使用着其他的计算框架，比如MapReduce、Storm等计算框架。Spark基于此种情况开发了Spark on YARN的运行模式，由于借助了YARN良好的弹性资源管理机制，不仅部署Application更加方便，而且用户在YARN集群中运行的服务和Application的资源也完全隔离，更具实践应用价值的是YARN可以通过队列的方式，管理同时运行在集群中的多个服务。</p>
+<p align="justify"><span style="color:#000000;">    Spark on YARN</span>模式根据Driver在集群中的位置分为两种模式：一种是YARN-Client模式，另一种是YARN-Cluster（或称为YARN-Standalone模式）。</p>
+<h2><a name="t3"></a><span style="font-family:'Microsoft YaHei';font-size:18px;"></span>
+</h2><p align="justify">    1：Yarn框架流程</p>
+
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;"></span></p>
+<p align="justify"><span style="font-size:15px;"><span style="font-family:'微软雅黑';"><span style="color:#000000;">        任何框架与<span lang="en-us" xml:lang="en-us">YARN</span>的结合，都必须遵循<span lang="en-us" xml:lang="en-us">YARN</span>的开发模式。在分析<span lang="en-us" xml:lang="en-us">Spark on YARN</span>的实现细节之前，有必要先分析一下<span lang="en-us" xml:lang="en-us">YARN</span>框架的一些基本原理。Yarn框架的基本流程如下：</span></span></span><br></p>
+<p align="justify">         <img src="https://img-blog.csdn.net/20160705190402924?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p align="justify"><span style="font-size:15px;"><span style="font-family:'微软雅黑';"><span style="color:#000000;">        其中，<span lang="en-us" xml:lang="en-us">ResourceManager</span>负责将集群的资源分配给各个应用使用，而资源分配和调度的基本单位是<span lang="en-us" xml:lang="en-us">Container</span>，其中封装了机器资源，如内存、<span lang="en-us" xml:lang="en-us">CPU</span>、磁盘和网络等，每个任务会被分配一个<span lang="en-us" xml:lang="en-us">Container</span>，该任务只能在该<span lang="en-us" xml:lang="en-us">Container</span>中执行，并使用该<span lang="en-us" xml:lang="en-us">Container</span>封装的资源。<span lang="en-us" xml:lang="en-us">NodeManager</span>是一个个的计算节点，主要负责启动<span lang="en-us" xml:lang="en-us">Application</span>所需的<span lang="en-us" xml:lang="en-us">Container</span>，监控资源（内存、<span lang="en-us" xml:lang="en-us">CPU</span>、磁盘和网络等）的使用情况并将之汇报给<span lang="en-us" xml:lang="en-us">ResourceManager</span>。<span lang="en-us" xml:lang="en-us">ResourceManager</span>与<span lang="en-us" xml:lang="en-us">NodeManagers</span>共同组成整个数据计算框架，<span lang="en-us" xml:lang="en-us">ApplicationMaster</span>与具体的<span lang="en-us" xml:lang="en-us">Application</span>相关，主要负责同<span lang="en-us" xml:lang="en-us">ResourceManager</span>协商以获取合适的<span lang="en-us" xml:lang="en-us">Container</span>，并跟踪这些<span lang="en-us" xml:lang="en-us">Container</span>的状态和监控其进度。</span></span></span></p>
+<span style="font-family:'Microsoft YaHei';font-size:18px;"></span>
+<h2><a name="t4"></a><span style="font-size:18px;"><span style="font-size:15px;"><span style="font-family:'微软雅黑';"><span style="color:#000000;">    2：Yarn Client模式 </span></span></span></span></h2>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;"></span></p>
+<p align="justify"><span style="font-size:15px;"><span style="font-family:'微软雅黑';"><span style="color:#000000;"></span></span></span></p>
+<p align="justify"><span style="color:#000000;">         Yarn-Client</span>模式中，Driver在客户端本地运行，这种模式可以使得Spark Application和客户端进行交互，因为Driver在客户端，所以可以通过webUI访问Driver的状态，默认是http://hadoop1:4040访问，而YARN通过http:// hadoop1:8088访问。</p>
+<p align="justify"><span style="color:#000000;">         YARN-client</span>的工作流程分为以下几个步骤：</p>
+         <img src="https://img-blog.csdn.net/20160705190956937?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><p style="background:#fefefe;"><span style="color:#333333;">       (1).</span>Spark Yarn Client向YARN的ResourceManager申请启动Application Master。同时在SparkContent初始化中将创建DAGScheduler和TASKScheduler等，由于我们选择的是<span style="color:#000000;">Yarn-Client</span><span style="color:#333333;">模式，程序会选择YarnClientClusterScheduler</span>和YarnClientSchedulerBackend；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">         (2).</span>ResourceManager收到请求后，在集群中选择一个NodeManager，为该应用程序分配第一个Container，要求它在这个Container中启动应用程序的ApplicationMaster，与YARN-Cluster区别的是在该ApplicationMaster不运行SparkContext，只与SparkContext进行联系进行资源的分派；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">       (3).</span>Client中的SparkContext初始化完毕后，与ApplicationMaster建立通讯，向ResourceManager注册，根据任务信息向ResourceManager申请资源（Container）；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">          (4).</span>一旦ApplicationMaster申请到资源（也就是Container）后，便与对应的NodeManager通信，要求它在获得的Container中启动启动CoarseGrainedExecutorBackend，CoarseGrainedExecutorBackend启动后会向Client中的SparkContext注册并申请Task；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">        (5).</span>Client中的SparkContext分配Task给CoarseGrainedExecutorBackend执行，CoarseGrainedExecutorBackend运行Task并向Driver汇报运行的状态和进度，以让Client随时掌握各个任务的运行状态，从而可以在任务失败时重新启动任务；</p>
+<span style="color:#333333;">          (6).</span>应用程序运行完成后，Client的SparkContext向ResourceManager申请注销并关闭自己
+<h2><a name="t5"></a><span style="font-family:'Microsoft YaHei';font-size:18px;"></span>
+</h2><p align="justify">    3：Spark Cluster模式</p>
+
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;"></span></p>
+<p align="left"><span style="color:#000000;">          在YARN-Cluster</span>模式中，当用户向YARN中提交一个应用程序后，YARN将分两个阶段运行该应用程序：第一个阶段是把Spark的Driver作为一个ApplicationMaster在YARN集群中先启动；第二个阶段是由ApplicationMaster创建应用程序，然后为它向ResourceManager申请资源，并启动Executor来运行Task，同时监控它的整个运行过程，直到运行完成。</p>
+<p align="left"><span style="color:#000000;">          YARN-cluster</span>的工作流程分为以下几个步骤：</p>
+        <img src="https://img-blog.csdn.net/20160705192032427?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><p style="background:#fefefe;"><span style="color:#333333;">         (1).</span>   Spark Yarn Client向YARN中提交应用程序，包括ApplicationMaster程序、启动ApplicationMaster的命令、需要在Executor中运行的程序等；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">        (2).</span>   ResourceManager收到请求后，在集群中选择一个NodeManager，为该应用程序分配第一个Container，要求它在这个Container中启动应用程序的ApplicationMaster，其中ApplicationMaster进行SparkContext等的初始化；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">         (3).</span>   ApplicationMaster向ResourceManager注册，这样用户可以直接通过ResourceManage查看应用程序的运行状态，然后它将采用轮询的方式通过RPC协议为各个任务申请资源，并监控它们的运行状态直到运行结束；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">         (4).</span>   一旦ApplicationMaster申请到资源（也就是Container）后，便与对应的NodeManager通信，要求它在获得的Container中启动启动CoarseGrainedExecutorBackend，CoarseGrainedExecutorBackend启动后会向ApplicationMaster中的SparkContext注册并申请Task。这一点和Standalone模式一样，只不过SparkContext在Spark
+ Application中初始化时，使用CoarseGrainedSchedulerBackend配合YarnClusterScheduler进行任务的调度，其中YarnClusterScheduler只是对TaskSchedulerImpl的一个简单包装，增加了对Executor的等待逻辑等；</p>
+<p style="background:#fefefe;"><span style="color:#333333;">         (5).</span>   ApplicationMaster中的SparkContext分配Task给CoarseGrainedExecutorBackend执行，CoarseGrainedExecutorBackend运行Task并向ApplicationMaster汇报运行的状态和进度，以让ApplicationMaster随时掌握各个任务的运行状态，从而可以在任务失败时重新启动任务；</p>
+<p align="justify"><span style="color:#333333;">         (6).</span>   应用程序运行完成后，ApplicationMaster向ResourceManager申请注销并关闭自己。<span style="color:#000000;"><br></span></p>
+<h2 align="justify"><a name="t6"></a><span style="font-size:18px;color:#000000;">    4：Spark Client 和 Spark Cluster的区别</span></h2>
+<p align="justify"><span style="color:#000000;"><span style="font-size:15px;"><span style="font-family:'微软雅黑';"><span style="color:#000000;">        理解<span lang="en-us" xml:lang="en-us">YARN-Client</span>和<span lang="en-us" xml:lang="en-us">YARN-Cluster</span>深层次的区别之前先清楚一个概念：<span lang="en-us" xml:lang="en-us">Application
+ Master</span>。在<span lang="en-us" xml:lang="en-us">YARN</span>中，每个<span lang="en-us" xml:lang="en-us">Application</span>实例都有一个<span lang="en-us" xml:lang="en-us">ApplicationMaster</span>进程，它是<span lang="en-us" xml:lang="en-us">Application</span>启动的第一个容器。它负责和<span lang="en-us" xml:lang="en-us">ResourceManager</span>打交道并请求资源，获取资源之后告诉<span lang="en-us" xml:lang="en-us">NodeManager</span>为其启动<span lang="en-us" xml:lang="en-us">Container</span>。从深层次的含义讲<span lang="en-us" xml:lang="en-us">YARN-Cluster</span>和<span lang="en-us" xml:lang="en-us">YARN-Client</span>模式的区别其实就是<span lang="en-us" xml:lang="en-us">ApplicationMaster</span>进程的区别。</span></span></span><br></span></p>
+<p align="justify"><span style="color:#000000;">               l</span>  YARN-Cluster模式下，Driver运行在AM(Application Master)中，它负责向YARN申请资源，并监督作业的运行状况。当用户提交了作业之后，就可以关掉Client，作业会继续在YARN上运行，因而YARN-Cluster模式不适合运行交互类型的作业；</p>
+<p align="justify"><span style="color:#000000;">              l</span>  YARN-Client模式下，Application Master仅仅向YARN请求Executor，Client会和请求的Container通信来调度他们工作，也就是说Client不能离开。</p>
+<p align="justify">                <img src="https://img-blog.csdn.net/20160705192351981?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+            </div>
+                </div>

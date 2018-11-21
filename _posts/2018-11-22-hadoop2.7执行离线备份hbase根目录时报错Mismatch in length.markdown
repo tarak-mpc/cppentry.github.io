@@ -1,0 +1,103 @@
+---
+layout:     post
+title:      hadoop2.7执行离线备份hbase根目录时报错Mismatch in length
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：欢迎给我留言，多提意见。互相交流、共同进步！					https://blog.csdn.net/qq_31598113/article/details/78877423				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-size:18px;">[hdfs@hmaster-1 root]$ hadoop distcp hdfs://hdfs-ha/apps/hbase/data hdfs://hdfs-ha/backup/hbase_bk_20171222</span></p>
+<p><strong><span style="font-size:18px;">出现的错误摘要：</span></strong></p>
+<p><span style="font-size:14px;">Caused by: <span style="color:rgb(255,0,0);">java.io.IOException</span>:<span style="color:rgb(255,0,0);">Mismatch in length of source</span>:hdfs://hdfs-ha/apps/hbase/data/WALs/core-06/backup/hbase_bk_20171222/.distcp.tmp.attempt_1506497058251_3878_m_000000_1</span></p>
+<p><span style="font-size:14px;">at org.apache.hadoop.tools.mapred.RetriableFileCopyCommand.compareFileLengths(RetriableFileCopyCommand.java:193)</span></p>
+<p><span style="font-size:14px;">at org.apache.hadoop.tools.mapred.RetriableFileCopyCommand.doCopy(RetriableFileCopyCommand.java:126)</span></p>
+<p><span style="font-size:18px;"><span style="font-family:'宋体';">最大可能的原因是由于文件未关闭而影响了</span>distcp<span style="font-family:'宋体';">作业执行，验证一下是不是，查看这个文件状态：</span></span></p>
+<p><span style="font-size:14px;">[hdfs@hmaster-1 ~]$ hdfs fsck hdfs://hdfs-ha/apps/hbase/data/WALs/core-06,16020,1513713156134-splitting/core-06%2C16020%2C1513713156134.default.<span style="color:rgb(255,0,0);">1513946044353</span></span></p>
+<p><span style="font-size:14px;">Connecting to namenode via http://hmaster-1.ksc.com:50070/fsck?ugi=hdfs&amp;path=%2Fapps%2Fhbase%2Fdata%2FWALs%2Fcore-06%2C16020%2C1513713156134-splitting%2Fcore-06%252C16020%252C1513713156134.default.1513946044353</span></p>
+<p><span style="font-size:14px;">FSCK started by hdfs (auth:SIMPLE) from /172.31.0.10 for path /apps/hbase/data/WALs/core-06,16020,1513713156134-splitting/core-06%2C16020%2C1513713156134.default.1513946044353  at Fri Dec 22 22:18:06 CST 2017</span></p>
+<p><span style="font-size:14px;">.Status: HEALTHY</span></p>
+<p><span style="font-size:14px;"> Total size: 16004696 B</span></p>
+<p><span style="font-size:14px;"> Total dirs: 0</span></p>
+<p><span style="font-size:14px;"> Total files: 1</span></p>
+<p><span style="font-size:14px;"> Total symlinks: 0</span></p>
+<p><span style="font-size:14px;"> Total blocks (validated): 1 (avg. block size 16004696 B)</span></p>
+<p><span style="font-size:14px;"> Minimally replicated blocks: 1 (100.0 %)</span></p>
+<p><span style="font-size:14px;"> Over-replicated blocks: 0 (0.0 %)</span></p>
+<p><span style="font-size:14px;"> Under-replicated blocks: 0 (0.0 %)</span></p>
+<p><span style="font-size:14px;"> Mis-replicated blocks: 0 (0.0 %)</span></p>
+<p><span style="font-size:14px;"> Default replication factor: 3</span></p>
+<p><span style="font-size:14px;"> Average block replication: 3.0</span></p>
+<p><span style="font-size:14px;"> Corrupt blocks: 0</span></p>
+<p><span style="font-size:14px;"> Missing replicas: 0 (0.0 %)</span></p>
+<p><span style="font-size:14px;"> Number of data-nodes: 8</span></p>
+<p><span style="font-size:14px;"> Number of racks: 1</span></p>
+<p><span style="font-size:14px;">FSCK ended at Fri Dec 22 22:18:06 CST 2017 in 21 milliseconds</span></p>
+<p><span style="font-size:14px;"> </span></p>
+<p><span style="font-size:14px;">The filesystem under path '/apps/hbase/data/WALs/core-06,16020,1513713156134-splitting/core-06%2C16020%2C1513713156134.default.1513946044353 ' is HEALTHY</span></p>
+<p><span style="font-size:14px;">[hdfs@hmaster-1 ~]$</span></p>
+<p><span style="font-size:14px;"><br></span></p>
+<p><span style="font-size:18px;">发现此文件真的是没关闭状态。那么，解决办法是只要关闭该文件。怎样实现该文件的关闭呢？</span></p>
+<p><span style="font-size:18px;">Hadoop DFS<span style="font-family:'宋体';">自带了恢复机制，由于</span><span style="font-family:'DejaVu Sans Mono';">Lease Recovery</span><span style="font-family:'宋体';">会触发</span><span style="font-family:'DejaVu Sans Mono';">Block Recovery</span><span style="font-family:'宋体';">，当</span><span style="font-family:'DejaVu Sans Mono';">Data
+ Node</span><span style="font-family:'宋体';">完成</span><span style="font-family:'DejaVu Sans Mono';">Block Recovery</span><span style="font-family:'宋体';">后文件会被关闭。所以这里手动执行</span><span style="font-family:'DejaVu Sans Mono';">recoverLease</span><span style="font-family:'宋体';">即可。那么把上面报出来的</span><span style="font-family:'宋体';">文件</span><span style="font-family:'DejaVu Sans Mono';">(</span><span style="font-family:'宋体';">上文红色字体部分</span><span style="font-family:'DejaVu Sans Mono';">)</span><span style="font-family:'宋体';">关闭即可，操作流程：</span></span></p>
+<p><span style="font-size:18px;">第一步，关闭此文件之前先拷贝此文件：</span></p>
+<p><span style="font-size:14px;">[hdfs@hmaster-1 root]$ hdfs dfs -cp hdfs://hdfs-ha/apps/hbase/data/WALs/core-06,16020,1513713156134-splitting/core-06%2C16020%2C1513713156134.default.<span style="color:rgb(255,0,0);">1513946044353</span><span style="color:rgb(255,0,0);"> </span>hdfs://hdfs-ha/apps/hbase/data/WALs/core-06,16020,1513713156134-splitting/core-06%2C16020%2C1513713156134.default.<span style="color:rgb(255,0,0);">1513946044353</span><span style="color:rgb(255,0,0);">_backup</span></span></p>
+<p><span style="font-size:14px;">[hdfs@hmaster-1 root]$ hdfs debug <span style="color:rgb(255,0,0);">
+recoverLease </span>-path hdfs://hdfs-ha/apps/hbase/data/WALs/core-06,16020,1513713156134-splitting/core-06%2C16020%2C1513713156134.default.1513946044353</span></p>
+<p><span style="font-size:14px;">recoverLease returned false.</span></p>
+<p><span style="font-size:14px;">Giving up on recoverLease for hdfs://hdfs-ha/apps/hbase/data/WALs/core-06,16020,1513713156134-splitting/core-06%2C16020%2C1513713156134.default.<span style="color:rgb(255,0,0);">1513946044353  </span>after 1 try.</span></p>
+<p><span style="font-size:14px;"><br></span></p>
+<p><span style="font-size:18px;"><span style="font-family:'宋体';">第二步，执行</span>recoverLease<span style="font-family:'宋体';">操作：</span></span></p>
+<p><span style="font-size:14px;"><span style="font-size:14px;">[hdfs@hmaster-1 ~]$ </span>hdfs debug recoverLease -path hdfs://hdfs-ha/apps/hbase/data/WALs/core-06,16020,1513713156134-splitting/core-06%2C16020%2C1513713156134.default.<span style="color:rgb(255,0,0);">1513946044353</span></span></p>
+<p><span style="font-size:14px;"><span style="color:rgb(255,0,0);"><br></span></span></p>
+<p><span style="font-size:18px;"><span style="font-family:'宋体';">第三步，再次执行</span>hadoop distcp<span style="font-family:'宋体';">，成功！</span></span></p>
+<p><span style="font-size:14px;"><span style="color:rgb(69,69,69);font-family:'PingFang SC', 'Microsoft YaHei', SimHei, Arial, SimSun;font-size:14px;">[hdfs@hmaster-1 ~]$ </span>hadoop distcp hdfs://hdfs-ha/apps/hbase/data hdfs://hdfs-ha/backup/hbase_bk_20171222</span></p>
+<p><span style="font-size:14px;">17/12/22 22:31:12 INFO mapreduce.Job:  map 98% reduce 0%</span></p>
+<p><span style="font-size:14px;">17/12/22 22:32:57 INFO mapreduce.Job:  map 99% reduce 0%</span></p>
+<p><span style="font-size:14px;">17/12/22 22:33:03 INFO mapreduce.Job:  map 100% reduce 0%</span></p>
+<p><span style="font-size:14px;">17/12/22 22:34:39 INFO mapreduce.Job: Job job_1506497058251_3881 completed successfully</span></p>
+<p><span style="font-size:14px;">17/12/22 22:34:40 INFO mapreduce.Job: Counters: 35</span></p>
+<p><span style="font-size:14px;">File System Counters</span></p>
+<p><span style="font-size:14px;">FILE: Number of bytes read=0</span></p>
+<p><span style="font-size:14px;">FILE: Number of bytes written=3363460</span></p>
+<p><span style="font-size:14px;">FILE: Number of read operations=0</span></p>
+<p><span style="font-size:14px;">FILE: Number of large read operations=0</span></p>
+<p><span style="font-size:14px;">FILE: Number of write operations=0</span></p>
+<p><span style="font-size:14px;">HDFS: Number of bytes read=229694663586</span></p>
+<p><span style="font-size:14px;">HDFS: Number of bytes written=229694159042</span></p>
+<p><span style="font-size:14px;">HDFS: Number of read operations=8354</span></p>
+<p><span style="font-size:14px;">HDFS: Number of large read operations=0</span></p>
+<p><span style="font-size:14px;">HDFS: Number of write operations=2271</span></p>
+<p><span style="font-size:14px;">Job Counters </span></p>
+<p><span style="font-size:14px;">Launched map tasks=22</span></p>
+<p><span style="font-size:14px;">Other local map tasks=22</span></p>
+<p><span style="font-size:14px;">Total time spent by all maps in occupied slots (ms)=16149228</span></p>
+<p><span style="font-size:14px;">Total time spent by all reduces in occupied slots (ms)=0</span></p>
+<p><span style="font-size:14px;">Total time spent by all map tasks (ms)=16149228</span></p>
+<p><span style="font-size:14px;">Total vcore-milliseconds taken by all map tasks=16149228</span></p>
+<p><span style="font-size:14px;">Total megabyte-milliseconds taken by all map tasks=16536809472</span></p>
+<p><span style="font-size:14px;">Map-Reduce Framework</span></p>
+<p><span style="font-size:14px;">Map input records=2048</span></p>
+<p><span style="font-size:14px;">Map output records=430</span></p>
+<p><span style="font-size:14px;">Input split bytes=2552</span></p>
+<p><span style="font-size:14px;">Spilled Records=0</span></p>
+<p><span style="font-size:14px;">Failed Shuffles=0</span></p>
+<p><span style="font-size:14px;">Merged Map outputs=0</span></p>
+<p><span style="font-size:14px;">GC time elapsed (ms)=42683</span></p>
+<p><span style="font-size:14px;">CPU time spent (ms)=2335900</span></p>
+<p><span style="font-size:14px;">Physical memory (bytes) snapshot=7897362432</span></p>
+<p><span style="font-size:14px;">Virtual memory (bytes) snapshot=140236464128</span></p>
+<p><span style="font-size:14px;">Total committed heap usage (bytes)=4506779648</span></p>
+<p><span style="font-size:14px;">File Input Format Counters </span></p>
+<p><span style="font-size:14px;">Bytes Read=559035</span></p>
+<p><span style="font-size:14px;">File Output Format Counters </span></p>
+<p><span style="font-size:14px;">Bytes Written=57043</span></p>
+<p><span style="font-size:14px;">org.apache.hadoop.tools.mapred.CopyMapper$Counter</span></p>
+<p><span style="font-size:14px;">BYTESCOPIED=229694101999</span></p>
+<p><span style="font-size:14px;">BYTESEXPECTED=229694101999</span></p>
+<p><span style="font-size:14px;">BYTESSKIPPED=245050605213</span></p>
+<p><span style="font-size:14px;">COPY=1618</span></p>
+<p><span style="font-size:14px;">SKIP=430</span></p>
+            </div>
+                </div>

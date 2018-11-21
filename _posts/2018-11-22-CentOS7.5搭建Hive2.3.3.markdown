@@ -1,0 +1,699 @@
+---
+layout:     post
+title:      CentOS7.5搭建Hive2.3.3
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h2>一 Hive的下载</h2>
+
+<p>软件下载地址：<a href="https://mirrors.tuna.tsinghua.edu.cn/apache/hive/" rel="nofollow">https://mirrors.tuna.tsinghua.edu.cn/apache/hive/ </a>  这里下载的版本是：apache-hive-2.3.3-bin.tar.gz</p>
+
+<p>官方安装配置文档：<a href="https://cwiki.apache.org/confluence/display/Hive/GettingStarted" rel="nofollow">https://cwiki.apache.org/confluence/display/Hive/GettingStarted</a></p>
+
+<p><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1385722/201807/1385722-20180714102300220-713754456.png"></p>
+
+<h2>二 Hive单用户安装</h2>
+
+<h3>远程Metastore数据库</h3>
+
+<p><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1385722/201806/1385722-20180602125907384-190292791.png"><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1385722/201806/1385722-20180602125936874-912134635.png"></p>
+
+<h2>1  解压配置环境变量</h2>
+
+<pre>
+#解压指定位置安装
+[admin@node21 software]$ tar zxvf apache-hive-2.3.3-bin.tar.gz -C /opt/module/
+[admin@node21 module]$ mv apache-hive-2.3.3-bin hive-2.3.3
+#配置环境变量
+[admin@node21 hive-2.3.3]$ sudo vi /etc/profile
+末尾追加
+export  HIVE_HOME=/opt/module/hive-2.3.3
+export  PATH=$PATH:$HIVE_HOME/bin
+重新编译环境变量生效
+[admin@node21 hive-2.3.3]$ source /etc/profile</pre>
+
+<h2>2 配置Hive文件</h2>
+
+<h3>2.1 修改hive-env.sh</h3>
+
+<pre>
+[admin@node21 conf]$ cd /opt/module/hive-2.3.3/conf
+[admin@node21 conf]$ cp hive-env.sh.template hive-env.sh 
+[admin@node21 conf]$ vi hive-env.sh 
+# HADOOP_HOME=${bin}/../../hadoop
+打开注释修改 HADOOP_HOME=/opt/module/hadoop-2.7.6
+# export HIVE_CONF_DIR=
+打开注释修改 HIVE_CONF_DIR=/opt/module/hive-2.3.3/conf</pre>
+
+<h3>2.2 修改hive-log4j.properties</h3>
+
+<p>修改hive的log存放日志到/opt/module/hive-2.3.3/logs</p>
+
+<pre>
+[admin@node21 conf]$ mv hive-log4j2.properties.template hive-log4j2.properties
+[admin@node21 conf]$ vi hive-log4j2.properties
+找到 property.hive.log.dir = ${sys:java.io.tmpdir}/${sys:user.name}
+修改 property.hive.log.dir = /opt/module/hive-2.3.3/logs</pre>
+
+<h2>3 配置MySQL作为Metastore</h2>
+
+<p>默认情况下, Hive的元数据保存在了内嵌的 derby 数据库里, 但一般情况下生产环境使用 MySQL 来存放 Hive 元数据。</p>
+
+<h3>3.1 安装mysql</h3>
+
+<p>参考地址：<a href="https://www.cnblogs.com/frankdeng/p/9017384.html" rel="nofollow"> https://www.cnblogs.com/frankdeng/p/9017384.html</a></p>
+
+<p>安装mysql，拷贝 mysql-connector-java-5.1.9-bin.jar 放入 $HIVE_HOME/lib 下。</p>
+
+<pre>
+[admin@node21 software]$ cp mysql-connector-java-5.1.9.jar  /opt/module/hive-2.3.3/lib/</pre>
+
+<h3>3.2 修改配置文件</h3>
+
+<p>参数配置文档：<a href="https://cwiki.apache.org/confluence/display/Hive/AdminManual+MetastoreAdmin" rel="nofollow">https://cwiki.apache.org/confluence/display/Hive/AdminManual+MetastoreAdmin</a></p>
+
+<p>复制hive-default.xml.template为hive-site.xml 文件，删除掉configuration里的配置信息，重新配置 MySQL 数据库连接信息。</p>
+
+<pre>
+[admin@node21 conf]$ vi hive-site.xml</pre>
+
+<p>删除命令：光标在configuration的下一行,输入：.,$-1d  (光标所在行到 倒数第二行）回车，进行如下编辑</p>
+
+<pre>
+&lt;?xml version="1.0" encoding="UTF-8" standalone="no"?&gt;
+&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;
+&lt;configuration&gt; 
+&lt;!--Hive作业的HDFS根目录位置 --&gt; 
+&lt;property&gt;
+    &lt;name&gt;hive.exec.scratchdir&lt;/name&gt;
+    &lt;value&gt;/user/hive/tmp&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--Hive作业的HDFS根目录创建写权限 --&gt; 
+&lt;property&gt;
+    &lt;name&gt;hive.scratch.dir.permission&lt;/name&gt;
+    &lt;value&gt;733&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--hdfs上hive元数据存放位置 --&gt; 
+&lt;property&gt;  
+  &lt;name&gt;hive.metastore.warehouse.dir&lt;/name&gt;  
+  &lt;value&gt;/user/hive/warehouse&lt;/value&gt;   
+&lt;/property&gt;
+&lt;!--连接数据库地址，名称 --&gt;  
+&lt;property&gt;
+  &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt;
+  &lt;value&gt;jdbc:mysql://node21/hive?createDatabaseIfNotExist=true&lt;/value&gt;  
+&lt;/property&gt;  
+&lt;!--连接数据库驱动 --&gt; 
+&lt;property&gt;
+  &lt;name&gt;javax.jdo.option.ConnectionDriverName&lt;/name&gt;  
+  &lt;value&gt;com.mysql.jdbc.Driver&lt;/value&gt;  
+&lt;/property&gt; 
+&lt;!--连接数据库用户名称 --&gt;  
+&lt;property&gt;  
+  &lt;name&gt;javax.jdo.option.ConnectionUserName&lt;/name&gt;  
+  &lt;value&gt;hive&lt;/value&gt;
+&lt;/property&gt; 
+&lt;!--连接数据库用户密码 --&gt;  
+&lt;property&gt;  
+  &lt;name&gt;javax.jdo.option.ConnectionPassword&lt;/name&gt;  
+  &lt;value&gt;hive&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前查询表的头信息 --&gt; 
+ &lt;property&gt;
+  &lt;name&gt;hive.cli.print.header&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前数据库名称信息 --&gt; 
+&lt;property&gt;
+  &lt;name&gt;hive.cli.print.current.db&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt; 
+&lt;/configuration&gt; </pre>
+
+<h3>3.3 mysql创建hive用户密码</h3>
+
+<pre>
+mysql&gt; CREATE DATABASE hive; 
+mysql&gt; USE hive; 
+mysql&gt; CREATE USER 'hive'@'localhost' IDENTIFIED BY 'hive';
+mysql&gt; GRANT ALL ON hive.* TO 'hive'@'localhost' IDENTIFIED BY 'hive'; 
+mysql&gt; GRANT ALL ON hive.* TO 'hive'@'%' IDENTIFIED BY 'hive'; 
+mysql&gt; FLUSH PRIVILEGES; 
+mysql&gt; quit;</pre>
+
+<h2>4  运行Hive</h2>
+
+<h3>4.1 初始化数据库</h3>
+
+<p>从Hive 2.1开始，我们需要运行下面的schematool命令作为初始化步骤。例如，这里使用“mysql”作为db类型。 </p>
+
+<pre>
+[admin@node21 conf]$ schematool -dbType mysql -initSchema
+</pre>
+
+<p>终端输出如下信息</p>
+
+<p><img alt="" class="has" id="code_img_closed_64a909d7-f15a-491f-b7c6-d446dde86322" src="http://images.cnblogs.com/OutliningIndicators/ContractedBlock.gif">View Code</p>
+
+<p>执行成功后，可以使用Navicat Premium 查看元数据库 hive 是否已经创建成功。</p>
+
+<h3>4.2 启动 Hive 客户端</h3>
+
+<p>启动Hadoop服务，使用 Hive CLI（Hive command line interface）, <strong>hive --service cli和hive效果一样，</strong>可以在终端输入以下命令：</p>
+
+<pre>
+[admin@node21 conf]$ hive</pre>
+
+<p>启动信息如下：</p>
+
+<pre>
+which: no hbase in (/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/opt/module/jdk1.8/bin:/opt/module/jdk1.8/sbin:/opt/module/zookeeper-3.4.12/bin:/opt/module/
+hadoop-2.7.6/bin:/opt/module/hadoop-2.7.6/sbin:/opt/module/hive-2.3.3/bin:/home/admin/.local/bin:/home/admin/bin)SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: Found binding in [jar:file:/opt/module/hive-2.3.3/lib/log4j-slf4j-impl-2.6.2.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: Found binding in [jar:file:/opt/module/hadoop-2.7.6/share/hadoop/common/lib/slf4j-log4j12-1.7.10.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [org.apache.logging.slf4j.Log4jLoggerFactory]
+
+Logging initialized using configuration in file:/opt/module/hive-2.3.3/conf/hive-log4j2.properties Async: true
+Hive-on-MR is deprecated in Hive 2 and may not be available in the future versions. Consider using a different execution engine (i.e. spark, tez) or using Hive 1.X rel
+eases.hive (default)&gt;  </pre>
+
+<h2>三 多用户安装</h2>
+
+<p><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1385722/201806/1385722-20180602130032576-840273363.png"></p>
+
+<p>用于非Java客户端访问元数据库，在服务器端启动MetaStoreServer，客户端利用Thrift协议通过MetaStoreServer访问元数据库。</p>
+
+<h2>1 本地Metastore服务器</h2>
+
+<p>在本地/嵌入式Metastore设置中，Metastore服务器组件像Hive Client中的库一样使用。 每个Hive客户端都将打开一个到数据库的连接并对其进行SQL查询。确保可以从执行Hive查询的机器访问数据库，因为这是本地存储。还要确保JDBC客户端库位于Hive Client的类路径中。此配置通常与HiveServer2一起使用。</p>
+
+<p>这里node21作为MySQL Server，node22同时作为Metastore服务器和客户端。</p>
+
+<h3>1.1 解压安装hive</h3>
+
+<pre>
+[admin@node22 software]$ tar zxvf apache-hive-2.3.3-bin.tar.gz -C /opt/module/
+[admin@node22 module]$ mv apache-hive-2.3.3-bin hive-2.3.3</pre>
+
+<h3>1.2 配置环境变量</h3>
+
+<pre>
+[admin@node22 module]$ sudo vi /etc/profile
+末尾追加
+export  HIVE_HOME=/opt/module/hive-2.3.3
+export  PATH=$PATH:$HIVE_HOME/bin
+重新编译环境变量生效
+[admin@node22 hive-2.3.3]$ source /etc/profile</pre>
+
+<h3>1.3 修改conf文件</h3>
+
+<p>1.3.1 修改hive-env.sh</p>
+
+<pre>
+[admin@node22 conf]$ cd /opt/module/hive-2.3.3/conf
+[admin@node22 conf]$ cp hive-env.sh.template hive-env.sh 
+[admin@node22 conf]$ vi hive-env.sh 
+# HADOOP_HOME=${bin}/../../hadoop
+打开注释修改 HADOOP_HOME=/opt/module/hadoop-2.7.6
+# export HIVE_CONF_DIR=
+打开注释修改 HIVE_CONF_DIR=/opt/module/hive-2.3.3/conf</pre>
+
+<p>1.3.2 修改hive-log4j.properties</p>
+
+<pre>
+[admin@node22 conf]$ mv hive-log4j2.properties.template hive-log4j2.properties
+[admin@node21 conf]$ vi hive-log4j2.properties
+找到 property.hive.log.dir = ${sys:java.io.tmpdir}/${sys:user.name}
+修改 property.hive.log.dir = /opt/module/hive-2.3.3/logs</pre>
+
+<p>1.3.3 修改hive-site.xml </p>
+
+<pre>
+&lt;?xml version="1.0" encoding="UTF-8" standalone="no"?&gt;
+&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;
+&lt;configuration&gt;
+&lt;!--Hive作业的HDFS根目录位置 --&gt; 
+&lt;property&gt;
+    &lt;name&gt;hive.exec.scratchdir&lt;/name&gt;
+    &lt;value&gt;/user/hive/tmp&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--Hive作业的HDFS根目录创建写权限 --&gt; 
+&lt;property&gt;
+    &lt;name&gt;hive.scratch.dir.permission&lt;/name&gt;
+    &lt;value&gt;733&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--hdfs上hive元数据存放位置 --&gt; 
+&lt;property&gt;  
+  &lt;name&gt;hive.metastore.warehouse.dir&lt;/name&gt;  
+  &lt;value&gt;/user/hive/warehouse&lt;/value&gt;   
+&lt;/property&gt;
+&lt;!--连接数据库地址，名称 --&gt;  
+&lt;property&gt;
+  &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt;
+  &lt;value&gt;jdbc:mysql://node21/hive?createDatabaseIfNotExist=true&lt;/value&gt;  
+&lt;/property&gt;  
+&lt;!--连接数据库驱动 --&gt; 
+&lt;property&gt;
+  &lt;name&gt;javax.jdo.option.ConnectionDriverName&lt;/name&gt;  
+  &lt;value&gt;com.mysql.jdbc.Driver&lt;/value&gt;  
+&lt;/property&gt; 
+&lt;!--连接数据库用户名称 --&gt;  
+&lt;property&gt;  
+  &lt;name&gt;javax.jdo.option.ConnectionUserName&lt;/name&gt;  
+  &lt;value&gt;hive&lt;/value&gt;
+&lt;/property&gt; 
+&lt;!--连接数据库用户密码 --&gt;  
+&lt;property&gt;  
+  &lt;name&gt;javax.jdo.option.ConnectionPassword&lt;/name&gt;  
+  &lt;value&gt;hive&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前查询表的头信息 --&gt; 
+ &lt;property&gt;
+  &lt;name&gt;hive.cli.print.header&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前数据库名称信息 --&gt; 
+&lt;property&gt;
+  &lt;name&gt;hive.cli.print.current.db&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt; 
+&lt;/configuration&gt; </pre>
+
+<h3>1.4 运行Hive</h3>
+
+<p>初始化数据库</p>
+
+<pre>
+[admin@node22 conf]$ schematool -dbType mysql -initSchema  hive hive</pre>
+
+<p>1.4.1第一种方式</p>
+
+<p>服务端启动：</p>
+
+<pre>
+[admin@node22 ~]$ hive --service metastore </pre>
+
+<p>客户端启动：</p>
+
+<pre>
+[admin@node22 ~]$ hive</pre>
+
+<p>退出：quit</p>
+
+<p>1.4.2第二种方式</p>
+
+<p>服务端启动：</p>
+
+<pre>
+[admin@node22 ~]$  hiveserver2</pre>
+
+<p>客户端启动：</p>
+
+<pre>
+[admin@node22 ~]$  beeline -u  jdbc:hive2://node22:10000 -n root 
+或者
+[admin@node22 ~]$  beeline !connect jdbc:hive2://node22:10000 hive hive</pre>
+
+<p>退出：</p>
+
+<p>！quit</p>
+
+<h2>2 远程Metastore服务器</h2>
+
+<p>这里node21作为MySQL Server，node22作为Metastore服务器，node23作为客户端。</p>
+
+<h3>2.1 解压安装hive</h3>
+
+<pre>
+[admin@node22 software]$ tar zxvf apache-hive-2.3.3-bin.tar.gz -C /opt/module/
+[admin@node22 module]$ mv apache-hive-2.3.3-bin hive-2.3.3
+[admin@node23 software]$ tar zxvf apache-hive-2.3.3-bin.tar.gz -C /opt/module/
+[admin@node23 module]$ mv apache-hive-2.3.3-bin hive-2.3.3</pre>
+
+<h3>2.2 配置环境变量</h3>
+
+<pre>
+[admin@node22 module]$ sudo vi /etc/profile
+[admin@node23 module]$ sudo vi /etc/profile
+末尾追加
+export  HIVE_HOME=/opt/module/hive-2.3.3
+export  PATH=$PATH:$HIVE_HOME/bin
+重新编译环境变量生效
+[admin@node22 hive-2.3.3]$ source /etc/profile
+[admin@node22 hive-2.3.3]$ source /etc/profile</pre>
+
+<h3>2.3 修改conf文件</h3>
+
+<p>2.3.1 修改hive-env.sh</p>
+
+<pre>
+修改node22，node23节点的hive-env.sh 
+cd /opt/module/hive-2.3.3/conf
+cp hive-env.sh.template hive-env.sh 
+vi hive-env.sh 
+# HADOOP_HOME=${bin}/../../hadoop
+打开注释修改 HADOOP_HOME=/opt/module/hadoop-2.7.6
+# export HIVE_CONF_DIR=
+打开注释修改 HIVE_CONF_DIR=/opt/module/hive-2.3.3/conf</pre>
+
+<p>2.3.2 修改hive-log4j.properties</p>
+
+<pre>
+修改node22，node23节点上的hive-log4j2.properties
+mv hive-log4j2.properties.template hive-log4j2.properties
+vi hive-log4j2.properties
+找到 property.hive.log.dir = ${sys:java.io.tmpdir}/${sys:user.name}
+修改 property.hive.log.dir = /opt/module/hive-2.3.3/logs</pre>
+
+<p>2.3.3 修改hive-site.xml </p>
+
+<p>服务端配置</p>
+
+<pre>
+&lt;?xml version="1.0" encoding="UTF-8" standalone="no"?&gt;
+&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;
+&lt;configuration&gt;
+&lt;!--Hive作业的HDFS根目录位置 --&gt; 
+&lt;property&gt;
+    &lt;name&gt;hive.exec.scratchdir&lt;/name&gt;
+    &lt;value&gt;/user/hive/tmp&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--Hive作业的HDFS根目录创建写权限 --&gt; 
+&lt;property&gt;
+    &lt;name&gt;hive.scratch.dir.permission&lt;/name&gt;
+    &lt;value&gt;733&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--hdfs上hive元数据存放位置 --&gt; 
+&lt;property&gt;  
+  &lt;name&gt;hive.metastore.warehouse.dir&lt;/name&gt;  
+  &lt;value&gt;/user/hive/warehouse&lt;/value&gt;   
+&lt;/property&gt;
+&lt;!--连接数据库地址，名称 --&gt;  
+&lt;property&gt;
+  &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt;
+  &lt;value&gt;jdbc:mysql://node21/hive?createDatabaseIfNotExist=true&lt;/value&gt;  
+&lt;/property&gt;  
+&lt;!--连接数据库驱动 --&gt; 
+&lt;property&gt;
+  &lt;name&gt;javax.jdo.option.ConnectionDriverName&lt;/name&gt;  
+  &lt;value&gt;com.mysql.jdbc.Driver&lt;/value&gt;  
+&lt;/property&gt; 
+&lt;!--连接数据库用户名称 --&gt;  
+&lt;property&gt;  
+  &lt;name&gt;javax.jdo.option.ConnectionUserName&lt;/name&gt;  
+  &lt;value&gt;hive&lt;/value&gt;
+&lt;/property&gt; 
+&lt;!--连接数据库用户密码 --&gt;  
+&lt;property&gt;  
+  &lt;name&gt;javax.jdo.option.ConnectionPassword&lt;/name&gt;  
+  &lt;value&gt;hive&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前查询表的头信息 --&gt; 
+ &lt;property&gt;
+  &lt;name&gt;hive.cli.print.header&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前数据库名称信息 --&gt; 
+&lt;property&gt;
+  &lt;name&gt;hive.cli.print.current.db&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt; 
+&lt;/configuration&gt; </pre>
+
+<p>客户端配置</p>
+
+<pre>
+&lt;?xml version="1.0" encoding="UTF-8" standalone="no"?&gt;
+&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;
+&lt;configuration&gt;
+&lt;!--Hive作业的HDFS根目录位置 --&gt; 
+&lt;property&gt;
+    &lt;name&gt;hive.exec.scratchdir&lt;/name&gt;
+    &lt;value&gt;/user/hive/tmp&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--Hive作业的HDFS根目录创建写权限 --&gt; 
+&lt;property&gt;
+    &lt;name&gt;hive.scratch.dir.permission&lt;/name&gt;
+    &lt;value&gt;733&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--hdfs上hive元数据存放位置，默认 --&gt;
+&lt;property&gt;
+  &lt;name&gt;hive.metastore.warehouse.dir&lt;/name&gt;
+  &lt;value&gt;/user/hive/warehouse&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前数据库名称信息 --&gt;
+&lt;property&gt;
+  &lt;name&gt;hive.metastore.uris&lt;/name&gt;
+  &lt;value&gt;thrift://node22:9083&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前查询表的头信息 --&gt;
+ &lt;property&gt;
+  &lt;name&gt;hive.cli.print.header&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;!--客户端显示当前数据库名称信息 --&gt;
+&lt;property&gt;
+  &lt;name&gt;hive.cli.print.current.db&lt;/name&gt;
+  &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt; 
+&lt;/configuration&gt;</pre>
+
+<h3>2.4 运行Hive</h3>
+
+<p>拷贝 mysql-connector-java-5.1.9-bin.jar到服务端hive/lib下。</p>
+
+<p>初始化服务器端</p>
+
+<pre>
+[admin@node22 conf]$ schematool -dbType mysql -initSchema  hive hive</pre>
+
+<p>启动方式：</p>
+
+<p>服务端node22启动命令：</p>
+
+<p>hive  --service metastore</p>
+
+<p>查看node22的9083端口：</p>
+
+<p>netstat -nptl | grep 9083</p>
+
+<p>客户端node23启动命令：</p>
+
+<p>hive </p>
+
+<h2>四 Hive基本使用</h2>
+
+<p>现有一个文件student.txt，将其存入hive中，student.txt数据格式如下：</p>
+
+<pre>
+95002,刘晨,女,19,IS
+95017,王风娟,女,18,IS
+95018,王一,女,19,IS
+95013,冯伟,男,21,CS
+95014,王小丽,女,19,CS
+95019,邢小丽,女,19,IS
+95020,赵钱,男,21,IS
+95003,王敏,女,22,MA
+95004,张立,男,19,IS
+95012,孙花,女,20,CS
+95010,孔小涛,男,19,CS
+95005,刘刚,男,18,MA
+95006,孙庆,男,23,CS
+95007,易思玲,女,19,MA
+95008,李娜,女,18,CS
+95021,周二,男,17,MA
+95022,郑明,男,20,MA
+95001,李勇,男,20,CS
+95011,包小柏,男,18,MA
+95009,梦圆圆,女,18,MA
+95015,王君,男,18,MA</pre>
+
+<h3>1、创建一个数据库myhive</h3>
+
+<pre>
+hive&gt;<strong> create database myhive;</strong>
+OK
+Time taken: 7.847 seconds
+hive&gt; </pre>
+
+<p><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180403173156107-1549458905.png"></p>
+
+<h3>2、使用新的数据库myhive</h3>
+
+<pre>
+hive&gt;<strong> use myhive;</strong>
+OK
+Time taken: 0.047 seconds
+hive&gt; </pre>
+
+<p><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180403173305344-1780862637.png"></p>
+
+<h3>3、查看当前正在使用的数据库</h3>
+
+<pre>
+hive&gt; <strong>select</strong><strong> current_database();</strong>
+OK
+<strong>myhive</strong>
+Time taken: 0.728 seconds, Fetched: 1 row(s)
+hive&gt; </pre>
+
+<p><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180403173425413-1583852832.png"></p>
+
+<h3>4、在数据库myhive创建一张student表</h3>
+
+<pre>
+hive&gt; <strong>create table student(id int, name string, sex string, age int, department string) row format delimited fields terminated by ","</strong><strong>;</strong>
+OK
+Time taken: 0.718 seconds
+hive&gt; </pre>
+
+<p><img alt="" class="has" height="97" src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180403181521923-461375650.png" width="903"></p>
+
+<h3>5、往表中加载数据</h3>
+
+<pre>
+hive&gt; <strong>load data local inpath "/home/hadoop/student.txt"</strong><strong> into table student;</strong>
+Loading data to table myhive.student
+OK
+Time taken: 1.854 seconds
+hive&gt; </pre>
+
+<p><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180403181841534-1261507478.png"></p>
+
+<h3>6、查询数据</h3>
+
+<pre>
+hive&gt; <strong>select * from</strong><strong> student;</strong>
+OK
+95002    刘晨    女    19    IS
+95017    王风娟    女    18    IS
+95018    王一    女    19    IS
+95013    冯伟    男    21    CS
+95014    王小丽    女    19    CS
+95019    邢小丽    女    19    IS
+95020    赵钱    男    21    IS
+95003    王敏    女    22    MA
+95004    张立    男    19    IS
+95012    孙花    女    20    CS
+95010    孔小涛    男    19    CS
+95005    刘刚    男    18    MA
+95006    孙庆    男    23    CS
+95007    易思玲    女    19    MA
+95008    李娜    女    18    CS
+95021    周二    男    17    MA
+95022    郑明    男    20    MA
+95001    李勇    男    20    CS
+95011    包小柏    男    18    MA
+95009    梦圆圆    女    18    MA
+95015    王君    男    18    MA
+Time taken: 2.455 seconds, Fetched: 21 row(s)
+hive&gt; </pre>
+
+<p><img alt="" class="has" src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180403182000435-2086698927.png"></p>
+
+<h3>7、查看表结构</h3>
+
+<pre>
+hive&gt;<strong> desc student;</strong>
+OK
+id                      int                                         
+name                    string                                      
+sex                     string                                      
+age                     int                                         
+department              string                                      
+Time taken: 0.102 seconds, Fetched: 5 row(s)
+hive&gt; </pre>
+
+<p> </p>
+
+<pre>
+hive&gt;<strong> desc extended student;</strong>
+OK
+id                      int                                         
+name                    string                                      
+sex                     string                                      
+age                     int                                         
+department              string                                      
+          
+Detailed Table Information    Table(tableName:student, dbName:myhive, owner:hadoop, createTime:1522750487, lastAccessTime:0, retention:0, sd:StorageDescriptor(cols:[FieldSchema(name:id, type:int, comment:null), FieldSchema(name:name, type:string, comment:null), FieldSchema(name:sex, type:string, comment:null), FieldSchema(name:age, type:int, comment:null), FieldSchema(name:department, type:string, comment:null)], location:hdfs://myha01/user/hive/warehouse/myhive.db/student, inputFormat:org.apache.hadoop.mapred.TextInputFormat, outputFormat:org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat, compressed:false, numBuckets:-1, serdeInfo:SerDeInfo(name:null, serializationLib:org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe, parameters:{serialization.format=,, field.delim=,}), bucketCols:[], sortCols:[], parameters:{}, skewedInfo:SkewedInfo(skewedColNames:[], skewedColValues:[], skewedColValueLocationMaps:{}), storedAsSubDirectories:false), partitionKeys:[], parameters:{transient_lastDdlTime=1522750695, totalSize=523, numRows=0, rawDataSize=0, numFiles=1}, viewOriginalText:null, viewExpandedText:null, tableType:MANAGED_TABLE, rewriteEnabled:false)    
+Time taken: 0.127 seconds, Fetched: 7 row(s)
+hive&gt; </pre>
+
+<p> </p>
+
+<pre>
+hive&gt;<strong> desc formatted student;</strong>
+OK
+# col_name                data_type               comment             
+          
+id                      int                                         
+name                    string                                      
+sex                     string                                      
+age                     int                                         
+department              string                                      
+          
+# Detailed Table Information          
+Database:               myhive                   
+Owner:                  hadoop                   
+CreateTime:             Tue Apr 03 18:14:47 CST 2018     
+LastAccessTime:         UNKNOWN                  
+Retention:              0                        
+Location:               hdfs://myha01/user/hive/warehouse/myhive.db/student     
+Table Type:             MANAGED_TABLE            
+Table Parameters:          
+    numFiles                1                   
+    numRows                 0                   
+    rawDataSize             0                   
+    totalSize               523                 
+    transient_lastDdlTime    1522750695          
+          
+# Storage Information          
+SerDe Library:          org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe     
+InputFormat:            org.apache.hadoop.mapred.TextInputFormat     
+OutputFormat:           org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat     
+Compressed:             No                       
+Num Buckets:            -1                       
+Bucket Columns:         []                       
+Sort Columns:           []                       
+Storage Desc Params:          
+    field.delim             ,                   
+    serialization.format    ,                   
+Time taken: 0.13 seconds, Fetched: 34 row(s)
+hive&gt; </pre>
+
+<h2>五 安装故障解析</h2>
+
+<p>1.没有初始化数据库</p>
+
+<pre>
+[admin@node21 conf]$ hive
+which: no hbase in (/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/opt/module/jdk1.8/bin:/opt/module/jdk1.8/sbin:/opt/module/zookeeper-3.4.12/bin:/opt/module
+/hadoop-2.7.6/bin:/opt/module/hadoop-2.7.6/sbin:/home/admin/.local/bin:/home/admin/bin:/opt/module/jdk1.8/bin:/opt/module/jdk1.8/sbin:/opt/module/zookeeper-3.4.12/bin:/opt/module/hadoop-2.7.6/bin:/opt/module/hadoop-2.7.6/sbin:/opt/module/jdk1.8/bin:/opt/module/jdk1.8/sbin:/opt/module/zookeeper-3.4.12/bin:/opt/module/hadoop-2.7.6/bin:/opt/module/hadoop-2.7.6/sbin:/opt/module/jdk1.8/bin:/opt/module/jdk1.8/sbin:/opt/module/zookeeper-3.4.12/bin:/opt/module/hadoop-2.7.6/bin:/opt/module/hadoop-2.7.6/sbin:/opt/module/hive-2.3.3/bin)SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: Found binding in [jar:file:/opt/module/hive-2.3.3/lib/log4j-slf4j-impl-2.6.2.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: Found binding in [jar:file:/opt/module/hadoop-2.7.6/share/hadoop/common/lib/slf4j-log4j12-1.7.10.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [org.apache.logging.slf4j.Log4jLoggerFactory]
+
+Logging initialized using configuration in jar:file:/opt/module/hive-2.3.3/lib/hive-common-2.3.3.jar!/hive-log4j2.properties Async: true
+Exception in thread "main" java.lang.IllegalArgumentException: java.net.URISyntaxException: Relative path in absolute URI: ${system:java.io.tmpdir%7D/$%7Bsystem:user.
+name%7D    at org.apache.hadoop.fs.Path.initialize(Path.java:205)
+    at org.apache.hadoop.fs.Path.&lt;init&gt;(Path.java:171)
+    at org.apache.hadoop.hive.ql.session.SessionState.createSessionDirs(SessionState.java:659)
+    at org.apache.hadoop.hive.ql.session.SessionState.start(SessionState.java:582)
+    at org.apache.hadoop.hive.ql.session.SessionState.beginStart(SessionState.java:549)
+    at org.apache.hadoop.hive.cli.CliDriver.run(CliDriver.java:750)
+    at org.apache.hadoop.hive.cli.CliDriver.main(CliDriver.java:686)
+    at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+    at sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+    at sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+    at java.lang.reflect.Method.invoke(Method.java:498)
+    at org.apache.hadoop.util.RunJar.run(RunJar.java:221)
+    at org.apache.hadoop.util.RunJar.main(RunJar.java:136)
+Caused by: java.net.URISyntaxException: Relative path in absolute URI: ${system:java.io.tmpdir%7D/$%7Bsystem:user.name%7D
+    at java.net.URI.checkPath(URI.java:1823)
+    at java.net.URI.&lt;init&gt;(URI.java:745)
+    at org.apache.hadoop.fs.Path.initialize(Path.java:202)
+    ... 12 more </pre>            </div>
+                </div>

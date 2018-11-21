@@ -1,0 +1,210 @@
+---
+layout:     post
+title:      Hive学习笔记(4)
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc"><div class="toc">
+<ul>
+<li><a href="#hive%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0" rel="nofollow">Hive学习笔记</a><ul>
+<li><a href="#hiveql%E8%A7%86%E5%9B%BE" rel="nofollow">HiveQL:视图</a><ul>
+<li><a href="#%E4%BD%BF%E7%94%A8%E8%A7%86%E5%9B%BE%E6%9D%A5%E9%99%8D%E4%BD%8E%E6%9F%A5%E8%AF%A2%E5%A4%8D%E6%9D%82%E5%BA%A6" rel="nofollow">使用视图来降低查询复杂度</a></li>
+<li><a href="#%E4%BD%BF%E7%94%A8%E8%A7%86%E5%9B%BE%E6%9D%A5%E9%99%90%E5%88%B6%E5%9F%BA%E4%BA%8E%E6%9D%A1%E4%BB%B6%E8%BF%87%E6%BB%A4%E7%9A%84%E6%95%B0%E6%8D%AE" rel="nofollow">使用视图来限制基于条件过滤的数据</a></li>
+<li><a href="#%E5%8A%A8%E6%80%81%E5%88%86%E5%8C%BA%E4%B8%AD%E7%9A%84%E8%A7%86%E5%9B%BE%E5%92%8C-map-%E7%B1%BB%E5%9E%8B" rel="nofollow">动态分区中的视图和 map 类型</a></li>
+<li><a href="#%E8%A7%86%E5%9B%BE%E9%9B%B6%E7%A2%8E" rel="nofollow">视图零碎</a></li>
+</ul>
+</li>
+<li><a href="#hiveql%E7%B4%A2%E5%BC%95" rel="nofollow">HiveQL:索引</a><ul>
+<li><a href="#%E9%87%8D%E5%BB%BA%E7%B4%A2%E5%BC%95" rel="nofollow">重建索引</a></li>
+<li><a href="#%E6%98%BE%E7%A4%BA%E7%B4%A2%E5%BC%95" rel="nofollow">显示索引</a></li>
+<li><a href="#%E5%88%A0%E9%99%A4%E7%B4%A2%E5%BC%95" rel="nofollow">删除索引</a></li>
+<li><a href="#%E5%AE%9E%E7%8E%B0%E4%B8%80%E4%B8%AA%E5%AE%9A%E5%88%B6%E5%8C%96%E7%9A%84%E7%B4%A2%E5%BC%95%E5%A4%84%E7%90%86%E5%99%A8" rel="nofollow">实现一个定制化的索引处理器</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+
+
+
+
+<h1 id="hive学习笔记">Hive学习笔记</h1>
+
+<p>笔记内容主要来自<a href="https://download.csdn.net/download/bbirdsky/8300267" rel="nofollow">Hive编程指南</a></p>
+
+
+
+<h2 id="hiveql视图">HiveQL:视图</h2>
+
+<blockquote>
+  <p>Hive视图是一个逻辑结构，因为它不像一个表会存储数据。Hive目前暂不支持物化视图。</p>
+</blockquote>
+
+
+
+<h3 id="使用视图来降低查询复杂度">使用视图来降低查询复杂度</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-comment">-- Hive查询语句中多层嵌套</span>
+FROM(
+    <span class="hljs-operator"><span class="hljs-keyword">SELECT</span> * <span class="hljs-keyword">FROM</span> people <span class="hljs-keyword">JOIN</span> cart
+    <span class="hljs-keyword">ON</span> (cart.people_id=people.id) <span class="hljs-keyword">WHERE</span> firstname=<span class="hljs-string">'john'</span>
+) a <span class="hljs-keyword">SELECT</span> a.lastname <span class="hljs-keyword">WHERE</span> a.id=<span class="hljs-number">3</span>;</span>
+
+<span class="hljs-comment">-- 嵌套子查询变成了一个视图</span>
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">VIEW</span> shorter_join <span class="hljs-keyword">AS</span>
+<span class="hljs-keyword">SELECT</span> * <span class="hljs-keyword">FROM</span> people <span class="hljs-keyword">JOIN</span> cart
+<span class="hljs-keyword">ON</span> (cart.people_id=people.id) <span class="hljs-keyword">WHERE</span> firstname=<span class="hljs-string">'john'</span>;</span>
+
+<span class="hljs-comment">-- 现在就可以像操作表一样来操作这个视图</span>
+<span class="hljs-operator"><span class="hljs-keyword">SELECT</span> lastname <span class="hljs-keyword">FROM</span> shorter_join <span class="hljs-keyword">WHERE</span> id=<span class="hljs-number">3</span>;</span>
+</code></pre>
+
+
+
+<h3 id="使用视图来限制基于条件过滤的数据">使用视图来限制基于条件过滤的数据</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-comment">-- Hive通过创建视图来限制数据访问可以用来保护信息不被随意查询</span>
+
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> userinfo(firstname string, lastname string, ssn string, password string);</span>
+<span class="hljs-comment">-- 通过视图隐藏了ssn和password</span>
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">VIEW</span> safer_user_info <span class="hljs-keyword">AS</span> 
+<span class="hljs-keyword">SELECT</span> firstname, lastname <span class="hljs-keyword">FROM</span> userinfo;</span>
+</code></pre>
+
+
+
+<h3 id="动态分区中的视图和-map-类型">动态分区中的视图和 map 类型</h3>
+
+<p>示例数据 <br>
+<img src="https://img-blog.csdn.net/20180626083739217?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2ppbmVzc2U=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="示例数据" title=""></p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">EXTERNAL</span> <span class="hljs-keyword">TABLE</span> dynamictable(cols map&lt;string,string&gt;)
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED
+    FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\004'</span>
+    COLLECTION ITEMS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\001'</span>
+    MAP KEYS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\002'</span>
+STORED <span class="hljs-keyword">AS</span> TEXTFILE;</span>
+
+<span class="hljs-comment">--可以创建一个视图取出 type值 等于 request 的 city,state和part 3个字段。</span>
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">VIEW</span> orders(state, city, part) <span class="hljs-keyword">AS</span>
+<span class="hljs-keyword">SELECT</span> cols[<span class="hljs-string">"state"</span>], cols[<span class="hljs-string">"city"</span>], cols[<span class="hljs-string">"part"</span>]
+<span class="hljs-keyword">FROM</span> dynamictable
+<span class="hljs-keyword">WHERE</span> cols[<span class="hljs-string">"type"</span>] = <span class="hljs-string">"request"</span>;</span>
+
+<span class="hljs-comment">-- 可以加where限制条件</span>
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">VIEW</span> shipments(<span class="hljs-keyword">time</span>, part) <span class="hljs-keyword">AS</span>
+<span class="hljs-keyword">SELECT</span> cols[<span class="hljs-string">"time"</span>], cols[<span class="hljs-string">"part"</span>]
+<span class="hljs-keyword">FROM</span> dynamictable
+<span class="hljs-keyword">WHERE</span> cols[<span class="hljs-string">"type"</span>] = <span class="hljs-string">"response"</span>;</span></code></pre>
+
+
+
+<h3 id="视图零碎">视图零碎</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs ">
+<span class="hljs-comment">-- 创建视图</span>
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">VIEW</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> shipments(<span class="hljs-keyword">time</span>, part)
+COMMENT <span class="hljs-string">'Time and parts for shipments.'</span>
+TBLPROPERTIES(<span class="hljs-string">'creator'</span>=<span class="hljs-string">'me'</span>)
+<span class="hljs-keyword">AS</span> <span class="hljs-keyword">SELECT</span> ...;</span>
+
+<span class="hljs-comment">--放弃视图</span>
+<span class="hljs-operator"><span class="hljs-keyword">DROP</span> <span class="hljs-keyword">VIEW</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span> shipments;</span>
+
+<span class="hljs-comment">--更新</span>
+<span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">VIEW</span> shipments <span class="hljs-keyword">SET</span> TBLPROPERTIES(<span class="hljs-string">'created_at'</span>=<span class="hljs-string">'some_timestamp'</span>);</span>
+</code></pre>
+
+
+
+<h2 id="hiveql索引">HiveQL:索引</h2>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> employees(
+    name STRING,
+    salary <span class="hljs-keyword">FLOAT</span>,
+    subordinates ARRAY&lt;STRING&gt;,
+    deductions MAP&lt;STRING,<span class="hljs-keyword">FLOAT</span>&gt;,
+    address STRUCT&lt;street:STRING, city:STRING, state:STRING, zip:<span class="hljs-keyword">INT</span>&gt;
+)
+PARTITIONED <span class="hljs-keyword">BY</span>(country STRING, state STRING);</span>
+
+<span class="hljs-comment">-- 下面仅对分区字段country 建立索引</span>
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> INDEX employees_index
+<span class="hljs-keyword">ON</span> <span class="hljs-keyword">TABLE</span> employees (country)
+<span class="hljs-keyword">AS</span> <span class="hljs-string">'org.apache.hadoop.hive.ql.index.compact.CompactIndexHandler'</span>
+<span class="hljs-keyword">WITH</span> <span class="hljs-keyword">DEFERRED</span> REBUILD
+IDXPROPERTIES(<span class="hljs-string">'creator'</span>=<span class="hljs-string">'me'</span>, <span class="hljs-string">'created_at'</span>=<span class="hljs-string">'some_time'</span>)
+<span class="hljs-keyword">IN</span> <span class="hljs-keyword">TABLE</span> employees_index_table
+PARTITIONED <span class="hljs-keyword">BY</span> (country, name)
+COMMENT <span class="hljs-string">'Employees indexed by country and name.'</span>;</span>
+
+
+<span class="hljs-comment">--Bitmap索引普遍应用于排重后值较少的列</span>
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> INDEX employees_index
+<span class="hljs-keyword">ON</span> <span class="hljs-keyword">TABLE</span> employees (country)
+<span class="hljs-keyword">AS</span> <span class="hljs-string">'BITMAP'</span>
+<span class="hljs-keyword">WITH</span> <span class="hljs-keyword">DEFERRED</span> REBUILD
+IDXPROPERTIES(<span class="hljs-string">'creator'</span>=<span class="hljs-string">'me'</span>,<span class="hljs-string">'created_at'</span>=<span class="hljs-string">'some_time'</span>)
+<span class="hljs-keyword">IN</span> <span class="hljs-keyword">TABLE</span> employees_index_table
+PARTITIONED <span class="hljs-keyword">BY</span> (country, name)
+COMMENT <span class="hljs-string">'Employees indexed by country and name.'</span>;</span>
+</code></pre>
+
+
+
+<h3 id="重建索引">重建索引</h3>
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-comment">-- 如果用户指定了 DEFERRED REBUILD,那么新索引将呈现空白状态。在任何时候，都可以进行第一次索引创建或者使用 ALTER INDEX 对索引进行重建</span>
+<span class="hljs-operator"><span class="hljs-keyword">ALTER</span> INDEX employees_index
+<span class="hljs-keyword">ON</span> <span class="hljs-keyword">TABLE</span> employees
+PARTITION (country=<span class="hljs-string">'US'</span>)
+REBUILD;</span>
+<span class="hljs-comment">-- 如果省略掉PARTITION，那么将会对所有分区进行重建索引</span>
+<span class="hljs-comment">--在工作流可以对对应的索引执行重建索引语句ALTER INDEX...REBUILD</span></code></pre>
+
+
+
+<h3 id="显示索引">显示索引</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-comment">-- 显示对于这个索引表对所有列所建立的索引</span>
+<span class="hljs-operator"><span class="hljs-keyword">SHOW</span> FORMATTED INDEX <span class="hljs-keyword">ON</span> employees;</span>
+
+<span class="hljs-comment">-- INDEXS 列举出多个索引信息</span>
+<span class="hljs-operator"><span class="hljs-keyword">SHOW</span> FORMATTED INDEXS <span class="hljs-keyword">ON</span> employees;</span></code></pre>
+
+
+
+<h3 id="删除索引">删除索引</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-comment">-- 删除一个索引将会删除这个索引表</span>
+<span class="hljs-operator"><span class="hljs-keyword">DROP</span> INDEX <span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span> employees_index <span class="hljs-keyword">ON</span> <span class="hljs-keyword">TABLE</span> employees;</span></code></pre>
+
+
+
+<h3 id="实现一个定制化的索引处理器">实现一个定制化的索引处理器</h3>
+
+<blockquote>
+  <p>Hive Wiki 页面具有实现一个定制化的索引处理器的完整的例子，链接是 <a href="https://cwiki.apache.org/confluence/display/Hive/IndexDev#CREATE_INDEX" rel="nofollow">https://cwiki.apache.org/confluence/display/Hive/IndexDev#CREATE_INDEX</a> 其中还包括了索引的初步设计文档。</p>
+</blockquote>
+
+<hr>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

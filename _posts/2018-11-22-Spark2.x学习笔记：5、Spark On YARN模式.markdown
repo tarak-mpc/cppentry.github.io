@@ -1,0 +1,860 @@
+---
+layout:     post
+title:      Spark2.x学习笔记：5、Spark On YARN模式
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，欢迎转载。					https://blog.csdn.net/chengyuqiang/article/details/77864246				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="spark学习笔记5spark-on-yarn模式">Spark学习笔记：5、Spark On YARN模式</h2>
+
+<hr>
+
+<p>有些关于Spark on YARN部署的博客，实际上介绍的是Spark的 standalone运行模式。如果启动Spark的master和worker服务，这是Spark的 standalone运行模式，不是Spark on YARN运行模式，请不要混淆。</p>
+
+<p>Spark在生产环境中，主要部署在Hadoop集群中，以Spark On YARN模式运行，依靠yarn来调度Spark，比默认的Spark运行模式性能要好的多。 <br>
+所以需要先搭建Hadoop分布式环境，然后就可以开始部署Spark on YARN了。</p>
+
+<p>如果你已经准备好Hadoop分布式环境，请直接跳转到5.5节； <br>
+如果你对Hadoop分布式环境搭建不熟悉，请参考下面5.1节到5.4节内容。</p>
+
+<p>Hadoop分布式环境搭总思路：以192.168.1.180节点为基准构建Spark分布式环境，然后将软件包分发到各个节点。 <br>
+我的192.168.1.180节点是个虚拟机，这样可以通过复制虚拟机快速搭建集群。</p>
+
+
+
+<h3 id="51-基本linux环境搭建">5.1 基本Linux环境搭建</h3>
+
+<p><strong>（1）配置IP地址</strong></p>
+
+<p><strong>（2）修改hosts文件</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[root@master ~]<span class="hljs-preprocessor"># vi /etc/hosts</span>
+[root@master ~]<span class="hljs-preprocessor"># cat /etc/hosts</span>
+<span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span>   localhost localhost<span class="hljs-preprocessor">.localdomain</span> localhost4 localhost4<span class="hljs-preprocessor">.localdomain</span>4
+::<span class="hljs-number">1</span>         localhost localhost<span class="hljs-preprocessor">.localdomain</span> localhost6 localhost6<span class="hljs-preprocessor">.localdomain</span>6
+<span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.180</span>   master
+<span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.181</span>   slave1
+<span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.182</span>   slave2
+[root@master ~]<span class="hljs-preprocessor"># </span></code></pre>
+
+<p><strong>（3）关闭防火墙和禁用Selinux</strong> <br>
+停止防火墙</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># systemctl stop firewalld</span>
+[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># systemctl disable firewalld</span>
+</code></pre>
+
+<p>禁用Selinux</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># setenforce 0</span>
+[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config</span></code></pre>
+
+<p>查看修改后的文件</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vala">[root@master ~]# cat /etc/selinux/config 
+
+<span class="hljs-preprocessor"># This file controls the state of SELinux on the system.</span>
+<span class="hljs-preprocessor"># SELINUX= can take one of these three values:</span>
+<span class="hljs-preprocessor">#     enforcing - SELinux security policy is enforced.</span>
+<span class="hljs-preprocessor">#     permissive - SELinux prints warnings instead of enforcing.</span>
+<span class="hljs-preprocessor">#     disabled - No SELinux policy is loaded.</span>
+SELINUX=disabled
+<span class="hljs-preprocessor"># SELINUXTYPE= can take one of three two values:</span>
+<span class="hljs-preprocessor">#     targeted - Targeted processes are protected,</span>
+<span class="hljs-preprocessor">#     minimum - Modification of targeted policy. Only selected processes are protected. </span>
+<span class="hljs-preprocessor">#     mls - Multi Level Security protection.</span>
+SELINUXTYPE=targeted 
+
+
+[root@master ~]#</code></pre>
+
+<p><strong>（4）安装openssh-clients</strong> <br>
+安装openssh-clients</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># yum install -y openssh-clients</span></code></pre>
+
+<p>在/root目录下准备一个脚本文件sshUtil.sh，用于SSH免密登录配置（后面再执行），内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-shebang">#!/bin/bash</span>
+ssh-keygen -q -t rsa -N <span class="hljs-string">""</span> <span class="hljs-operator">-f</span> /root/.ssh/id_rsa
+ssh-copy-id -i localhost
+ssh-copy-id -i master
+ssh-copy-id -i slave1
+ssh-copy-id -i slave2</code></pre>
+
+<p>参数说明：</p>
+
+<ul>
+<li>-t指定算法</li>
+<li>-f 指定生成秘钥路径</li>
+<li>-N指定密码</li>
+</ul>
+
+<p><strong>（5）安装JDK8</strong> <br>
+下载解压</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># tar -zxvf jdk-8u144-linux-x64.tar.gz -C /opt</span></code></pre>
+
+<p>配置环境变量</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">[root@master ~]<span class="hljs-comment"># vi /etc/profile.d/custom.sh</span>
+[root@master ~]<span class="hljs-comment"># cat /etc/profile.d/custom.sh</span>
+<span class="hljs-shebang">#!/bin/bash</span>
+<span class="hljs-comment">#java path</span>
+<span class="hljs-keyword">export</span> JAVA_HOME=/opt/jdk1.<span class="hljs-number">8.0</span>_144
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">$PATH</span>:<span class="hljs-variable">$JAVA_HOME</span>/bin
+<span class="hljs-keyword">export</span> CLASSPATH=.:<span class="hljs-variable">$CLASSPATH</span>:<span class="hljs-variable">$JAVA_HOME</span>/lib
+[root@master ~]<span class="hljs-comment"># source /etc/profile.d/custom.sh</span>
+[root@master ~]<span class="hljs-comment"># java -version</span>
+java version <span class="hljs-string">"1.8.0_144"</span>
+Java(TM) SE Runtime Environment (build <span class="hljs-number">1.8</span>.<span class="hljs-number">0</span>_144-b01)
+Java HotSpot(TM) <span class="hljs-number">64</span>-Bit Server VM (build <span class="hljs-number">25.144</span>-b01, mixed mode)
+[root@master ~]<span class="hljs-comment"># </span></code></pre>
+
+
+
+<h3 id="52-hadoop环境搭建">5.2 Hadoop环境搭建</h3>
+
+<p><strong>（1）Hadoop集群规划</strong></p>
+
+<table>
+<thead>
+<tr>
+  <th>序号</th>
+  <th>OS</th>
+  <th>IP</th>
+  <th>节点名</th>
+  <th>NN</th>
+  <th>DN</th>
+  <th>RM</th>
+  <th>NM</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>1</td>
+  <td>CentOS7</td>
+  <td>192.168.1.180</td>
+  <td>master</td>
+  <td>Y</td>
+  <td>Y</td>
+  <td>Y</td>
+  <td>Y</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td>CentOS7</td>
+  <td>192.168.1.181</td>
+  <td>slave1</td>
+  <td></td>
+  <td>Y</td>
+  <td></td>
+  <td>Y</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td>CentOS7</td>
+  <td>192.168.1.182</td>
+  <td>slave2</td>
+  <td></td>
+  <td>Y</td>
+  <td></td>
+  <td>Y</td>
+</tr>
+</tbody></table>
+
+
+<p><strong>（2）下载Hadoop软件包</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># wget http://mirrors.tuna.tsinghua.edu.cn/apache/hadoop/common/hadoop-2.7.4/hadoop-2.7.4.tar.gz </span>
+[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># tar -zxvf hadoop-2.7.4.tar.gz -C /opt</span></code></pre>
+
+<p><strong>（3）hadoop-env.sh</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs mel">[root<span class="hljs-variable">@master</span> hadoop]# <span class="hljs-keyword">pwd</span>
+/opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/etc/hadoop
+[root<span class="hljs-variable">@master</span> hadoop]# sed -i <span class="hljs-string">'s#export JAVA_HOME=${JAVA_HOME}#export JAVA_HOME=/opt/jdk1.8.0_144#'</span> hadoop-<span class="hljs-keyword">env</span>.sh </code></pre>
+
+<p><strong>（4）core-site.xml</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> hadoop-<span class="hljs-number">2.7</span>.<span class="hljs-number">4</span>]<span class="hljs-comment"># vi etc/hadoop/core-site.xml</span></code></pre>
+
+<p>编辑内容如下</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-pi">&lt;?xml version="1.0" encoding="UTF-8"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>fs.defaultFS<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://master:9000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hadoop.tmp.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/var/data/hadoop<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>io.file.buffer.size<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>65536<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p><strong>（5）hdfs-site.xml</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@node1</span> hadoop]<span class="hljs-comment"># vi hdfs-site.xml</span></code></pre>
+
+<p>hdfs-site.xml文件内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-pi">&lt;?xml version="1.0" encoding="UTF-8"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.replication<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>3<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.namenode.secondary.http-address<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>slave2:50090<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.namenode.secondary.https-address<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>slave2:50091<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>    
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p><strong>（6）slaves</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> hadoop]<span class="hljs-comment"># echo 'master' &gt; slaves</span>
+[root<span class="hljs-variable">@master</span> hadoop]<span class="hljs-comment"># echo 'slave1' &gt;&gt; slaves</span>
+[root<span class="hljs-variable">@master</span> hadoop]<span class="hljs-comment"># echo 'slave2' &gt;&gt; slaves</span>
+[root<span class="hljs-variable">@master</span> hadoop]<span class="hljs-comment"># cat slaves </span>
+master
+slave1
+slave2
+[root<span class="hljs-variable">@master</span> hadoop]<span class="hljs-comment">#</span></code></pre>
+
+<p><strong>（7）mapred-site.xml</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml">[root@master hadoop-2.7.4]# vi etc/hadoop/mapred-site.xml
+[root@master hadoop-2.7.4]# cat etc/hadoop/mapred-site.xml
+<span class="hljs-pi">&lt;?xml version="1.0"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>  
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapreduce.framework.name<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>  
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>yarn<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>  
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span> 
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p><strong>（8）yarn-site.xml</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-pi">&lt;?xml version="1.0" encoding="utf-8"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.resourcemanager.hostname<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>master<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.aux-services<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>mapreduce_shuffle<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p><strong>（9）配置环境变量</strong> <br>
+编辑/etc/profile.d/custom.sh，增加如下内容</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-comment">#hadoop path</span>
+<span class="hljs-keyword">export</span> HADOOP_HOME=/opt/hadoop-<span class="hljs-number">2.7</span>.<span class="hljs-number">4</span>
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">${HADOOP_HOME}</span>/bin:<span class="hljs-variable">${HADOOP_HOME}</span>/sbin:<span class="hljs-variable">$PATH</span>
+<span class="hljs-keyword">export</span> HADOOP_MAPRED_HOME=<span class="hljs-variable">${HADOOP_HOME}</span>
+<span class="hljs-keyword">export</span> HADOOP_COMMON_HOME=<span class="hljs-variable">${HADOOP_HOME}</span>
+<span class="hljs-keyword">export</span> HADOOP_HDFS_HOME=<span class="hljs-variable">${HADOOP_HOME}</span>
+<span class="hljs-keyword">export</span> YARN_HOME=<span class="hljs-variable">${HADOOP_HOME}</span></code></pre>
+
+
+
+<h3 id="53-搭建集群">5.3 搭建集群</h3>
+
+<p>上面已经对Linux基础环境和Hadoop环境配置好，现在需要构建集群。这里通过最快捷的方式，复制虚拟机。</p>
+
+<p><strong>（1）复制虚拟机</strong> <br>
+首先关闭虚拟机master 192.168.1.180，先复制一个slave1节点，操作如下：</p>
+
+<ul>
+<li>在VMWare软件中右键单击master，在弹出的快捷菜单中选中Mange–&gt;clone；</li>
+<li>然后弹出克隆向导，直接单击“Next”</li>
+<li>Clone from界面默认选项即可，再次单击“Next”</li>
+<li>Clone Type界面中选中Create a full clone</li>
+<li>Name输入框输入节点名称slave1，Location选中新虚拟机存放目录（默认值即可），单击“Next”</li>
+<li>单击Finish按钮，开始复制，最后单击“Close”按钮即可</li>
+</ul>
+
+<p>同样的操作，再复制一个slave2节点。 <br>
+<strong>（2）修改IP和hostname</strong> <br>
+先修改新节点slave1的IP和hostname <br>
+直接通过sed命令修改IPADDR值即可。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">sed <span class="hljs-attribute">-i</span> <span class="hljs-string">'s/192.168.1.180/192.168.1.181'</span> /etc/sysconfig/network<span class="hljs-attribute">-scripts</span>/ifcfg<span class="hljs-attribute">-ens32</span></code></pre>
+
+<p>然后重启网络</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ">systemctl restart network</code></pre>
+
+<p>修改主机名</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">hostnamectl <span class="hljs-built_in">set</span><span class="hljs-attribute">-hostname</span> slave1</code></pre>
+
+<p>同样操作修改slave2节点的IP和hostanem</p>
+
+<p><strong>可能存在的问题：</strong> <br>
+如果复制的虚拟机无法联网，可以尝试编辑/etc/sysconfig/network-scripts/ifcfg-ens32文件，<strong>删除UUID和HWADDR两行数据</strong>。然后重启网络。</p>
+
+<p><strong>（3）SSH免密操作</strong> <br>
+在master节点上执行sshUtil.sh脚本，按照提示输入yes和对应节点密码</p>
+
+<pre class="prettyprint"><code class=" hljs applescript">[root@master ~]<span class="hljs-comment"># sh sshUtil.sh </span>
+The authenticity <span class="hljs-keyword">of</span> host 'localhost (::<span class="hljs-number">1</span>)' can't be established.
+ECDSA key fingerprint <span class="hljs-keyword">is</span> <span class="hljs-number">22</span>:<span class="hljs-number">5</span>e:<span class="hljs-number">82</span>:fa:<span class="hljs-number">7</span>b:c3:<span class="hljs-number">26</span>:de:<span class="hljs-number">30</span>:<span class="hljs-number">76</span>:<span class="hljs-number">73</span>:bd:<span class="hljs-number">7</span>c:a2:<span class="hljs-number">17</span>:<span class="hljs-number">29.</span>
+Are you sure you want <span class="hljs-keyword">to</span> <span class="hljs-keyword">continue</span> connecting (yes/no)? yes
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: attempting <span class="hljs-keyword">to</span> <span class="hljs-command">log</span> <span class="hljs-keyword">in</span> <span class="hljs-keyword">with</span> <span class="hljs-keyword">the</span> new key(s), <span class="hljs-keyword">to</span> filter out any <span class="hljs-keyword">that</span> are already installed
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: <span class="hljs-number">1</span> key(s) remain <span class="hljs-keyword">to</span> be installed <span class="hljs-comment">-- if you are prompted now it is to install the new keys</span>
+root@localhost's password: 
+
+Number <span class="hljs-keyword">of</span> key(s) added: <span class="hljs-number">1</span>
+
+Now <span class="hljs-keyword">try</span> logging <span class="hljs-keyword">into</span> <span class="hljs-keyword">the</span> machine, <span class="hljs-keyword">with</span>:   <span class="hljs-string">"ssh 'localhost'"</span>
+<span class="hljs-keyword">and</span> check <span class="hljs-keyword">to</span> make sure <span class="hljs-keyword">that</span> only <span class="hljs-keyword">the</span> key(s) you wanted were added.
+
+The authenticity <span class="hljs-keyword">of</span> host 'master (<span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.180</span>)' can't be established.
+ECDSA key fingerprint <span class="hljs-keyword">is</span> <span class="hljs-number">22</span>:<span class="hljs-number">5</span>e:<span class="hljs-number">82</span>:fa:<span class="hljs-number">7</span>b:c3:<span class="hljs-number">26</span>:de:<span class="hljs-number">30</span>:<span class="hljs-number">76</span>:<span class="hljs-number">73</span>:bd:<span class="hljs-number">7</span>c:a2:<span class="hljs-number">17</span>:<span class="hljs-number">29.</span>
+Are you sure you want <span class="hljs-keyword">to</span> <span class="hljs-keyword">continue</span> connecting (yes/no)? yes
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: attempting <span class="hljs-keyword">to</span> <span class="hljs-command">log</span> <span class="hljs-keyword">in</span> <span class="hljs-keyword">with</span> <span class="hljs-keyword">the</span> new key(s), <span class="hljs-keyword">to</span> filter out any <span class="hljs-keyword">that</span> are already installed
+
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: WARNING: All keys were skipped because they already exist <span class="hljs-function_start"><span class="hljs-keyword">on</span></span> <span class="hljs-keyword">the</span> remote system.
+
+The authenticity <span class="hljs-keyword">of</span> host 'slave1 (<span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.181</span>)' can't be established.
+ECDSA key fingerprint <span class="hljs-keyword">is</span> <span class="hljs-number">22</span>:<span class="hljs-number">5</span>e:<span class="hljs-number">82</span>:fa:<span class="hljs-number">7</span>b:c3:<span class="hljs-number">26</span>:de:<span class="hljs-number">30</span>:<span class="hljs-number">76</span>:<span class="hljs-number">73</span>:bd:<span class="hljs-number">7</span>c:a2:<span class="hljs-number">17</span>:<span class="hljs-number">29.</span>
+Are you sure you want <span class="hljs-keyword">to</span> <span class="hljs-keyword">continue</span> connecting (yes/no)? yes
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: attempting <span class="hljs-keyword">to</span> <span class="hljs-command">log</span> <span class="hljs-keyword">in</span> <span class="hljs-keyword">with</span> <span class="hljs-keyword">the</span> new key(s), <span class="hljs-keyword">to</span> filter out any <span class="hljs-keyword">that</span> are already installed
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: <span class="hljs-number">1</span> key(s) remain <span class="hljs-keyword">to</span> be installed <span class="hljs-comment">-- if you are prompted now it is to install the new keys</span>
+root@slave1's password: 
+
+Number <span class="hljs-keyword">of</span> key(s) added: <span class="hljs-number">1</span>
+
+Now <span class="hljs-keyword">try</span> logging <span class="hljs-keyword">into</span> <span class="hljs-keyword">the</span> machine, <span class="hljs-keyword">with</span>:   <span class="hljs-string">"ssh 'slave1'"</span>
+<span class="hljs-keyword">and</span> check <span class="hljs-keyword">to</span> make sure <span class="hljs-keyword">that</span> only <span class="hljs-keyword">the</span> key(s) you wanted were added.
+
+The authenticity <span class="hljs-keyword">of</span> host 'slave2 (<span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.182</span>)' can't be established.
+ECDSA key fingerprint <span class="hljs-keyword">is</span> <span class="hljs-number">22</span>:<span class="hljs-number">5</span>e:<span class="hljs-number">82</span>:fa:<span class="hljs-number">7</span>b:c3:<span class="hljs-number">26</span>:de:<span class="hljs-number">30</span>:<span class="hljs-number">76</span>:<span class="hljs-number">73</span>:bd:<span class="hljs-number">7</span>c:a2:<span class="hljs-number">17</span>:<span class="hljs-number">29.</span>
+Are you sure you want <span class="hljs-keyword">to</span> <span class="hljs-keyword">continue</span> connecting (yes/no)? yes
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: attempting <span class="hljs-keyword">to</span> <span class="hljs-command">log</span> <span class="hljs-keyword">in</span> <span class="hljs-keyword">with</span> <span class="hljs-keyword">the</span> new key(s), <span class="hljs-keyword">to</span> filter out any <span class="hljs-keyword">that</span> are already installed
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: <span class="hljs-number">1</span> key(s) remain <span class="hljs-keyword">to</span> be installed <span class="hljs-comment">-- if you are prompted now it is to install the new keys</span>
+root@slave2's password: 
+
+Number <span class="hljs-keyword">of</span> key(s) added: <span class="hljs-number">1</span>
+
+Now <span class="hljs-keyword">try</span> logging <span class="hljs-keyword">into</span> <span class="hljs-keyword">the</span> machine, <span class="hljs-keyword">with</span>:   <span class="hljs-string">"ssh 'slave2'"</span>
+<span class="hljs-keyword">and</span> check <span class="hljs-keyword">to</span> make sure <span class="hljs-keyword">that</span> only <span class="hljs-keyword">the</span> key(s) you wanted were added.
+
+[root@master ~]<span class="hljs-comment"># </span></code></pre>
+
+<p>然后在其他两个节点上执行sshUtil.sh</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@slave1</span> ~]<span class="hljs-comment"># sh sshUtil.sh </span>
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@slave2</span> ~]<span class="hljs-comment"># sh sshUtil.sh </span></code></pre>
+
+<p><strong>（4）环境变量生效</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># source /etc/profile.d/custom.sh</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@slave1</span> ~]<span class="hljs-comment"># source /etc/profile.d/custom.sh</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@slave2</span> ~]<span class="hljs-comment"># source /etc/profile.d/custom.sh</span></code></pre>
+
+
+
+<h3 id="54-启动hadoop集群">5.4 启动Hadoop集群</h3>
+
+<p><strong>（0）清空数据</strong> <br>
+因为前面在192.168.1.180节点上搭建了Hadoop伪分布式环境，进行了namenode格式化，这里先清除一下Hadoop数据。如果之前没有进行Hadoopnamenode格式化，则不要清除。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># rm -rf /tmp/*</span></code></pre>
+
+<p><strong>（1）namenode格式化</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[root@master ~]<span class="hljs-preprocessor"># hdfs namenode -format</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">51</span> INFO namenode<span class="hljs-preprocessor">.NameNode</span>: STARTUP_MSG: 
+<span class="hljs-comment">/************************************************************
+STARTUP_MSG: Starting NameNode
+STARTUP_MSG:   host = master/192.168.1.180
+STARTUP_MSG:   args = [-format]
+STARTUP_MSG:   version = 2.7.4
+STARTUP_MSG:   classpath = /opt/hadoop-2.7.4/etc/hadoop:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-compress-1.4.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-cli-1.2.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jettison-1.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/curator-framework-2.7.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/java-xmlbuilder-0.4.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/slf4j-api-1.7.10.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-digester-1.8.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/httpclient-4.2.5.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/api-asn1-api-1.0.0-M20.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/protobuf-java-2.5.0.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jersey-server-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/mockito-all-1.8.5.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-httpclient-3.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jersey-core-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/xmlenc-0.52.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jackson-mapper-asl-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jersey-json-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/curator-client-2.7.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/avro-1.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-net-3.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jackson-xc-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/log4j-1.2.17.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/gson-2.2.4.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/hamcrest-core-1.3.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-io-2.4.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-configuration-1.6.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/activation-1.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/api-util-1.0.0-M20.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jets3t-0.9.0.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/apacheds-i18n-2.0.0-M15.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jetty-util-6.1.26.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-collections-3.2.2.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/zookeeper-3.4.6.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jackson-core-asl-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-beanutils-core-1.8.0.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jsch-0.1.54.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jaxb-impl-2.2.3-1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-math3-3.1.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/servlet-api-2.5.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-logging-1.1.3.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jsr305-3.0.0.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-beanutils-1.7.0.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/xz-1.0.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jaxb-api-2.2.2.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jetty-sslengine-6.1.26.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/curator-recipes-2.7.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/snappy-java-1.0.4.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/guava-11.0.2.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/httpcore-4.2.5.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/hadoop-auth-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/junit-4.11.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/slf4j-log4j12-1.7.10.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jackson-jaxrs-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/paranamer-2.3.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/netty-3.6.2.Final.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jsp-api-2.1.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/asm-3.2.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/stax-api-1.0-2.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/apacheds-kerberos-codec-2.0.0-M15.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-codec-1.4.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/hadoop-annotations-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/jetty-6.1.26.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/htrace-core-3.1.0-incubating.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/commons-lang-2.6.jar:/opt/hadoop-2.7.4/share/hadoop/common/hadoop-nfs-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/common/hadoop-common-2.7.4-tests.jar:/opt/hadoop-2.7.4/share/hadoop/common/hadoop-common-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/xml-apis-1.3.04.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/commons-cli-1.2.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/netty-all-4.0.23.Final.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/protobuf-java-2.5.0.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/jersey-server-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/jersey-core-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/xmlenc-0.52.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/jackson-mapper-asl-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/leveldbjni-all-1.8.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/log4j-1.2.17.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/commons-io-2.4.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/jetty-util-6.1.26.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/jackson-core-asl-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/xercesImpl-2.9.1.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/servlet-api-2.5.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/commons-logging-1.1.3.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/jsr305-3.0.0.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/guava-11.0.2.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/commons-daemon-1.0.13.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/netty-3.6.2.Final.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/asm-3.2.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/commons-codec-1.4.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/jetty-6.1.26.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/htrace-core-3.1.0-incubating.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/lib/commons-lang-2.6.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/hadoop-hdfs-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/hadoop-hdfs-2.7.4-tests.jar:/opt/hadoop-2.7.4/share/hadoop/hdfs/hadoop-hdfs-nfs-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/commons-compress-1.4.1.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/guice-3.0.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/commons-cli-1.2.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jettison-1.1.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/protobuf-java-2.5.0.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jersey-server-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jersey-core-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jackson-mapper-asl-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jersey-json-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jackson-xc-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/leveldbjni-all-1.8.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/guice-servlet-3.0.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/log4j-1.2.17.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/commons-io-2.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/activation-1.1.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jetty-util-6.1.26.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/commons-collections-3.2.2.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/zookeeper-3.4.6.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jersey-guice-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jackson-core-asl-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jaxb-impl-2.2.3-1.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/javax.inject-1.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jersey-client-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/servlet-api-2.5.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/commons-logging-1.1.3.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jsr305-3.0.0.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/xz-1.0.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jaxb-api-2.2.2.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/guava-11.0.2.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/zookeeper-3.4.6-tests.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jackson-jaxrs-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/netty-3.6.2.Final.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/asm-3.2.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/stax-api-1.0-2.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/aopalliance-1.0.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/commons-codec-1.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/jetty-6.1.26.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/lib/commons-lang-2.6.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-client-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-server-resourcemanager-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-common-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-applications-distributedshell-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-applications-unmanaged-am-launcher-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-api-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-server-tests-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-server-web-proxy-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-server-sharedcachemanager-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-server-common-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-server-nodemanager-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-server-applicationhistoryservice-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/yarn/hadoop-yarn-registry-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/commons-compress-1.4.1.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/guice-3.0.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/protobuf-java-2.5.0.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/jersey-server-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/jersey-core-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/jackson-mapper-asl-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/avro-1.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/leveldbjni-all-1.8.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/guice-servlet-3.0.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/log4j-1.2.17.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/hamcrest-core-1.3.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/commons-io-2.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/jersey-guice-1.9.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/jackson-core-asl-1.9.13.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/javax.inject-1.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/xz-1.0.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/snappy-java-1.0.4.1.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/junit-4.11.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/paranamer-2.3.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/netty-3.6.2.Final.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/asm-3.2.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/aopalliance-1.0.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/lib/hadoop-annotations-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-client-hs-plugins-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-client-jobclient-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-client-app-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-client-common-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-client-jobclient-2.7.4-tests.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-client-core-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-client-hs-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-examples-2.7.4.jar:/opt/hadoop-2.7.4/share/hadoop/mapreduce/hadoop-mapreduce-client-shuffle-2.7.4.jar:/opt/hadoop-2.7.4/contrib/capacity-scheduler/*.jar
+STARTUP_MSG:   build = https://shv@git-wip-us.apache.org/repos/asf/hadoop.git -r cd915e1e8d9d0131462a0b7301586c175728a282; compiled by 'kshvachk' on 2017-08-01T00:29Z
+STARTUP_MSG:   java = 1.8.0_144
+************************************************************/</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">51</span> INFO namenode<span class="hljs-preprocessor">.NameNode</span>: registered UNIX signal handlers for [TERM, HUP, INT]
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">51</span> INFO namenode<span class="hljs-preprocessor">.NameNode</span>: createNameNode [-format]
+Formatting using clusterid: CID-f377c031-d448-<span class="hljs-number">4e66</span>-b06e-<span class="hljs-number">8</span>ecd2eb7e57b
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: No KeyProvider found.
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: fsLock is fair: true
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: Detailed lock hold time metrics enabled: false
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.DatanodeManager</span>: dfs<span class="hljs-preprocessor">.block</span><span class="hljs-preprocessor">.invalidate</span><span class="hljs-preprocessor">.limit</span>=<span class="hljs-number">1000</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.DatanodeManager</span>: dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.datanode</span><span class="hljs-preprocessor">.registration</span><span class="hljs-preprocessor">.ip</span>-hostname-check=true
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.startup</span><span class="hljs-preprocessor">.delay</span><span class="hljs-preprocessor">.block</span><span class="hljs-preprocessor">.deletion</span><span class="hljs-preprocessor">.sec</span> is <span class="hljs-keyword">set</span> to <span class="hljs-number">000</span>:<span class="hljs-number">00</span>:<span class="hljs-number">00</span>:<span class="hljs-number">00.000</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: The block deletion will start around <span class="hljs-number">2017</span> Sep <span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: Computing capacity for map BlocksMap
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: VM type       = <span class="hljs-number">64</span>-bit
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: <span class="hljs-number">2.0</span>% max memory <span class="hljs-number">889</span> MB = <span class="hljs-number">17.8</span> MB
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: capacity      = <span class="hljs-number">2</span>^<span class="hljs-number">21</span> = <span class="hljs-number">2097152</span> entries
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: dfs<span class="hljs-preprocessor">.block</span><span class="hljs-preprocessor">.access</span><span class="hljs-preprocessor">.token</span><span class="hljs-preprocessor">.enable</span>=false
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: defaultReplication         = <span class="hljs-number">1</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: maxReplication             = <span class="hljs-number">512</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: minReplication             = <span class="hljs-number">1</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: maxReplicationStreams      = <span class="hljs-number">2</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: replicationRecheckInterval = <span class="hljs-number">3000</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: encryptDataTransfer        = false
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO blockmanagement<span class="hljs-preprocessor">.BlockManager</span>: maxNumBlocksToLog          = <span class="hljs-number">1000</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: fsOwner             = root (auth:SIMPLE)
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: supergroup          = supergroup
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: isPermissionEnabled = true
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: HA Enabled: false
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: Append Enabled: true
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: Computing capacity for map INodeMap
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: VM type       = <span class="hljs-number">64</span>-bit
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: <span class="hljs-number">1.0</span>% max memory <span class="hljs-number">889</span> MB = <span class="hljs-number">8.9</span> MB
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: capacity      = <span class="hljs-number">2</span>^<span class="hljs-number">20</span> = <span class="hljs-number">1048576</span> entries
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSDirectory</span>: ACLs enabled? false
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSDirectory</span>: XAttrs enabled? true
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSDirectory</span>: Maximum size of an xattr: <span class="hljs-number">16384</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.NameNode</span>: Caching file names occuring more than <span class="hljs-number">10</span> times
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: Computing capacity for map cachedBlocks
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: VM type       = <span class="hljs-number">64</span>-bit
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: <span class="hljs-number">0.25</span>% max memory <span class="hljs-number">889</span> MB = <span class="hljs-number">2.2</span> MB
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: capacity      = <span class="hljs-number">2</span>^<span class="hljs-number">18</span> = <span class="hljs-number">262144</span> entries
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.safemode</span><span class="hljs-preprocessor">.threshold</span>-pct = <span class="hljs-number">0.9990000128746033</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.safemode</span><span class="hljs-preprocessor">.min</span><span class="hljs-preprocessor">.datanodes</span> = <span class="hljs-number">0</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.safemode</span><span class="hljs-preprocessor">.extension</span>     = <span class="hljs-number">30000</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO metrics<span class="hljs-preprocessor">.TopMetrics</span>: NNTop conf: dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.top</span><span class="hljs-preprocessor">.window</span><span class="hljs-preprocessor">.num</span><span class="hljs-preprocessor">.buckets</span> = <span class="hljs-number">10</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO metrics<span class="hljs-preprocessor">.TopMetrics</span>: NNTop conf: dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.top</span><span class="hljs-preprocessor">.num</span><span class="hljs-preprocessor">.users</span> = <span class="hljs-number">10</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO metrics<span class="hljs-preprocessor">.TopMetrics</span>: NNTop conf: dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.top</span><span class="hljs-preprocessor">.windows</span><span class="hljs-preprocessor">.minutes</span> = <span class="hljs-number">1</span>,<span class="hljs-number">5</span>,<span class="hljs-number">25</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: Retry cache on namenode is enabled
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSNamesystem</span>: Retry cache will use <span class="hljs-number">0.03</span> of total heap <span class="hljs-keyword">and</span> retry cache entry expiry time is <span class="hljs-number">600000</span> millis
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: Computing capacity for map NameNodeRetryCache
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: VM type       = <span class="hljs-number">64</span>-bit
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: <span class="hljs-number">0.029999999329447746</span>% max memory <span class="hljs-number">889</span> MB = <span class="hljs-number">273.1</span> KB
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO util<span class="hljs-preprocessor">.GSet</span>: capacity      = <span class="hljs-number">2</span>^<span class="hljs-number">15</span> = <span class="hljs-number">32768</span> entries
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSImage</span>: Allocated new BlockPoolId: BP-<span class="hljs-number">593225014</span>-<span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.180</span>-<span class="hljs-number">1504253632799</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO common<span class="hljs-preprocessor">.Storage</span>: Storage directory /tmp/hadoop-root/dfs/name has been successfully formatted.
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">52</span> INFO namenode<span class="hljs-preprocessor">.FSImageFormatProtobuf</span>: Saving image file /tmp/hadoop-root/dfs/name/current/fsimage<span class="hljs-preprocessor">.ckpt</span>_0000000000000000000 using no compression
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">53</span> INFO namenode<span class="hljs-preprocessor">.FSImageFormatProtobuf</span>: Image file /tmp/hadoop-root/dfs/name/current/fsimage<span class="hljs-preprocessor">.ckpt</span>_0000000000000000000 of size <span class="hljs-number">321</span> bytes saved <span class="hljs-keyword">in</span> <span class="hljs-number">0</span> seconds.
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">53</span> INFO namenode<span class="hljs-preprocessor">.NNStorageRetentionManager</span>: Going to retain <span class="hljs-number">1</span> images with txid &gt;= <span class="hljs-number">0</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">53</span> INFO util<span class="hljs-preprocessor">.ExitUtil</span>: Exiting with status <span class="hljs-number">0</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">01</span> <span class="hljs-number">04</span>:<span class="hljs-number">13</span>:<span class="hljs-number">53</span> INFO namenode<span class="hljs-preprocessor">.NameNode</span>: SHUTDOWN_MSG: 
+<span class="hljs-comment">/************************************************************
+SHUTDOWN_MSG: Shutting down NameNode at master/192.168.1.180
+************************************************************/</span>
+[root@master ~]<span class="hljs-preprocessor"># </span>
+</code></pre>
+
+<p><strong>（2）启动HDFS</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[root@master ~]<span class="hljs-preprocessor"># start-dfs.sh</span>
+Starting namenodes on [master]
+<span class="hljs-label">master:</span> starting namenode, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/hadoop-root-namenode-master<span class="hljs-preprocessor">.out</span>
+<span class="hljs-label">master:</span> starting datanode, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/hadoop-root-datanode-master<span class="hljs-preprocessor">.out</span>
+<span class="hljs-label">slave1:</span> starting datanode, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/hadoop-root-datanode-slave1<span class="hljs-preprocessor">.out</span>
+<span class="hljs-label">slave2:</span> starting datanode, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/hadoop-root-datanode-slave2<span class="hljs-preprocessor">.out</span>
+Starting secondary namenodes [<span class="hljs-number">0.0</span><span class="hljs-number">.0</span><span class="hljs-number">.0</span>]
+<span class="hljs-number">0.0</span><span class="hljs-number">.0</span><span class="hljs-number">.0</span>: starting secondarynamenode, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/hadoop-root-secondarynamenode-master<span class="hljs-preprocessor">.out</span>
+[root@master ~]<span class="hljs-preprocessor">#</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># jps</span>
+<span class="hljs-number">21024</span> <span class="hljs-constant">DataNode</span>
+<span class="hljs-number">21319</span> <span class="hljs-constant">Jps</span>
+<span class="hljs-number">20890</span> <span class="hljs-constant">NameNode</span>
+<span class="hljs-number">21195</span> <span class="hljs-constant">SecondaryNameNode</span>
+[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment">#</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@slave2</span> ~]<span class="hljs-comment"># jps</span>
+<span class="hljs-number">7282</span> <span class="hljs-constant">Jps</span>
+<span class="hljs-number">7203</span> <span class="hljs-constant">DataNode</span>
+[root<span class="hljs-variable">@slave2</span> ~]<span class="hljs-comment">#</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@slave1</span> ~]<span class="hljs-comment"># jps</span>
+<span class="hljs-number">9027</span> <span class="hljs-constant">Jps</span>
+<span class="hljs-number">8948</span> <span class="hljs-constant">DataNode</span>
+[root<span class="hljs-variable">@slave1</span> ~]<span class="hljs-comment">#</span></code></pre>
+
+<p><strong>（3）启动YARN</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[root@slave1 ~]<span class="hljs-preprocessor"># start-yarn.sh</span>
+starting yarn daemons
+starting resourcemanager, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/yarn-root-resourcemanager-slave1<span class="hljs-preprocessor">.out</span>
+<span class="hljs-label">slave1:</span> starting nodemanager, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/yarn-root-nodemanager-slave1<span class="hljs-preprocessor">.out</span>
+<span class="hljs-label">master:</span> starting nodemanager, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/yarn-root-nodemanager-master<span class="hljs-preprocessor">.out</span>
+<span class="hljs-label">slave2:</span> starting nodemanager, logging to /opt/hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.4</span>/logs/yarn-root-nodemanager-slave2<span class="hljs-preprocessor">.out</span>
+[root@slave1 ~]<span class="hljs-preprocessor">#</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@slave1</span> ~]<span class="hljs-comment"># jps</span>
+<span class="hljs-number">8948</span> <span class="hljs-constant">DataNode</span>
+<span class="hljs-number">9079</span> <span class="hljs-constant">ResourceManager</span>
+<span class="hljs-number">9482</span> <span class="hljs-constant">Jps</span>
+<span class="hljs-number">9183</span> <span class="hljs-constant">NodeManager</span>
+[root<span class="hljs-variable">@slave1</span> ~]<span class="hljs-comment">#</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@slave2</span> ~]<span class="hljs-comment"># jps</span>
+<span class="hljs-number">7203</span> <span class="hljs-constant">DataNode</span>
+<span class="hljs-number">7433</span> <span class="hljs-constant">Jps</span>
+<span class="hljs-number">7325</span> <span class="hljs-constant">NodeManager</span>
+[root<span class="hljs-variable">@slave2</span> ~]<span class="hljs-comment"># </span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">
+[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># jps</span>
+<span class="hljs-number">21024</span> <span class="hljs-constant">DataNode</span>
+<span class="hljs-number">21481</span> <span class="hljs-constant">Jps</span>
+<span class="hljs-number">20890</span> <span class="hljs-constant">NameNode</span>
+<span class="hljs-number">21195</span> <span class="hljs-constant">SecondaryNameNode</span>
+<span class="hljs-number">21371</span> <span class="hljs-constant">NodeManager</span>
+[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># </span>
+</code></pre>
+
+<p><strong>（4）访问WEB</strong> <br>
+namenode在master节点，resourcemanager在slave1节点，每个节点都有nodemanager</p>
+
+<ul>
+<li>namenode界面：<a href="http://192.168.1.180:50070/" rel="nofollow">http://192.168.1.180:50070/</a></li>
+<li>resourcemanager界面：<a href="http://192.168.1.181:8088/" rel="nofollow">http://192.168.1.181:8088/</a></li>
+<li>nodemanager界面：<a href="http://192.168.1.180:8042" rel="nofollow">http://192.168.1.180:8042</a></li>
+</ul>
+
+<p><img src="https://img-blog.csdn.net/20170830104201183?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY2hlbmd5dXFpYW5n/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+
+
+<h3 id="55-spark下载">5.5 Spark下载</h3>
+
+<p>Spark on YARN运行模式，只需要在Hadoop分布式集群中任选一个节点安装配置Spark即可，不要集群安装。因为Spark应用程序提交到YARN后，YARN会负责集群资源的调度。 <br>
+不失一般性，这里我们选择192.168.1.180节点安装Spark。</p>
+
+<p><strong>（1）下载Spark 2.2</strong> <br>
+Spark2.2下载具体步骤请参考：<a href="http://blog.csdn.net/chengyuqiang/article/details/77671748" rel="nofollow">http://blog.csdn.net/chengyuqiang/article/details/77671748</a></p>
+
+<p>选择国内镜像，通过wget命令<code>wget http://mirrors.tuna.tsinghua.edu.cn/apache/spark/spark-2.2.0/spark-2.2.0-bin-hadoop2.7.tgz</code>直接下载</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[root@master ~]<span class="hljs-preprocessor"># wget http://mirrors.tuna.tsinghua.edu.cn/apache/spark/spark-2.2.0/spark-2.2.0-bin-hadoop2.7.tgz</span>
+--<span class="hljs-number">2017</span>-<span class="hljs-number">08</span>-<span class="hljs-number">29</span> <span class="hljs-number">22</span>:<span class="hljs-number">43</span>:<span class="hljs-number">51</span>--  http://mirrors<span class="hljs-preprocessor">.tuna</span><span class="hljs-preprocessor">.tsinghua</span><span class="hljs-preprocessor">.edu</span><span class="hljs-preprocessor">.cn</span>/apache/spark/spark-<span class="hljs-number">2.2</span><span class="hljs-number">.0</span>/spark-<span class="hljs-number">2.2</span><span class="hljs-number">.0</span>-bin-hadoop2<span class="hljs-number">.7</span><span class="hljs-preprocessor">.tgz</span>
+Resolving mirrors<span class="hljs-preprocessor">.tuna</span><span class="hljs-preprocessor">.tsinghua</span><span class="hljs-preprocessor">.edu</span><span class="hljs-preprocessor">.cn</span> (mirrors<span class="hljs-preprocessor">.tuna</span><span class="hljs-preprocessor">.tsinghua</span><span class="hljs-preprocessor">.edu</span><span class="hljs-preprocessor">.cn</span>)... <span class="hljs-number">101.6</span><span class="hljs-number">.6</span><span class="hljs-number">.177</span>, <span class="hljs-number">2402</span>:f000:<span class="hljs-number">1</span>:<span class="hljs-number">416</span>:<span class="hljs-number">101</span>:<span class="hljs-number">6</span>:<span class="hljs-number">6</span>:<span class="hljs-number">177</span>
+Connecting to mirrors<span class="hljs-preprocessor">.tuna</span><span class="hljs-preprocessor">.tsinghua</span><span class="hljs-preprocessor">.edu</span><span class="hljs-preprocessor">.cn</span> (mirrors<span class="hljs-preprocessor">.tuna</span><span class="hljs-preprocessor">.tsinghua</span><span class="hljs-preprocessor">.edu</span><span class="hljs-preprocessor">.cn</span>)|<span class="hljs-number">101.6</span><span class="hljs-number">.6</span><span class="hljs-number">.177</span>|:<span class="hljs-number">80.</span>.. connected.
+HTTP request sent, awaiting response... <span class="hljs-number">200</span> OK
+<span class="hljs-label">Length:</span> <span class="hljs-number">203728858</span> (<span class="hljs-number">194</span>M) [application/octet-stream]
+Saving to: ‘spark-<span class="hljs-number">2.2</span><span class="hljs-number">.0</span>-bin-hadoop2<span class="hljs-number">.7</span><span class="hljs-preprocessor">.tgz</span>’
+
+<span class="hljs-number">100</span>%[==================================================================================================================================&gt;] <span class="hljs-number">203</span>,<span class="hljs-number">728</span>,<span class="hljs-number">858</span> <span class="hljs-number">9.79</span>MB/s   <span class="hljs-keyword">in</span> <span class="hljs-number">23</span>s    
+
+<span class="hljs-number">2017</span>-<span class="hljs-number">08</span>-<span class="hljs-number">29</span> <span class="hljs-number">22</span>:<span class="hljs-number">44</span>:<span class="hljs-number">15</span> (<span class="hljs-number">8.32</span> MB/s) - ‘spark-<span class="hljs-number">2.2</span><span class="hljs-number">.0</span>-bin-hadoop2<span class="hljs-number">.7</span><span class="hljs-preprocessor">.tgz</span>’ saved [<span class="hljs-number">203728858</span>/<span class="hljs-number">203728858</span>]
+
+[root@master ~]<span class="hljs-preprocessor">#</span></code></pre>
+
+<p><strong>（2）然后解压缩，重命名</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># tar -zxvf spark-2.2.0-bin-hadoop2.7.tgz -C /opt</span>
+[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># mv /opt/spark-2.2.0-bin-hadoop2.7/ /opt/spark-2.2.0</span></code></pre>
+
+
+
+<h3 id="56-spark配置">5.6 Spark配置</h3>
+
+<p><strong>（1）配置环境变量</strong> <br>
+编辑文件<code>/etc/profile.d/custom.sh</code>，增加如下内容</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-comment">#spark path</span>
+<span class="hljs-keyword">export</span> SPARK_HOME=/opt/spark-<span class="hljs-number">2.2</span>.<span class="hljs-number">0</span>
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">${SPARK_HOME}</span>/bin:<span class="hljs-variable">${SPARK_HOME}</span>/sbin:<span class="hljs-variable">$PATH</span></code></pre>
+
+<p>生效</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> ~]<span class="hljs-comment"># source /etc/profile.d/custom.sh</span></code></pre>
+
+<p><strong>（2）spark-env.sh</strong> <br>
+执行下面命令，复制一份Spark的spark-env.sh模版，然后添加HADOOP_CONF_DIR一项。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs mel">[root<span class="hljs-variable">@node1</span> spark-<span class="hljs-number">2.2</span><span class="hljs-number">.0</span>]# cp conf/spark-<span class="hljs-keyword">env</span>.sh.template conf/spark-<span class="hljs-keyword">env</span>.sh
+[root<span class="hljs-variable">@node1</span> spark-<span class="hljs-number">2.2</span><span class="hljs-number">.0</span>]# echo <span class="hljs-string">"export HADOOP_CONF_DIR=/opt/hadoop-2.7.3/etc/hadoop"</span> &gt;&gt; conf/spark-<span class="hljs-keyword">env</span>.sh</code></pre>
+
+<p>配置到这里，Spark就可以跑在YARN上了，也没必要启动spark的master和slaves服务，因为是靠yarn进行任务调度，所以直接提交任务即可。</p>
+
+<p>补充：有些关于Spark on YARN部署的博客，实际上介绍的是Spark的 standalone运行模式。如果启动Spark的master和worker服务，这是Spark的 standalone运行模式，不是Spark on YARN运行模式，请不要混淆。</p>
+
+
+
+<h3 id="57-spark-shell运行在yarn上">5.7 spark-shell运行在YARN上</h3>
+
+<p><strong>（1）运行在yarn-client上</strong> <br>
+执行命令<code>spark-shell --master yarn-client</code>，稍等片刻即可看到如下输出。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vhdl">[root@node1 ~]# spark-shell <span class="hljs-comment">--master yarn-client</span>
+Warning: Master yarn-client <span class="hljs-keyword">is</span> deprecated since <span class="hljs-number">2.0</span>. Please <span class="hljs-keyword">use</span> master <span class="hljs-string">"yarn"</span> <span class="hljs-keyword">with</span> specified deploy mode instead.
+Setting <span class="hljs-keyword">default</span> log level <span class="hljs-keyword">to</span> <span class="hljs-string">"WARN"</span>.
+<span class="hljs-keyword">To</span> adjust logging level <span class="hljs-keyword">use</span> sc.setLogLevel(newLevel). <span class="hljs-keyword">For</span> SparkR, <span class="hljs-keyword">use</span> setLogLevel(newLevel).
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">11</span>:<span class="hljs-number">14</span>:<span class="hljs-number">52</span> WARN util.NativeCodeLoader: Unable <span class="hljs-keyword">to</span> load native-hadoop <span class="hljs-keyword">library</span> <span class="hljs-keyword">for</span> your platform... using builtin-java classes where applicable
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">11</span>:<span class="hljs-number">14</span>:<span class="hljs-number">58</span> WARN yarn.Client: Neither spark.yarn.jars <span class="hljs-keyword">nor</span> spark.yarn.archive <span class="hljs-keyword">is</span> set, falling back <span class="hljs-keyword">to</span> uploading libraries under SPARK_HOME.
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">11</span>:<span class="hljs-number">15</span>:<span class="hljs-number">50</span> WARN metastore.ObjectStore: Version information <span class="hljs-keyword">not</span> found <span class="hljs-keyword">in</span> metastore. hive.metastore.schema.verification <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> enabled so recording the schema version <span class="hljs-number">1.2</span><span class="hljs-number">.0</span>
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">11</span>:<span class="hljs-number">15</span>:<span class="hljs-number">50</span> WARN metastore.ObjectStore: Failed <span class="hljs-keyword">to</span> get database <span class="hljs-keyword">default</span>, returning NoSuchObjectException
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">11</span>:<span class="hljs-number">15</span>:<span class="hljs-number">52</span> WARN metastore.ObjectStore: Failed <span class="hljs-keyword">to</span> get database global_temp, returning NoSuchObjectException
+Spark <span class="hljs-keyword">context</span> Web UI available at http://<span class="hljs-number">192.168</span><span class="hljs-number">.80</span><span class="hljs-number">.131</span>:<span class="hljs-number">4040</span>
+Spark <span class="hljs-keyword">context</span> available as <span class="hljs-attribute">'sc</span>' (master = yarn, app id = application_1504883417879_0002).
+Spark session available as <span class="hljs-attribute">'spark</span>'.
+Welcome <span class="hljs-keyword">to</span>
+      ____              __
+     / __/__  ___ _____/ /__
+    _\ \/ _ \/ _ `/ __/  '_/
+   /___/ .__/\_,_/_/ /_/\_\   version <span class="hljs-number">2.2</span><span class="hljs-number">.0</span>
+      /_/
+
+Using Scala version <span class="hljs-number">2.11</span><span class="hljs-number">.8</span> (Java HotSpot(TM) <span class="hljs-number">64</span>-<span class="hljs-typename">Bit</span> Server VM, Java <span class="hljs-number">1.8</span><span class="hljs-number">.0</span>_112)
+<span class="hljs-keyword">Type</span> <span class="hljs-keyword">in</span> expressions <span class="hljs-keyword">to</span> have them evaluated.
+<span class="hljs-keyword">Type</span> :help <span class="hljs-keyword">for</span> more information.
+
+scala&gt; </code></pre>
+
+<p>说明：从上面的spark-shell日志中看到<code>spark-shell --master yarn-client</code>命令从Spark2.0开始废弃了，可以换成<code>spark-shell --master yarn --deploy-mode client</code>。</p>
+
+<p><strong>（2）可能存在的问题</strong> <br>
+由于是在虚拟机上运行，虚拟内存可能超过了设定的数值。在执行命令<code>spark-shell --master yarn-client</code>时可能报错，异常信息如下。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">[root@node1 ~]<span class="hljs-comment"># spark-shell --master yarn-client</span>
+Warning: Master yarn-client <span class="hljs-keyword">is</span> deprecated <span class="hljs-keyword">since</span> <span class="hljs-number">2.0</span>. Please use master <span class="hljs-string">"yarn"</span> <span class="hljs-keyword">with</span> specified deploy mode instead.
+Setting default <span class="hljs-command">log</span> level <span class="hljs-keyword">to</span> <span class="hljs-string">"WARN"</span>.
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">10</span>:<span class="hljs-number">34</span>:<span class="hljs-number">52</span> WARN util.NativeCodeLoader: Unable <span class="hljs-keyword">to</span> load native-hadoop library <span class="hljs-keyword">for</span> your platform... using builtin-java classes <span class="hljs-keyword">where</span> applicable
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">10</span>:<span class="hljs-number">34</span>:<span class="hljs-number">59</span> WARN yarn.Client: Neither spark.yarn.jars nor spark.yarn.archive <span class="hljs-keyword">is</span> <span class="hljs-keyword">set</span>, falling <span class="hljs-keyword">back</span> <span class="hljs-keyword">to</span> uploading libraries under SPARK_HOME.
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">10</span>:<span class="hljs-number">36</span>:<span class="hljs-number">08</span> ERROR spark.SparkContext: Error initializing SparkContext.
+org.apache.spark.SparkException: Yarn <span class="hljs-type">application</span> has already ended! It might have been killed <span class="hljs-keyword">or</span> unable <span class="hljs-keyword">to</span> <span class="hljs-command">launch</span> <span class="hljs-type">application</span> master.
+    <span class="hljs-keyword">at</span> org.apache.spark.scheduler.cluster.YarnClientSchedulerBackend.waitForApplication(YarnClientSchedulerBackend.scala:<span class="hljs-number">85</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.scheduler.cluster.YarnClientSchedulerBackend.start(YarnClientSchedulerBackend.scala:<span class="hljs-number">62</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.scheduler.TaskSchedulerImpl.start(TaskSchedulerImpl.scala:<span class="hljs-number">173</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.SparkContext.&lt;init&gt;(SparkContext.scala:<span class="hljs-number">509</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.SparkContext$.getOrCreate(SparkContext.scala:<span class="hljs-number">2509</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.sql.SparkSession$Builder$$anonfun$<span class="hljs-number">6.</span>apply(SparkSession.scala:<span class="hljs-number">909</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.sql.SparkSession$Builder$$anonfun$<span class="hljs-number">6.</span>apply(SparkSession.scala:<span class="hljs-number">901</span>)
+    <span class="hljs-keyword">at</span> scala.Option.getOrElse(Option.scala:<span class="hljs-number">121</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.sql.SparkSession$Builder.getOrCreate(SparkSession.scala:<span class="hljs-number">901</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.repl.Main$.createSparkSession(Main.scala:<span class="hljs-number">97</span>)
+    <span class="hljs-keyword">at</span> $line3.$<span class="hljs-command">read</span>$$iw$$iw.&lt;init&gt;(&lt;console&gt;:<span class="hljs-number">15</span>)
+    <span class="hljs-keyword">at</span> $line3.$<span class="hljs-command">read</span>$$iw.&lt;init&gt;(&lt;console&gt;:<span class="hljs-number">42</span>)
+	<span class="hljs-keyword">at</span> $line3.$<span class="hljs-command">read</span>.&lt;init&gt;(&lt;console&gt;:<span class="hljs-number">44</span>)
+	<span class="hljs-keyword">at</span> $line3.$<span class="hljs-command">read</span>$.&lt;init&gt;(&lt;console&gt;:<span class="hljs-number">48</span>)
+	<span class="hljs-keyword">at</span> $line3.$<span class="hljs-command">read</span>$.&lt;clinit&gt;(&lt;console&gt;)
+	<span class="hljs-keyword">at</span> $line3.$eval$.$print$lzycompute(&lt;console&gt;:<span class="hljs-number">7</span>)
+	<span class="hljs-keyword">at</span> $line3.$eval$.$print(&lt;console&gt;:<span class="hljs-number">6</span>)
+	<span class="hljs-keyword">at</span> $line3.$eval.$print(&lt;console&gt;)
+	<span class="hljs-keyword">at</span> sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	<span class="hljs-keyword">at</span> sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:<span class="hljs-number">62</span>)
+	<span class="hljs-keyword">at</span> sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:<span class="hljs-number">43</span>)
+	<span class="hljs-keyword">at</span> java.lang.reflect.Method.invoke(Method.java:<span class="hljs-number">498</span>)
+	<span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.IMain$ReadEvalPrint.call(IMain.scala:<span class="hljs-number">786</span>)
+	<span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.IMain$Request.loadAndRun(IMain.scala:<span class="hljs-number">1047</span>)
+	<span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.IMain$WrappedRequest$$anonfun$loadAndRunReq$<span class="hljs-number">1.</span>apply(IMain.scala:<span class="hljs-number">638</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.IMain$WrappedRequest$$anonfun$loadAndRunReq$<span class="hljs-number">1.</span>apply(IMain.scala:<span class="hljs-number">637</span>)
+    <span class="hljs-keyword">at</span> scala.reflect.internal.util.ScalaClassLoader$<span class="hljs-type">class</span>.asContext(ScalaClassLoader.scala:<span class="hljs-number">31</span>)
+    <span class="hljs-keyword">at</span> scala.reflect.internal.util.AbstractFileClassLoader.asContext(AbstractFileClassLoader.scala:<span class="hljs-number">19</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.IMain$WrappedRequest.loadAndRunReq(IMain.scala:<span class="hljs-number">637</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.IMain.interpret(IMain.scala:<span class="hljs-number">569</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.IMain.interpret(IMain.scala:<span class="hljs-number">565</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.ILoop.interpretStartingWith(ILoop.scala:<span class="hljs-number">807</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.ILoop.command(ILoop.scala:<span class="hljs-number">681</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.ILoop.processLine(ILoop.scala:<span class="hljs-number">395</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.repl.SparkILoop$$anonfun$initializeSpark$<span class="hljs-number">1.</span>apply$mcV$sp(SparkILoop.scala:<span class="hljs-number">38</span>)
+	<span class="hljs-keyword">at</span> org.apache.spark.repl.SparkILoop$$anonfun$initializeSpark$<span class="hljs-number">1.</span>apply(SparkILoop.scala:<span class="hljs-number">37</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.repl.SparkILoop$$anonfun$initializeSpark$<span class="hljs-number">1.</span>apply(SparkILoop.scala:<span class="hljs-number">37</span>)
+	<span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.IMain.beQuietDuring(IMain.scala:<span class="hljs-number">214</span>)
+	<span class="hljs-keyword">at</span> org.apache.spark.repl.SparkILoop.initializeSpark(SparkILoop.scala:<span class="hljs-number">37</span>)
+	<span class="hljs-keyword">at</span> org.apache.spark.repl.SparkILoop.loadFiles(SparkILoop.scala:<span class="hljs-number">98</span>)
+	<span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.ILoop$$anonfun$process$<span class="hljs-number">1.</span>apply$mcZ$sp(ILoop.scala:<span class="hljs-number">920</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.ILoop$$anonfun$process$<span class="hljs-number">1.</span>apply(ILoop.scala:<span class="hljs-number">909</span>)
+	<span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.ILoop$$anonfun$process$<span class="hljs-number">1.</span>apply(ILoop.scala:<span class="hljs-number">909</span>)
+    <span class="hljs-keyword">at</span> scala.reflect.internal.util.ScalaClassLoader$.savingContextLoader(ScalaClassLoader.scala:<span class="hljs-number">97</span>)
+    <span class="hljs-keyword">at</span> scala.tools.nsc.interpreter.ILoop.process(ILoop.scala:<span class="hljs-number">909</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.repl.Main$.doMain(Main.scala:<span class="hljs-number">70</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.repl.Main$.main(Main.scala:<span class="hljs-number">53</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.repl.Main.main(Main.scala)
+    <span class="hljs-keyword">at</span> sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+    <span class="hljs-keyword">at</span> sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:<span class="hljs-number">62</span>)
+    <span class="hljs-keyword">at</span> sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:<span class="hljs-number">43</span>)
+    <span class="hljs-keyword">at</span> java.lang.reflect.Method.invoke(Method.java:<span class="hljs-number">498</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.deploy.SparkSubmit$.org$apache$spark$deploy$SparkSubmit$$runMain(SparkSubmit.scala:<span class="hljs-number">755</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.deploy.SparkSubmit$.doRunMain$<span class="hljs-number">1</span>(SparkSubmit.scala:<span class="hljs-number">180</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.deploy.SparkSubmit$.submit(SparkSubmit.scala:<span class="hljs-number">205</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.deploy.SparkSubmit$.main(SparkSubmit.scala:<span class="hljs-number">119</span>)
+    <span class="hljs-keyword">at</span> org.apache.spark.deploy.SparkSubmit.main(SparkSubmit.scala)
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">10</span>:<span class="hljs-number">36</span>:<span class="hljs-number">09</span> WARN cluster.YarnSchedulerBackend$YarnSchedulerEndpoint: Attempted <span class="hljs-keyword">to</span> request executors <span class="hljs-keyword">before</span> <span class="hljs-keyword">the</span> AM has registered!
+<span class="hljs-number">17</span>/<span class="hljs-number">09</span>/<span class="hljs-number">08</span> <span class="hljs-number">10</span>:<span class="hljs-number">36</span>:<span class="hljs-number">09</span> WARN metrics.MetricsSystem: Stopping a MetricsSystem <span class="hljs-keyword">that</span> <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-property">running</span>
+org.apache.spark.SparkException: Yarn <span class="hljs-type">application</span> has already ended! It might have been killed <span class="hljs-keyword">or</span> unable <span class="hljs-keyword">to</span> <span class="hljs-command">launch</span> <span class="hljs-type">application</span> master.
+  <span class="hljs-keyword">at</span> org.apache.spark.scheduler.cluster.YarnClientSchedulerBackend.waitForApplication(YarnClientSchedulerBackend.scala:<span class="hljs-number">85</span>)
+  <span class="hljs-keyword">at</span> org.apache.spark.scheduler.cluster.YarnClientSchedulerBackend.start(YarnClientSchedulerBackend.scala:<span class="hljs-number">62</span>)
+  <span class="hljs-keyword">at</span> org.apache.spark.scheduler.TaskSchedulerImpl.start(TaskSchedulerImpl.scala:<span class="hljs-number">173</span>)
+  <span class="hljs-keyword">at</span> org.apache.spark.SparkContext.&lt;init&gt;(SparkContext.scala:<span class="hljs-number">509</span>)
+  <span class="hljs-keyword">at</span> org.apache.spark.SparkContext$.getOrCreate(SparkContext.scala:<span class="hljs-number">2509</span>)
+  <span class="hljs-keyword">at</span> org.apache.spark.sql.SparkSession$Builder$$anonfun$<span class="hljs-number">6.</span>apply(SparkSession.scala:<span class="hljs-number">909</span>)
+  <span class="hljs-keyword">at</span> org.apache.spark.sql.SparkSession$Builder$$anonfun$<span class="hljs-number">6.</span>apply(SparkSession.scala:<span class="hljs-number">901</span>)
+  <span class="hljs-keyword">at</span> scala.Option.getOrElse(Option.scala:<span class="hljs-number">121</span>)
+  <span class="hljs-keyword">at</span> org.apache.spark.sql.SparkSession$Builder.getOrCreate(SparkSession.scala:<span class="hljs-number">901</span>)
+  <span class="hljs-keyword">at</span> org.apache.spark.repl.Main$.createSparkSession(Main.scala:<span class="hljs-number">97</span>)
+  ... <span class="hljs-number">47</span> elided
+&lt;console&gt;:<span class="hljs-number">14</span>: <span class="hljs-keyword">error</span>: <span class="hljs-keyword">not</span> found: value spark
+       import spark.implicits._
+              ^
+&lt;console&gt;:<span class="hljs-number">14</span>: <span class="hljs-keyword">error</span>: <span class="hljs-keyword">not</span> found: value spark
+       import spark.sql
+              ^
+Welcome <span class="hljs-keyword">to</span>
+      ____              __
+     / __/__  ___ _____/ /__
+    _\ \/ _ \/ _ `/ __/  '_/
+   /___/ .__/\_,_/_/ /_/\_\   <span class="hljs-property">version</span> <span class="hljs-number">2.2</span><span class="hljs-number">.0</span>
+      /_/
+
+Using Scala <span class="hljs-property">version</span> <span class="hljs-number">2.11</span><span class="hljs-number">.8</span> (Java HotSpot(TM) <span class="hljs-number">64</span>-Bit Server VM, Java <span class="hljs-number">1.8</span><span class="hljs-number">.0</span>_112)
+Type <span class="hljs-keyword">in</span> expressions <span class="hljs-keyword">to</span> have them evaluated.
+Type :help <span class="hljs-keyword">for</span> more information.
+
+scala&gt;</code></pre>
+
+<p>解决办法： <br>
+先停止YARN服务，然后修改yarn-site.xml，增加如下内容</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"> <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.vmem-check-enabled<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>false<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>Whether virtual memory limits will be enforced for containers<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.vmem-pmem-ratio<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>4<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>Ratio between virtual memory to physical memory when setting memory limits for containers<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+</code></pre>
+
+<p>将新的yarn-site.xml文件分发到其他Hadoop节点对应的目录下，最后在重新启动YARN。 <br>
+再执行<code>spark-shell --master yarn-client</code>命令时，就不会报上面异常了。</p>
+
+<p><strong>（3）YARN WEB</strong> <br>
+打开YARN WEB页面：192.168.1.180:8088 <br>
+可以看到Spark shell应用程序正在运行，单击ID号链接，可以看到该应用程序的详细信息。 <br>
+<img src="https://img-blog.csdn.net/20170909171920682?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY2hlbmd5dXFpYW5n/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20170909190546044?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY2hlbmd5dXFpYW5n/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>单击“ApplicationMaster”链接， <br>
+<img src="https://img-blog.csdn.net/20170909191237043?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY2hlbmd5dXFpYW5n/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>（4）运行程序</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; val rdd=sc<span class="hljs-preprocessor">.parallelize</span>(<span class="hljs-number">1</span> to <span class="hljs-number">100</span>,<span class="hljs-number">5</span>)
+<span class="hljs-label">rdd:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Int] = ParallelCollectionRDD[<span class="hljs-number">0</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; rdd<span class="hljs-preprocessor">.count</span>
+<span class="hljs-label">res0:</span> Long = <span class="hljs-number">100</span>                                                                
+
+scala&gt;</code></pre>
+
+<p><img src="https://img-blog.csdn.net/20170909191912930?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY2hlbmd5dXFpYW5n/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20170909192230524?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY2hlbmd5dXFpYW5n/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

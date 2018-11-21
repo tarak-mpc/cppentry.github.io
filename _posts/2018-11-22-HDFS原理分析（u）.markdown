@@ -1,0 +1,95 @@
+---
+layout:     post
+title:      HDFS原理分析（u）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u010223431/article/details/51018318				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>HDFS（Hadoop Distributed File System）</p>
+
+<p>Hadoop由两部分组成，HDFS（分布式文件系统）以及MapReduce（分布式计算框架），其中HDFS用于大规模数据的分布式存储，MapReduce构建在文件系统智商，对存储在分布式文件系统中的数据进行分布式计算。 <br>
+分布式文件系统是一个独立存在的模块，用户可以根据接口来自己构建文件系统，但是一般会默认使用HDFS。</p>
+
+<p>HDFS主要设计理念： <br>
+1、  高度容错性，适合部署在廉价的机器上 <br>
+2、  能够存储超大数据 <br>
+3、  高吞吐量</p>
+
+<p>不适用于： <br>
+1、  对延迟要求高 <br>
+2、  存储大量小文件</p>
+
+<p><strong>基本架构：</strong> <br>
+ <img src="https://img-blog.csdn.net/20160330190245394" alt="这里写图片描述" title=""> <br>
+ps.Rack为机柜。</p>
+
+<p>HDFS是采用了master（主节点）/slave（从节点）模式，主要组件有Client，namenode，secondary namenode，datanode。</p>
+
+<p><strong>namenode：</strong> <br>
+整个hadoop集群中只有一个，负责管理HDFS的目录树和相关的元数据信息，主要是两个文件：fsimage（HDFS元数据镜像文件）和editlog（HDFS文件改动日志）。当HDFS重启时会重新生成这两个文件。此外namenode会对datanode进行监控，如果datanode宕掉，namenode会将该datanode移出HDFS，并会重新备份上面的数据。Namenode中包含block map和namespace state。</p>
+
+<p>问题1：重启时重新生成，那么在重启前会将变更都融合到目录树中吗？ <br>
+问题2：重启中是怎么重新生成目录树文件？ <br>
+问题3：namenode怎么确定datanode已经宕掉？ <br>
+主节点和从节点之间的通信是通过心跳机制实现的，如NameNode与DataNode之间，当长时间没有发送心跳时，NameNode就判断DataNode的连接已经中断,不能继续工作了,就把他定性为”dead node”。NameNode会检查dead node中的副本数据，复制到其他的data node中。 <br>
+问题4：namenode怎么备份宕掉的datanode上的数据，被分到哪里？对移出的datanode会做什么处理？ <br>
+问题5：block map和namespace state分别是干什么的？还有跟两个文件的对应关系？ <br>
+Namenode中存储着HDFS的Namespace，其中主要表现为namespace镜像和edit.log两种文件。在namespace镜像中维护着HDFS的文件系统树结构以及所有目录/文件的元数据信息。Namenode中还保存着每个文件的每一个块所在的Datanode信息，便于确定具体某个块的位置。Datanode存储数据块，并且通过Heartbeating周期性地向Namenode报告自己的状态。 <br>
+为了增强HDFS的稳定性，一般有两种方法：一种是备份当前的元数据信息，随着系统的运行，这部分信息会越来越多，将它们存储到不同的文件系统中；另一种是合并namespace的镜像文件作为secondary namenode。当Namenode发生故障时，使用备份的namespace镜像和元数据备份就可以定位checkpoint恢复出Namenode。但是这种情况只能用于Namenode出现软件故障时，如果整个节点down掉则没有办法恢复。</p>
+
+<p>NameNode作为HDFS中文件目录和文件分配的管理者，它保存的最重要信息，就是下面两个映射： <br>
+文件名=&gt;数据块 <br>
+数据块=&gt;DataNode列表 <br>
+其中，文件名=&gt;数据块保存在磁盘上（持久化）；但NameNode上不保存数据块=&gt;DataNode列表，该列表是通过DataNode上报建立起来的。 <br>
+因此block map应该是数据块到datanode的映射关系表，但是是不保存在磁盘上的。那么是不是每次查询的时候都需要datanode上报一次情况？上报的只有查询的部分，还是所有？</p>
+
+<p><strong>secondary namenode：</strong> <br>
+用来合并namenode中保存的两个文件，fsimage和editlog，然后将合并后的文件传给namenode <br>
+问题1：合并后的文件时fsimage吗？ <br>
+问题2：什么时候合并？ <br>
+问题3：如果在合并过程中有新的修改？ <br>
+问题4：在不合并的时候，secondary namenode里面会保存备份文件吗？</p>
+
+<p><strong>datanode：</strong> <br>
+每个slave节点上都会安装一个datanode，负责实际的数据存储，并定期汇报给namenode。当用户上传一个大的文件到HDFS时，文件会被切分为若干个block，分别存储到不同的datanode上，默认情况下block大小为64MB。 <br>
+为保证高容错性，会将同一个block以流水线方式写到若干个datanode上，一般默认是3个，用户可以自己进行配置。 <br>
+这个先对文件进行切割再存储的过程对于用户来说是透明的。</p>
+
+<p>问题1：由谁来进行文件切割？ <br>
+问题2：同一个block保存到3个datanode上是需要进行分配的，还是固定？分配方式是什么？ <br>
+问题3：datanode存储实际数据，什么时候汇报给namenode，汇报形式是什么？ <br>
+问题4：slave节点？ <br>
+问题5：机柜rack，里面会放几个服务器时，是每个服务器都有一个datanode吗？然后同一个文件时同时保存在两个以上机柜而不能都保存在同一个机柜的几个服务器中。</p>
+
+<p><strong>写文件操作：</strong> <br>
+（需补图） <br>
+1 Client调用DistributedFileSystem对象的create方法，创建一个文件输出流（FSDataOutputStream）对象 <br>
+2 通过DistributedFileSystem对象与Hadoop集群的NameNode进行一次RPC远程调用，在HDFS的Namespace中创建一个文件条目（Entry），该条目没有任何的Block <br>
+3 通过FSDataOutputStream对象，向DataNode写入数据，数据首先被写入FSDataOutputStream对象内部的Buffer中，然后数据被分割成一个个Packet数据包 <br>
+4 以Packet最小单位，基于Socket连接发送到按特定算法选择的HDFS集群中一组DataNode（正常是3个，可能大于等于1）中的一个节点上，在这组DataNode组成的Pipeline上依次传输Packet。数据首先写到第一节点，第一节点将数据包传送并写入第二节点，第二节点=》第三节点。 <br>
+5 这组DataNode组成的Pipeline反方向上，发送ack，最终由Pipeline中第一个DataNode节点将Pipeline ack发送给Client <br>
+6 完成向文件写入数据，Client在文件输出流（FSDataOutputStream）对象上调用close方法，flush缓冲区的数据包，关闭流 <br>
+7 调用DistributedFileSystem对象的complete方法，通知NameNode文件写入成功</p>
+
+<p><strong>读文件操作：</strong> <br>
+（需补图） <br>
+1 client调用FileSystem.open()方法： <br>
+FileSystem通过RPC与namenode通信，namenode返回该文件的部分或全部block列表（含有block拷贝的datanode地址）。检查流对象是否处于打开状态 <br>
+2选取距离客户端最近的datanode建立连接，读取block，返回FSDataInputStream。 <br>
+3 .client调用输入流的read()方法： <br>
+当读到block结尾时，FSDataInputStream关闭与当前datanode的连接，并为读取下一个block寻找最近datanode。 <br>
+读取完一个block都会进行checksum验证，如果读取datanode时出现错误，客户端会通知Namenode，然后再从下一个拥有该block拷贝的datanode继续读。 <br>
+如果block列表读完后，文件还未结束，FileSystem会继续从namenode获取下一批block列表。 <br>
+这些操作对client透明，client感觉到的是连续的流。 <br>
+4关闭FSDataInputStream</p>
+
+<p>高度容错性实现方式：</p>
+
+<p>高吞吐量实现方式：</p>
+
+<p>一次写入，多次读取？？</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

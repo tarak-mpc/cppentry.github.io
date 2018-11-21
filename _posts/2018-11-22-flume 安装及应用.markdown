@@ -1,0 +1,254 @@
+---
+layout:     post
+title:      flume 安装及应用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1><a id="1_Flume_0"></a>1. 日志采集框架Flume</h1>
+<p>Flume进阶</p>
+<ul>
+<li>flume断点续传</li>
+<li>flume在hdfs上小文件解决</li>
+<li>flume agent串并联</li>
+</ul>
+<h2><a id="11_Flume_7"></a>1.1 Flume介绍</h2>
+<h3><a id="111__8"></a>1.1.1 概述</h3>
+<p>Flume是一个数据搬运工，侧重于数据的搬运，而不是数据处理</p>
+<ul>
+<li>Flume是一个分布式、可靠、和高可用的海量日志采集、聚合和传输的系统。</li>
+<li>Flume可以采集文件，socket数据包等各种形式源数据，又可以将采集到的数据输出到HDFS、hbase、hive、kafka等众多外部存储系统中</li>
+<li>一般的采集需求，通过对flume的简单配置即可实现</li>
+<li>Flume针对特殊场景也具备良好的自定义扩展能力，因此，flume可以适用于大部分的日常数据采集场景</li>
+</ul>
+<h3><a id="112__14"></a>1.1.2 运行机制</h3>
+<p>Flume相当于一辆公交车，source是前门，乘客从前门上车；channel相当于座位；sink相当于后门，乘客从后门下车。公交车负责将乘客从一个地方运送到另一个地方。<br>
+1、	Flume分布式系统中最核心的角色是agent，flume采集系统就是由一个个agent所连接起来形成<br>
+2、	每一个agent相当于一个数据传递员，内部有三个组件：<br>
+a)	Source：采集源，用于跟数据源对接，以获取数据<br>
+b)	Sink：下沉地，采集数据的传送目的，用于往下一级agent传递数据或者往最终存储系统传递数据<br>
+c)	Channel：angent内部的数据传输通道，用于从source将数据传递到sink</p>
+<p><img src="https://img-blog.csdnimg.cn/20181110234748282.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MTczNDY4Nw==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<h3><a id="113_Flume_23"></a>1.1.3 Flume采集系统结构图</h3>
+<ol>
+<li>简单结构<br>
+单个agent采集数据<br>
+<img src="https://img-blog.csdnimg.cn/20181110235000580.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MTczNDY4Nw==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></li>
+<li>复杂结构<br>
+多级agent之间串联<br>
+<img src="https://img-blog.csdnimg.cn/20181110235030213.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MTczNDY4Nw==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></li>
+</ol>
+<h2><a id="12_Flume_31"></a>1.2 Flume实战案例</h2>
+<h3><a id="121_Flume_32"></a>1.2.1 Flume的安装部署</h3>
+<p>1、Flume的安装非常简单，只需要解压即可，当然，前提是已有hadoop环境</p>
+<pre><code>上传安装包到数据源所在节点上
+解压  
+tar -zxvf apache-flume-1.6.0-bin.tar.gz
+然后进入flume的目录，修改conf下的flume-env.sh，在里面配置JAVA_HOME
+cd /root/apps/apache-flume-1.6.0-bin/conf
+cp flume-env.sh.template flume-env.sh
+vi flume-env.sh # 加入以下一行（请自行更改自己的JAVA_HOME路径），然后保存
+JAVA_HOME=/usr/local/jdk1.8.0_191
+</code></pre>
+<p>2、根据数据采集的需求配置采集方案，描述在配置文件中(文件名可任意自定义)<br>
+3、指定采集方案配置文件，在相应的节点上启动flume agent</p>
+<p>简单flume采集案例：采集本机某个端口发送的信息，并答应到屏幕控制台：<br>
+1、先在flume的conf目录下新建一个文件<br>
+vi   netcat-logger.conf</p>
+<pre><code># 定义这个agent中各组件的名字
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# 描述和配置source组件：r1
+a1.sources.r1.type = netcat
+a1.sources.r1.bind = localhost
+a1.sources.r1.port = 44444
+
+# 描述和配置sink组件：k1
+a1.sinks.k1.type = logger
+
+# 描述和配置channel组件，此处使用是内存缓存的方式
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# 描述和配置source  channel   sink之间的连接关系
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+</code></pre>
+<p>2、启动agent去采集数据</p>
+<pre><code>bin/flume-ng agent -c conf -f conf/netcat-logger.conf -n a1  -Dflume.root.logger=INFO,console
+</code></pre>
+<p>-c conf   指定flume自身的配置文件所在目录<br>
+-f conf/netcat-logger.con  指定我们所描述的采集方案<br>
+-n a1  指定我们这个agent的名字<br>
+3、测试<br>
+先要往agent采集监听的端口上发送数据，让agent有数据可采<br>
+随便在一个能跟agent节点联网的机器上</p>
+<pre><code>telnet anget-hostname  port   （telnet localhost 44444） 
+输入hello world 然后按enter
+</code></pre>
+<h3><a id="122flume_89"></a>1.2.2.flume采集数据</h3>
+<h4><a id="1221_90"></a>1.2.2.1.采集目录下数据</h4>
+<p>采集需求：某服务器的某特定目录下，会不断产生新的文件，每当有新文件出现，就需要把文件采集到HDFS中去<br>
+根据需求，首先定义以下3大要素</p>
+<ul>
+<li>采集源，即source——监控文件目录 :  spooldir</li>
+<li>下沉目标，即sink——为简便，依然打印到控制台  :  hdfs sink</li>
+<li>source和sink之间的传递通道——channel，可用file channel 也可以用内存channel</li>
+</ul>
+<p>配置文件编写：</p>
+<pre><code># Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+#监听目录,spoolDir指定目录, fileHeader要不要给文件夹前坠名
+a1.sources.r1.type = spooldir
+a1.sources.r1.spoolDir = /home/hadoop/flumespool
+a1.sources.r1.fileHeader = true
+
+# Describe the sink
+a1.sinks.k1.type = logger
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+</code></pre>
+<p>运行：</p>
+<pre><code>bin/flume-ng agent -c ./conf -f ./conf/spool-logger.conf -n a1 -Dflume.root.logger=INFO,console
+</code></pre>
+<h4><a id="1222_hdfs_126"></a>1.2.2.2 采集日志到hdfs集群</h4>
+<p>采集需求：比如业务系统使用log4j生成的日志，日志内容不断增加，需要把追加到日志文件中的数据实时采集到hdfs</p>
+<p>根据需求，首先定义以下3大要素</p>
+<ul>
+<li>采集源，即source——监控文件内容更新 :  exec  ‘tail -F file’</li>
+<li>下沉目标，即sink——HDFS文件系统  :  hdfs sink</li>
+<li>Source和sink之间的传递通道——channel，可用file channel 也可以用 内存channel</li>
+</ul>
+<pre><code>########
+
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = exec
+a1.sources.r1.command = tail -F /root/etl/project/big_data/tmp/flumespool/flumetohdfs.log
+a1.sources.r1.channels = c1
+
+# Describe the sink
+a1.sinks.k1.type = hdfs
+a1.sinks.k1.channel = c1
+a1.sinks.k1.hdfs.path = /data/data_coe/data_asset/bigdata/flume/%y-%m-%d/%H%M/
+a1.sinks.k1.hdfs.filePrefix = events-
+# 控制生成的目录，这里是每10分钟重新生成一个目录
+a1.sinks.k1.hdfs.round = true
+a1.sinks.k1.hdfs.roundValue = 10
+a1.sinks.k1.hdfs.roundUnit = minute
+# 控制多长时间将hdfs上的临时文件变成永久文件，这里设置为3秒或20byte或5个event，生成最终文件速度太快，在hdfs上会生成大量小文件，不利于mapreduce进行处理
+a1.sinks.k1.hdfs.rollInterval = 3
+a1.sinks.k1.hdfs.rollSize = 20
+a1.sinks.k1.hdfs.rollCount = 5
+a1.sinks.k1.hdfs.batchSize = 1
+a1.sinks.k1.hdfs.useLocalTimeStamp = true
+#生成的文件类型，默认是Sequencefile，可用DataStream，则为普通文本
+a1.sinks.k1.hdfs.fileType = DataStream
+
+
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+</code></pre>
+<p>启动命令</p>
+<pre><code>bin/flume-ng agent -c conf -f conf/tail-fs.conf -n a1
+</code></pre>
+<h5><a id="1223_flumeavro_181"></a>1.2.2.3 flume通过avro对接（汇总数据）</h5>
+<p>使用场景：<br>
+把多台服务器(flume generator)上面的日志汇总到一台或者几台服务器上面（flume collector），然后对接到kafka或者HDFS上<br>
+<img src="https://img-blog.csdnimg.cn/20181114230402438.jpg?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MTczNDY4Nw==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>
+两台服务器，一台master，一台slave，flume把ma ster上的日志te r z传送对接到slave1<br>
+master 上 tail_avor.conf</p>
+<pre><code>##################
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = exec
+a1.sources.r1.command = tail -F /home/hadoop/log/test.log
+a1.sources.r1.channels = c1
+
+# Describe the sink
+a1.sinks = k1
+a1.sinks.k1.type = avro
+a1.sinks.k1.channel = c1
+a1.sinks.k1.hostname = 
+a1.sinks.k1.port = 4141
+a1.sinks.k1.batch-size = 2
+
+
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+</code></pre>
+<p>slave1 接收数据<br>
+avor_console.conf</p>
+<pre><code># Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = avro
+a1.sources.r1.channels = c1
+a1.sources.r1.bind = localhost
+a1.sources.r1.port = 4141
+
+# Describe the sink
+a1.sinks.k1.type = logger
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+</code></pre>
+<p>注意，一定要关闭防火墙</p>
+<pre><code>service iptables stop
+</code></pre>
+<p>先启动slave1上接收数据的flume</p>
+<pre><code>bin/flume-ng agent -c conf -f conf/avor_console.conf -n a1  -Dflume.root.logger=INFO,console
+</code></pre>
+<p>再启动master上的flume</p>
+<pre><code>bin/flume-ng agent -c conf -f conf/tail_avor.conf -n a1  -Dflume.root.logger=INFO,console
+</code></pre>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

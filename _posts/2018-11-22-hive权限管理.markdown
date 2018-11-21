@@ -1,0 +1,374 @@
+---
+layout:     post
+title:      hive权限管理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;"><span style="color:rgb(51,51,51);font-family:'Microsoft YaHei';font-size:14px;line-height:26px;">《Hive编程指南》第18章 安全有相关内容可参考。</span><br></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">环境：</span></p>
+<p><span style="font-family:'Microsoft YaHei';">HDP2.4 ,hive-1.2.0, ambari统一管理</span></p>
+<p><span style="font-family:'Microsoft YaHei';"><span style="color:rgb(51,51,51);font-size:14px;line-height:26px;">目前hive支持简单的权限管理，默认情况下是不开启，这样所有的用户都具有相同的权限，同时也是超级管理员，</span><span style="color:rgb(51,51,51);font-size:14px;line-height:26px;">也就对hive中的所有表都有查看和改动的权利，这样是不符合一般数据仓库的安全原则的。下面来介绍HIVE的权限管理。</span></span></p>
+<p><span style="color:rgb(51,51,51);font-size:14px;line-height:26px;"><span style="font-family:'Microsoft YaHei';"><strong>Hive用户</strong></span></span></p>
+<div style="font-size:14px;line-height:21px;"><span style="font-family:'Microsoft YaHei';">1. Hive作为表存储层。</span></div>
+<div style="font-size:14px;line-height:21px;"><span style="font-family:'Microsoft YaHei';">    使用对象：<span style="color:rgb(51,51,51);">Hive's<span style="background-color:inherit;"> </span></span><a href="https://cwiki.apache.org/confluence/display/Hive/HCatalog" rel="nofollow" style="color:rgb(53,114,176);">HCatalog</a><span style="color:rgb(51,51,51);"><span style="background-color:inherit;"> </span>API如Apache
+ Pig, MapReduce 和一些大量的并行数据库， 有直接操作HDFS和元数据server的权限</span></span></div>
+<div style="font-size:14px;line-height:21px;"><span style="font-family:'Microsoft YaHei';">2. Hive作为SQL查询引擎。</span></div>
+<div style="font-size:14px;line-height:21px;"><span style="font-family:'Microsoft YaHei';">    a. hive cli: 同样有HDFS和Hive metastore操作权限</span></div>
+<div style="font-size:14px;line-height:21px;"><span style="font-family:'Microsoft YaHei';">    b. <span style="color:rgb(51,51,51);">ODBC/JDBC和其他HiveServer2 API users (Beeline CLI is an example)，通过HiveServer2操作。</span></span></div>
+<strong><span style="font-family:'Microsoft YaHei';"><span style="font-size:14px;">Hive三种授权模型</span></span></strong>
+<p></p>
+<p><span style="font-size:12px;"><span style="font-family:'Microsoft YaHei';">1. <span style="color:rgb(51,51,51);font-size:14px;line-height:21px;">Storage Based Authorization in the Metastore Server(SBA)</span></span></span></p>
+<p><span style="font-family:'Microsoft YaHei';"><span style="font-size:12px;"><span style="color:rgb(51,51,51);font-size:14px;line-height:21px;"> 通常用于Metastore Server API的授权；hive用户</span></span><span style="color:rgb(51,51,51);line-height:1.5;font-size:14px;">1和2a,
+ Hive配置不控制权限，通过HDFS文件进行 权限控制；</span><span style="color:rgb(51,51,51);line-height:1.5;font-size:14px;">hive用户2b 使用需要</span><a href="https://cwiki.apache.org/confluence/display/Hive/Configuration+Properties#ConfigurationProperties-hive.server2.enable.doAs" rel="nofollow" style="line-height:1.5;font-size:14px;color:rgb(53,114,176);">hive.server2.enable.doAs</a><span style="color:rgb(51,51,51);line-height:1.5;font-size:14px;background-color:inherit;"> =true</span><span style="font-size:12px;"><span style="color:rgb(51,51,51);font-size:14px;line-height:21px;"></span><span style="color:rgb(51,51,51);font-size:14px;line-height:21px;"></span></span></span></p>
+<div style="font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);line-height:1.5;"><span style="background-color:inherit;"><span style="font-family:'Microsoft YaHei';">注意：<span style="color:rgb(51,51,51);font-size:14px;line-height:21px;">Hive
+ 0.12.0版本之后开始支持;</span>使用HDFS ACL(Hadoop 2.4以后版本支持）灵活控制</span></span></span></div>
+<span style="font-family:'Microsoft YaHei';">虽然能够保护Metastore中的元数据不被恶意用户破坏，<span style="color:rgb(51,51,51);font-size:14px;line-height:21px;">可控制数据库、表和分区</span>但是没有提供细粒度的访问控制（列级别、行级别）</span>
+<p><span style="color:rgb(51,51,51);"><span style="font-size:14px;line-height:21px;"><span style="font-family:'Microsoft YaHei';">hive-site.xml配置：</span></span></span></p>
+<p><span style="font-family:Arial, sans-serif;color:#333333;"><span style="font-size:14px;line-height:21px;"></span></span></p>
+<pre><code class="language-html">roperty&gt;
+&lt;name&gt;hive.metastore.pre.event.listeners&lt;/name&gt;
+&lt;value&gt; org.apache.hadoop.hive.ql.security.authorization.AuthorizationPreEventListener&lt;/value&gt;
+&lt;description&gt;turns on metastore-side security&lt;/description&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.metastore.authorization.manager&lt;/name&gt;
+&lt;value&gt;  org.apache.hadoop.hive.ql.security.authorization.StorageBasedAuthorizationProvider&lt;/value&gt;
+&lt;description&gt;This tells Hive which metastore-side authorization provider to use. The default setting uses DefaultHiveMetastoreAuthorizationProvider, which implements the standard Hive grant/revoke model. To use an HDFS permission-based model (recommended) to do your authorization, use StorageBasedAuthorizationProvider as instructed above.&lt;/description&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.metastore.authenticator.manager&lt;/name&gt;
+&lt;value&gt; org.apache.hadoop.hive.ql.security.HadoopDefaultMetastoreAuthenticator&lt;/value&gt;
+  &lt;description&gt;authenticator manager class name to be used in the metastore for authentication.
+  The user defined authenticator should implement interface 
+  org.apache.hadoop.hive.ql.security.HiveAuthenticationProvider.
+  &lt;/description&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.metastore.authorization.auth.reads&lt;/name&gt;
+&lt;value&gt; true&lt;/value&gt;
+&lt;description&gt;default=true,When this is set to true, Hive metastore authorization also checks for read access.&lt;/description&gt;
+&lt;/property&gt;</code></pre>
+<p></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;">2. <span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;">SQL
+ Standards Based Authorization in HiveServer2(SSBA)</span></span></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">基于SQL标准的Hive授权为Hive授权提供了第三个选择，它完全兼容SQL的授权模型，不会给现在的用户带来向后兼容的问题，因此被推荐使用。一旦用户迁移到这种更加安全的授权机制后，默认的授权机制可以被遗弃掉。</span><br></span></span></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;"><span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">基于SQL的授权模型可以和基于存储的授权模型（Hive
+ Metastore Server）结合使用。</span><br></span></span></span></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;"><span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;"><span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">授权确认时是以提交SQL指令的用户身份为依据的，但SQL指令是以Hive
+ Server用户身份（即Hive Server的进程用户）被执行的，因此Hive Server用户必须拥有相应目录（文件）的权限（根据SQL指令的不同，所需权限也不同）。</span><br></span></span></span></span></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"></span></span></span></p>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;line-height:1.5;">基于HiveServer2可提供行列级别的细粒度权限控制</span></div>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;line-height:1.5;"><span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">在这种授权模型控制下，拥有权限使用Hive
+ CLI、HDFS commands、Pig command line、'hadoop jar' 等工具（指令）的用户被称为特权用户。在一个组织（团队）内，仅仅一些需要执行ETL相关工作的团队需要这些特殊权限，这些工具的访问<strong>不经过HiveServer2，因此它们不受这种授权模型的控制。对于需要通过Hive CLI、Pig和MapReduce访问Hive表的用户，可以通过在Hive Metastore Server中启用Storage Based Authorization来进行相应的权限控制<span style="color:rgb(51,51,51);font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">（否则hive
+ cli无法进行权限控制）</span>；</strong>其它情况则可能需要结合Hadoop的安全机制进行。</span></span></div>
+<strong>限制：</strong>
+<p></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;">（1）当授权enbled,
+ 命令dfs, add, delete, compile和reset  disabled.</span></span></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;">（2）<span style="color:rgb(51,51,51);font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">transform
+ clause被禁用。</span></span></span></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:12px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:21px;"></span></span></span></p>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">
+（3）改变Hive配置的指令集合被限制为仅某些用户可以执行，可以通过hive.security.authorization.sqlstd.confwhitelist（hive-site.xml）进行配置。</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">
+（4）添加或删除函数、宏的权限被限制为仅具有admin角色的用户可以执行。</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:25.2px;">
+（5）<span style="line-height:25.2px;">为了用户可以使用（自定义）函数，创建永久函数（create permanent functions）的功能被添加。拥有角色admin的用户可以执行该指令添加函数，所有添加的函数可以被所有的用户使用。</span></div>
+<p><strong><span style="font-family:'Microsoft YaHei';font-size:12px;">hive-site.xml配置：</span></strong></p>
+<p></p>
+<pre><code class="language-html">&lt;property&gt;
+&lt;name&gt;hive.security.authorization.enabled&lt;/name&gt;
+&lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+    &lt;name&gt;hive.server2.enable.doAs&lt;/name&gt;
+    &lt;value&gt;false&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+    &lt;name&gt;hive.users.in.admin.role&lt;/name&gt;
+    &lt;value&gt;hive&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.authorization.manager&lt;/name&gt; 
+&lt;value&gt;org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdHiveAuthorizerFactory&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.authenticator.manager&lt;/name&gt; 
+&lt;value&gt;org.apache.hadoop.hive.ql.security.SessionStateUserAuthenticator&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;!--
+&lt;property&gt;
+&lt;name&gt;hive.metastore.uris&lt;/name&gt;
+&lt;value&gt;''&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.conf.restricted.list&lt;/name&gt; 
+&lt;value&gt;hive.security.authorization.enabled,hive.security.authorization.manager,hive.security.authenticator.manager&lt;/value&gt; 
+&lt;/property&gt;
+--&gt;</code></pre><strong>注意：</strong>
+<p></p>
+<p>（1）拥有admin角色的用户需要运行命令“set role admin"去获取admin角色的权限；</p>
+<p>配置完这个可以在元数据表中查询到</p>
+<p></p>
+<pre><code class="language-html">&lt;property&gt;
+    &lt;name&gt;hive.users.in.admin.role&lt;/name&gt;
+    &lt;value&gt;hive&lt;/value&gt;
+&lt;/property&gt;</code></pre>查询： select * from Role_Map;<br><p></p>
+<p></p>
+<pre><code class="language-plain">a. [Important] Before restarting HiveServer2, firstly grant admin role to the user in Beeline.
+
+grant admin to user mapr;
+This is to make sure the specified admin user has the admin role.
+If we ignore this step in Hive 0.13, then later we can not set the role to admin even if the user is specified in  hive.users.in.admin.role.
+For example:
+0: jdbc:hive2://xxx:10000/default&gt; set hive.users.in.admin.role;
++----------------------------------------------+
+|                     set                      |
++----------------------------------------------+
+| hive.users.in.admin.role=mapr                |
++----------------------------------------------+
+1 row selected (0.05 seconds)
+
+0: jdbc:hive2://xxx:10000/default&gt; set role admin;    
+Error: Error while processing statement: FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask. mapr doesn't belong to role admin (state=08S01,code=1)
+b. Start HiveServer2 with the following additional command-line options.
+
+-hiveconf hive.security.authorization.manager=org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdHiveAuthorizerFactory
+-hiveconf hive.security.authorization.enabled=true
+-hiveconf hive.security.authenticator.manager=org.apache.hadoop.hive.ql.security.SessionStateUserAuthenticator
+c.  Test admin role.
+
+0: jdbc:hive2://xxx:xxx/default&gt; set role admin;                                           
+No rows affected (0.824 seconds)
+0: jdbc:hive2://xxx:xxx/default&gt; show current roles;
++--------+
+|  role  |
++--------+
+| admin  |
+|        |
++--------+
+2 rows selected (0.391 seconds)</code></pre>
+<p></p>
+<p></p>
+（2）HiveServer2可以配置了用嵌入的metastore( 这个没有测试）
+<p><strong>hiveserver2-site.xml的配置：</strong></p>
+<p></p>
+<pre><code class="language-html">&lt;property&gt;
+&lt;name&gt;hive.security.authorization.enabled&lt;/name&gt;
+&lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.authorization.manager&lt;/name&gt; 
+&lt;value&gt;org.apache.hadoop.hive.ql.security.authorization.plugin.sqlstd.SQLStdHiveAuthorizerFactory&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.authenticator.manager&lt;/name&gt; 
+&lt;value&gt;org.apache.hadoop.hive.ql.security.SessionStateUserAuthenticator&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.metastore.uris&lt;/name&gt; 
+&lt;value&gt;thrift://localhost:9083&lt;/value&gt;
+&lt;/property&gt;</code></pre><br><span style="font-size:14px;">3. Hive Default Authorization</span>
+<p></p>
+<p></p>
+<div style="font-family:'微软雅黑';font-size:14px;line-height:21px;"> 缺陷：类似于关系型的授权模式，但用户的授权许可没有定义，任何用户都可以授权和撤回</div>
+<div style="font-size:14px;line-height:21px;"><span style="font-family:'Microsoft YaHei';"> 类似2，提供<span style="color:rgb(51,51,51);">grant/revoke控制权限，Hive Cli支持</span></span></div>
+<p><span style="font-family:'Microsoft YaHei';">Hive授权定义在不同级别： Users Groups Roles, 其中之一的权限checks通过， hive操作即可执行</span></p>
+<p><span style="font-family:'Microsoft YaHei';">默认情况，metastore使用HadoopDefaultAuthenticator</span></p>
+<p><span style="font-family:'Microsoft YaHei';">hive-site.xml配置：</span></p>
+<p></p>
+<pre><code class="language-html">&lt;property&gt;  
+  &lt;name&gt;hive.security.authorization.enabled&lt;/name&gt;   
+  &lt;value&gt;true&lt;/value&gt;  
+  &lt;description&gt;Enable or disable the hive client authorization&lt;/description&gt;  
+&lt;/property&gt; 
+
+&lt;property&gt;  
+  &lt;name&gt;hive.security.authorization.createtable.owner.grants&lt;/name&gt;  
+  &lt;value&gt;ALL&lt;/value&gt;  
+  &lt;description&gt;The privileges automatically granted to the owner whenever  
+  a table gets created.An example like "select,drop" will grant select  
+  and drop privilege to the owner of the table&lt;/description&gt;  
+&lt;/property&gt; 
+
+&lt;!--可选,未测--&gt;
+&lt;property&gt;  
+  &lt;name&gt;hive.security.authorization.createtable.user.grants&lt;/name&gt;  
+  &lt;value&gt;ALL&lt;/value&gt;  
+&lt;/property&gt; 
+
+&lt;!--可选,未测--&gt;
+&lt;property&gt;  
+  &lt;name&gt;hive.security.authorization.createtable.group.grants&lt;/name&gt;  
+  &lt;value&gt;ALL&lt;/value&gt;  
+&lt;/property&gt; 
+
+&lt;!--可选,未测--&gt;
+&lt;property&gt;  
+  &lt;name&gt;hive.security.authorization.createtable.role.grants&lt;/name&gt;  
+  &lt;value&gt;ALL&lt;/value&gt;  
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.authorization.manager&lt;/name&gt; 
+&lt;value&gt;org.apache.hadoop.hive.ql.security.authorization.DefaultHiveMetastoreAuthorizationProvider&lt;/value&gt;
+&lt;description&gt;The hive client authorization manager class name.&lt;/description&gt;  
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;hive.security.authenticator.manager&lt;/name&gt; 
+&lt;value&gt;org.apache.hadoop.hive.ql.security.HadoopDefaultAuthenticator&lt;/value&gt; 
+&lt;/property&gt;</code></pre>
+<p><span style="font-size:14px;"><strong>我的配置：</strong></span></p>
+<p><span style="font-size:14px;"><strong><img src="https://img-blog.csdn.net/20160708150821604?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></strong></span></p>
+<p><span style="font-size:14px;"><span style="color:#ff0000;">Ambari配置按上面配置会有一个报错：</span></span><span style="color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;line-height:21px;background-color:rgb(242,222,222);">hive.security.authorization.enabled=
+ true后</span><span style="color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;line-height:21px;background-color:rgb(242,222,222);">hive_security_authorization should not be None if hive.security.authorization.enabled
+ is set。</span></p>
+<p>如何配置：<a href="https://issues.apache.org/jira/browse/AMBARI-11575" rel="nofollow">https://issues.apache.org/jira/browse/AMBARI-11575</a></p>
+<p><span style="font-size:14px;"><strong>Privileges, Users 和Roles</strong></span></p>
+<p>(1) <span style="font-size:14px;">Privileges可以被授权给Users和Roles；</span></p>
+<p><span style="font-size:14px;">(2) Users可以有一个或多个角色</span></p>
+<p><span style="font-size:14px;">默认角色都是public， 所有的用户都有public角色。只有Admin角色可以create/drop/set/show roles.</span></p>
+<p><span style="font-size:14px;">元数据表：</span></p>
+<p><span style="font-size:14px;">Db_privs:记录了User/Role在DB上的权限<br>
+Tbl_privs:记录了User/Role在table上的权限<br>
+Tbl_col_privs：记录了User/Role在table column上的权限<br>
+Roles：记录了所有创建的role<br>
+Role_map：记录了User与Role的对应关系</span></p>
+<p><span style="font-size:14px;"></span></p>
+<pre><code class="language-plain">hive&gt; set role admin;
+hive&gt; show roles;
+OK
+admin
+public
+role_test1
+hive&gt; create role role_test2;OK
+Time taken: 0.644 seconds
+hive&gt; drop  role role_test1;
+hive&gt; show roles;
+OK
+admin
+public
+role_test2</code></pre>
+<p><span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;line-height:20px;"><strong>Grant/Revoke Roles</strong></span></p>
+<pre><code class="language-plain">SHOW GRANT principal_specification
+[ON object_specification [(column_list)]]
+ 
+principal_specification:
+    USER user
+  | GROUP group
+  | ROLE role
+ 
+object_specification:
+    TABLE tbl_name
+  | DATABASE db_name
+
+eg：GRANT UPDATE  ON table test to user hive;</code></pre><pre><code class="language-plain">hive&gt; GRANT UPDATE  ON table test to user hive;
+FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask. Permission denied: Principal [name=hive, type=USER] does not have following privileges for operation GRANT_PRIVILEGE [[UPDATE with grant] on Object [type=TABLE_OR_VIEW, name=default.test]]
+hive&gt; set role admin;
+OK
+Time taken: 0.037 seconds
+hive&gt; show current roles;
+OK
+admin
+Time taken: 0.13 seconds, Fetched: 1 row(s)
+hive&gt; GRANT UPDATE  ON table test to user hive;
+OK
+Time taken: 1.006 seconds
+hive&gt; alter table test rename to test01;
+FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask. Unable to alter table. No privilege 'Alter' found for outputs { database:default, table:test}
+hive&gt; create database test02;
+FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask. MetaException(message:No privilege 'Create' found for outputs { database:test02})</code></pre><pre><code class="language-plain">这个不明白，为什么不能正常的授权？？
+0: jdbc:hive2://XXXX:10000&gt; GRANT select ON DATABASE test TO USER hive;
+Error: Error while processing statement: FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask. Error getting object from metastore for Object [type=DATABASE, name=test] (state=08S01,code=1)</code></pre><pre><code class="language-plain">&lt;pre name="code" class="plain"&gt;hive&gt; GRANT SELECT ON TABLE test TO USER hive;
+FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask. Permission denied: Principal [name=hive, type=USER] does not have following privileges for operation GRANT_PRIVILEGE [[SELECT with grant] on Object [type=TABLE_OR_VIEW, name=default.test]]
+hive&gt; set role admin;
+OK
+Time taken: 0.06 seconds
+hive&gt; GRANT SELECT ON TABLE test TO USER hive;
+OK
+Time taken: 0.566 seconds
+hive&gt; GRANT ALL ON TABLE test TO USER hive; #######这里不明白#######
+FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask. Error granting privileges: null </code></pre>
+<pre></pre>
+<pre><code class="language-plain">hive&gt; revoke insert on table test_hive from user hive;
+OK
+Time taken: 0.191 seconds
+hive&gt; show grant user hive on table test_hive;
+OK
+default    test_hive            hive    USER    DELETE    true    1467708923000    hive
+default    test_hive            hive    USER    SELECT    true    1467708923000    hive
+default    test_hive            hive    USER    UPDATE    true    1467708923000    hive
+Time taken: 0.031 seconds, Fetched: 3 row(s)
+hive&gt; insert into test_hive values(5,"rows5");
+Query ID = hive_20160707015802_fadf5833-7367-4538-b2a9-71230cd10efd
+Total jobs = 1
+Launching Job 1 out of 1
+Tez session was closed. Reopening...
+Session re-established.
+
+
+Status: Running (Executing on YARN cluster with App id application_1467857886938_0008)
+
+--------------------------------------------------------------------------------
+        VERTICES      STATUS  TOTAL  COMPLETED  RUNNING  PENDING  FAILED  KILLED
+--------------------------------------------------------------------------------
+Map 1 ..........   SUCCEEDED      1          1        0        0       0       0
+--------------------------------------------------------------------------------
+VERTICES: 01/01  [==========================&gt;&gt;] 100%  ELAPSED TIME: 56.18 s    
+--------------------------------------------------------------------------------
+Loading data to table default.test_hive
+Failed with exception Unable to alter table. No privilege 'Alter' found for outputs { database:default, table:test_hive}
+FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.MoveTask
+hivemetastore.log报错
+2016-07-06 23:46:52,613 ERROR [pool-3-thread-161]: metastore.RetryingHMSHandler (RetryingHMSHandler.java:invoke(159)) - MetaException(message:No privilege 'Alter' found for outputs { database:default, table:test}) at org.apache.hadoop.hive.metastore.HiveMetaStore$HMSHandler.firePreEvent(HiveMetaStore.java:2026)</code></pre><br><p><span style="font-family:'Microsoft YaHei';font-size:14px;"><strong>一个很常见的错误：</strong></span></p>
+<p></p>
+<pre style="font-family:Monaco, Consolas, Courier, 'Lucida Console', monospace;line-height:21px;background-color:rgb(255,255,255);"><span style="color:rgb(255,0,0);"><span style="font-size:10px;">[root@l1035lab ~]# hive
+Logging initialized using configuration in file:/etc/hive/conf/hive-log4j.properties
+SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: Found binding in [jar:file:/usr/hdp/2.2.4.2-2/hadoop/lib/slf4j-log4j12-1.7.5.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: Found binding in [jar:file:/usr/hdp/2.2.4.2-2/hive/lib/hive-jdbc-0.14.0.2.2.4.2-2-standalone.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [org.slf4j.impl.Log4jLoggerFactory]
+Exception in thread "main" java.lang.RuntimeException: org.apache.hadoop.security.AccessControlException:
+Permission denied: user=root, access=WRITE, inode="/user":hdfs:hdfs:drwxr-xr-x
+        at org.apache.hadoop.hdfs.server.namenode.FSPermissionChecker.checkFsPermission(FSPermissionChecker.java:271)
+        at org.apache.hadoop.hdfs.server.namenode.FSPermissionChecker.check(FSPermissionChecker.java:257)
+        at org.apache.hadoop.hdfs.server.namenode.FSPermissionChecker.check(FSPermissionChecker.java:238)
+        at org.apache.hadoop.hdfs.server.namenode.FSPermissionChecker.checkPermission(FSPermissionChecker.java:179)</span></span></pre>
+<p></p>
+<pre><code class="language-plain">解决办法：You need to have a user home directory on HDFS. Log as the HDFS user and create a home dir for root.
+# su  hdfs
+$ hdfs dfs -mkdir /user/root
+$ hdfs dfs -chown root:root /user/root
+如果已经有了/user/root ，查看下文件的权限
+[root@ambari-2 ~]# hdfs dfs -ls /user
+Found 6 items
+drwxrwx---   - ambari-qa hdfs          0 2016-07-01 04:56 /user/ambari-qa
+drwxr-xr-x   - hcat      hdfs          0 2016-06-29 00:13 /user/hcat
+drwxr-xr-x   - hdfs      hdfs          0 2016-06-30 18:26 /user/hdfs
+drwxr-xr-x   - hive      hdfs          0 2016-07-05 04:21 /user/hive
+drwxr-xr-x   - root      root          0 2016-07-05 02:07 /user/root
+drwxr-xr-x   - tom       tom           0 2016-07-06 20:20 /user/tom</code></pre><br><p></p>
+<p>参考文献：</p>
+<p><a href="https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Authorization#LanguageManualAuthorization-1StorageBasedAuthorizationintheMetastoreServer" rel="nofollow">https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Authorization#LanguageManualAuthorization-1StorageBasedAuthorizationintheMetastoreServer</a><br></p>
+<p><a href="http://m.blog.csdn.net/article/details?id=51312153" rel="nofollow">http://m.blog.csdn.net/article/details?id=51312153</a><br></p>
+<p><a href="http://hadooptutorial.info/hive-authorization-models-and-hive-security/" rel="nofollow">http://hadooptutorial.info/hive-authorization-models-and-hive-security/</a></p>
+<p><a href="http://www.cnblogs.com/yurunmiao/p/4441735.html" rel="nofollow">http://www.cnblogs.com/yurunmiao/p/4441735.html</a></p>
+<p><a href="http://www.tuicool.com/articles/YrIFRvq" rel="nofollow">点击打开链接</a><br></p>
+<br><br>            </div>
+                </div>

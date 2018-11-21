@@ -1,0 +1,1032 @@
+---
+layout:     post
+title:      Hbase基础全解析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：					https://blog.csdn.net/vinfly_li/article/details/79395994				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hbase基础全解析">HBASE基础全解析</h1>
+
+<p>标签： 大数据生态 <br>
+本文使用版本  hbase-0.98.6-cdh5.3.6 <br>
+源码库：  <a href="https://github.com/apache/hbase/releases" rel="nofollow">https://github.com/apache/hbase/releases</a> <br>
+<em>注：rel = release即发行版本 ， RC=Release Candidate即候选发行版</em> <br>
+<em>Write By VinFly</em></p>
+
+
+
+<h2 id="hbase概述">HBASE概述</h2>
+
+<hr>
+
+
+
+<h3 id="hbase概述-1">HBASE概述</h3>
+
+<p>HBASE是HADOOP数据库，是一个分布式的，可扩展的，存储海量数据的数据库，存储级别一般为数十亿行及数百万列的数据，它是一个非关系型数据库，能随机、实时读写，部署在低廉的商用机上（扩展性好），基于高可用性的分布式系统。</p>
+
+
+
+<h3 id="hbase数据表结构">HBASE数据表结构</h3>
+
+<p>HBASE是以表的形式存储数据，表有行和列组成，列划分为若干个列族（Column Family）。 <br>
+在HBASE的表中，Row Key的设计是表中每条记录的“主键”，在查询HBASE中的数据时，也是根据Row Key来查询，所以Row Key的设计非常重要，Row Key的值在表中以字节数组的类型存储。HBASE表结构如下图所示。 <br>
+<img src="http://static.zybuluo.com/vin123456/v5fsktu900a81ddip9kipnfa/image_1ar7vk6lhqr015l28p619u51vig9.png" alt="image_1ar7vk6lhqr015l28p619u51vig9.png-448kB" title=""></p>
+
+
+
+<h3 id="数据表结构详解">数据表结构详解：</h3>
+
+<p><strong>- Row Key</strong></p>
+
+<p>与nosql数据库们一样,row key是用来检索记录的主键。访问hbase table中的行，只有三种方式：</p>
+
+<ol>
+<li>通过单个rowkey访问 (get)</li>
+<li>通过rowkey的range (scan)</li>
+<li>全表扫描</li>
+</ol>
+
+<p>Row key行键 (Row key)可以是任意字符串(最大长度是 64KB，实际应用中长度一般为 10-100bytes)，在hbase内部，row key保存为字节数组。 <br>
+存储时，数据按照Row key的字典序(byte order)排序存储。设计key时，要充分排序存储这个特性，将经常一起读取的行存储放到一起。(位置相关性)</p>
+
+<p><strong>- 列族（Column Family）</strong></p>
+
+<p>hbase表中的每个列，都归属与某个列族。列族是表的schema的一部分(而列不是)，必须在使用表之前定义。列名都以列族作为前缀。例如courses:history ， courses:math 都属于 courses 这个列族。 <br>
+访问控制、磁盘和内存的使用统计都是在列族层面进行的。实际应用中，列族上的控制权限能 帮助我们管理不同类型的应用：我们允许一些应用可以添加新的基本数据、一些应用可以读取基本数据并创建继承的列族、一些应用则只允许浏览数据（甚至可能因 为隐私的原因不能浏览所有数据）。</p>
+
+<ul>
+<li><strong>时间戳（Time Stamp）</strong></li>
+</ul>
+
+<p>HBase中通过row和columns确定的为一个存贮单元称为cell。每个 cell都保存着同一份数据的多个版本。版本通过时间戳来索引。时间戳的类型是 64位整型。时间戳可以由hbase(在数据写入时自动 )赋值，此时时间戳是精确到毫秒的当前系统时间。时间戳也可以由客户显式赋值。如果应用程序要避免数据版本冲突，就必须自己生成具有唯一性的时间戳。每个 cell中，不同版本的数据按照时间倒序排序，即最新的数据排在最前面。 <br>
+为了避免数据存在过多版本造成的的管理 (包括存贮和索引)负担，hbase提供了两种数据版本回收方式。一是保存数据的最后n个版本，二是保存最近一段时间内的版本（比如最近七天）。用户可以针对每个列族进行设置。maxversion=3   verson=1</p>
+
+<ul>
+<li><strong>Cell</strong> <br>
+唯一确定的单元。cell中的数据是没有类型的，全部是字节码形式存贮 <br>
+<code>{rowkey, column( =&lt;family&gt; + &lt;label&gt;), version}</code></li>
+</ul>
+
+
+
+<h3 id="hbase安装部署及简单shell使用">HBASE安装部署及简单SHELL使用</h3>
+
+<p><strong>1、下载、解压源码包</strong> <br>
+使用HBASE要注意其与Hadoop的兼容性，本文使用CDH5.3.6版本的HBASE及HADOOP，下载地址： <br>
+<a href="http://archive.cloudera.com/cdh5/cdh/5/" rel="nofollow">http://archive.cloudera.com/cdh5/cdh/5/</a> <br>
+下载完成后上传Hbase压缩包，赋予执行权限，解压至指定目录</p>
+
+<p><strong>2、配置</strong></p>
+
+<p>检查jdk是否正确（jdk版本使用1.7以上），启动hadoop，检查dfsadmin是否脱离安全模式 <br>
+ <img src="http://static.zybuluo.com/vin123456/gnc466iwhzthbhu5ezkih2yx/image_1ar8328e1e3m19q91pn5i6o1om3m.png" alt="image_1ar8328e1e3m19q91pn5i6o1om3m.png-57.7kB" title=""> <br>
+配置{HBASE_HOME}/conf下的hbase-enc.sh <br>
+ <code>export JAVA_HOME=/opt/modules/jdk1.7.0_67 <br>
+  export HBASE_MANAGES_ZK=false</code> <br>
+其中的export HBASE_MANAGES_ZK=false是配置是否使用HBASE自带的zookeeper <br>
+配置{HBASE_HOME}/conf下的hbase-site.xml <br>
+首先在hbase目录下创建目录(可以在任意目录下)： <br>
+mkdir -p data/tmp <br>
+配置hbase.tmp.dir属性值为创建的目录 <br>
+<img src="http://static.zybuluo.com/vin123456/8znhb9eps2keklczciqfm2mb/image_1ar86rhn0e3kmrp1efj1e011k0413.png" alt="image_1ar86rhn0e3kmrp1efj1e011k0413.png-31.4kB" title=""> <br>
+配置hbase.root.dir指定存储的数据在HDFS上的目录 <br>
+<img src="http://static.zybuluo.com/vin123456/udew55zgk8gyk3zhzcutx6ic/image_1ar86s2n413qt10det1k143i18r11g.png" alt="image_1ar86s2n413qt10det1k143i18r11g.png-8.5kB" title=""> <br>
+配置hbase.cluster.distributed值为true，指定是否为分布式模式 <br>
+<img src="http://static.zybuluo.com/vin123456/wzt56bm6vdv96t85f1rraem0/image_1ar86skqp4bh18td1rcf187613kt1t.png" alt="image_1ar86skqp4bh18td1rcf187613kt1t.png-8kB" title=""> <br>
+配置hbase.zookeeper.quorum ，这里配置的是zookeeper所在机器，在设置了主机名与IP地址映射之后，这里写的是主机名，中间用逗号隔开。 <br>
+<img src="http://static.zybuluo.com/vin123456/7rfgjstm03zpfetu5szoptc0/image_1ar871ta81djlq8oc7g1h091e22a.png" alt="image_1ar871ta81djlq8oc7g1h091e22a.png-9.4kB" title=""> <br>
+配置{HBASE_HOME}/conf下的regionservers，这里配置的是regionserver所在机器，根据需要自己设定。 <br>
+<img src="http://static.zybuluo.com/vin123456/craw721tujwl9cviqkmv060y/image_1ar874t29id64hi1m1cdinnmq2n.png" alt="image_1ar874t29id64hi1m1cdinnmq2n.png-4.9kB" title=""> <br>
+注：如果下载的hbase版本与使用的hadoop版本不兼容，替换掉{HBASE_HOME}/lib下的hadoop jar包即可。 <br>
+到这里基本的配置就完成了，如果有其他参数要求，参考官网。 <br>
+地址：<a href="http://hbase.apache.org/book.html#config.files" rel="nofollow">http://hbase.apache.org/book.html#config.files</a></p>
+
+<p><strong>3、启动与shell基本使用</strong></p>
+
+<p>启动命令： <br>
+<code>${HBASE_HOME}/bin/hbase-daemon.sh start master</code> <br>
+ <code>${HBASE_HOME}/bin/hbase-daemon.sh start regionserver</code></p>
+
+<p>查看启动的进程： <br>
+<img src="http://static.zybuluo.com/vin123456/ydk4plusknr34nks1vqy9lqs/image_1ar87cq491ffl1csv8o21i2610h334.png" alt="image_1ar87cq491ffl1csv8o21i2610h334.png-47.1kB" title=""> <br>
+启动Hbase命令行：bin/hbase shell <br>
+<img src="http://static.zybuluo.com/vin123456/166llplc9jfy9pkfbwtlmwi7/image_1ar87i2091ee01kefejq1dh4sfr3h.png" alt="image_1ar87i2091ee01kefejq1dh4sfr3h.png-74.5kB" title=""> <br>
+在命令行中，如果不熟悉某个命令，可以使用 help：查看帮助信息 比如help+’create’查看create命令使用方法 <br>
+<strong>基本命令举例</strong> <br>
+<strong>创建表</strong> <br>
+     <code>create 'user', 'info'</code> //创建user表，列族名为info <br>
+PUT/UPDATE  //插入数据 <br>
+    <code>put 'user', '100001', 'info:name', 'zhangsan'</code> <br>
+    <img src="http://static.zybuluo.com/vin123456/tfxeaa58g04rp7ie5nut0xbj/image_1ar87mhg919pm8clmg718hv2em3u.png" alt="image_1ar87mhg919pm8clmg718hv2em3u.png-23.8kB" title=""> <br>
+<strong>查询</strong> <br>
+<em>get</em> <br>
+        依据ROWKEY进行查询，速度最快的 <br>
+    <code>get 'user', '100001'</code> <br>
+<img src="http://static.zybuluo.com/vin123456/2b6pls53gnenfbgt3fqpf1ig/image_1ar87n9lk17ha1pgj100r1b75kgh4b.png" alt="image_1ar87n9lk17ha1pgj100r1b75kgh4b.png-66.6kB" title=""> <br>
+<em>scan</em> <br>
+        全表扫描，也就测试用用，实际慎用 <br>
+        <code>scan 'user'</code> <br>
+<em>scan range</em> <br>
+        范围查询 <br>
+        使用最多最广泛 <br>
+    <code>scan 'user' , {STARTROW =&gt; ‘100001’}</code> <br>
+<img src="http://static.zybuluo.com/vin123456/hcp745lqhf3beyj7ozuiec46/image_1ar87q1oc11b01qo62tjecj1sj14o.png" alt="image_1ar87q1oc11b01qo62tjecj1sj14o.png-105.2kB" title=""> <br>
+HBASE也有它的端口号，默认为60010，可在浏览器中监控HBASE运行状况。 <br>
+<img src="http://static.zybuluo.com/vin123456/411i8gg2vo5zq0or9noyjnbm/image_1ar87s54btfj12knfe3fb9fo55.png" alt="image_1ar87s54btfj12knfe3fb9fo55.png-52.8kB" title=""></p>
+
+<hr>
+
+
+
+<h2 id="hbase的物理结构">HBASE的物理结构</h2>
+
+<p>首先看HBASE的物理模型图 <br>
+<img src="http://static.zybuluo.com/vin123456/avi0zrx84roewwab95qwvech/image_1ar88e1j31ucc2ln1qa9v5t1jeh5i.png" alt="HBASE物理模型" title=""> <br>
+从图中可以看出一下几点：</p>
+
+<ol>
+<li>在HBASE的表中，所有的行都是按照Row Key的字典序排列（a~z,1~9…）</li>
+<li><p>在行的方向上分割为多个Region，而Region是按大小进行分割的，每个表初始只有一个Region，随着数据的增多，Region不断增大，当增大到一定阀值得时候，Region就会等分为两个新的Region <br>
+<img src="http://static.zybuluo.com/vin123456/hydn7r5onivmz4hq4nm8x6li/image_1ar88ort8n0q1c4n12l59v9i35v.png" alt="image_1ar88ort8n0q1c4n12l59v9i35v.png-62.1kB" title=""></p></li>
+<li><p>Region是HBASE中分布式存储的最小单元，不同的Region分布到不同的RegionServer上 <br>
+<img src="http://static.zybuluo.com/vin123456/60tpho0s4lp22dcov88sabqw/image_1ar88sro8shfig61m3b16m516hf6c.png" alt="image_1ar88sro8shfig61m3b16m516hf6c.png-164.2kB" title=""></p></li>
+<li><p>Region是分布式存储的最小单元，但它不是存储的最小单元，Region又由一个或者多个Store组成，每个Store保存一个column family，每个Store由一个memStore和0到多个StoreFile组成，其中的memStore存储在内存中，StoreFile存储在HDFS文件系统上。 <br>
+<img src="http://static.zybuluo.com/vin123456/3wcwfei7zan7gvv5asev8j4t/image_1ar894108d1u13l71111srcpvo6p.png" alt="image_1ar894108d1u13l71111srcpvo6p.png-81kB" title=""></p></li>
+<li>HBASE在HDFS上的存储 <br>
+HBASE中所有数据文件都存储在了HDFS文件系统上，HBASE主要包括两种文件类型： <br>
+HFile：HBase中KeyValue数据的存储格式，HFile是Hadoop的二进制格式文件，实际上上面提到的StoreFile就是对HFile做了轻量级包装，即StoreFile底层就是HFile <br>
+HLog File：HBASE中的WAL（Write Ahead Log ：预写日志）的存储格式，物理上是Hadoop的Sequence File，具体的WAL将在后面讲解。</li>
+</ol>
+
+
+
+<hr>
+
+
+
+<h2 id="hbase架构">HBASE架构</h2>
+
+<p>HBase架构也是主从服务器架构，它由HRegion服务器（HRegion Server）群和HBase Master服务器（HBaseMaster Server)构成。HBase Master服务器负责管理所有的HRegion服务器，而HBase中所有的服务器都是通过ZooKeeper来进行协调，并处理HBase服务器运行期间可能遇到的错误。HBase Master Server本身不存储HBase中的任何数据，HBase中的表可能会被划分为多个HRegion，然后存储到HRegion Server群中，HBase Master Server中存储的是从数据到HRegionServer中的映射。 <br>
+ HBASE架构见图 <br>
+ <img src="http://static.zybuluo.com/vin123456/bbht7evj0pfkyiy7lp05nfc4/image_1ar8botqk1sbjvh4jf4e8q1ekq1h.png" alt="image_1ar8botqk1sbjvh4jf4e8q1ekq1h.png-303.8kB" title=""></p>
+
+<p><strong>HBASE架构中的组件解析</strong></p>
+
+<p><strong>Client</strong></p>
+
+<blockquote>
+  <blockquote>
+    <p>客户端Client是整个集群的访问入口 <br>
+    Client使用HBase RPC机制与HMaster和HRegionserver进行通信 <br>
+    与HMaster进行通信进行管理类操作 <br>
+    与HRegionserver进行数据读写类操作 <br>
+    包含访问HBase的接口，并维护cache来加快对HBase的访问</p>
+  </blockquote>
+</blockquote>
+
+<p><strong>协作组件zookeeper</strong> <br>
+zookeeper作为一个大数据协作框架，它的HBASE中的地位相当重要。</p>
+
+<blockquote>
+  <blockquote>
+    <p>1、 zookeeper管理着HBASE的meta表的region等相关信息，那么何谓meta表？ <br>
+    在HBASE中，有命名空间——NAMESPACE的概念，它类似于数据库，我们用户自定义的表存储在名为default的namespace下，而meta表是hbase自带的系统表，它存储在名为hbase的命名空间下，见图。 <br>
+    <img src="http://static.zybuluo.com/vin123456/1u2u90vxur9f78mkyy0bgdip/image_1ar9v25hqpuh1jp510n312471e039.png" alt="image_1ar9v25hqpuh1jp510n312471e039.png-48.7kB" title=""> <br>
+    其中的user table是我们自定义的表，而catalog tables是系统自带的表，那么meta表中存储的是什么数据呢？ <br>
+    通过完整的hbase命令<code>hbase(main):005:0&gt; scan 'hbase:meta'</code>查看meta表中的信息 <br>
+    <img src="http://static.zybuluo.com/vin123456/nu58tsoikvk97ike4jj3ivii/image_1ar9v8hddavbp6f1to6altjpbm.png" alt="image_1ar9v8hddavbp6f1to6altjpbm.png-157.4kB" title=""> <br>
+    在这个meta表中可以看到user表的信息，比如user表的某个region存储在了哪个regionserver上，region的startRowKey和endRowKey等信息。但是meta表也是HBASE中的一张表，它也遵循HBASE表的一般特性，那么它也有自己的region，比如某个region存储某张用户自定义的表，这些region的信息（表名、表的唯一标识符、startRowKey、endRowKey/存储在哪个regionserver上…）存储在哪里呢？ <br>
+    这里我们进入zookeeper的znode里面查看zookeeper存储的一些数据 <br>
+    使用命令：<code>bin/zkCli.sh</code> -&gt; <code>ls</code> -&gt; <code>ls /hbase</code> <br>
+    <img src="http://static.zybuluo.com/vin123456/1tgac244ftmj1egh3e7x921n/image_1ara01osot8a6peofm1acr18vr13.png" alt="image_1ara01osot8a6peofm1acr18vr13.png-47.1kB" title=""> <br>
+    <img src="http://static.zybuluo.com/vin123456/y0rpa8oi0k6goo6zgh7nfil3/image_1ara06a5iiju13gt4nkvh17651g.png" alt="image_1ara06a5iiju13gt4nkvh17651g.png-85.6kB" title=""> <br>
+    在这里可以看到zookeeper存储了关于hbase的数据，其中的meta-region-server中就是存储了hbase中meta表的region的相关数据。所以，这里我们总结出对HBASE中数据操作的流程： <br>
+    client-&gt;zookeeper-&gt;meta-region-server-&gt;regionServer上meta数据查找具体Regioin <br>
+    2、 zookeeper中存储了监控着regionserver是否存活的数据，见图。也就是说，zookeeper实时监控了Hregionserver的上线和下线信息，并通知给HMaster。 <br>
+    <img src="http://static.zybuluo.com/vin123456/cg13kzfophd1s8ztfg45ju1k/image_1ara0qfg510fpnr714jicpqjd41t.png" alt="image_1ara0qfg510fpnr714jicpqjd41t.png-20.1kB" title=""> <br>
+    3、 zookeeper保证了在任何时候，集群只有一个HMaster，如果一个HMaster宕掉，那么zookeeper会通过它的选举机制再重新选取一个regionserver作为新的HMaster，所以HBase集群不会有单节点故障。</p>
+  </blockquote>
+</blockquote>
+
+<p><strong>主节点HMaster</strong></p>
+
+<blockquote>
+  <blockquote>
+    <p>为Region server分配region <br>
+    负责Region server的负载均衡 <br>
+    发现失效的Region server并重新分配其上的region <br>
+    管理用户对table的增删改查操作 <br>
+    Client访问hbase中的数据的过程并不需要master参与（寻址访问的是zookeeper和Regionserver，数据读写访问的是HRegionserver），HMaster仅仅维护元数据信息，负载很低。</p>
+  </blockquote>
+</blockquote>
+
+<p><strong>HRegionserver</strong></p>
+
+<blockquote>
+  <blockquote>
+    <p>1、维护HRegion，处理这些Region的IO请求，向HDFS文件系统中读写数据 <br>
+    2、负责切分在运行过程中变大的HRegion <br>
+    3、一台机器上面一般只运行一个HRegionServer，且每一个区段的HRegion也只会被一个HRegionServier维护 <br>
+    4、当用户需要更新数据的时候，他会被分配到对应的HRegionServer上提交修改，这些修改先是被写到memStore（内存中的缓存，保存最近更新的数据）缓存和服务器的Hlog（磁盘上面的记录文件，它记录着所有的更新操作）文件里面。在操作写入Hlog之后，commit()调用才会将其返回给客户端。 <br>
+    5、在读取数据的时候，HRegionServier会先访问memStore缓存，如果缓存里没有改数据，才会回到Store磁盘上面寻找，每一个列族都会有一个Store集合，每一个Store集合包含很多storeFile(封装了Hfile）文件</p>
+  </blockquote>
+</blockquote>
+
+
+
+<h2 id="hbase的数据存储">HBASE的数据存储</h2>
+
+<p><strong>数据存储原理</strong> <br>
+这里首先介绍一下LSM树（log-structured merge-tree）</p>
+
+<blockquote>
+  <blockquote>
+    <p>输入数据首先被存储在日志文件，这些文件内的数据完全有序。当有日志文件被修改时，对应的更新会被先保存在内存中来加速查询。当系统经历过许多次数据修改，且内存空间被逐渐被占满后，LSM树会把有序的“键-记录”对写到磁盘中，同时创建一个新的数据存储文件。此时，因为最近的修改都被持久化了，内存中保存的最近更新就可以被丢弃了。 <br>
+    <img src="http://static.zybuluo.com/vin123456/t0i38w9k8g1oou41h1v5c6o3/image_1ara2pge1td1kqmk9ncl37e2a.png" alt="image_1ara2pge1td1kqmk9ncl37e2a.png-147.6kB" title=""> <br>
+    存储文件的组织与B树相似，不过其为磁盘顺序读取做了优化，所有节点都是满的并按页存储。修改数据文件的操作通过滚动合并完成，也就是说，系统将现有的页与内存刷写数据混合在一起进行管理，直到数据块达到它的容量 <br>
+    在内存中多个块存储归并到磁盘的过程，合并写入会产生一个新的结果块，最终多个块被合并为更大块。 <br>
+        多次数据刷写之后会创建许多数据存储文件，后台线程就会自动将小文件聚合成大文件，这样磁盘查找就会 被限制在少数几个数据存储文件中。磁盘上的树结构也可以拆分成独立的小单元，这样更新就可以被分散到多个数据存储文件中。所有的数据存储文件都按键排序， 所以没有必要在存储文件中为新的键预留位置。 <br>
+    查询时先查找内存中的存储，然后再查找磁盘上的文件。这样在客户端看来数据存储文件的位置是透明的。 <br>
+    删除是一种特殊的更改，当删除标记被存储之后，查找会跳过这些删除过的键。当页被重写时，有删除标记的键会被丢弃。 <br>
+    此外，后台运维过程可以处理预先设定的删除请求。这些请求由TTL（time-to-live）触发，例如，当TTL设为20天后，合并进程会检查这些预设的时间戳，同时在重写数据块时丢弃过期的记录。</p>
+  </blockquote>
+</blockquote>
+
+<p>根据LSM树的原理，可以总结出：在HBASE中数据写入的流程如下：</p>
+
+<blockquote>
+  <blockquote>
+    <p>Client写入 -&gt;存入memStore，一直到memStore满-&gt;Flush成一个StoreFile，直到成长到一定阀值-&gt;出现Compact合并操作-&gt;多个StoreFile合并成一个StoreFile，同时进行版本合并和数据删除-&gt;当StoreFile  Compact合并后，逐步形成一个大的StoreFile-&gt;单个StoreFile超过一定阀值后，触发split操作，把当前的Region split成两个region,老region会下线，新Split出的两个孩子Region会被HMaster分配到相应的HRegionServer上，使得原先一个Region压力得以分流到2个Region上 <br>
+    注：所有的更新和删除操作，都是在Compact阶段做的，所以，用户写操作只需要进入到内存即可，从而保证了IO高性能。</p>
+  </blockquote>
+</blockquote>
+
+<p><strong>WAL（write-ahead-log)</strong></p>
+
+<p>WAL即为预写日志，它的存储格式是HLog File，WAL主要用作数据恢复，类似于MYSQL中的binlog。 <br>
+HLog记录着数据的变更，一旦数据更改，就可以通过log进行恢复，每个HRegionserver维护一个HLog，而不是每个Region一个 ，这样不同的Region（来自不同的表）的日志会混在一起，这样做的目的是不断追加单个文件相对于同时写多个文件而言，可以减少磁盘寻址次数，因此提高对table的写性能，但是带的缺点是，如果一台Regionserver下线，为了恢复其上的region，需要将该Regionserver的HLog进行拆分，然后分发到其它Regionserver上进行恢复。 <br>
+WAL的处理流程如下：</p>
+
+<blockquote>
+  <blockquote>
+    <p>首先客户端启动一个操作来修改数据。例如，可以对put()、delete()和increment()进行调用。每一个修改都封装到一个KeyValue对象实例中，并通过RPC调用发送出去。这些调用（理想情况下）成批地发送给含有匹配region的HRegionServer。一旦KeyValue实例到达，它们会被发送到管理相应行的HRegion实例。数据被写入到WAL，然后被放入到实际拥有记录的存储文件的MemStore中。实质上，这就是HBase大体的写路径。最后，当memstore达到一定的大小或是经历一个特定的时间之后，数据就会异步地连续写入到文件 系统中。在写入的过程中，数据以一种不稳定的状态存放在内存中，即使在服务器完全崩溃的情况下，WAL也能够保证数据不会丢失，因为实际的日志存储在HDFS上。其他服务器可以打开日志文件然后回放这些修改—恢复操作并不在这些崩溃的物理服务器上进行。</p>
+  </blockquote>
+</blockquote>
+
+<hr>
+
+
+
+<h2 id="hbase的java-api基本使用">HBASE的JAVA API基本使用</h2>
+
+<hr>
+
+<p>在IDE或者IDEA环境中开发HBASE都使用MAVEN工程来进行管理，所以在开发代码前要做以下几步：</p>
+
+<blockquote>
+  <blockquote>
+    <p>1、 在Maven工程中的 pom.xml 文件中添加HBASE依赖</p>
+  </blockquote>
+</blockquote>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-tag">&lt;<span class="hljs-title">hbase.version</span>&gt;</span>0.98.6-hadoop2<span class="hljs-tag">&lt;/<span class="hljs-title">hbase.version</span>&gt;</span>
+
+        <span class="hljs-comment">&lt;!-- HBase Client --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">dependency</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">groupId</span>&gt;</span>org.apache.hbase<span class="hljs-tag">&lt;/<span class="hljs-title">groupId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">artifactId</span>&gt;</span>hbase-server<span class="hljs-tag">&lt;/<span class="hljs-title">artifactId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">version</span>&gt;</span>${hbase.version}<span class="hljs-tag">&lt;/<span class="hljs-title">version</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">dependency</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">dependency</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">groupId</span>&gt;</span>org.apache.hbase<span class="hljs-tag">&lt;/<span class="hljs-title">groupId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">artifactId</span>&gt;</span>hbase-client<span class="hljs-tag">&lt;/<span class="hljs-title">artifactId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">version</span>&gt;</span>${hbase.version}<span class="hljs-tag">&lt;/<span class="hljs-title">version</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">dependency</span>&gt;</span></code></pre>
+
+<blockquote>
+  <blockquote>
+    <p>2、确定maven工程中依赖包里有Hbase jar包，并拷贝<code>${HADOOP_HOME} /conf</code>下的<code>core-site.xml</code> 、   <code>hdfs-site.xml</code>配置文件以及<code>${HBASE_HOME}/conf</code>下的<code>hbase-site.xml</code>配置文件到maven工程中，确保所有regionserver启动，master启动即可在eclipse下运行java application</p>
+  </blockquote>
+</blockquote>
+
+<p><strong>添加数据到HBASE</strong></p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">package</span> hbase_study;
+<span class="hljs-keyword">import</span> .......
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">HBaseClientApp</span> {</span>
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> HTable <span class="hljs-title">getHTableByTableName</span>(String tableName)<span class="hljs-keyword">throws</span> Exception{
+        <span class="hljs-comment">// Get instance of Configuration</span>
+        Configuration configuration = HBaseConfiguration.create();
+
+        <span class="hljs-comment">// Get table instance</span>
+        HTable table = <span class="hljs-keyword">new</span> HTable(configuration, tableName) ;
+
+<span class="hljs-comment">//      System.out.println(table);</span>
+
+        <span class="hljs-keyword">return</span> table ;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">putData</span>() <span class="hljs-keyword">throws</span> Exception{
+        String tableName = <span class="hljs-string">"user"</span> ;
+
+        HTable table = getHTableByTableName(tableName) ;
+
+        <span class="hljs-comment">// create put instance</span>
+        Put put = <span class="hljs-keyword">new</span> Put(Bytes.toBytes(<span class="hljs-string">"100002"</span>)) ;
+
+        <span class="hljs-comment">// add a column with value</span>
+        put.add(
+            Bytes.toBytes(<span class="hljs-string">"info"</span>),
+            Bytes.toBytes(<span class="hljs-string">"name"</span>), 
+            Bytes.toBytes(<span class="hljs-string">"lisi"</span>)
+        );
+        put.add(
+                Bytes.toBytes(<span class="hljs-string">"info"</span>),
+                Bytes.toBytes(<span class="hljs-string">"age"</span>), 
+                Bytes.toBytes(<span class="hljs-string">"22"</span>)
+            );
+        put.add(
+                Bytes.toBytes(<span class="hljs-string">"info"</span>),
+                Bytes.toBytes(<span class="hljs-string">"sex"</span>), 
+                Bytes.toBytes(<span class="hljs-string">"female"</span>)
+            );
+        put.add(
+                Bytes.toBytes(<span class="hljs-string">"info"</span>),
+                Bytes.toBytes(<span class="hljs-string">"address"</span>), 
+                Bytes.toBytes(<span class="hljs-string">"nanjing"</span>)
+            );
+        put.add(
+                Bytes.toBytes(<span class="hljs-string">"info"</span>),
+                Bytes.toBytes(<span class="hljs-string">"tel"</span>), 
+                Bytes.toBytes(<span class="hljs-string">"188888888"</span>)
+            );  
+        <span class="hljs-comment">// put data into table</span>
+        table.put(put);
+
+        <span class="hljs-comment">// close</span>
+        table.close();
+    }</code></pre>
+
+<p><strong>查询数据(get Row Key)</strong></p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-javadoc">/**
+     * Get Data From Table By ROWKEY
+     * 
+     *<span class="hljs-javadoctag"> @throws</span> Exception
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">getData</span>() <span class="hljs-keyword">throws</span> Exception{
+        String tableName = <span class="hljs-string">"user"</span> ;
+        <span class="hljs-comment">//</span>
+        HTable table = getHTableByTableName(tableName) ;
+        <span class="hljs-javadoc">/**
+         * get 'user', '10001', 'info:name' 
+         */</span>
+        <span class="hljs-comment">// Create Get with rowkey</span>
+        Get get = <span class="hljs-keyword">new</span> Get(Bytes.toBytes(<span class="hljs-string">"1001"</span>)) ;
+<span class="hljs-comment">/*      
+        get.addColumn(//
+            Bytes.toBytes("info"),//
+            Bytes.toBytes("name") //
+        ) ;
+*/</span>      
+
+        <span class="hljs-comment">// Get Data</span>
+        Result result = table.get(get);
+
+        <span class="hljs-comment">// System.out.println(result);</span>
+        <span class="hljs-javadoc">/**
+         * Key:
+         *      rowkey + cf + c + version
+         * Value:
+         *      value
+         */</span>
+        <span class="hljs-keyword">for</span>(Cell cell : result.rawCells()){
+            System.out.println(<span class="hljs-comment">// </span>
+                <span class="hljs-comment">// column family</span>
+                Bytes.toString(CellUtil.cloneFamily(cell))
+                + <span class="hljs-string">":"</span>
+                <span class="hljs-comment">// column</span>
+                + Bytes.toString(CellUtil.cloneQualifier(cell))
+                + <span class="hljs-string">"-&gt;"</span>
+                <span class="hljs-comment">// value</span>
+                + Bytes.toString(CellUtil.cloneValue(cell))
+                + <span class="hljs-string">"     "</span>
+                <span class="hljs-comment">// timestamp</span>
+                + cell.getTimestamp()
+            );
+            System.out.println(<span class="hljs-string">"============================="</span>);
+        }
+        <span class="hljs-comment">// close</span>
+        table.close();
+    }</code></pre>
+
+<p><strong>查询数据（scan）</strong></p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-javadoc">/**
+     * Scan Data
+     * 
+     *<span class="hljs-javadoctag"> @throws</span> Exception
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">scanData</span>() <span class="hljs-keyword">throws</span> Exception{
+        String tableName = <span class="hljs-string">"user"</span> ;
+        <span class="hljs-comment">//</span>
+        HTable table = <span class="hljs-keyword">null</span> ;
+        ResultScanner resultScanner = <span class="hljs-keyword">null</span> ;
+
+
+        <span class="hljs-keyword">try</span>{
+            <span class="hljs-comment">// </span>
+            table = getHTableByTableName(tableName) ;
+
+            <span class="hljs-comment">// </span>
+            Scan scan = <span class="hljs-keyword">new</span> Scan() ;
+
+<span class="hljs-comment">//==========================================================</span>
+<span class="hljs-comment">// Range</span>
+        <span class="hljs-comment">//  scan.setStartRow(startRow) ; // 2016070112000000_</span>
+        <span class="hljs-comment">//  scan.setStopRow(stopRow) ;   // 2016070113000000_</span>
+
+<span class="hljs-comment">//==========================================================</span>
+<span class="hljs-comment">// Range            </span>
+<span class="hljs-comment">// iterator</span>
+    <span class="hljs-comment">//  Scan scan2 = new Scan(startRow, stopRow) ;</span>
+
+<span class="hljs-comment">// add Column</span>
+    <span class="hljs-comment">//  scan.addColumn(family, qualifier) ;</span>
+    <span class="hljs-comment">//  scan.addFamily(family) ;    </span>
+
+<span class="hljs-comment">// Filter</span>
+    <span class="hljs-comment">//  Filter filter = new PrefixFilter(prefix) ;</span>
+    <span class="hljs-comment">//  scan.setFilter(filter) ;</span>
+
+    <span class="hljs-comment">// page</span>
+        <span class="hljs-comment">//  PageFilter</span>
+
+<span class="hljs-comment">//</span>
+        <span class="hljs-comment">// 是否缓存查询出来的数据</span>
+    <span class="hljs-comment">//  scan.setCacheBlocks(false);</span>
+        <span class="hljs-comment">//  </span>
+    <span class="hljs-comment">//  scan.setCaching(2);</span>
+
+        scan.setBatch(<span class="hljs-number">2</span>);
+
+            <span class="hljs-comment">// scan all table</span>
+            resultScanner =  table.getScanner(scan) ;
+
+            <span class="hljs-keyword">for</span>(Result result : resultScanner){
+                System.out.println(Bytes.toString(result.getRow()));
+                <span class="hljs-keyword">for</span>(Cell cell : result.rawCells()){
+                    System.out.println(<span class="hljs-comment">// </span>
+                        <span class="hljs-comment">// column family</span>
+                        Bytes.toString(CellUtil.cloneFamily(cell))
+                        + <span class="hljs-string">":"</span>
+                        <span class="hljs-comment">// column</span>
+                        + Bytes.toString(CellUtil.cloneQualifier(cell))
+                        + <span class="hljs-string">"-&gt;"</span>
+                        <span class="hljs-comment">// value</span>
+                        + Bytes.toString(CellUtil.cloneValue(cell))
+                        + <span class="hljs-string">"     "</span>
+                        <span class="hljs-comment">// timestamp</span>
+                        + cell.getTimestamp()
+                    );
+                }
+                System.out.println(<span class="hljs-string">"============================="</span>);
+            }
+        }<span class="hljs-keyword">catch</span>(Exception e){
+            e.printStackTrace(); 
+        }<span class="hljs-keyword">finally</span>{
+            IOUtils.closeStream(resultScanner);
+            IOUtils.closeStream(table);
+        }
+
+    }</code></pre>
+
+<p><strong>删除HBASE中的数据</strong></p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-javadoc">/**
+     * Delete Data
+     * 
+     *<span class="hljs-javadoctag"> @throws</span> Exception
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">deleteData</span>() <span class="hljs-keyword">throws</span> Exception{
+        String tableName = <span class="hljs-string">"user"</span> ;
+        <span class="hljs-comment">//</span>
+        HTable table = getHTableByTableName(tableName) ;
+        <span class="hljs-comment">//</span>
+        Delete delete = <span class="hljs-keyword">new</span> Delete(Bytes.toBytes(<span class="hljs-string">"1004"</span>)) ;
+<span class="hljs-comment">/*      
+        delete.deleteColumn(
+            Bytes.toBytes("info"),//
+            Bytes.toBytes("address") //
+            ) ;
+*/</span>      
+        <span class="hljs-comment">// delete data</span>
+        table.delete(delete);
+
+        <span class="hljs-comment">// close</span>
+        table.close();
+    }   </code></pre>
+
+
+
+<h2 id="hbase与mapreduce集成">HBASE与MapReduce集成</h2>
+
+<p>HBASE与MapReduce集成的三种方式：</p>
+
+<blockquote>
+  <blockquote>
+    <p>1、input - source    ==== 从HBase表中读取数据 <br>
+    2、output - sink    ==== 将MapReduce的计算结果存储到HBase表中 <br>
+    3、input &amp; output - source &amp; sink  ====既从HBase表中读取数据，又向HBase表中存储数据，mapreduce程序可以看作是hbase的一个客户端</p>
+  </blockquote>
+</blockquote>
+
+<p><strong>1、运行测试HBASE自带的mapreduce例子</strong> <br>
+首先测试运行： <br>
+<code>[vin@vin01 hbase-0.98.6-cdh5.3.6]$ /opt/modules/hadoop-2.5.0-cdh5.3.6/bin/yarn jar lib/hbase-server-0.98.6-cdh5.3.6.jar</code> <br>
+<img src="http://static.zybuluo.com/vin123456/t6ax8pc1k4r8r24pdc3ai5co/image_1aranrua5sft18r014ks1kvp16e02n.png" alt="image_1aranrua5sft18r014ks1kvp16e02n.png-61.2kB" title=""> <br>
+发现报错，原因是mapreduce运行需要HBASE的jar包，我们通过执行<code>bin/hbase mapredcp</code>来查看需要哪些jar包，而解决这些jar包的方法就是设置classpath： <br>
+<em>参考官网：<a href="http://hbase.apache.org/book.html#hbase.mapreduce.classpath" rel="nofollow">http://hbase.apache.org/book.html#hbase.mapreduce.classpath</a></em> <br>
+设置方式：</p>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs bash"><span class="hljs-keyword">export</span> HADOOP_HOME=/opt/modules/hadoop-<span class="hljs-number">2.5</span>.<span class="hljs-number">0</span>-cdh5.<span class="hljs-number">3.6</span>
+<span class="hljs-keyword">export</span> HBASE_HOME=/opt/modules/hbase-<span class="hljs-number">0.98</span>.<span class="hljs-number">6</span>-cdh5.<span class="hljs-number">3.6</span>
+<span class="hljs-keyword">export</span> HADOOP_CLASSPATH=`<span class="hljs-variable">${HBASE_HOME}</span>/bin/hbase classpath`</code></pre>
+
+<p>设置完成之后再测试运行该jar包： <br>
+<img src="http://static.zybuluo.com/vin123456/c5fmggejluwwhjz2cavbdd26/image_1araoomfk18cvn1e18l9cvq1nhb34.png" alt="image_1araoomfk18cvn1e18l9cvq1nhb34.png-119kB" title=""> <br>
+可以看出该jar包中有多个实例，这里再测试运行rowcounter来计算user表： <br>
+执行：</p>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs lasso">export HADOOP_HOME<span class="hljs-subst">=</span>/opt/modules/hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.5</span><span class="hljs-number">.0</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>
+export HBASE_HOME<span class="hljs-subst">=</span>/opt/modules/hbase<span class="hljs-subst">-</span><span class="hljs-number">0.98</span><span class="hljs-number">.6</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>
+export HADOOP_CLASSPATH<span class="hljs-subst">=</span><span class="hljs-string">`${HBASE_HOME}/bin/hbase classpath`</span>
+/opt/modules/hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.5</span><span class="hljs-number">.0</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>/bin/yarn jar lib/hbase<span class="hljs-attribute">-server</span><span class="hljs-subst">-</span><span class="hljs-number">0.98</span><span class="hljs-number">.6</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span><span class="hljs-built_in">.</span>jar rowcounter user</code></pre>
+
+<p>测试结果： <br>
+<img src="http://static.zybuluo.com/vin123456/5c21hf321vkvr8cw1shc8utu/image_1araoukiad2g16gc1jfp1ud18603h.png" alt="image_1araoukiad2g16gc1jfp1ud18603h.png-42.3kB" title=""> <br>
+<strong>测试既从HBase表中读取数据，又向HBase表中存储数据</strong> <br>
+这里就需要使用MAVEN工程来开发mapreduce程序了，代码如下：</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">package</span> hbase_study;
+
+<span class="hljs-keyword">import</span> java.io.IOException;
+
+<span class="hljs-keyword">import</span> org.apache.hadoop.conf.Configuration;
+<span class="hljs-keyword">import</span> org.apache.hadoop.conf.Configured;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.Cell;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.CellUtil;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.HBaseConfiguration;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.client.Put;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.client.Result;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.client.Scan;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.io.ImmutableBytesWritable;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.mapreduce.TableMapper;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.mapreduce.TableReducer;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.util.Bytes;
+<span class="hljs-keyword">import</span> org.apache.hadoop.mapreduce.Job;
+<span class="hljs-keyword">import</span> org.apache.hadoop.util.Tool;
+<span class="hljs-keyword">import</span> org.apache.hadoop.util.ToolRunner;
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ExportBasicFromUserMapReduce</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">Configured</span> <span class="hljs-keyword">implements</span> <span class="hljs-title">Tool</span> {</span>
+
+    <span class="hljs-comment">// step 1: Mapper</span>
+    <span class="hljs-javadoc">/**
+     * Mapper&lt;ImmutableBytesWritable, Result, KEYOUT, VALUEOUT&gt;
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ReadFromUserMapper</span> 
+            <span class="hljs-keyword">extends</span> <span class="hljs-title">TableMapper</span>&lt;<span class="hljs-title">ImmutableBytesWritable</span>, <span class="hljs-title">Put</span>&gt; {</span>
+
+        <span class="hljs-annotation">@Override</span>
+        <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">map</span>(ImmutableBytesWritable key, Result value, Context context)
+                <span class="hljs-keyword">throws</span> IOException, InterruptedException {
+            <span class="hljs-comment">// get rowkey</span>
+            <span class="hljs-comment">// String rowkey = Bytes.toString(key.get()) ;</span>
+
+            <span class="hljs-comment">// create put</span>
+            Put put = <span class="hljs-keyword">new</span> Put(key.get());
+
+            <span class="hljs-comment">// iterator</span>
+            <span class="hljs-keyword">for</span> (Cell cell : value.rawCells()) {
+                <span class="hljs-comment">// add family: info</span>
+                <span class="hljs-keyword">if</span> (<span class="hljs-string">"info"</span>.equals(Bytes.toString(CellUtil.cloneFamily(cell)))) {
+                    <span class="hljs-comment">// add column : name</span>
+                    <span class="hljs-keyword">if</span> (<span class="hljs-string">"name"</span>.equals(Bytes.toString(CellUtil.cloneQualifier(cell)))) {
+                        put.add(cell);
+                    }
+                    <span class="hljs-comment">// add column : age</span>
+                    <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (<span class="hljs-string">"age"</span>.equals(Bytes.toString(CellUtil.cloneQualifier(cell)))) {
+                        put.add(cell);
+                    }
+                }
+            }
+            <span class="hljs-comment">// output</span>
+            context.write(key, put);
+        }
+    }
+
+    <span class="hljs-comment">// step 2: Reducer</span>
+    <span class="hljs-javadoc">/**
+     * Reducer&lt;KEYIN, VALUEIN, KEYOUT, Mutation&gt;
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">WriteToBasicReducer</span> 
+            <span class="hljs-keyword">extends</span> <span class="hljs-title">TableReducer</span>&lt;<span class="hljs-title">ImmutableBytesWritable</span>, <span class="hljs-title">Put</span>, <span class="hljs-title">ImmutableBytesWritable</span>&gt; {</span>
+
+        <span class="hljs-annotation">@Override</span>
+        <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">reduce</span>(ImmutableBytesWritable key, Iterable&lt;Put&gt; values, 
+            Context context) <span class="hljs-keyword">throws</span> IOException, InterruptedException {
+            <span class="hljs-keyword">for</span>(Put put : values){
+                <span class="hljs-comment">// output</span>
+                context.write(key, put);
+            }
+        }
+    }
+
+    <span class="hljs-comment">// step 3: Driver</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">int</span> <span class="hljs-title">run</span>(String[] args) <span class="hljs-keyword">throws</span> Exception {
+        <span class="hljs-comment">// 1) get conf</span>
+        Configuration conf = <span class="hljs-keyword">super</span>.getConf();
+
+        <span class="hljs-comment">// 2) create job</span>
+        Job job = Job.getInstance(conf, <span class="hljs-keyword">this</span>.getClass().getSimpleName());
+
+        job.setJarByClass(ExportBasicFromUserMapReduce.class);
+
+        <span class="hljs-comment">// 3) set job</span>
+        <span class="hljs-comment">// input &amp; mapper</span>
+        Scan scan = <span class="hljs-keyword">new</span> Scan();
+        scan.setCaching(<span class="hljs-number">500</span>);        <span class="hljs-comment">// 1 is the default in Scan, which will be bad for MapReduce jobs</span>
+        scan.setCacheBlocks(<span class="hljs-keyword">false</span>);  <span class="hljs-comment">// don't set to true for MR jobs</span>
+
+        TableMapReduceUtil.initTableMapperJob(
+          <span class="hljs-string">"user"</span>,        <span class="hljs-comment">// input table</span>
+          scan,               <span class="hljs-comment">// Scan instance to control CF and attribute selection</span>
+          ReadFromUserMapper.class,     <span class="hljs-comment">// mapper class</span>
+          ImmutableBytesWritable.class,         <span class="hljs-comment">// mapper output key</span>
+          Put.class,  <span class="hljs-comment">// mapper output value</span>
+          job <span class="hljs-comment">//</span>
+        );
+
+        <span class="hljs-comment">// reducer &amp; output</span>
+        TableMapReduceUtil.initTableReducerJob(
+          <span class="hljs-string">"basic"</span>,        <span class="hljs-comment">// output table</span>
+          WriteToBasicReducer.class,    <span class="hljs-comment">// reducer class</span>
+          job <span class="hljs-comment">//</span>
+       );
+
+        job.setNumReduceTasks(<span class="hljs-number">1</span>);   <span class="hljs-comment">// at least one, adjust as required</span>
+
+        <span class="hljs-comment">// 4) submit job</span>
+        <span class="hljs-keyword">boolean</span> isSuccess = job.waitForCompletion(<span class="hljs-keyword">true</span>);
+
+        <span class="hljs-keyword">return</span> isSuccess ? <span class="hljs-number">0</span> : <span class="hljs-number">1</span>;
+    }
+
+    <span class="hljs-javadoc">/**
+     * Entry
+     * 
+     *<span class="hljs-javadoctag"> @param</span> args
+     *<span class="hljs-javadoctag"> @throws</span> Exception
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) <span class="hljs-keyword">throws</span> Exception {
+        <span class="hljs-comment">// create conf</span>
+        Configuration configuration = HBaseConfiguration.create();
+
+        <span class="hljs-comment">// run job</span>
+        <span class="hljs-keyword">int</span> status = ToolRunner.run( <span class="hljs-comment">//</span>
+                configuration, <span class="hljs-keyword">new</span> ExportBasicFromUserMapReduce(), args);
+        <span class="hljs-comment">// exit program</span>
+        System.exit(status);
+    }
+
+}</code></pre>
+
+<p>上述代码完成的功能是编写mapreduce从user表中查询抽取某些字段到basic表中 <br>
+代码编写完成，打成jar包 <br>
+<img src="http://static.zybuluo.com/vin123456/qq0acf9mitgglaup60ktkx7p/image_1arap6dafltsf991n1e11o517lp3u.png" alt="image_1arap6dafltsf991n1e11o517lp3u.png-111.7kB" title=""> <br>
+上传该jar包并运行：</p>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs lasso">export HADOOP_HOME<span class="hljs-subst">=</span>/opt/modules/hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.5</span><span class="hljs-number">.0</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>
+export HBASE_HOME<span class="hljs-subst">=</span>/opt/modules/hbase<span class="hljs-subst">-</span><span class="hljs-number">0.98</span><span class="hljs-number">.6</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>
+export HADOOP_CLASSPATH<span class="hljs-subst">=</span><span class="hljs-string">`${HBASE_HOME}/bin/hbase classpath`</span>
+/opt/modules/hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.5</span><span class="hljs-number">.0</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>/bin/yarn jar mr<span class="hljs-attribute">-user2basic</span><span class="hljs-built_in">.</span>jar hbase_study<span class="hljs-built_in">.</span>ExportBasicFromUserMapReduce</code></pre>
+
+<p><em>注：上述shell代码是在$HBASE_HOME主目录下执行的，上传的jar包也在该主目录下，所以省略了路径，在实际运行中应该写上jar的绝对路径。</em></p>
+
+<hr>
+
+
+
+<h2 id="hbase的数据迁移">HBASE的数据迁移</h2>
+
+<hr>
+
+<p>HBASE的数据来源一般就是Logs 、 RDBMS，或者本身的备份。 <br>
+1）数据迁移几种方式：</p>
+
+<blockquote>
+  <blockquote>
+    <p>1、PUT API 写入数据 <br>
+    这种方式主要是通过编写mapreduce，通过连接JDBC，将RDBMS关系型数据库中的数据迁移到HBASE中，编写过程复杂，这里我们使用HBASE自带的一个mapreduce来测试将以制表符分隔的tsv格式的文件导入到HBASE表中，该mapreduce也在自带的jar包中，见图。 <br>
+    <img src="http://static.zybuluo.com/vin123456/42rdknyonwuip83vz2c0iely/image_1aras4phe125trpm1u9v1e0n1rn24b.png" alt="image_1aras4phe125trpm1u9v1e0n1rn24b.png-118.8kB" title=""> <br>
+    测试运行： <br>
+    查看其用法： <br>
+    <code>/opt/modules/hadoop-2.5.0-cdh5.3.6/bin/yarn jar lib/hbase-server-0.98.6-cdh5.3.6.jar importtsv</code> <br>
+    <img src="http://static.zybuluo.com/vin123456/oksyfja82yv8aa6g6t24lo0u/image_1aras8131111u1lgu17tj1iuhb1b4o.png" alt="image_1aras8131111u1lgu17tj1iuhb1b4o.png-12.9kB" title=""> <br>
+    测试步骤：</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li>首先在hbase创建表：create ‘person’ ,‘info’ 用来存放要导入的数据</li>
+<li>将tsv数据上传到hdfs文件系统中，本文使用的是<code>/user/hadoop001/hbase/data/importtsv/</code>目录</li>
+<li><p>运行：</p>
+
+<pre class="prettyprint"><code class="language-shell hljs lasso">export HADOOP_HOME<span class="hljs-subst">=</span>/opt/modules/hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.5</span><span class="hljs-number">.0</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>
+export HBASE_HOME<span class="hljs-subst">=</span>/opt/modules/hbase<span class="hljs-subst">-</span><span class="hljs-number">0.98</span><span class="hljs-number">.6</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>
+export HADOOP_CLASSPATH<span class="hljs-subst">=</span><span class="hljs-string">`${HBASE_HOME}/bin/hbase mapredcp`</span>:${HBASE_HOME}/conf <span class="hljs-subst">\</span>
+/opt/modules/hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.5</span><span class="hljs-number">.0</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>/bin/yarn jar lib/hbase<span class="hljs-attribute">-server</span><span class="hljs-subst">-</span><span class="hljs-number">0.98</span><span class="hljs-number">.6</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span><span class="hljs-built_in">.</span>jar importtsv <span class="hljs-subst">\</span>
+<span class="hljs-attribute">-Dimporttsv</span><span class="hljs-built_in">.</span>columns<span class="hljs-subst">=</span>HBASE_ROW_KEY,<span class="hljs-subst">\</span>
+info:name,info:age,info:sex,info:address <span class="hljs-subst">\</span>
+person <span class="hljs-subst">\</span>
+/user/hadoop001/hbase/<span class="hljs-built_in">data</span>/importtsv</code></pre>
+
+<p>说明：通常MapReduce在写HBASE时使用的是TableOutputFormat方式，在reduce中直接生成put对象写入Hbase，该方式在大数据量时写入效率低下，HBase会Block写入，频繁进行flush、split、compact等大量IO操作，并对HBase节点的稳定性造成一定影响。 <br>
+2、使用bulk load tool <br>
+过程：先将数据转换为HFile格式文件，然后将HFile文件加载到HBase表中。 <br>
+BULK LOAD 是利用HBase的数据信息按照特定格式存储在HDFS内这一原理，直接在HDFS中生成持久化的HFile数据格式文件，然后上传至合适位置，完成了海量数据快速入库的方式，配合mapreduce完成， 高效便捷，不占用region资源，消除看对HBase集群插入数据的压力，提高了job运行效率。 <br>
+在hbase-server-0.98.6-cdh5.3.6.jar中的importtsv方法也具有bulkload功能，见图。下面对它进行测试 <br>
+<img src="http://static.zybuluo.com/vin123456/bgai3k2jzgrv9d3sxw1bgu1z/image_1arau2ne0sgl1idgbrgect1f4255.png" alt="image_1arau2ne0sgl1idgbrgect1f4255.png-41.7kB" title=""> <br>
+测试步骤：</p></li>
+<li><p>设置HFile存储的目录（该目录会自动创建） <br>
+<code>-Dimporttsv.bulk.output=/user/hadoop001/hbase/hfileOutput</code> <br>
+要处理的数据仍然为 <br>
+<code>/user/hadoop001/hbase/data/importtsv</code>目录下的student.tsv文件</p></li>
+<li>运行代码,生成HFile文件</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs lasso">export HADOOP_HOME<span class="hljs-subst">=</span>/opt/modules/hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.5</span><span class="hljs-number">.0</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>
+export HBASE_HOME<span class="hljs-subst">=</span>/opt/modules/hbase<span class="hljs-subst">-</span><span class="hljs-number">0.98</span><span class="hljs-number">.6</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>
+export HADOOP_CLASSPATH<span class="hljs-subst">=</span><span class="hljs-string">`${HBASE_HOME}/bin/hbase mapredcp`</span>:${HBASE_HOME}/conf <span class="hljs-subst">\</span>
+/opt/modules/hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.5</span><span class="hljs-number">.0</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span>/bin/yarn jar lib/hbase<span class="hljs-attribute">-server</span><span class="hljs-subst">-</span><span class="hljs-number">0.98</span><span class="hljs-number">.6</span><span class="hljs-attribute">-cdh5</span><span class="hljs-number">.3</span><span class="hljs-number">.6</span><span class="hljs-built_in">.</span>jar importtsv <span class="hljs-subst">\</span>
+<span class="hljs-attribute">-Dimporttsv</span><span class="hljs-built_in">.</span>bulk<span class="hljs-built_in">.</span>output<span class="hljs-subst">=</span>/user/hadoop001/hbase/hfileOutput <span class="hljs-subst">\</span>
+<span class="hljs-attribute">-Dimporttsv</span><span class="hljs-built_in">.</span>columns<span class="hljs-subst">=</span>HBASE_ROW_KEY, <span class="hljs-subst">\</span>
+info:name,info:age,info:sex,info:address <span class="hljs-subst">\</span>
+person <span class="hljs-subst">\</span>
+/user/hadoop001/hbase/<span class="hljs-built_in">data</span>/importtsv</code></pre>
+
+<p><img src="http://static.zybuluo.com/vin123456/1rwn8culhx4n3pt2zukt6hpm/image_1arau8snd1rijkc61r956ijgn75i.png" alt="image_1arau8snd1rijkc61r956ijgn75i.png-46.8kB" title=""></p>
+
+<p><img src="http://static.zybuluo.com/vin123456/0rzown8tt2jycdb6zcmuh3x2/image_1arau95l41pl0gru1csm11rj1lmh5v.png" alt="image_1arau95l41pl0gru1csm11rj1lmh5v.png-20.3kB" title=""> <br>
+ - 加载HFile数据到HBase表中</p>
+
+
+
+<pre class="prettyprint"><code class="language-shelll hljs bash"><span class="hljs-keyword">export</span> HADOOP_HOME=/opt/modules/hadoop-<span class="hljs-number">2.5</span>.<span class="hljs-number">0</span>-cdh5.<span class="hljs-number">3.6</span>
+<span class="hljs-keyword">export</span> HBASE_HOME=/opt/modules/hbase-<span class="hljs-number">0.98</span>.<span class="hljs-number">6</span>-cdh5.<span class="hljs-number">3.6</span>
+<span class="hljs-keyword">export</span> HADOOP_CLASSPATH=`<span class="hljs-variable">${HBASE_HOME}</span>/bin/hbase mapredcp`:<span class="hljs-variable">${HBASE_HOME}</span>/conf \
+<span class="hljs-variable">${HADOOP_HOME}</span>/bin/yarn jar \
+<span class="hljs-variable">${HBASE_HOME}</span>/lib/hbase-server-<span class="hljs-number">0.98</span>.<span class="hljs-number">6</span>-hadoop2.jar completebulkload \
+/user/hadoop001/hbase/hfileOutput \
+person</code></pre>
+
+<p>通过运行此条命令，会将<code>/user/hadoop001/hbase/hfileOutput</code>下的文件剪切到<code>/hbase/data/default/person/0731f5632f614b5bfdc2381353eb2d70/</code>目录下 <br>
+<img src="http://static.zybuluo.com/vin123456/j86brxsz4yqnqhkw5ek9elr3/image_1arb79olcqlnhau17tvdsl1ivo6f.png" alt="image_1arb79olcqlnhau17tvdsl1ivo6f.png-45.7kB" title=""> <br>
+这时我们通过查看HBASE表，就可以看到数据被成功的加载到其中了。</p>
+
+<p>3、 编写mapreduce的固定模式 <br>
+  <img src="http://static.zybuluo.com/vin123456/74pedifjzi5xvs0owv4oba6u/image_1arb8ht3kca41r2n1aqsk7q177u6s.png" alt="image_1arb8ht3kca41r2n1aqsk7q177u6s.png-408.1kB" title=""></p>
+
+<hr>
+
+
+
+<h2 id="hbase表的设计">HBASE表的设计</h2>
+
+<hr>
+
+<ol>
+<li>HBASE创建表的方式及预分区</li>
+</ol>
+
+<p>通过在HBASE SHELL命令行中输入<code>help 'create'</code>可以查看创建表的方法及其常用属性 <br>
+<img src="http://static.zybuluo.com/vin123456/hq58mtrplc1fd9fezqk73396/image_1arb8u1o7fmj1dtlvod17ke5vo79.png" alt="image_1arb8u1o7fmj1dtlvod17ke5vo79.png-80.5kB" title=""> <br>
+<img src="http://static.zybuluo.com/vin123456/mnpud1ariea8qa3zf3x01edg/image_1arb96e0in7c12g5313dbh1nv57m.png" alt="image_1arb96e0in7c12g5313dbh1nv57m.png-76.3kB" title=""> <br>
+从HBASE给出的示例中可以总结：</p>
+
+<ul>
+<li>创建的表可以有多个列族，列族可以有多个属性</li>
+<li>split <br>
+
+
+<blockquote>
+  <blockquote>
+     在HBASE中，前面我们谈过了其数据来源有两种，一种是日志文件写入，一种是将文件转换成HFile，通过BULK load导入到HBASE表中，但是我们知道HBASE初始给表设计的是一个Region，而Bulk Load 短时间将大量的数据文件写入到Region，所以管理这个Region的Regionserver负载会非常大，可能会造成节点损坏，那么解决办法就是在创建表的时候指定多个Region（根据表的Row Key进行设计，结合实际业务）。那么如何在创建表的时候创建多个Region呢？ <br>
+     split就是对HBASE表的预分区，分区是相对于region而已，而Region的划分是根据Row Key划分的，[startRow , endRow) <br>
+    测试split： <br>
+    <code>create 'ns1:t1', 'f1', SPLITS =&gt; ['10', '20', '30', '40']</code> <br>
+    <img src="http://static.zybuluo.com/vin123456/vg1d9vstynlrigin7hvkrhfg/image_1arbct6798jjhq51jceekv1omu83.png" alt="image_1arbct6798jjhq51jceekv1omu83.png-122.5kB" title=""> <br>
+    这其中的’10’, ‘20’, ‘30’, ‘40’就是预估的分区，这里还可以将分区写入到文件中，然后创建表的时候加载该文件即可，在创建很多个region的时候使用这个方式： <br>
+    <code>hbase&gt; create 't1', 'f1', SPLITS_FILE =&gt; 'splits.txt'</code> <br>
+    文件中的格式为</blockquote></blockquote></li>
+    </ul>
+    
+  
+
+
+<pre class="prettyprint"><code class="language-shell hljs ">10
+20
+30
+40</code></pre>
+
+
+<ul>
+<li>在设计表的时候，某些不常用但是有需求的业务表设计成索引表，索引表的某个列必须是主表的RowKey，而实现主表与索引表的数据同步需要使用Phoenix的JDBC方式。</li>
+</ul>
+
+<p>2.RowKey的设计原则</p>
+
+<p><strong>- rowkey长度原则</strong></p>
+
+<blockquote>
+  <blockquote>
+    <p>rowkey是一个二进制码流，可以是任意字符串，最大长度 64kb ，实际应用中一般为10-100bytes，以 byte[] 形式保存，一般设计成定长。 <br>
+    建议越短越好，不要超过16个字节，原因如下： <br>
+    数据的持久化文件HFile中是按照KeyValue存储的，如果rowkey过长，比如超过100字节，1000w行数据，光rowkey就要占用100*1000w=10亿个字节，将近1G数据，这样会极大影响HFile的存储效率； <br>
+    MemStore将缓存部分数据到内存，如果rowkey字段过长，内存的有效利用率就会降低，系统不能缓存更多的数据，这样会降低检索效率。 <br>
+    目前操作系统都是64位系统，内存8字节对齐，控制在16个字节，8字节的整数倍利用了操作系统的最佳特性。</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>rowkey散列原则</strong></li>
+</ul>
+
+<blockquote>
+  <blockquote>
+    <p>如果rowkey按照时间戳的方式递增，不要将时间放在二进制码的前面，建议将rowkey的高位作为散列字段，由程序随机生成，低位放时间字段，这样将提高数据均衡分布在每个RegionServer，以实现负载均衡的几率。如果没有散列字段，首字段直接是时间信息，所有的数据都会集中在一个RegionServer上，这样在数据检索的时候负载会集中在个别的RegionServer上，造成热点问题，会降低查询效率。</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>rowkey唯一原则</strong></li>
+</ul>
+
+<blockquote>
+  <blockquote>
+    <p>必须在设计上保证其唯一性，rowkey是按照字典顺序排序存储的，因此，设计rowkey的时候，要充分利用这个排序的特点，将经常读取的数据存储到一块，将最近可能会被访问的数据放到一块。</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>什么是热点</strong></li>
+</ul>
+
+<blockquote>
+  <blockquote>
+    <p>HBase中的行是按照rowkey的字典顺序排序的，这种设计优化了scan操作，可以将相关的行以及会被一起读取的行存取在临近位置，便于scan。然而糟糕的rowkey设计是热点的源头。 热点发生在大量的client直接访问集群的一个或极少数个节点（访问可能是读，写或者其他操作）。大量访问会使热点region所在的单个机器超出自身承受能力，引起性能下降甚至region不可用，这也会影响同一个RegionServer上的其他region，由于主机无法服务其他region的请求。 设计良好的数据访问模式以使集群被充分，均衡的利用。 <br>
+    为了避免写热点，设计rowkey使得不同行在同一个region，但是在更多数据情况下，数据应该被写入集群的多个region，而不是一个。 <br>
+    下面是一些常见的避免热点的方法以及它们的优缺点：</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>加盐</strong></li>
+</ul>
+
+<blockquote>
+  <blockquote>
+    <p>这里所说的加盐不是密码学中的加盐，而是在rowkey的前面增加随机数，具体就是给rowkey分配一个随机前缀以使得它和之前的rowkey的开头不同。分配的前缀种类数量应该和你想使用数据分散到不同的region的数量一致。加盐之后的rowkey就会根据随机生成的前缀分散到各个region上，以避免热点。</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>哈希</strong></li>
+</ul>
+
+<blockquote>
+  <blockquote>
+    <p>哈希会使同一行永远用一个前缀加盐。哈希也可以使负载分散到整个集群，但是读却是可以预测的。使用确定的哈希可以让客户端重构完整的rowkey，可以使用get操作准确获取某一个行数据</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>反转</strong></li>
+</ul>
+
+<blockquote>
+  <blockquote>
+    <p>第三种防止热点的方法时反转固定长度或者数字格式的rowkey。这样可以使得rowkey中经常改变的部分（最没有意义的部分）放在前面。这样可以有效的随机rowkey，但是牺牲了rowkey的有序性。 <br>
+    反转rowkey的例子以手机号为rowkey，可以将手机号反转后的字符串作为rowkey，这样的就避免了以手机号那样比较固定开头导致热点问题</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>时间戳反转</strong></li>
+</ul>
+
+<blockquote>
+  <blockquote>
+    <p>一个常见的数据处理问题是快速获取数据的最近版本，使用反转的时间戳作为rowkey的一部分对这个问题十分有用，可以用 Long.Max_Value - timestamp 追加到key的末尾，例如 [key][reverse_timestamp] , [key] 的最新值可以通过scan [key]获得[key]的第一条记录，因为HBase中rowkey是有序的，第一条记录是最后录入的数据。 <br>
+    比如需要保存一个用户的操作记录，按照操作时间倒序排序，在设计rowkey的时候，可以这样设计 <br>
+    [userId反转][Long.Max_Value - timestamp]，在查询用户的所有操作记录数据的时候，直接指定反转后的userId，startRow是[userId反转][000000000000],stopRow是[userId反转][Long.Max_Value - timestamp] <br>
+    如果需要查询某段时间的操作记录，startRow是[user反转][Long.Max_Value - 起始时间]，stopRow是[userId反转][Long.Max_Value - 结束时间]</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>其他一些建议</strong></li>
+</ul>
+
+<blockquote>
+  <blockquote>
+    <p>尽量减少行和列的大小在HBase中，value永远和它的key一起传输的。当具体的值在系统间传输时，它的rowkey，列名，时间戳也会一起传输。如果你的rowkey和列名很大，甚至可以和具体的值相比较，那么你将会遇到一些有趣的问题。HBase storefiles中的索引（有助于随机访问）最终占据了HBase分配的大量内存，因为具体的值和它的key很大。可以增加block大小使得storefiles索引再更大的时间间隔增加，或者修改表的模式以减小rowkey和列名的大小。压缩也有助于更大的索引。</p>
+  </blockquote>
+</blockquote>
+
+<ul>
+<li><strong>列族尽可能越短越好，最好是一个字符</strong> <br>
+
+
+<blockquote>
+  <blockquote>
+    <p>冗长的属性名虽然可读性好，但是更短的属性名存储在HBase中会更好</p></blockquote></blockquote></li>
+    </ul>
+    
+    <hr>
+  
+
+
+
+
+
+
+<h2 id="hbase表的压缩属性配置">HBASE表的压缩属性配置</h2>
+
+<hr>
+
+
+压缩
+
+首先在HBASE SHELL中输入`describe ‘user’`来查看user表的信息：
+![image_1arcl4ca6gifhcqn6n1vm1i9u9.png-72.5kB][39]
+其中的COMPRESSION =’NONE’表示的表的存储是否使用压缩，而HBASE数据是存储在HDFS上的，检查hadoop支持哪些压缩格式：
+`bin/hadoop checknative`
+
+<ul>
+<li><p>配置HBASE压缩步骤（以常用的压缩格式snappy为例）：</p>
+
+<p>– 配置hadoop压缩 <br>
+使用<code>bin/hadoop checknative</code>检查 <br>
+–配置HBASE <br>
+1、将hadoop与snappy集成的jar包放入HBASE安装目录下的lib目录中 <br>
+2、将本地native库放入HBASE安装目录中 <br>
+<img src="http://static.zybuluo.com/vin123456/dwtppm97km74j31amnuvlgyk/image_1arcm5fu81pnp1bu35qlt711h8o13.png" alt="image_1arcm5fu81pnp1bu35qlt711h8o13.png-212.4kB" title=""></p></li>
+</ul>
+
+<p>–在hbase-site.xml文件中配置压缩属性 <br>
+<img src="http://static.zybuluo.com/vin123456/3aprt7kdbp8253xymse1uoxl/image_1arcmc3d113c9nf5ou4140c13o71g.png" alt="image_1arcmc3d113c9nf5ou4140c13o71g.png-176.2kB" title=""> <br>
+–在做好上面步骤好，就可以在表中将压缩属性设置为想要的压缩格式 <br>
+<em>注：已经存在的数据不会因为设置压缩属性而压缩</em></p>
+
+<hr>
+
+
+
+<h2 id="hbase与hive集成">HBASE与Hive集成</h2>
+
+<p>参考官网: <a href="https://cwiki.apache.org/confluence/display/Hive/HBaseIntegration" rel="nofollow">https://cwiki.apache.org/confluence/display/Hive/HBaseIntegration</a></p>
+
+<h2 id="喜欢我的文章请关注微信公众号dtspider">喜欢我的文章请关注微信公众号<em>DTSpider</em></h2>
+
+<p><img src="https://img-blog.csdn.net/20180228092027636?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdmluZmx5X2xp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="DTSpider" title=""></p>
+
+<hr>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

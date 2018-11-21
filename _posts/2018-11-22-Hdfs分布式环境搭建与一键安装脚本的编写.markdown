@@ -1,0 +1,161 @@
+---
+layout:     post
+title:      Hdfs分布式环境搭建与一键安装脚本的编写
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="hadoop介绍">Hadoop介绍</h2>
+
+<p>  Hadoop 是目前比较流行的大数据分布式处理软件框架。这套框架异常的可靠，在假设数据元素和存储会失效的情况下，维护多个工作数据副本，确保能够针对失败的节点重新分布处理。同时以并行处理提高处理速度，最高能能够处理 PB 级数据。  <br>
+  Hadoop 主要由三个部分组成：  <br>
+1、HDFS  <br>
+2、MapReduce  <br>
+3、Hbase</p>
+
+<p>  HDFS（Hadoop Distributed File System)为分布式计算存储提供了底层支持。存储在 HDFS 中的文件被分成块（通常为 64MB），然后将这些块复制到多个计算机中（DataNode）。块的大小和复制的块数量在创建文件时由客户机决定。NameNode 可以控制所有文件操作。HDFS 内部的所有通信都基于标准的 TCP/IP 协议。  <br>
+    MapReduce从名字上看就是map(任务的分解)与reduce(结果的汇总)的结合，提供了一个海量数据处理的编程模型框架。基于该框架能够容易地编写应用程序，这些应用程序能够运行在由上千个商用机器组成的大集群上，并以一种可靠的，具有容错能力的方式并行地处理上TB级别的海量数据集。这个定义里面有着这些关键词，一是软件框架，二是并行处理，三是可靠且容错，四是大规模集群，五是海量数据集。  <br>
+    HBase是一个开源的、分布式的、多版本的、面向列的存储模型。可以直接使用本地文件系统也可使用Hadoop的HDFS文件存储系统的大型数据库。</p>
+
+<h2 id="分布式环境搭建">分布式环境搭建</h2>
+
+<p>1、安装需求 <br>
+    以搭建一台master，两台slave为例，需要准备的有： <br>
+    linux机器三台，实体机与虚拟机皆可，ip最好可以固定。这里以三台centos7 64位的机器为例。 <br>
+    hadoop安装包，下载地址：hadoop官方下载地址 选择某个版本 binary(已编译好的)tar包下载，这里选择hadoop-2.7.2版本 <br>
+    JDK安装包JDK官方下载地址 选择linux 64位对应的tar包下载 <br>
+2、hadoop的安装 <br>
+    先介绍一下hadoop的安装过程便于理解脚本的编写。</p>
+
+<ul>
+<li><p>安装JDK <br>
+    关于JDK的安装请参照我的另一篇博客centos7上JDK安装与一键安装脚本的编写，同样的是自己编写的一键安装脚本方式安装：<a href="http://blog.csdn.net/zuixuewosha/article/details/57125503" rel="nofollow">centos7上JDK安装与一键安装脚本的编写</a></p></li>
+<li><p>关闭防火墙 <br>
+    使用 “systemctl stop firewalld” 命令关闭防火墙</p></li>
+<li><p>设置主机名称 <br>
+    使用 “hostnamectl set-hostname xxxx” 来设置主机名，这里我们吧master机器的主机名设置为master，slave机器主机名命名为slave1、slave2以此类推。</p></li>
+<li><p>配置hosts文件 <br>
+    在host文件中添加各个机器ip与的对应，这样各个机器之间就可以用主机名直接通信了。修改”/etc/hosts”文件，在文件末尾添加 “IP地址 主机名”,样式如下：  <br>
+192.168.1.1 master  <br>
+192.168.1.2 slave1  <br>
+192.168.1.3 slave2</p></li>
+<li><p>设置无密码登陆 <br>
+    使用命令 “ssh-keygen -t rsa” ，所有的交互都直接回车，生成密钥对。默认存放路径在 “~/.ssh” 目录下,这个目录下会有”id_rsa.pub” 这个文件。如果A机器想要免密码访问B机器，把自己的”id_rsa.pub” 这个文件拷贝到B机器的 “~/.ssh”目录下，就可以免密码访问B了，从B机器上拷贝文件也不会需要密码。</p></li>
+</ul>
+
+<p>设置完以上配置后，将hadoop的压缩包内容解压到/usr/hadoop目录下</p>
+
+<ul>
+<li>修改hadoop的配置文件 <br>
+    hadoop的配置文件都是xml格式的，存放在解压后目录的etc/hadoop//目录下。找到每一项的名称，修改对应的value即可。 <br>
+     <br>
+    修改配置文件core-site.xml。配置其中的fs.defaultFS项，这里配置的是HDFS master（即namenode）的地址和端口号（默认9000）。其中的ip地址在修改过host文件后可以换成主机名。 </li>
+</ul>
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>  
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>  
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>fs.defaultFS<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>  
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://192.168.1.1:9000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>  
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>  
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span>  </code></pre>
+
+<p>    修改配置文件hdfs-site.xml。配置其中的dfs.replication项，这里配置的是子节点的总数目。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+          <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.replication<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+          <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>2<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>    
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p>    修改配置文件mapred-site.xml。配置其中的mapred.job.tracker项，这里配置的是jobtracker的ip和端口（默认9001）。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml">configuration&gt;
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+          <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapred.job.tracker<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+          <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>192.168.1.1:9001<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>    
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p>    修改配置文件hadoop-env.sh，修改其中JAVA_HOME的设置，如果JAVA_HOME已经设置好了，可以跳过这一步： <br>
+把export JAVA_HOME=${JAVA_HOME}改为export JAVA_HOME=实际的JAVA_HONE路径。</p>
+
+<p>    修改slaves文件，slaves即为HDFS的DataNode节点。当使用脚本start-dfs.sh来启动hdfs时，会使用到这个文件，以无密码登录方式到各slaves上启动DataNode。将slaves的节点IP（也可以是相应的主机名）一个个加进去，一行一个IP。在设置过hosts文件后，也可以一行一个主机名。</p>
+
+<p>    设置完毕后格式化hadoop <br>
+    $HADOOP_HOME/bin/hadoop namenode -format</p>
+
+<p>在namenode的机器上设置好hdfs后，把整个目录拷贝到各个datanode机器上即可。</p>
+
+
+
+<h2 id="一键安装脚本的编写">一键安装脚本的编写</h2>
+
+<p>首先设置master的ip和slave的ip</p>
+
+<pre class="prettyprint"><code class="language-shell hljs bash">function <span class="hljs-function"><span class="hljs-title">syni_input_master_hdfs</span></span>()
+{
+    local input_master_fail_num=<span class="hljs-number">0</span>
+    local input_slave_fail_num=<span class="hljs-number">0</span>
+    <span class="hljs-comment"># 设置MASTER_IP</span>
+    <span class="hljs-keyword">while</span> [ <span class="hljs-number">1</span> ]; <span class="hljs-keyword">do</span>
+        <span class="hljs-built_in">read</span> -p <span class="hljs-string">"&gt;&gt;Please input HDFS-master IP : "</span> MASTER_IP
+        <span class="hljs-keyword">if</span> [ ! -z <span class="hljs-string">"<span class="hljs-variable">$MASTER_IP</span>"</span> ]; <span class="hljs-keyword">then</span>
+            <span class="hljs-built_in">echo</span> <span class="hljs-string">"<span class="hljs-variable">$MASTER_IP</span>"</span> | grep -q -E <span class="hljs-string">"^([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$"</span>
+            <span class="hljs-keyword">if</span> [ $? <span class="hljs-operator">-eq</span> <span class="hljs-number">0</span> ]; <span class="hljs-keyword">then</span>
+                <span class="hljs-keyword">break</span>
+            <span class="hljs-keyword">fi</span>
+        <span class="hljs-keyword">fi</span>
+        (( input_master_fail_num=input_master_fail_num+<span class="hljs-number">1</span> ))
+        <span class="hljs-built_in">echo</span> <span class="hljs-string">"Error, MASTER_IP &lt;<span class="hljs-variable">$MASTER_IP</span>&gt; is not reachable or not valid!!"</span>
+        <span class="hljs-keyword">if</span> [ <span class="hljs-variable">$input_master_fail_num</span> -ge <span class="hljs-number">6</span> ]; <span class="hljs-keyword">then</span>
+            <span class="hljs-built_in">echo</span> <span class="hljs-string">"ERROR, fail to input server ip <span class="hljs-variable">$input_master_fail_num</span> times!!"</span>
+            <span class="hljs-keyword">exit</span> <span class="hljs-number">1</span>
+        <span class="hljs-keyword">fi</span>
+    <span class="hljs-keyword">done</span>
+
+    <span class="hljs-built_in">read</span> -p <span class="hljs-string">"&gt;&gt;Please input HDFS-slave total numbers : "</span> SLAVE_NUM
+    <span class="hljs-keyword">for</span> (( num=<span class="hljs-number">1</span>; num&lt;=SLAVE_NUM; num++ ))
+    <span class="hljs-keyword">do</span>
+        <span class="hljs-comment"># 设置SLAVE_IP</span>
+        <span class="hljs-keyword">while</span> [ <span class="hljs-number">1</span> ]; <span class="hljs-keyword">do</span>
+            <span class="hljs-built_in">read</span> -p <span class="hljs-string">"&gt;&gt;Please input HDFS-slave<span class="hljs-variable">${num}</span> IP : "</span> SLAVE_IP
+            <span class="hljs-keyword">if</span> [ ! -z <span class="hljs-string">"<span class="hljs-variable">$SLAVE_IP</span>"</span> ]; <span class="hljs-keyword">then</span>
+                <span class="hljs-built_in">echo</span> <span class="hljs-string">"<span class="hljs-variable">$SLAVE_IP</span>"</span> | grep -q -E <span class="hljs-string">"^([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$"</span>
+                <span class="hljs-keyword">if</span> [ $? <span class="hljs-operator">-eq</span> <span class="hljs-number">0</span> ]; <span class="hljs-keyword">then</span>
+                    <span class="hljs-keyword">break</span>
+                <span class="hljs-keyword">fi</span>
+            <span class="hljs-keyword">fi</span>
+            (( input_slave_fail_num=input_slave_fail_num+<span class="hljs-number">1</span> ))
+            <span class="hljs-built_in">echo</span> <span class="hljs-string">"Error, SLAVE_IP &lt;<span class="hljs-variable">$SLAVE_IP</span>&gt; is not reachable or not valid!!"</span>
+            <span class="hljs-keyword">if</span> [ <span class="hljs-variable">$input_slave_fail_num</span> -ge <span class="hljs-number">6</span> ]; <span class="hljs-keyword">then</span>
+                <span class="hljs-built_in">echo</span> <span class="hljs-string">"ERROR, fail to input server ip <span class="hljs-variable">$input_slave_fail_num</span> times!!"</span>
+                <span class="hljs-keyword">exit</span> <span class="hljs-number">1</span>
+            <span class="hljs-keyword">fi</span>
+        <span class="hljs-keyword">done</span>
+        <span class="hljs-comment">#修改Hosts文件,把slaves</span>
+        <span class="hljs-comment"># read</span>
+        <span class="hljs-comment">#in_url = ${HDFS_ROLE}</span>
+        <span class="hljs-comment">#in_ip = ${HDFS_IP}</span>
+        local grep_result
+        inner_ip_map=<span class="hljs-string">"<span class="hljs-variable">${SLAVE_IP}</span> "</span>slave<span class="hljs-string">"<span class="hljs-variable">${num}</span>"</span>
+        grep_result=$(cat /etc/hosts |grep <span class="hljs-string">"<span class="hljs-variable">${inner_ip_map}</span>"</span> || <span class="hljs-built_in">echo</span> <span class="hljs-string">""</span>) 
+        <span class="hljs-keyword">if</span> [ -z <span class="hljs-string">"<span class="hljs-variable">${grep_result}</span>"</span> ];<span class="hljs-keyword">then</span>
+            <span class="hljs-built_in">echo</span> <span class="hljs-variable">${inner_ip_map}</span> &gt;&gt; /etc/hosts
+            <span class="hljs-keyword">if</span> [ $? <span class="hljs-operator">-eq</span> <span class="hljs-number">0</span> ]; <span class="hljs-keyword">then</span>
+                <span class="hljs-built_in">let</span> host_add_num=SLAVE_NUM+<span class="hljs-number">1</span>
+                <span class="hljs-built_in">echo</span> <span class="hljs-string">"<span class="hljs-variable">${inner_ip_map}</span> to hosts success host is <span class="hljs-variable">$(tail -n ${host_add_num} /etc/hosts)</span>"</span>
+            <span class="hljs-keyword">fi</span>
+        <span class="hljs-keyword">fi</span>
+    <span class="hljs-keyword">done</span>
+}
+</code></pre>
+
+<p>未完待续。。。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

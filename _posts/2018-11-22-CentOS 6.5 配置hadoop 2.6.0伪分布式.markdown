@@ -1,0 +1,163 @@
+---
+layout:     post
+title:      CentOS 6.5 配置hadoop 2.6.0伪分布式
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>操作系统：CentOS 6.5    32位</p>
+<p>Java环境：jdk 1.7.0_71 </p>
+<p>hadoop下载地址：http://apache.fayea.com/hadoop/common/stable/hadoop-2.6.0.tar.gz<br></p>
+<p>1.创建用户组和用户</p>
+<p>使用su命令切换用户为root<br></p>
+<p></p>
+<pre><code class="language-html">groupadd hadoop
+useradd hadoop hadoop
+passwd  hadoop  #为用户添加密码   可以不设置密码
+</code></pre>
+<p></p>
+<p>2.安装ssh</p>
+<pre><code class="language-plain">rpm -qa |grep ssh  #检查是否装了SSH包
+yum install openssh-server  # 安装ssh
+chkconfig --list sshd #检查SSHD是否设置为开机启动
+chkconfig --level 2345 sshd on  #如果没设置启动就设置下.
+service sshd restart  #重新启动
+</code></pre>
+<p>3.配置ssh无密码登录</p>
+<p>切换至hadoop用户</p>
+<p></p>
+<pre><code class="language-html">su hadoop</code></pre>生成密钥
+<p></p>
+<p></p>
+<pre><code class="language-html">ssh-keygen -t rsa -P ""</code></pre>执行后会在.ssh目录下生成id_rsa和id_rsa.pub两个文件
+<p></p>
+<p>进入.ssh目录，并将id_rsa.pub追加到authorized_keys文件中</p>
+<p></p>
+<pre><code class="language-html">cd ./.ssh
+cat id_rsa.pub &gt;&gt; authorized_keys 
+chmod 600 authorized_keys # 修改用户权限
+</code></pre>
+<p></p>
+<p>测试是否可以登录</p>
+<p></p>
+<pre><code class="language-html">ssh localhost  # 执行后会提示输入 yes or no. 输入yes后 如果提示为最后一次登录时间 则表明成功。
+</code></pre>4.安装hadoop
+<p></p>
+<p>将下载的hadoop解压并移动到期望的安装目录,修改其访问权限</p>
+<p></p>
+<pre><code class="language-html">tar -xvf hadoop-2.6.0.tar.gz
+mv hadoop-2.6.0 /usr/opt/hadoop
+chmod -R 775 /usr/opt/hadoop
+chown -R hadoop:hadoop /usr/opt/hadoop
+</code></pre>配置hadoop 的环境变量（所有的环境变量都是必须的）
+<p></p>
+<p></p>
+<pre><code class="language-html">su
+vim /etc/profile
+export HADOOP_INSTALL=/usr/opt/hadoop
+export PATH=${HADOOP_INSTALL}/bin:${HADOOP_INSTALL}/sbin${PATH}
+export HADOOP_MAPRED_HOME=${HADOOP_INSTALL}
+export HADOOP_COMMON_HOME=${HADOOP_INSTALL}
+export HADOOP_HDFS_HOME=${HADOOP_INSTALL}
+export YARN_HOME=${HADOOP_INSTALLL}
+export HADOOP_COMMON_LIB_NATIVE_DIR=${HADOOP_INSTALL}/lib/natvie  
+export HADOOP_OPTS="-Djava.library.path=${HADOOP_INSTALL}/lib:${HADOOP_INSTALL}/lib/native"
+</code></pre>设置hadoop-env.sh中的java环境变量
+<p></p>
+<p></p>
+<pre><code class="language-html">cd /usr/opt/hadoop
+vim ./etc/hadoop/hadoop-env.sh 
+</code></pre><pre><code class="language-html">export JAVA_HOME= {你的java环境变量}
+</code></pre>
+<p></p>
+<p>5.配置伪分布式</p>
+<p>hadoop的配置文件主要有core-site.xml  、 hdfs-site.xml 、 yarn-site.xml 三个文件。</p>
+<p></p>
+<pre><code class="language-html">cd /usr/opt/hadoop/etc/hadoop</code></pre><br><p></p>
+<p>core-site.xml</p>
+<p></p>
+<pre><code class="language-html">&lt;configuration&gt;
+    &lt;property&gt;
+        &lt;name&gt;hadoop.tmp.dir&lt;/name&gt;
+        &lt;value&gt;/usr/opt/hadoop/tmp&lt;/value&gt;  &lt;!--一定要配置  系统默认的缓存文件夹在每次重启后会被删除--&gt;
+    &lt;/property&gt;
+    &lt;property&gt;
+        &lt;name&gt;fs.defaultFS&lt;/name&gt;
+        &lt;value&gt;hdfs://localhost:9000&lt;/value&gt;
+    &lt;/property&gt;
+&lt;/configuration&gt;</code></pre><br>
+hdfs.xml
+<p></p>
+<p></p>
+<pre><code class="language-html">    &lt;configuration&gt;  
+    &lt;property&gt;  
+            &lt;name&gt;dfs.replication&lt;/name&gt;  
+            &lt;value&gt;1&lt;/value&gt;  
+        &lt;/property&gt;  
+        &lt;property&gt;  
+            &lt;name&gt;dfs.namenode.name.dir&lt;/name&gt;  
+            &lt;value&gt;file:/usr/opt/hadoop/dfs/name&lt;/value&gt;  
+        &lt;/property&gt;  
+        &lt;property&gt;  
+            &lt;name&gt;dfs.datanode.data.dir&lt;/name&gt;  
+            &lt;value&gt;file:/usr/opt/hadoop/dfs/data&lt;/value&gt;  
+        &lt;/property&gt;  
+        &lt;property&gt;                 &lt;！--这个属性节点是为了防止后面eclipse存在拒绝读写设置的 --&gt; 
+                &lt;name&gt;dfs.permissions&lt;/name&gt;  
+                &lt;value&gt;false&lt;/value&gt;  
+         &lt;/property&gt;  
+     &lt;/configuration&gt;  </code></pre><br>
+yarn-site.xml
+<p></p>
+<p></p>
+<pre><code class="language-html">&lt;configuration&gt;
+&lt;property&gt;
+&lt;name&gt;mapreduce.framework.name&lt;/name&gt;
+&lt;value&gt;yarn&lt;/value&gt;
+&lt;/property&gt;
+
+&lt;property&gt;
+&lt;name&gt;yarn.nodemanager.aux-services&lt;/name&gt;
+&lt;value&gt;mapreduce_shuffle&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;</code></pre><br>
+接下来创建需要的文件夹
+<p></p>
+<p></p>
+<pre><code class="language-html">cd /usr/local/hadoop
+mkdir tmp dfs dfs/name dfs/data</code></pre>
+<p></p>
+<p><br></p>
+<p>到目前为止所有的配置都已经完成。</p>
+<p><br></p>
+<p>6.运行<br></p>
+<p>首先格式化文件系统</p>
+<p></p>
+<pre><code class="language-html">.bin/hdfs namenode -format </code></pre>启动
+<p></p>
+<p></p>
+<pre><code class="language-html">./sbin/start-dfs.sh
+./sbin/start-yarn.sh</code></pre><br>
+提示如下则表明成功了。
+<p></p>
+<p></p>
+<pre><code class="language-html">Starting namenodes on [localhost]
+localhost: starting namenode, logging to /usr/opt/hadoop-2.6.0/logs/hadoop-hadoop-namenode-.out
+localhost: starting datanode, logging to /usr/opt/hadoop-2.6.0/logs/hadoop-hadoop-datanode-.out
+Starting secondary namenodes [0.0.0.0]
+0.0.0.0: starting secondarynamenode, logging to /usr/opt/hadoop-2.6.0/logs/hadoop-hadoop-secondarynamenode-.out
+</code></pre>输入网址127.0.0.1:50070就可以看见hadoop的网页了。<br><p><br></p>
+<p>PS ：如果出现警告提示：</p>
+<p></p>
+<p></p>
+<pre><code class="language-html">Unable to load native-hadoop library for your platform</code></pre>也可以看到那个网页，但hadoop并没有完全装好。
+<p></p>
+<p>出现这个问题有两种情况：</p>
+<p>一、没有设置HADOOP_OPTS这个环境变量</p>
+<p>二、是操作系统与hadoop.so文件不兼容导致的。</p>
+<p>hadoop 2.5以后的release版本都是64位编译的，如果自己的电脑是32位的就出现不兼容的情况。这时需要重新编译hadoop源码<span style="color:#FF0000;">（编译hadoop源码时，不要使用jdk1.8.0，使用1.6和1.7就可以了，不然会报这个错误[ERROR] Failed to execute goal org.apache.maven.plugins:maven-javadoc-plugin:2.8.1:jar (module-javadocs) on project
+ hadoop-annotations: MavenReportException: Error while creating archive ）:<br></span><br></p>
+<p><br></p>
+<br>            </div>
+                </div>

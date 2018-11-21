@@ -1,0 +1,185 @@
+---
+layout:     post
+title:      HDFS Java代码进行增删改查
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/sinat_35045195/article/details/76889323				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>提醒：如果要在idear或者eclipse等IDE下运行就必须在HDFS上给你所使用的目录分配权限给windows下的用户，为了方便起见建议给所有权限777</p>
+<p>创建目录命令</p>
+<p></p><pre><code class="language-plain">hdfs dfs -mkdir myproject</code></pre><br>
+分配权限命令
+<p></p><pre><code class="language-html">hdfs dfs -chmod 777 myproject</code></pre>
+<h1>HDFS增删改查工具类</h1>
+<p></p>
+<p></p><pre><code class="language-java">package hdfs;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Created by LiuwenSheng on 2017/8/7.
+ */
+public class HDFSUtils {
+    private final String FILE_PROTOCOL = "file:///";
+    private final String HDFS_PROTOCOL = "hdfs://xxx:9000/myproject";//此处xxx表示你的IP地址比如：192.168.18.1
+
+    /**
+     * 用于从本地文件中选择文件上传至hdfs中
+     * @param conf org.apache.hadoop.conf.Configuration 配置信息
+     * @param localPath String 本地文件的存储路径
+     * @param hdfsPath String 上传到HDFS的路径 eg:/a/b.txt
+     * @throws IOException
+     */
+    public void file2HDFS( Configuration conf,String localPath,String hdfsPath)throws IOException{
+        FileSystem fs = FileSystem.get(conf);
+        fs.copyFromLocalFile(new Path(FILE_PROTOCOL+localPath),new Path(HDFS_PROTOCOL+hdfsPath));
+        fs.close();
+    }
+    /**
+     * 测试文件是否存在
+     * @param conf  配置信息
+     * @param path 文件路径
+     * @return
+     * @throws IOException
+     */
+    public boolean isExit(Configuration conf,String path)throws IOException{
+        FileSystem fs = FileSystem.get(conf);
+        boolean exit = fs.exists(new Path(HDFS_PROTOCOL+path));
+        fs.close();
+        return exit;
+    }
+    /**
+     * 删除文件
+     * @param conf org.apache.hadoop.conf.Configuration 配置信息
+     * @param path 要删除的文件路径
+     * @throws IOException
+     */
+    public Boolean deleteFormHDFS(Configuration conf,String path) throws IOException {
+        FileSystem fs = FileSystem.get(conf);
+        boolean isDel =  fs.deleteOnExit(new Path(HDFS_PROTOCOL+path));
+        fs.close();
+        return isDel;
+    }
+
+    /**
+     * 把HDFS上面的文件下载到本地
+     * @param conf 配置信息
+     * @param hdfsPath hdfs的文件路径
+     * @param localPath 本地文件路径
+     * @throws IOException
+     */
+    public  void file2Loacl(Configuration conf,String hdfsPath,String localPath)throws IOException{
+        FileSystem fs = FileSystem.get(conf);
+        fs.copyToLocalFile(new Path(HDFS_PROTOCOL+hdfsPath),new Path(FILE_PROTOCOL+localPath));
+        fs.close();
+    }
+
+    /**
+     * 创建hdfs目录
+     * @param conf 配置信息
+     * @param path 需要创建的目录路径
+     * @return 是否创建成功
+     * @throws IOException
+     */
+    public Boolean mkHDFSDir(Configuration conf,String path)throws IOException{
+        FileSystem fs = FileSystem.get(conf);
+        Path mypath = new Path(HDFS_PROTOCOL + path);
+        boolean ismk = false;
+        if(!fs.exists(mypath))
+        {
+            ismk = fs.mkdirs(mypath);
+        }
+        fs.close();
+        return ismk;
+    }
+
+    /**
+     * 查看当前目录内文件列表
+     * @param conf 配置信息
+     * @param path 查看的目录
+     * @return 文件状态数组
+     * @throws IOException
+     */
+    public List&lt;String&gt; lsHDFSDir(Configuration conf, String path) throws IOException{
+        List&lt;String&gt; list = new ArrayList&lt;String&gt;();
+        FileSystem fs = FileSystem.get(conf);
+        FileStatus[] fileStatuses = fs.listStatus(new Path(HDFS_PROTOCOL + path));
+        for (FileStatus fileStatus:fileStatuses){
+            list.add(fileStatus.getPath().toString());
+        }
+        fs.close();
+        return list;
+    }
+}
+</code></pre>
+<h1>测试用例</h1>
+<p></p>
+<p></p><pre><code class="language-java">package test;
+import hdfs.HDFSUtils;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
+import org.junit.Before;
+import org.junit.Test;
+
+import javax.ws.rs.core.Context;
+import java.io.IOException;
+import java.util.List;
+
+/**
+ * Created by lws on 2017/8/7.
+ */
+public class MyHDFSTest {
+
+
+    private HDFSUtils hdfsUtils = new HDFSUtils();
+    private Configuration conf = new Configuration();
+    @Before
+    public void beforeBegining(){
+        conf.set("fs.defaultFS", "hdfs://xxx:9000/");//此处xxx为你的IP地址，如192.168.12.8
+    }
+
+
+    @Test
+    public void test_file2HDFS()throws IOException{
+        hdfsUtils.file2HDFS(conf,"D:\\BugReport.txt","/myuser2/1");
+    }
+
+    @Test
+    public void test_deleteFormHDFS()throws IOException{
+        hdfsUtils.deleteFormHDFS(conf,"/myuser/BugReport.txt");
+    }
+    @Test
+    public void test_isExit()throws  IOException{
+        boolean is = hdfsUtils.isExit(conf,"/myuser/BugReport.txt");
+        System.out.print(is);
+    }
+    @Test
+    public void test_file2Local()throws IOException{
+        hdfsUtils.file2Loacl(conf,"/myuser/BugReport.txt","D://test");
+    }
+    @Test
+    public void test_mkHDFSDir()throws IOException{
+        boolean a = hdfsUtils.mkHDFSDir(conf,"/myuser/liming");
+        System.out.print(a);
+    }
+    @Test
+    public void test_lsHDFSDir()throws IOException{
+        List&lt;String&gt; list = hdfsUtils.lsHDFSDir(conf,"/myuser2");
+        for (String file:list){
+            System.out.println(file);
+        }
+    }
+}
+</code></pre><br><br><br><br><p><br></p>
+            </div>
+                </div>

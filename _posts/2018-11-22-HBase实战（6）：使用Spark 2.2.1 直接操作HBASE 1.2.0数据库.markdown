@@ -1,0 +1,472 @@
+---
+layout:     post
+title:      HBase实战（6）：使用Spark 2.2.1 直接操作HBASE 1.2.0数据库
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：王家林大咖2018年新书《SPARK大数据商业实战三部曲》清华大学出版，清华大学出版社官方旗舰店（天猫）https://qhdx.tmall.com/?spm=a220o.1000855.1997427721.d4918089.4b2a2e5dT6bUsM					https://blog.csdn.net/duan_zhihua/article/details/80705033				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>HBase实战（6）：使用Spark 2.2.1 直接操作HBASE 1.2.0数据库</p><p>之前对于Hbase系统已实验成功的内容：</p><p>       Hbase分布式集群搭建：<a href="https://blog.csdn.net/duan_zhihua/article/details/80664859" rel="nofollow">点击打开链接</a></p><ol><li>直接使用python API连接Hbase操作数据。<a href="https://blog.csdn.net/duan_zhihua/article/details/80622166" rel="nofollow">点击打开链接</a></li><li>直接使用Java API 连接Hbase操作数据。<a href="https://blog.csdn.net/duan_zhihua/article/details/80674047" rel="nofollow">点击打开链接</a></li><li>使用spark-sql 工具通过Hive间接操作Hbase的数据。<a href="https://blog.csdn.net/duan_zhihua/article/details/80689075" rel="nofollow">点击打开链接</a></li><li>使用Hive-sql 操作Hbase数据。<a href="https://blog.csdn.net/duan_zhihua/article/details/80666415" rel="nofollow">点击打开链接</a></li></ol><p>本次大数据实验室的内容：</p><p>     5.直接使用Spark 2.2.1 操作HBase 1.2.0的数据。    </p><p>编写测试代码：</p><pre><code class="language-html">package HbaseTest.sparkconnectHbase;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.*;
+import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
+import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
+import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.VoidFunction;
+import org.apache.spark.rdd.RDD;
+import org.apache.spark.sql.SparkSession;
+import scala.Function1;
+import scala.Tuple2;
+import scala.collection.Iterator;
+import scala.runtime.BoxedUnit;
+
+/***
+ * 使用Spark 2.2.1 直接连接 Hbase 1.2.0 数据库。
+ * */
+public class SparkConnectHbaseTest {
+
+    public static void main(String[] args) {
+        Configuration confhbase = HBaseConfiguration.create();
+
+        confhbase.set("hbase.zookeeper.property.clientPort", "2181");
+        confhbase.set("hbase.zookeeper.quorum", "192.168.189.1,192.168.189.2,192.168.189.3");
+        confhbase.set("hbase.master", "192.168.189.1:60000");
+
+        confhbase.set(TableInputFormat.INPUT_TABLE, "db_res:wtb_ow_operation");
+        SparkConf conf = new SparkConf().
+                setAppName("Spark_Connect_Hbase_Test");
+        JavaSparkContext sc = new JavaSparkContext(conf);
+        JavaPairRDD&lt;ImmutableBytesWritable, Result&gt; resultRDD = sc.newAPIHadoopRDD(confhbase, TableInputFormat.class, ImmutableBytesWritable.class, Result.class);
+
+        long count = resultRDD.count();
+        System.out.print("************SPARK from hbase  count ***************      " + count + "                 ");
+
+        resultRDD.foreach(new VoidFunction&lt;Tuple2&lt;ImmutableBytesWritable, Result&gt;&gt;() {
+            @Override
+            public void call(Tuple2&lt;ImmutableBytesWritable, Result&gt; v1) throws Exception {
+                String key = Bytes.toString(v1._2().getRow());
+                String operate_begin_time = Bytes.toString(v1._2().getValue(Bytes.toBytes("info"), Bytes.toBytes("operate_begin_time")));
+                System.out.print("==================spark from hbase  record=========== ：  " + key + "  " + operate_begin_time);
+            }
+        });
+        while (true) {
+
+        }
+    }
+}
+</code></pre><p>pom文件：</p><pre><code class="language-html">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"&gt;
+    &lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;
+
+    &lt;groupId&gt;noc_hbase_test&lt;/groupId&gt;
+    &lt;artifactId&gt;noc_hbase_test&lt;/artifactId&gt;
+    &lt;version&gt;1.0-SNAPSHOT&lt;/version&gt;
+
+    &lt;properties&gt;
+        &lt;scala.version&gt;2.11.8&lt;/scala.version&gt;
+        &lt;spark.version&gt;2.2.1&lt;/spark.version&gt;
+        &lt;jedis.version&gt;2.8.2&lt;/jedis.version&gt;
+        &lt;fastjson.version&gt;1.2.14&lt;/fastjson.version&gt;
+        &lt;jetty.version&gt;9.2.5.v20141112&lt;/jetty.version&gt;
+        &lt;container.version&gt;2.17&lt;/container.version&gt;
+        &lt;java.version&gt;1.8&lt;/java.version&gt;
+        &lt;hbase.version&gt;1.2.0&lt;/hbase.version&gt;
+    &lt;/properties&gt;
+
+
+    &lt;repositories&gt;
+        &lt;repository&gt;
+            &lt;id&gt;scala-tools.org&lt;/id&gt;
+            &lt;name&gt;Scala-Tools Maven2 Repository&lt;/name&gt;
+            &lt;url&gt;http://scala-tools.org/repo-releases&lt;/url&gt;
+        &lt;/repository&gt;
+    &lt;/repositories&gt;
+
+    &lt;pluginRepositories&gt;
+        &lt;pluginRepository&gt;
+            &lt;id&gt;scala-tools.org&lt;/id&gt;
+            &lt;name&gt;Scala-Tools Maven2 Repository&lt;/name&gt;
+            &lt;url&gt;http://scala-tools.org/repo-releases&lt;/url&gt;
+        &lt;/pluginRepository&gt;
+    &lt;/pluginRepositories&gt;
+
+    &lt;dependencies&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.scala-lang&lt;/groupId&gt;
+            &lt;artifactId&gt;scala-library&lt;/artifactId&gt;
+            &lt;version&gt;${scala.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.scala-lang&lt;/groupId&gt;
+            &lt;artifactId&gt;scala-compiler&lt;/artifactId&gt;
+            &lt;version&gt;${scala.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.scala-lang&lt;/groupId&gt;
+            &lt;artifactId&gt;scala-reflect&lt;/artifactId&gt;
+            &lt;version&gt;${scala.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.scala-lang&lt;/groupId&gt;
+            &lt;artifactId&gt;scalap&lt;/artifactId&gt;
+            &lt;version&gt;${scala.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.spark&lt;/groupId&gt;
+            &lt;artifactId&gt;spark-core_2.10&lt;/artifactId&gt;
+            &lt;version&gt;${spark.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.spark&lt;/groupId&gt;
+            &lt;artifactId&gt;spark-launcher_2.10&lt;/artifactId&gt;
+            &lt;version&gt;${spark.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.spark&lt;/groupId&gt;
+            &lt;artifactId&gt;spark-network-shuffle_2.10&lt;/artifactId&gt;
+            &lt;version&gt;${spark.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.spark&lt;/groupId&gt;
+            &lt;artifactId&gt;spark-sql_2.10&lt;/artifactId&gt;
+            &lt;version&gt;${spark.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.spark&lt;/groupId&gt;
+            &lt;artifactId&gt;spark-hive_2.10&lt;/artifactId&gt;
+            &lt;version&gt;${spark.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.spark&lt;/groupId&gt;
+            &lt;artifactId&gt;spark-catalyst_2.10&lt;/artifactId&gt;
+            &lt;version&gt;${spark.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+
+
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.spark&lt;/groupId&gt;
+            &lt;artifactId&gt;spark-repl_2.10&lt;/artifactId&gt;
+            &lt;version&gt;${spark.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hive&lt;/groupId&gt;
+            &lt;artifactId&gt;hive-jdbc&lt;/artifactId&gt;
+            &lt;version&gt;1.2.1&lt;/version&gt;
+        &lt;/dependency&gt;
+
+
+        &lt;!-- https://mvnrepository.com/artifact/org.apache.hbase/hbase --&gt;
+
+        &lt;!-- hbase依赖包 --&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hbase&lt;/groupId&gt;
+            &lt;artifactId&gt;hbase-client&lt;/artifactId&gt;
+            &lt;version&gt;${hbase.version}&lt;/version&gt;
+            &lt;exclusions&gt;
+                &lt;exclusion&gt;
+                    &lt;groupId&gt;org.slf4j&lt;/groupId&gt;
+                    &lt;artifactId&gt;slf4j-log4j12&lt;/artifactId&gt;
+                &lt;/exclusion&gt;
+            &lt;/exclusions&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hbase&lt;/groupId&gt;
+            &lt;artifactId&gt;hbase-common&lt;/artifactId&gt;
+            &lt;version&gt;${hbase.version}&lt;/version&gt;
+            &lt;exclusions&gt;
+                &lt;exclusion&gt;
+                    &lt;groupId&gt;org.slf4j&lt;/groupId&gt;
+                    &lt;artifactId&gt;slf4j-log4j12&lt;/artifactId&gt;
+                &lt;/exclusion&gt;
+            &lt;/exclusions&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hbase&lt;/groupId&gt;
+            &lt;artifactId&gt;hbase-server&lt;/artifactId&gt;
+            &lt;version&gt;${hbase.version}&lt;/version&gt;
+            &lt;exclusions&gt;
+                &lt;exclusion&gt;
+                    &lt;groupId&gt;org.slf4j&lt;/groupId&gt;
+                    &lt;artifactId&gt;slf4j-log4j12&lt;/artifactId&gt;
+                &lt;/exclusion&gt;
+            &lt;/exclusions&gt;
+        &lt;/dependency&gt;
+
+        &lt;!-- https://mvnrepository.com/artifact/org.apache.hadoop/hadoop-common --&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hadoop&lt;/groupId&gt;
+            &lt;artifactId&gt;hadoop-common&lt;/artifactId&gt;
+            &lt;version&gt;2.6.0&lt;/version&gt;
+        &lt;/dependency&gt;
+
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hadoop&lt;/groupId&gt;
+            &lt;artifactId&gt;hadoop-client&lt;/artifactId&gt;
+            &lt;version&gt;2.6.0&lt;/version&gt;
+        &lt;/dependency&gt;
+
+        &lt;!-- https://mvnrepository.com/artifact/org.apache.hadoop/hadoop-hdfs --&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hadoop&lt;/groupId&gt;
+            &lt;artifactId&gt;hadoop-hdfs&lt;/artifactId&gt;
+            &lt;version&gt;2.6.0&lt;/version&gt;
+        &lt;/dependency&gt;
+
+
+    &lt;/dependencies&gt;
+
+    &lt;build&gt;
+        &lt;plugins&gt;
+            &lt;plugin&gt;
+                &lt;artifactId&gt;maven-assembly-plugin&lt;/artifactId&gt;
+                &lt;configuration&gt;
+                    &lt;classifier&gt;dist&lt;/classifier&gt;
+                    &lt;appendAssemblyId&gt;true&lt;/appendAssemblyId&gt;
+                    &lt;descriptorRefs&gt;
+                        &lt;descriptor&gt;jar-with-dependencies&lt;/descriptor&gt;
+                    &lt;/descriptorRefs&gt;
+                &lt;/configuration&gt;
+                &lt;executions&gt;
+                    &lt;execution&gt;
+                        &lt;id&gt;make-assembly&lt;/id&gt;
+                        &lt;phase&gt;package&lt;/phase&gt;
+                        &lt;goals&gt;
+                            &lt;goal&gt;single&lt;/goal&gt;
+                        &lt;/goals&gt;
+                    &lt;/execution&gt;
+                &lt;/executions&gt;
+            &lt;/plugin&gt;
+
+            &lt;plugin&gt;
+                &lt;artifactId&gt;maven-compiler-plugin&lt;/artifactId&gt;
+                &lt;configuration&gt;
+                    &lt;source&gt;1.7&lt;/source&gt;
+                    &lt;target&gt;1.7&lt;/target&gt;
+                &lt;/configuration&gt;
+            &lt;/plugin&gt;
+
+            &lt;plugin&gt;
+                &lt;groupId&gt;net.alchim31.maven&lt;/groupId&gt;
+                &lt;artifactId&gt;scala-maven-plugin&lt;/artifactId&gt;
+                &lt;version&gt;3.2.2&lt;/version&gt;
+                &lt;executions&gt;
+                    &lt;execution&gt;
+                        &lt;id&gt;scala-compile-first&lt;/id&gt;
+                        &lt;phase&gt;process-resources&lt;/phase&gt;
+                        &lt;goals&gt;
+                            &lt;goal&gt;compile&lt;/goal&gt;
+                        &lt;/goals&gt;
+                    &lt;/execution&gt;
+                &lt;/executions&gt;
+                &lt;configuration&gt;
+                    &lt;scalaVersion&gt;${scala.version}&lt;/scalaVersion&gt;
+                    &lt;recompileMode&gt;incremental&lt;/recompileMode&gt;
+                    &lt;useZincServer&gt;true&lt;/useZincServer&gt;
+                    &lt;args&gt;
+                        &lt;arg&gt;-unchecked&lt;/arg&gt;
+                        &lt;arg&gt;-deprecation&lt;/arg&gt;
+                        &lt;arg&gt;-feature&lt;/arg&gt;
+                    &lt;/args&gt;
+                    &lt;jvmArgs&gt;
+                        &lt;jvmArg&gt;-Xms1024m&lt;/jvmArg&gt;
+                        &lt;jvmArg&gt;-Xmx1024m&lt;/jvmArg&gt;
+                    &lt;/jvmArgs&gt;
+                    &lt;javacArgs&gt;
+                        &lt;javacArg&gt;-source&lt;/javacArg&gt;
+                        &lt;javacArg&gt;${java.version}&lt;/javacArg&gt;
+                        &lt;javacArg&gt;-target&lt;/javacArg&gt;
+                        &lt;javacArg&gt;${java.version}&lt;/javacArg&gt;
+                        &lt;javacArg&gt;-Xlint:all,-serial,-path&lt;/javacArg&gt;
+                    &lt;/javacArgs&gt;
+                &lt;/configuration&gt;
+            &lt;/plugin&gt;
+
+            &lt;plugin&gt;
+                &lt;groupId&gt;org.antlr&lt;/groupId&gt;
+                &lt;artifactId&gt;antlr4-maven-plugin&lt;/artifactId&gt;
+                &lt;version&gt;4.3&lt;/version&gt;
+                &lt;executions&gt;
+                    &lt;execution&gt;
+                        &lt;id&gt;antlr&lt;/id&gt;
+                        &lt;goals&gt;
+                            &lt;goal&gt;antlr4&lt;/goal&gt;
+                        &lt;/goals&gt;
+                        &lt;phase&gt;none&lt;/phase&gt;
+                    &lt;/execution&gt;
+                &lt;/executions&gt;
+                &lt;configuration&gt;
+                    &lt;outputDirectory&gt;src/test/java&lt;/outputDirectory&gt;
+                    &lt;listener&gt;true&lt;/listener&gt;
+                    &lt;treatWarningsAsErrors&gt;true&lt;/treatWarningsAsErrors&gt;
+                &lt;/configuration&gt;
+            &lt;/plugin&gt;
+        &lt;/plugins&gt;
+    &lt;/build&gt;
+
+&lt;/project&gt;</code></pre><p>在spark集群中提交运行：</p><pre><code class="language-java">root@master:~# spark-submit --name noc_hbase_test   --class HbaseTest.sparkconnectHbase.SparkConnectHbaseTest --master  spark://master:7077  --jars /usr/local/apache-hive-1.2.1/lib/mysql-connector-java-5.1.13-bin.jar,/usr/local/apache-hive-1.2.1/lib/hive-hbase-handler-1.2.1.jar,/usr/local/hbase-1.2.0/lib/hbase-client-1.2.0.jar,/usr/local/hbase-1.2.0/lib/hbase-common-1.2.0.jar,/usr/local/hbase-1.2.0/lib/hbase-protocol-1.2.0.jar,/usr/local/hbase-1.2.0/lib/hbase-server-1.2.0.jar,/usr/local/hbase-1.2.0/lib/htrace-core-3.1.0-incubating.jar,/usr/local/hbase-1.2.0/lib/metrics-core-2.2.0.jar,/usr/local/hbase-1.2.0/lib/hbase-hadoop2-compat-1.2.0.jar,/usr/local/hbase-1.2.0/lib/guava-12.0.1.jar,/usr/local/hbase-1.2.0/lib/protobuf-java-2.5.0.jar    --executor-memory 512m  --total-executor-cores 2   /usr/local/setup_tools/noc_hbase_test.jar
+
+</code></pre><pre><code class="language-java">spark运行成功，运行结果如下：</code></pre><pre><code class="language-html">SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: Found binding in [jar:file:/usr/local/alluxio-1.7.0-hadoop-2.6/client/alluxio-1.7.0-client.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: Found binding in [jar:file:/usr/local/spark-2.2.1-bin-hadoop2.6/jars/slf4j-log4j12-1.7.16.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [org.slf4j.impl.Log4jLoggerFactory]
+18/06/15 14:52:57 INFO spark.SparkContext: Running Spark version 2.2.1
+18/06/15 14:52:57 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+18/06/15 14:52:58 INFO spark.SparkContext: Submitted application: Spark_Connect_Hbase_Test
+18/06/15 14:52:58 INFO spark.SecurityManager: Changing view acls to: root
+18/06/15 14:52:58 INFO spark.SecurityManager: Changing modify acls to: root
+18/06/15 14:52:58 INFO spark.SecurityManager: Changing view acls groups to: 
+18/06/15 14:52:58 INFO spark.SecurityManager: Changing modify acls groups to: 
+18/06/15 14:52:58 INFO spark.SecurityManager: SecurityManager: authentication disabled; ui acls disabled; users  with view permissions: Set(root); groups with view permissions: Set(); users  with modify permissions: Set(root); groups with modify permissions: Set()
+18/06/15 14:52:58 INFO util.Utils: Successfully started service 'sparkDriver' on port 46964.
+18/06/15 14:52:58 INFO spark.SparkEnv: Registering MapOutputTracker
+18/06/15 14:52:58 INFO spark.SparkEnv: Registering BlockManagerMaster
+18/06/15 14:52:58 INFO storage.BlockManagerMasterEndpoint: Using org.apache.spark.storage.DefaultTopologyMapper for getting topology information
+18/06/15 14:52:58 INFO storage.BlockManagerMasterEndpoint: BlockManagerMasterEndpoint up
+18/06/15 14:52:58 INFO storage.DiskBlockManager: Created local directory at /tmp/blockmgr-4ac96a51-bf1d-4c35-b9d7-53e481274c63
+18/06/15 14:52:58 INFO memory.MemoryStore: MemoryStore started with capacity 413.9 MB
+18/06/15 14:52:59 INFO spark.SparkEnv: Registering OutputCommitCoordinator
+18/06/15 14:52:59 INFO util.log: Logging initialized @2617ms
+18/06/15 14:52:59 INFO server.Server: jetty-9.3.z-SNAPSHOT
+18/06/15 14:52:59 INFO server.Server: Started @2799ms
+18/06/15 14:52:59 INFO server.AbstractConnector: Started ServerConnector@2ca308df{HTTP/1.1,[http/1.1]}{0.0.0.0:4040}
+18/06/15 14:52:59 INFO util.Utils: Successfully started service 'SparkUI' on port 4040.
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@70e0accd{/jobs,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@65f87a2c{/jobs/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@6ce1f601{/jobs/job,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@d816dde{/jobs/job/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@6c451c9c{/stages,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@372b0d86{/stages/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@3113a37{/stages/stage,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@20312893{/stages/stage/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@c41709a{/stages/pool,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@54ec8cc9{/stages/pool/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@5528a42c{/storage,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@1a6f5124{/storage/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@ec2bf82{/storage/rdd,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@6cc0bcf6{/storage/rdd/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@32f61a31{/environment,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@669253b7{/environment/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@51a06cbe{/executors,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@49a64d82{/executors/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@66d23e4a{/executors/threadDump,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@4d9d1b69{/executors/threadDump/json,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@251f7d26{/static,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@37d3d232{/,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@581d969c{/api,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@5851bd4f{/jobs/job/kill,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@2f40a43{/stages/stage/kill,null,AVAILABLE,@Spark}
+18/06/15 14:52:59 INFO ui.SparkUI: Bound SparkUI to 0.0.0.0, and started at http://master:4040
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/apache-hive-1.2.1/lib/mysql-connector-java-5.1.13-bin.jar at spark://master:46964/jars/mysql-connector-java-5.1.13-bin.jar with timestamp 1529045579564
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/apache-hive-1.2.1/lib/hive-hbase-handler-1.2.1.jar at spark://master:46964/jars/hive-hbase-handler-1.2.1.jar with timestamp 1529045579571
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/hbase-client-1.2.0.jar at spark://master:46964/jars/hbase-client-1.2.0.jar with timestamp 1529045579572
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/hbase-common-1.2.0.jar at spark://master:46964/jars/hbase-common-1.2.0.jar with timestamp 1529045579574
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/hbase-protocol-1.2.0.jar at spark://master:46964/jars/hbase-protocol-1.2.0.jar with timestamp 1529045579575
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/hbase-server-1.2.0.jar at spark://master:46964/jars/hbase-server-1.2.0.jar with timestamp 1529045579577
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/htrace-core-3.1.0-incubating.jar at spark://master:46964/jars/htrace-core-3.1.0-incubating.jar with timestamp 1529045579578
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/metrics-core-2.2.0.jar at spark://master:46964/jars/metrics-core-2.2.0.jar with timestamp 1529045579579
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/hbase-hadoop2-compat-1.2.0.jar at spark://master:46964/jars/hbase-hadoop2-compat-1.2.0.jar with timestamp 1529045579581
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/guava-12.0.1.jar at spark://master:46964/jars/guava-12.0.1.jar with timestamp 1529045579583
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/hbase-1.2.0/lib/protobuf-java-2.5.0.jar at spark://master:46964/jars/protobuf-java-2.5.0.jar with timestamp 1529045579584
+18/06/15 14:52:59 INFO spark.SparkContext: Added JAR file:/usr/local/setup_tools/noc_hbase_test.jar at spark://master:46964/jars/noc_hbase_test.jar with timestamp 1529045579585
+18/06/15 14:52:59 INFO client.StandaloneAppClient$ClientEndpoint: Connecting to master spark://master:7077...
+18/06/15 14:52:59 INFO client.TransportClientFactory: Successfully created connection to master/192.168.189.1:7077 after 40 ms (0 ms spent in bootstraps)
+18/06/15 14:53:00 INFO cluster.StandaloneSchedulerBackend: Connected to Spark cluster with app ID app-20180615145300-0004
+18/06/15 14:53:00 INFO client.StandaloneAppClient$ClientEndpoint: Executor added: app-20180615145300-0004/0 on worker-20180615140035-worker1-39457 (worker1:39457) with 1 cores
+18/06/15 14:53:00 INFO cluster.StandaloneSchedulerBackend: Granted executor ID app-20180615145300-0004/0 on hostPort worker1:39457 with 1 cores, 512.0 MB RAM
+18/06/15 14:53:00 INFO client.StandaloneAppClient$ClientEndpoint: Executor added: app-20180615145300-0004/1 on worker-20180615140043-worker3-56574 (worker3:56574) with 1 cores
+18/06/15 14:53:00 INFO cluster.StandaloneSchedulerBackend: Granted executor ID app-20180615145300-0004/1 on hostPort worker3:56574 with 1 cores, 512.0 MB RAM
+18/06/15 14:53:00 INFO util.Utils: Successfully started service 'org.apache.spark.network.netty.NettyBlockTransferService' on port 43464.
+18/06/15 14:53:00 INFO netty.NettyBlockTransferService: Server created on master:43464
+18/06/15 14:53:00 INFO storage.BlockManager: Using org.apache.spark.storage.RandomBlockReplicationPolicy for block replication policy
+18/06/15 14:53:00 INFO storage.BlockManagerMaster: Registering BlockManager BlockManagerId(driver, master, 43464, None)
+18/06/15 14:53:00 INFO storage.BlockManagerMasterEndpoint: Registering block manager master:43464 with 413.9 MB RAM, BlockManagerId(driver, master, 43464, None)
+18/06/15 14:53:00 INFO storage.BlockManagerMaster: Registered BlockManager BlockManagerId(driver, master, 43464, None)
+18/06/15 14:53:00 INFO storage.BlockManager: Initialized BlockManager: BlockManagerId(driver, master, 43464, None)
+18/06/15 14:53:00 INFO client.StandaloneAppClient$ClientEndpoint: Executor updated: app-20180615145300-0004/0 is now RUNNING
+18/06/15 14:53:00 INFO client.StandaloneAppClient$ClientEndpoint: Executor updated: app-20180615145300-0004/1 is now RUNNING
+18/06/15 14:53:00 INFO handler.ContextHandler: Started o.s.j.s.ServletContextHandler@d02f8d{/metrics/json,null,AVAILABLE,@Spark}
+18/06/15 14:53:00 INFO cluster.StandaloneSchedulerBackend: SchedulerBackend is ready for scheduling beginning after reached minRegisteredResourcesRatio: 0.0
+18/06/15 14:53:01 INFO memory.MemoryStore: Block broadcast_0 stored as values in memory (estimated size 300.0 KB, free 413.6 MB)
+18/06/15 14:53:01 INFO memory.MemoryStore: Block broadcast_0_piece0 stored as bytes in memory (estimated size 26.5 KB, free 413.6 MB)
+18/06/15 14:53:01 INFO storage.BlockManagerInfo: Added broadcast_0_piece0 in memory on master:43464 (size: 26.5 KB, free: 413.9 MB)
+18/06/15 14:53:01 INFO spark.SparkContext: Created broadcast 0 from newAPIHadoopRDD at SparkConnectHbaseTest.java:35
+18/06/15 14:53:01 INFO zookeeper.RecoverableZooKeeper: Process identifier=hconnection-0x895416d connecting to ZooKeeper ensemble=192.168.189.1:2181,192.168.189.2:2181,192.168.189.3:2181
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:zookeeper.version=3.4.6-1569965, built on 02/20/2014 09:09 GMT
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:host.name=master
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:java.version=1.8.0_60
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:java.vendor=Oracle Corporation
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:java.home=/usr/local/jdk1.8.0_60/jre
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:java.class.path=/usr/local/alluxio-1.7.0-hadoop-2.6/client/alluxio-1.7.0-client.jar:/usr/local/spark-2.2.1-bin-hadoop2.6/conf/:。。。。。。。。。</code></pre><pre><code class="language-html">18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:java.library.path=/usr/java/packages/lib/amd64:/usr/lib64:/lib64:/lib:/usr/lib
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:java.io.tmpdir=/tmp
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:java.compiler=&lt;NA&gt;
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:os.name=Linux
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:os.arch=amd64
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:os.version=3.16.0-30-generic
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:user.name=root
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:user.home=/root
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Client environment:user.dir=/root
+18/06/15 14:53:02 INFO zookeeper.ZooKeeper: Initiating client connection, connectString=192.168.189.1:2181,192.168.189.2:2181,192.168.189.3:2181 sessionTimeout=90000 watcher=hconnection-0x895416d0x0, quorum=192.168.189.1:2181,192.168.189.2:2181,192.168.189.3:2181, baseZNode=/hbase
+18/06/15 14:53:02 INFO zookeeper.ClientCnxn: Opening socket connection to server 192.168.189.3/192.168.189.3:2181. Will not attempt to authenticate using SASL (unknown error)
+18/06/15 14:53:02 INFO zookeeper.ClientCnxn: Socket connection established to 192.168.189.3/192.168.189.3:2181, initiating session
+18/06/15 14:53:02 INFO zookeeper.ClientCnxn: Session establishment complete on server 192.168.189.3/192.168.189.3:2181, sessionid = 0x3640207247f0009, negotiated timeout = 40000
+18/06/15 14:53:04 INFO util.RegionSizeCalculator: Calculating region sizes for table "db_res:wtb_ow_operation".
+18/06/15 14:53:05 INFO client.ConnectionManager$HConnectionImplementation: Closing master protocol: MasterService
+18/06/15 14:53:05 INFO client.ConnectionManager$HConnectionImplementation: Closing zookeeper sessionid=0x3640207247f0009
+18/06/15 14:53:05 INFO zookeeper.ClientCnxn: EventThread shut down
+18/06/15 14:53:05 INFO zookeeper.ZooKeeper: Session: 0x3640207247f0009 closed
+18/06/15 14:53:05 INFO spark.SparkContext: Starting job: count at SparkConnectHbaseTest.java:37
+18/06/15 14:53:05 INFO scheduler.DAGScheduler: Got job 0 (count at SparkConnectHbaseTest.java:37) with 1 output partitions
+18/06/15 14:53:05 INFO scheduler.DAGScheduler: Final stage: ResultStage 0 (count at SparkConnectHbaseTest.java:37)
+18/06/15 14:53:05 INFO scheduler.DAGScheduler: Parents of final stage: List()
+18/06/15 14:53:05 INFO scheduler.DAGScheduler: Missing parents: List()
+18/06/15 14:53:05 INFO scheduler.DAGScheduler: Submitting ResultStage 0 (NewHadoopRDD[0] at newAPIHadoopRDD at SparkConnectHbaseTest.java:35), which has no missing parents
+18/06/15 14:53:05 INFO memory.MemoryStore: Block broadcast_1 stored as values in memory (estimated size 2040.0 B, free 413.6 MB)
+18/06/15 14:53:05 INFO memory.MemoryStore: Block broadcast_1_piece0 stored as bytes in memory (estimated size 1278.0 B, free 413.6 MB)
+18/06/15 14:53:05 INFO storage.BlockManagerInfo: Added broadcast_1_piece0 in memory on master:43464 (size: 1278.0 B, free: 413.9 MB)
+18/06/15 14:53:05 INFO spark.SparkContext: Created broadcast 1 from broadcast at DAGScheduler.scala:1006
+18/06/15 14:53:05 INFO scheduler.DAGScheduler: Submitting 1 missing tasks from ResultStage 0 (NewHadoopRDD[0] at newAPIHadoopRDD at SparkConnectHbaseTest.java:35) (first 15 tasks are for partitions Vector(0))
+18/06/15 14:53:05 INFO scheduler.TaskSchedulerImpl: Adding task set 0.0 with 1 tasks
+18/06/15 14:53:20 WARN scheduler.TaskSchedulerImpl: Initial job has not accepted any resources; check your cluster UI to ensure that workers are registered and have sufficient resources
+18/06/15 14:53:33 INFO cluster.CoarseGrainedSchedulerBackend$DriverEndpoint: Registered executor NettyRpcEndpointRef(spark-client://Executor) (192.168.189.2:36455) with ID 0
+18/06/15 14:53:33 INFO scheduler.TaskSetManager: Starting task 0.0 in stage 0.0 (TID 0, worker1, executor 0, partition 0, NODE_LOCAL, 4879 bytes)
+18/06/15 14:53:34 INFO storage.BlockManagerMasterEndpoint: Registering block manager worker1:56820 with 117.0 MB RAM, BlockManagerId(0, worker1, 56820, None)
+18/06/15 14:53:34 INFO cluster.CoarseGrainedSchedulerBackend$DriverEndpoint: Registered executor NettyRpcEndpointRef(spark-client://Executor) (192.168.189.4:45624) with ID 1
+18/06/15 14:53:35 INFO storage.BlockManagerMasterEndpoint: Registering block manager worker3:38924 with 117.0 MB RAM, BlockManagerId(1, worker3, 38924, None)
+18/06/15 14:53:42 INFO storage.BlockManagerInfo: Added broadcast_1_piece0 in memory on worker1:56820 (size: 1278.0 B, free: 117.0 MB)
+18/06/15 14:53:43 INFO storage.BlockManagerInfo: Added broadcast_0_piece0 in memory on worker1:56820 (size: 26.5 KB, free: 116.9 MB)
+18/06/15 14:53:57 INFO scheduler.TaskSetManager: Finished task 0.0 in stage 0.0 (TID 0) in 23730 ms on worker1 (executor 0) (1/1)
+18/06/15 14:53:57 INFO scheduler.DAGScheduler: ResultStage 0 (count at SparkConnectHbaseTest.java:37) finished in 51.886 s
+18/06/15 14:53:57 INFO scheduler.TaskSchedulerImpl: Removed TaskSet 0.0, whose tasks have all completed, from pool 
+18/06/15 14:53:58 INFO scheduler.DAGScheduler: Job 0 finished: count at SparkConnectHbaseTest.java:37, took 52.827846 s
+************SPARK from hbase  count ***************      1                 18/06/15 14:53:58 INFO spark.SparkContext: Starting job: foreach at SparkConnectHbaseTest.java:40
+18/06/15 14:53:58 INFO scheduler.DAGScheduler: Got job 1 (foreach at SparkConnectHbaseTest.java:40) with 1 output partitions
+18/06/15 14:53:58 INFO scheduler.DAGScheduler: Final stage: ResultStage 1 (foreach at SparkConnectHbaseTest.java:40)
+18/06/15 14:53:58 INFO scheduler.DAGScheduler: Parents of final stage: List()
+18/06/15 14:53:58 INFO scheduler.DAGScheduler: Missing parents: List()
+18/06/15 14:53:58 INFO scheduler.DAGScheduler: Submitting ResultStage 1 (NewHadoopRDD[0] at newAPIHadoopRDD at SparkConnectHbaseTest.java:35), which has no missing parents
+18/06/15 14:53:58 INFO memory.MemoryStore: Block broadcast_2 stored as values in memory (estimated size 2.2 KB, free 413.6 MB)
+18/06/15 14:53:58 INFO memory.MemoryStore: Block broadcast_2_piece0 stored as bytes in memory (estimated size 1430.0 B, free 413.6 MB)
+18/06/15 14:53:58 INFO storage.BlockManagerInfo: Added broadcast_2_piece0 in memory on master:43464 (size: 1430.0 B, free: 413.9 MB)
+18/06/15 14:53:58 INFO spark.SparkContext: Created broadcast 2 from broadcast at DAGScheduler.scala:1006
+18/06/15 14:53:58 INFO scheduler.DAGScheduler: Submitting 1 missing tasks from ResultStage 1 (NewHadoopRDD[0] at newAPIHadoopRDD at SparkConnectHbaseTest.java:35) (first 15 tasks are for partitions Vector(0))
+18/06/15 14:53:58 INFO scheduler.TaskSchedulerImpl: Adding task set 1.0 with 1 tasks
+18/06/15 14:53:58 INFO scheduler.TaskSetManager: Starting task 0.0 in stage 1.0 (TID 1, worker1, executor 0, partition 0, NODE_LOCAL, 4879 bytes)
+18/06/15 14:53:58 INFO storage.BlockManagerInfo: Added broadcast_2_piece0 in memory on worker1:56820 (size: 1430.0 B, free: 116.9 MB)
+18/06/15 14:53:59 INFO scheduler.TaskSetManager: Finished task 0.0 in stage 1.0 (TID 1) in 507 ms on worker1 (executor 0) (1/1)
+18/06/15 14:53:59 INFO scheduler.TaskSchedulerImpl: Removed TaskSet 1.0, whose tasks have all completed, from pool 
+18/06/15 14:53:59 INFO scheduler.DAGScheduler: ResultStage 1 (foreach at SparkConnectHbaseTest.java:40) finished in 0.508 s
+18/06/15 14:53:59 INFO scheduler.DAGScheduler: Job 1 finished: foreach at SparkConnectHbaseTest.java:40, took 0.533378 s
+18/06/15 14:58:02 INFO storage.BlockManagerInfo: Removed broadcast_2_piece0 on master:43464 in memory (size: 1430.0 B, free: 413.9 MB)
+18/06/15 14:58:02 INFO storage.BlockManagerInfo: Removed broadcast_2_piece0 on worker1:56820 in memory (size: 1430.0 B, free: 116.9 MB) </code></pre><p>console截图如下：</p><p><img src="https://img-blog.csdn.net/20180615150415762?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2R1YW5femhpaHVh/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><img src="https://img-blog.csdn.net/20180615150422627?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2R1YW5femhpaHVh/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p><br></p><p>spark web截图如下：</p><p><img src="https://img-blog.csdn.net/20180615152048387?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2R1YW5femhpaHVh/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p><img src="https://img-blog.csdn.net/20180615150452866?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2R1YW5femhpaHVh/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p><img src="https://img-blog.csdn.net/20180615150621111?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2R1YW5femhpaHVh/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p><br></p><p><br></p><p><br></p>            </div>
+                </div>

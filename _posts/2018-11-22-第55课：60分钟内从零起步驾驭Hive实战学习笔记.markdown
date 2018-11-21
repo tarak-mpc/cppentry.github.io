@@ -1,0 +1,122 @@
+---
+layout:     post
+title:      第55课：60分钟内从零起步驾驭Hive实战学习笔记
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/someby/article/details/83421073				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>内容：<br>
+       Hive本质解析<br>
+       Hive安装实战<br>
+       使用Hive操作搜索引擎数据实战</p>
+
+<p>SparkSQL前身是Shark，Shark强烈依赖于Hive。Spark原来没有做SQL多维度数据查询工具，后来开发了Shark，Shark依赖于Hive的解释引擎，部分在Spark中运行，还有一部分在Hadoop中运行。所以讲SparkSQL必须讲Hive。</p>
+
+<p>一、Hive的本质<br>
+    1. Hive是分布式数据仓库，同时又是查询引擎，所以SparkSQL取代的只是Hives的查询引擎，在企业实际生产环境下，Hive+SparkSQL是目前最为经典的数据分析组合。<br>
+    2. Hive本身就是一个简单单机版本的软件，主要负责：<br>
+        a） 把HQL翻译成Mapper(s)-Reducer-Mapper(s)的代码，并且可能产生很多MapReduce的JOB。<br>
+        b）把生成的MapReduce代码及相关资源打包成jar并发布到Hadoop集群中运行（这一切都是自动的）<br>
+    3.Hive本身的架构如下所示：</p>
+
+<p><img alt="" class="has" src="https://timgsa.baidu.com/timg?image&amp;quality=80&amp;size=b9999_10000&amp;sec=1539188006931&amp;di=cb72b53a97039140bf6c9b55e66a7092&amp;imgtype=0&amp;src=http%3A%2F%2Fimage.codes51.com%2FArticle%2Fimage%2F20160523%2F20160523221541_7772.png"></p>
+
+<p>    可以通过CLI（命令终端）、JDBC/ODBC、Web GUI访问Hive。<br>
+    JavaEE或.net程序可以通过Hive处理，再把处理的结果展示给用户。<br>
+    也可以直接通过Web页面操作Hive。<br>
+    4.Hive本身只是一个单机版本的的软件，怎么访问HDFS的呢？<br>
+       在Hive用Table的方式插入数据、检索数据等，这就需要知道数据放在HDFS的什么地方以及什么地方属于什么数据，Metastore就是保存这些元数据信息的。Hive通过访问元数据信息再去访问HDFS上的数据。<br>
+     可以看出HDFS不是一个真实的文件系统，是虚拟的，是逻辑上的，HDFS只是一套软件而已，它是管理不同机器上的数据的，所以需要NameNode去管理元数据。DataNode去管理数据。<br>
+     Hive通过Metastore和NameNode打交道。</p>
+
+<p>二、Hive安装和配置实战<br>
+    Spark中SparkSQL可以指定具体的Hive的版本。<br>
+    1. 从apache官网下载hive-1.2.1，并解压到/usr/local/目录,重命名为hive(sudo mv hive-1.2.1 hive)。<br>
+    2. 配置Hive的环境变量，在文件.bashrc中追加以下内容：</p>
+
+<p><img alt="" class="has" height="54" src="https://img-blog.csdnimg.cn/20181026215927462.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NvbWVieQ==,size_27,color_FFFFFF,t_70" width="717"></p>
+
+<pre class="has">
+<code>        export HIVE_HOME=/usr/local/hive
+        export HIVE_CONF_DIR=/$HIVE_HOME/conf
+        export PATH=$PATH:$HIVE_HOME/bin</code></pre>
+
+<p><br>
+    3. 进入/usr/local/hive/conf目录下生成hive-env.sh:<br>
+        cp hive-env.sh.template hive-env.sh</p>
+
+<p><img alt="" class="has" height="221" src="https://img-blog.csdnimg.cn/20181026220058116.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NvbWVieQ==,size_27,color_FFFFFF,t_70" width="722">      </p>
+
+<pre class="has">
+<code>        export HADOOP_HOME=/usr/local/hadoop
+        export HIVE_HOME=/usr/local/hive
+        export HIVE_CONF_DIR=/$HIVE_HOME/conf </code></pre>
+
+<p><br>
+    4. 拷贝一份hive-default.xml.template作为默认Hive配置<br>
+       cp hive-default.xml.template hive-site.xml</p>
+
+<p><img alt="" class="has" height="98" src="https://img-blog.csdnimg.cn/20181026220208565.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NvbWVieQ==,size_27,color_FFFFFF,t_70" width="646"><br>
+    Hive默认情况下放元数据的数据库是Derby，遗憾的是Derby是单用户，所以在生产环境下一般会采用支持多用户的数据库来进行MetaStore，且进行Master-Slaves主从读写分离和备份（一般Master节点负责写数据，Slaves节点负责读数据）。最常用的是MySQL。<br>
+   5.创建一个文件hive-site.xml，并配置如下：</p>
+
+<pre class="has">
+<code>   &lt;configuration&gt;
+      &lt;property&gt;
+            &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt;
+            &lt;value&gt;jdbc:mysql://localhost:3306/hive?createDatabaseIfNotExist=true&amp;amp;useUnicode=true&amp;amp;characterEncoding=UTF-8&amp;amp;useSSL=false&lt;/value&gt;
+            &lt;description&gt;JDBC connect string for a JDBC metastore&lt;/description&gt;
+      &lt;/property&gt;
+      &lt;property&gt;
+            &lt;name&gt;javax.jdo.option.ConnectionDriverName&lt;/name&gt;
+            &lt;value&gt;com.mysql.jdbc.Driver&lt;/value&gt;
+            &lt;description&gt;Driver class name for a JDBC metastore&lt;/description&gt;
+      &lt;/property&gt;
+      &lt;property&gt;
+            &lt;name&gt;javax.jdo.option.ConnectionUserName&lt;/name&gt;
+            &lt;value&gt;hive&lt;/value&gt;
+            &lt;description&gt;username to use against metastore database&lt;/description&gt;
+      &lt;/property&gt;
+      &lt;property&gt;
+            &lt;name&gt;javax.jdo.option.ConnectionPassword&lt;/name&gt;
+            &lt;value&gt;hive&lt;/value&gt;
+            &lt;description&gt;password to use against metastore database&lt;/description&gt;
+      &lt;/property&gt;
+      &lt;property&gt;
+            &lt;name&gt;hive.metastore.dir&lt;/name&gt;
+            &lt;value&gt;/user/hive/warehouse&lt;/value&gt;
+      &lt;/property&gt;
+      &lt;property&gt;
+           &lt;name&gt;hive.metastore.schema.verification&lt;/name&gt;
+           &lt;value&gt;false&lt;/value&gt;
+           &lt;description&gt;
+            Enforce metastore schema version consistency.
+            True: Verify that version information stored in metastore matches with one from Hive jars.  Also disable automatic
+                  schema migration attempt. Users are required to manully migrate schema after Hive upgrade which ensures
+                  proper metastore schema migration. (Default)
+            False: Warn if the version information stored in metastore doesn't match with one from in Hive jars.
+            &lt;/description&gt;
+     &lt;/property&gt;
+  &lt;/configuration&gt;</code></pre>
+
+<p><br>
+    Hive中的DataBase和表其实就是HDFS上的目录和简单的文本文件。简单的文本文件中有几列数据，每列数据的类型无法直接从文本文件中得知。但当数据放入Hive中，Hive就把元数据放入Mysql中了，这样就可以基于数据的表进行查询了。<br>
+    6. MYSQL的安装和配置<br>
+        在hadoop用户下执行sudo install mysql-server即可自动安装<br>
+        执行rpm -qa mysql-server可以查看是否安装成功及安装的mysql版本。</p>
+
+<p>      将mysql-connector-java-5.1.40-bin.jar复制到/usr/local/hive/lib中，否则会报错：</p>
+
+<p>    Caused by: javax.jdo.JDOFatalInternalException: Error creating transactional connection factory</p>
+
+<p><img alt="" class="has" height="346" src="https://img-blog.csdnimg.cn/20181027120500316.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NvbWVieQ==,size_27,color_FFFFFF,t_70" width="943"><br>
+    7. Hive的表有两种基本类型：一种是内部表（这种表数据属于Hive本身，即如果原来的数据在HDFS的其他地方，此时数据会通过HDFS移动到Hive所在目录，如果删除Hive中的该表的话数据和元数据均会被删除），一种是外部表（这种表数据不属于Hive数据仓库，元数据中会表达具体数据在哪里，使用时和内部表的使用一样，只是如果通过Hive去删除的话，删除的只是元数据，并没有删除数据本身）</p>
+
+<p>三、 使用Hive分析搜索数据</p>
+
+<p>   参考:<a href="https://mp.csdn.net/postedit/83036769" rel="nofollow">Hive分析搜索引擎的数据</a><br>
+    <br>
+ </p>            </div>
+                </div>

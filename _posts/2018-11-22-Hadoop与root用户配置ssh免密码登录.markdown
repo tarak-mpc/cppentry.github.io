@@ -1,0 +1,30 @@
+---
+layout:     post
+title:      Hadoop与root用户配置ssh免密码登录
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="article-info-box" style="padding:0px 0px 14px;margin:0px;border-bottom:1px solid rgb(227,227,227);color:rgb(51,51,51);font-family:'SF Pro Display', Roboto, Noto, Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;font-size:14px;"><div class="article-bar-top d-flex" style="padding:0px;margin:0px;color:rgb(133,133,133);"><div class="float-right" style="padding:0px;margin:0px 0px 0px auto;float:right;"><br></div></div></div><div class="article_content clearfix csdn-tracking-statistics" style="padding:0px;margin:0px;height:1834px;"><div class="htmledit_views" style="padding:0px;margin-bottom:0px;"><h6 style="padding:0px;margin-top:0px;margin-bottom:15px;color:rgb(47,47,47);line-height:1.7;font-family:'-apple-system', 'SF UI Text', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;background-color:rgb(255,255,255);">Hadoop用户配置ssh</h6><h6 style="padding:0px;margin-top:0px;margin-bottom:15px;color:rgb(47,47,47);line-height:1.7;font-family:'-apple-system', 'SF UI Text', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;background-color:rgb(255,255,255);">1.创建Hadoop用户</h6><p><span style="background-color:rgb(255,255,255);"></span></p><pre class="hljs bash" style="padding:15px;margin-bottom:20px;background-color:rgb(246,246,246);font-size:13px;line-height:1.42857;border:1px solid rgb(204,204,204);"><code class="bash" style="font-size:12px;background-color:transparent;border:none;"><span style="font-family:Verdana;color:rgb(102,102,102);"><span class="hljs-comment"># useradd hadoop</span>
+<span class="hljs-comment"># id hadoop</span>
+<span class="hljs-comment"># vi /etc/sudoers</span>
+    hadoop ALL=(root) NOPASSWD:ALL</span></code></pre><p><span style="color:rgb(47,47,47);font-family:'-apple-system', 'SF UI Text', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;background-color:rgb(255,255,255);"><span style="font-weight:700;">2.<span><span>部署ssh，确保其是运行的</span></span></span></span><br></p><p><span style="background-color:rgb(255,255,255);"><span></span></span></p><pre class="hljs undefined" style="padding:15px;margin-bottom:20px;background-color:rgb(246,246,246);font-size:14px;line-height:1.42857;border:1px solid rgb(204,204,204);"><code style="background-color:transparent;border:none;"><span style="font-family:Verdana;color:rgb(102,102,102);">查看：默认是已经安装
+    hadoop]$ sudo service sshd status</span></code></pre><p><span style="font-weight:bold;">3.配置hadoop用户的ssh的信任关系</span></p><div style="padding:0px;margin:0px;"><div style="padding:0px;margin:0px;"><pre><code class="language-ruby"><code class="ruby"><span style="font-family:Verdana;color:rgb(102,102,102);">~]$ ssh-keygen -t rsa -P <span class="hljs-string">''</span> -f ~<span class="hljs-regexp">/.ssh/id</span>_rsa
+~]$ cat ~<span class="hljs-regexp">/.ssh/id</span>_rsa.pub <span class="hljs-meta">&gt;&gt; </span>~<span class="hljs-regexp">/.ssh/authorized</span>_keys
+~]$ chmod <span class="hljs-number">0600</span> ~<span class="hljs-regexp">/.ssh/authorized</span>_keys
+.ssh]$ ssh localhoste date
+    第一次输入需要yes
+.ssh]$ ssh 机器名 date
+    第二次输入不需要yes</span></code></code></pre></div></div><p><span style="color:rgb(47,47,47);font-family:'-apple-system', 'SF UI Text', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;background-color:rgb(255,255,255);"><span style="font-weight:700;"><span><span><span><span>4.实战环境演示：</span></span><br></span></span></span></span></p><p><span style="color:rgb(47,47,47);font-family:'-apple-system', 'SF UI Text', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;background-color:rgb(255,255,255);"><span style="font-weight:700;"><span><span><span><span><img src="https://img-blog.csdn.net/20180517105053776?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI0MDczNzA3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></span></span></span></span></span></span></p><p></p><h6 style="padding:0px;">配置root用户的ssh的信任关系</h6><pre><code class="language-css"><code class="css">当我们第一次执行：<span class="hljs-selector-tag">ssh</span> <span class="hljs-selector-tag">localhost</span> <span class="hljs-selector-tag">date</span>时是需要输入<span class="hljs-selector-tag">yes</span>和密码，之后会在<span class="hljs-selector-class">.ssh</span>下生成一个名字为<span class="hljs-selector-tag">known_hosts</span>的文件。
+
+    如果<span class="hljs-selector-class">.ssh</span>下面存在<span class="hljs-selector-tag">known_hosts</span>文件，则再次输入的时候不用输入<span class="hljs-selector-tag">yes</span>。
+
+    使用<span class="hljs-selector-tag">ssh</span>的时候不输入密码：
+        # <span class="hljs-selector-tag">ssh-keygen</span>
+        之后一直回车，会生成<span class="hljs-selector-tag">id_rsa</span><span class="hljs-selector-class">.pub</span>和<span class="hljs-selector-tag">id_rsa</span>两个文件
+        <span class="hljs-selector-tag">id_rsa</span>:私钥
+        <span class="hljs-selector-tag">id_rsa</span><span class="hljs-selector-class">.pub</span>:公钥
+
+        <span class="hljs-selector-class">.ssh</span>]# <span class="hljs-selector-tag">cat</span> <span class="hljs-selector-tag">id_rsa</span><span class="hljs-selector-class">.pub</span> &gt; <span class="hljs-selector-tag">authorized_keys</span>
+        <span class="hljs-selector-class">.ssh</span>]# <span class="hljs-selector-tag">ssh</span> 机器名 <span class="hljs-selector-tag">date</span></code></code></pre></div></div>            </div>
+                </div>

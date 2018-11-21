@@ -1,0 +1,468 @@
+---
+layout:     post
+title:      HDFS文件系统介绍及简单API操作
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="hdfs文件系统">HDFS文件系统</h2>
+
+
+
+<h3 id="hdfs概念">HDFS概念</h3>
+
+
+
+<h4 id="概念">概念</h4>
+
+<ul>
+<li>HDFS是一个文件系统，用于存储文件，通过目录树来定位文件；其次，它还是分布式的，由很多服务器联合起来实现其功能，集群中的服务器有个字的角色。</li>
+<li>HDFS的设计适合一次写入，多次读取的场景，且不支持文件的修改。适合用来做数据分析，并不适合做网盘应用。</li>
+</ul>
+
+
+
+<h4 id="组成">组成</h4>
+
+<ul>
+<li>HDFS集群包括，NameNode和DataNode以及Secondary Namenode。</li>
+<li>NameNode负责管理整个文件系统的元数据，以及每一个路径（文件）所对应的数据块信息。</li>
+<li>DataNode 负责管理用户的文件数据块，每一个数据块都可以在多个datanode上存储多个副本。</li>
+<li>Secondary NameNode用来监控HDFS状态的辅助后台程序，每隔一段时间获取HDFS元数据的快照。</li>
+</ul>
+
+
+
+<h4 id="hdfs文件块大小">HDFS文件块大小</h4>
+
+<ul>
+<li>HDFS中的文件在物理上是分块存储（block），块的大小可以通过配置参数( dfs.blocksize)来规定，默认大小在hadoop2.x版本中是128M，老版本中是64M</li>
+<li>HDFS的块比磁盘的块大，其目的是为了最小化寻址开销。如果块设置得足够大，从磁盘传输数据的时间会明显大于定位这个块开始位置所需的时间。因而，传输一个由多个块组成的文件的时间取决于磁盘传输速率。</li>
+<li>如果寻址时间约为10ms，而传输速率为100MB/s，为了使寻址时间仅占传输时间的1%，我们要将块大小设置约为100MB。默认的块大小128MB。</li>
+<li>块的大小：10ms <em>100 </em> 100M/s = 100M</li>
+</ul>
+
+
+
+<h3 id="hfds命令行操作">HFDS命令行操作</h3>
+
+
+
+<h4 id="基本语法">基本语法</h4>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs ">bin/hadoop fs 具体命令</code></pre>
+
+
+
+<h4 id="常用命令">常用命令</h4>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs lasso">（<span class="hljs-number">1</span>）<span class="hljs-attribute">-help</span>：输出这个命令参数
+（<span class="hljs-number">2</span>）<span class="hljs-attribute">-ls</span>: 显示目录信息
+（<span class="hljs-number">3</span>）<span class="hljs-attribute">-mkdir</span>：在hdfs上创建目录
+（<span class="hljs-number">4</span>）<span class="hljs-attribute">-moveFromLocal</span>从本地剪切粘贴到hdfs
+（<span class="hljs-number">5</span>）<span class="hljs-attribute">-moveToLocal</span>：从hdfs剪切粘贴到本地(尚未实现)
+（<span class="hljs-number">6</span>）<span class="hljs-attribute">-appendToFile</span>  ：追加一个文件到已经存在的文件末尾
+（<span class="hljs-number">7</span>）<span class="hljs-attribute">-cat</span> ：显示文件内容  
+（<span class="hljs-number">8</span>）<span class="hljs-attribute">-tail</span>：显示一个文件的末尾            
+（<span class="hljs-number">9</span>）<span class="hljs-attribute">-chgrp</span> 、<span class="hljs-attribute">-chmod</span>、<span class="hljs-attribute">-chown</span>：linux文件系统中的用法一样，修改文件所属权限
+（<span class="hljs-number">10</span>）<span class="hljs-attribute">-copyFromLocal</span>：从本地文件系统中拷贝文件到hdfs路径去
+（<span class="hljs-number">11</span>）<span class="hljs-attribute">-copyToLocal</span>：从hdfs拷贝到本地
+（<span class="hljs-number">12</span>）<span class="hljs-attribute">-cp</span> ：从hdfs的一个路径拷贝到hdfs的另一个路径
+（<span class="hljs-number">13</span>）<span class="hljs-attribute">-mv</span>：在hdfs目录中移动文件
+（<span class="hljs-number">14</span>）<span class="hljs-attribute">-get</span>：等同于copyToLocal，就是从hdfs下载文件到本地
+（<span class="hljs-number">15</span>）<span class="hljs-attribute">-getmerge</span>  ：合并下载多个文件，比如hdfs的目录 /aaa<span class="hljs-subst">/</span>下有多个文件:<span class="hljs-keyword">log</span><span class="hljs-number">.1</span>, <span class="hljs-keyword">log</span><span class="hljs-number">.2</span>,<span class="hljs-keyword">log</span><span class="hljs-number">.3</span>,<span class="hljs-attribute">...</span>
+（<span class="hljs-number">16</span>）<span class="hljs-attribute">-put</span>：等同于copyFromLocal   (hadoop  fs  <span class="hljs-attribute">-put</span>  /aaa/jdk<span class="hljs-built_in">.</span>tar<span class="hljs-built_in">.</span>gz  /bbb/jdk<span class="hljs-built_in">.</span>tar<span class="hljs-built_in">.</span>gz<span class="hljs-number">.2</span>)
+（<span class="hljs-number">17</span>）<span class="hljs-attribute">-rm</span>：删除文件或文件夹
+（<span class="hljs-number">18</span>）<span class="hljs-attribute">-rmdir</span>：删除空目录
+（<span class="hljs-number">19</span>）<span class="hljs-attribute">-df</span> ：统计文件系统的可用空间信息，<span class="hljs-attribute">-h</span>：格式化打印
+（<span class="hljs-number">20</span>）<span class="hljs-attribute">-du</span>统计文件夹的大小信息：<span class="hljs-attribute">-s</span>:总大小，去掉则表示分别列出文件夹大小
+（<span class="hljs-number">21</span>）<span class="hljs-attribute">-count</span>：统计一个指定目录下的文件节点数量
+    <span class="hljs-preprocessor">[</span>rot@hadoop102 hadoop<span class="hljs-subst">-</span><span class="hljs-number">2.7</span><span class="hljs-number">.2</span><span class="hljs-preprocessor">]</span><span class="hljs-markup">$ hadoop fs -count /user/atguigu/wcinput
+           1                2          197657784 /user/atguigu/wcinput
+嵌套文件层级；  包含文件的总数
+（22）-setrep：设置hdfs中文件的副本数量
+    注意：这里设置的副本数只是记录在namenode的元数据中，是否真的会有这么多副本，还得看datanode的数量。因为目前只有3台设备，最多也就3个副本，只有节点数的增加到10台时，副本数才能达到10。</span></code></pre>
+
+
+
+<h3 id="hdfs客户端操作">HDFS客户端操作</h3>
+
+
+
+<h4 id="eclipse环境准备">eclipse环境准备</h4>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs avrasm"><span class="hljs-number">1</span>）解压hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.2</span><span class="hljs-preprocessor">.tar</span><span class="hljs-preprocessor">.gz</span>到非中文目录
+<span class="hljs-number">2</span>）进入share文件夹，查找所有jar包，并把jar包拷贝到_lib文件夹下
+<span class="hljs-number">3</span>）在全部jar包中查找sources<span class="hljs-preprocessor">.jar</span>，并剪切到_source文件夹。
+<span class="hljs-number">4</span>）在全部jar包中查找tests<span class="hljs-preprocessor">.jar</span>，并剪切到_test文件夹。
+<span class="hljs-number">1</span>）配置HADOOP_HOME环境变量
+<span class="hljs-number">2</span>）采用hadoop编译后的bin 、lib两个文件夹（如果不生效，重新启动eclipse）
+<span class="hljs-number">3</span>）创建第一个java工程
+<span class="hljs-number">4</span>）执行程序
+    配置用户名称 在配置界面写上运行参数（-DHADOOP_USER_NAME=root）
+    客户端去操作hdfs时，是有一个用户身份的。默认情况下，hdfs客户端api会从jvm中获取一个参数来作为自己的用户身份：-DHADOOP_USER_NAME=root，root为用户名称。</code></pre>
+
+
+
+<h4 id="通过api操作hdfs">通过API操作HDFS</h4>
+
+
+
+<h5 id="hdfs获取文件系统">HDFS获取文件系统</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">initHDFS</span>() <span class="hljs-keyword">throws</span> Exception{
+        <span class="hljs-comment">// 1 创建配置信息对象</span>
+        Configuration configuration = <span class="hljs-keyword">new</span> Configuration();
+        <span class="hljs-comment">// 2 获取文件系统</span>
+        FileSystem fs = FileSystem.get(configuration);  
+        <span class="hljs-comment">// 3 打印文件系统</span>
+        System.out.println(fs.toString());
+    }</code></pre>
+
+
+
+<h5 id="hdfs文件上传">HDFS文件上传</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">putFileToHDFS</span>() <span class="hljs-keyword">throws</span> Exception{
+        <span class="hljs-comment">// 1 创建配置信息对象</span>
+        <span class="hljs-comment">// new Configuration();的时候，它就会去加载jar包中的hdfs-default.xml</span>
+        <span class="hljs-comment">// 然后再加载classpath下的hdfs-site.xml</span>
+        Configuration configuration = <span class="hljs-keyword">new</span> Configuration();
+        <span class="hljs-comment">// 2 设置参数 </span>
+        <span class="hljs-comment">// 参数优先级： 1、客户端代码中设置的值  2、classpath下的用户自定义配置文件 3、然后是服务器的默认配置</span>
+        configuration.set(<span class="hljs-string">"dfs.replication"</span>, <span class="hljs-string">"2"</span>);
+        FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"root"</span>);
+        <span class="hljs-comment">// 3 创建要上传文件所在的本地路径</span>
+        Path src = <span class="hljs-keyword">new</span> Path(<span class="hljs-string">"e:/hello.txt"</span>);    
+        <span class="hljs-comment">// 4 创建要上传到hdfs的目标路径</span>
+        Path dst = <span class="hljs-keyword">new</span> Path(<span class="hljs-string">"hdfs://hadoop102:9000/user/hello.txt"</span>);    
+        <span class="hljs-comment">// 5 拷贝文件</span>
+        fs.copyFromLocalFile(src, dst);
+        fs.close(); 
+}</code></pre>
+
+
+
+<h6 id="将core-sitexml拷贝到项目的根目录下">将core-site.xml拷贝到项目的根目录下</h6>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-pi">&lt;?xml version="1.0" encoding="UTF-8"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+<span class="hljs-comment">&lt;!-- 指定HDFS中NameNode的地址 --&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>fs.defaultFS<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://hadoop102:9000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+
+
+<h6 id="将hdfs-sitexml拷贝到项目的根目录下">将hdfs-site.xml拷贝到项目的根目录下</h6>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-pi">&lt;?xml version="1.0" encoding="UTF-8"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>dfs.replication<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>1<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span> 
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+
+
+<h5 id="hdfs文件下载">HDFS文件下载</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-annotation">@Test</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">getFileFromHDFS</span>() <span class="hljs-keyword">throws</span> Exception{     
+    <span class="hljs-comment">// 1 创建配置信息对象</span>
+    Configuration configuration = <span class="hljs-keyword">new</span> Configuration();  
+    FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"atguigu"</span>);  
+<span class="hljs-comment">//  fs.copyToLocalFile(new Path("hdfs://hadoop102:9000/user/hello.txt"), new Path("d:/hello.txt"));</span>
+    <span class="hljs-comment">// boolean delSrc 指是否将原文件删除</span>
+    <span class="hljs-comment">// Path src 指要下载的文件路径</span>
+    <span class="hljs-comment">// Path dst 指将文件下载到的路径</span>
+    <span class="hljs-comment">// boolean useRawLocalFileSystem 是否开启文件效验</span>
+    <span class="hljs-comment">// 2 下载文件</span>
+    fs.copyToLocalFile(<span class="hljs-keyword">false</span>, <span class="hljs-keyword">new</span> Path(<span class="hljs-string">"hdfs://hadoop102:9000/user/hello.txt"</span>), <span class="hljs-keyword">new</span> Path(<span class="hljs-string">"e:/hellocopy.txt"</span>), <span class="hljs-keyword">true</span>);
+    fs.close();
+    }</code></pre>
+
+
+
+<h5 id="hdfs目录创建">HDFS目录创建</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">mkdirAtHDFS</span>() <span class="hljs-keyword">throws</span> Exception{
+        <span class="hljs-comment">// 1 创建配置信息对象</span>
+        Configuration configuration = <span class="hljs-keyword">new</span> Configuration();  
+        FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"root"</span>); 
+        <span class="hljs-comment">//2 创建目录</span>
+        fs.mkdirs(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"hdfs://hadoop102:9000/user/output"</span>));
+    }</code></pre>
+
+
+
+<h5 id="hdfs文件夹删除">HDFS文件夹删除</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">deleteAtHDFS</span>() <span class="hljs-keyword">throws</span> Exception{
+        <span class="hljs-comment">// 1 创建配置信息对象</span>
+        Configuration configuration = <span class="hljs-keyword">new</span> Configuration();      
+        FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"root"</span>); 
+        <span class="hljs-comment">//2 删除文件夹 ，如果是非空文件夹，参数2是否递归删除，true递归</span>
+        fs.delete(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"hdfs://hadoop102:9000/user/output"</span>), <span class="hljs-keyword">true</span>);
+    }</code></pre>
+
+
+
+<h5 id="hdfs文件名更改">HDFS文件名更改</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">renameAtHDFS</span>() <span class="hljs-keyword">throws</span> Exception{
+        <span class="hljs-comment">// 1 创建配置信息对象</span>
+        Configuration configuration = <span class="hljs-keyword">new</span> Configuration();  
+        FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"root"</span>); 
+        <span class="hljs-comment">//2 重命名文件或文件夹</span>
+        fs.rename(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"hdfs://hadoop102:9000/user/hello.txt"</span>), <span class="hljs-keyword">new</span> Path(<span class="hljs-string">"hdfs://hadoop102:9000/user/hellonihao.txt"</span>));
+    }</code></pre>
+
+
+
+<h5 id="hdfs文件详情查看">HDFS文件详情查看</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-annotation">@Test</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">readListFiles</span>() <span class="hljs-keyword">throws</span> Exception {
+    <span class="hljs-comment">// 1 创建配置信息对象</span>
+    Configuration configuration = <span class="hljs-keyword">new</span> Configuration();      
+    FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"root"</span>);
+
+    <span class="hljs-comment">// 思考：为什么返回迭代器，而不是List之类的容器</span>
+    RemoteIterator&lt;LocatedFileStatus&gt; listFiles = fs.listFiles(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"/"</span>), <span class="hljs-keyword">true</span>);
+
+    <span class="hljs-keyword">while</span> (listFiles.hasNext()) {
+        LocatedFileStatus fileStatus = listFiles.next();
+
+        System.out.println(fileStatus.getPath().getName());
+        System.out.println(fileStatus.getBlockSize());
+        System.out.println(fileStatus.getPermission());
+        System.out.println(fileStatus.getLen());    
+
+        BlockLocation[] blockLocations = fileStatus.getBlockLocations();            
+        <span class="hljs-keyword">for</span> (BlockLocation bl : blockLocations) {           
+            System.out.println(<span class="hljs-string">"block-offset:"</span> + bl.getOffset());
+
+            String[] hosts = bl.getHosts();
+            <span class="hljs-keyword">for</span> (String host : hosts) {
+                System.out.println(host);
+            }
+        }
+
+        System.out.println(<span class="hljs-string">"--------------李冰冰的分割线--------------"</span>);
+    }
+}</code></pre>
+
+
+
+<h5 id="hdfs文件和文件夹判断">HDFS文件和文件夹判断</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-annotation">@Test</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">findAtHDFS</span>() <span class="hljs-keyword">throws</span> Exception, IllegalArgumentException, IOException{
+
+    <span class="hljs-comment">// 1 创建配置信息对象</span>
+    Configuration configuration = <span class="hljs-keyword">new</span> Configuration();      
+    FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"root"</span>);
+
+    <span class="hljs-comment">// 2 获取查询路径下的文件状态信息</span>
+    FileStatus[] listStatus = fs.listStatus(<span class="hljs-keyword">new</span> Path(<span class="hljs-string">"/"</span>));
+    <span class="hljs-comment">// 3 遍历所有文件状态</span>
+    <span class="hljs-keyword">for</span> (FileStatus status : listStatus) {
+        <span class="hljs-keyword">if</span> (status.isFile()) {
+            System.out.println(<span class="hljs-string">"f--"</span> + status.getPath().getName());
+        } <span class="hljs-keyword">else</span> {
+            System.out.println(<span class="hljs-string">"d--"</span> + status.getPath().getName());
+        }
+    }
+}</code></pre>
+
+
+
+<h4 id="通过io流操作hdfs">通过IO流操作HDFS</h4>
+
+
+
+<h5 id="hdfs文件上传-1">HDFS文件上传</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">putFileToHDFS</span>() <span class="hljs-keyword">throws</span> Exception{
+        <span class="hljs-comment">// 1 创建配置信息对象</span>
+        Configuration configuration = <span class="hljs-keyword">new</span> Configuration();
+
+        FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"root"</span>);
+        <span class="hljs-comment">// 2 创建输入流</span>
+        FileInputStream inStream = <span class="hljs-keyword">new</span> FileInputStream(<span class="hljs-keyword">new</span> File(<span class="hljs-string">"e:/hello.txt"</span>));
+
+        <span class="hljs-comment">// 3 获取输出路径</span>
+        String putFileName = <span class="hljs-string">"hdfs://hadoop102:9000/user/hello1.txt"</span>;
+        Path writePath = <span class="hljs-keyword">new</span> Path(putFileName);
+
+        <span class="hljs-comment">// 4 创建输出流</span>
+        FSDataOutputStream outStream = fs.create(writePath);
+
+        <span class="hljs-comment">// 5 流对接</span>
+        <span class="hljs-keyword">try</span>{
+            IOUtils.copyBytes(inStream, outStream, <span class="hljs-number">4096</span>, <span class="hljs-keyword">false</span>);
+        }<span class="hljs-keyword">catch</span>(Exception e){
+            e.printStackTrace();
+        }<span class="hljs-keyword">finally</span>{
+            IOUtils.closeStream(inStream);
+            IOUtils.closeStream(outStream);
+        }
+    }</code></pre>
+
+
+
+<h5 id="hdfs文件下载-1">HDFS文件下载</h5>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">getFileToHDFS</span>() <span class="hljs-keyword">throws</span> Exception{
+        <span class="hljs-comment">// 1 创建配置信息对象</span>
+        Configuration configuration = <span class="hljs-keyword">new</span> Configuration();
+
+        FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>),configuration, <span class="hljs-string">"root"</span>);
+
+        <span class="hljs-comment">// 2 获取读取文件路径</span>
+        String filename = <span class="hljs-string">"hdfs://hadoop102:9000/user/atguigu/hello1.txt"</span>;
+
+        <span class="hljs-comment">// 3 创建读取path</span>
+        Path readPath = <span class="hljs-keyword">new</span> Path(filename);
+
+        <span class="hljs-comment">// 4 创建输入流</span>
+        FSDataInputStream inStream = fs.open(readPath);
+
+        <span class="hljs-comment">// 5 流对接输出到控制台</span>
+        <span class="hljs-keyword">try</span>{
+            IOUtils.copyBytes(inStream, System.out, <span class="hljs-number">4096</span>, <span class="hljs-keyword">false</span>);
+        }<span class="hljs-keyword">catch</span>(Exception e){
+            e.printStackTrace();
+        }<span class="hljs-keyword">finally</span>{
+            IOUtils.closeStream(inStream);
+        }
+    }</code></pre>
+
+
+
+<h5 id="定位文件读取">定位文件读取</h5>
+
+
+
+<h6 id="下载第一块">下载第一块</h6>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-annotation">@Test</span>
+<span class="hljs-comment">// 定位下载第一块内容</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">readFileSeek1</span>() <span class="hljs-keyword">throws</span> Exception {
+
+    <span class="hljs-comment">// 1 创建配置信息对象</span>
+    Configuration configuration = <span class="hljs-keyword">new</span> Configuration();
+
+    FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>), configuration, <span class="hljs-string">"root"</span>);
+
+    <span class="hljs-comment">// 2 获取输入流路径</span>
+    Path path = <span class="hljs-keyword">new</span> Path(<span class="hljs-string">"hdfs://hadoop102:9000/user/tmp/hadoop-2.7.2.tar.gz"</span>);
+
+    <span class="hljs-comment">// 3 打开输入流</span>
+    FSDataInputStream fis = fs.open(path);
+
+    <span class="hljs-comment">// 4 创建输出流</span>
+    FileOutputStream fos = <span class="hljs-keyword">new</span> FileOutputStream(<span class="hljs-string">"e:/hadoop-2.7.2.tar.gz.part1"</span>);
+
+    <span class="hljs-comment">// 5 流对接</span>
+    <span class="hljs-keyword">byte</span>[] buf = <span class="hljs-keyword">new</span> <span class="hljs-keyword">byte</span>[<span class="hljs-number">1024</span>];
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i = <span class="hljs-number">0</span>; i &lt; <span class="hljs-number">128</span> * <span class="hljs-number">1024</span>; i++) {
+        fis.read(buf);
+        fos.write(buf);
+    }
+
+    <span class="hljs-comment">// 6 关闭流</span>
+    IOUtils.closeStream(fis);
+    IOUtils.closeStream(fos);
+    }</code></pre>
+
+
+
+<h6 id="下载第二块">下载第二块</h6>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-comment">// 定位下载第二块内容</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">readFileSeek2</span>() <span class="hljs-keyword">throws</span> Exception{
+
+        <span class="hljs-comment">// 1 创建配置信息对象</span>
+        Configuration configuration = <span class="hljs-keyword">new</span> Configuration();
+
+        FileSystem fs = FileSystem.get(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://hadoop102:9000"</span>), configuration, <span class="hljs-string">"root"</span>);
+
+        <span class="hljs-comment">// 2 获取输入流路径</span>
+        Path path = <span class="hljs-keyword">new</span> Path(<span class="hljs-string">"hdfs://hadoop102:9000/user/tmp/hadoop-2.7.2.tar.gz"</span>);
+
+        <span class="hljs-comment">// 3 打开输入流</span>
+        FSDataInputStream fis = fs.open(path);
+
+        <span class="hljs-comment">// 4 创建输出流</span>
+        FileOutputStream fos = <span class="hljs-keyword">new</span> FileOutputStream(<span class="hljs-string">"e:/hadoop-2.7.2.tar.gz.part2"</span>);
+
+        <span class="hljs-comment">// 5 定位偏移量（第二块的首位）</span>
+        fis.seek(<span class="hljs-number">1024</span> * <span class="hljs-number">1024</span> * <span class="hljs-number">128</span>);
+
+        <span class="hljs-comment">// 6 流对接</span>
+        IOUtils.copyBytes(fis, fos, <span class="hljs-number">1024</span>);
+
+        <span class="hljs-comment">// 7 关闭流</span>
+        IOUtils.closeStream(fis);
+        IOUtils.closeStream(fos);
+    }</code></pre>
+
+
+
+<h6 id="合并文件">合并文件</h6>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs avrasm">在window命令窗口中执行 type hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.2</span><span class="hljs-preprocessor">.tar</span><span class="hljs-preprocessor">.gz</span><span class="hljs-preprocessor">.part</span>2 &gt;&gt; hadoop-<span class="hljs-number">2.7</span><span class="hljs-number">.2</span><span class="hljs-preprocessor">.tar</span><span class="hljs-preprocessor">.gz</span><span class="hljs-preprocessor">.part</span>1</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

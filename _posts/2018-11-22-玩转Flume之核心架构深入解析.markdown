@@ -1,0 +1,386 @@
+---
+layout:     post
+title:      玩转Flume之核心架构深入解析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u013970991/article/details/52036331				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="iteye-blog-content-contain" style="font-size:14px;">
+<h1 class="title" style="font-family:'lucida grande', 'lucida sans unicode', lucida, helvetica, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;line-height:1.5;color:#555555;font-size:32px;">玩转Flume之核心架构深入解析</h1>
+<div class="meta-top" style="font-family:'lucida grande', 'lucida sans unicode', lucida, helvetica, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;color:#555555;line-height:20px;">
+<span class="wordage" style="font-size:12px;color:#999999;">字数2224</span> <span class="views-count" style="font-size:12px;color:#999999;">阅读29</span> <span class="comments-count" style="font-size:12px;color:#999999;">评论0</span> <span class="likes-count" style="font-size:12px;color:#999999;">喜欢0</span>
+</div>
+<div class="show-content" style="color:#2f2f2f;font-size:16px;line-height:1.7;font-family:'lucida grande', 'lucida sans unicode', lucida, helvetica, 'Hiragino Sans GB', 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;">
+<p style="text-align:justify;">前段时间我们分享过<a href="http://www.jianshu.com/p/f0a08bd4f975" rel="nofollow" style="color:#4094c7;">玩转Flume+Kafka原来也就那点事儿</a>和<a href="http://www.jianshu.com/p/0187459831af" rel="nofollow" style="color:#4094c7;">Flume-NG源码分析-整体结构及配置载入分析</a>这二篇文章，主要介绍了flume的简单使用和配置文件加载的全过程，那么今天我们重点分析flume核心原理，从而了解Source、Channel和Sink的全链路过程。</p>
+<blockquote style="border-left-width:4px;border-left-color:#999999;font-size:15px;line-height:30px;">
+<p style="line-height:1.7;text-align:justify;"><strong>一、Flume架构分析</strong></p>
+</blockquote>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-da311cea4f9f724e.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">F7C59934-2C22-4F45-BE12-FCC9BB2A1708.png</div>
+</div>
+<p style="text-align:justify;"><br>这个图中核心的组件是：<br>Source，ChannelProcessor，Channel，Sink。他们的关系结构如下：</p>
+<pre class="hljs mathematica"><code class="mathematica" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;">Source  <span class="hljs-list">{
+    ChannelProcessor  {
+             Channel  ch1
+             Channel  ch2
+             …
+    }</span>
+} 
+Sink  <span class="hljs-list">{
+   Channel  ch; 
+}</span> 
+SinkGroup <span class="hljs-list">{
+   Channel ch；
+   Sink s1；
+   Sink s2；
+   …
+}</span></code></pre>
+<blockquote style="border-left-width:4px;border-left-color:#999999;font-size:15px;line-height:30px;">
+<p style="line-height:1.7;text-align:justify;"><strong>二、各组件详细介绍</strong></p>
+</blockquote>
+<h4 style="font-family:inherit;line-height:1.8;color:inherit;font-size:20px;">1、Source组件</h4>
+<p style="text-align:justify;">Source是数据源的总称，我们往往设定好源后，数据将源源不断的被抓取或者被推送。<br>常见的数据源有：ExecSource，KafkaSource，HttpSource，NetcatSource，JmsSource，AvroSource等等。<br>所有的数据源统一实现一个接口类如下：</p>
+<pre><code class="language-java"><code class="java" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-annotation">@InterfaceAudience</span>.Public
+<span class="hljs-annotation">@InterfaceStability</span>.Stable
+<span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-class"><span class="hljs-keyword" style="color:#859900;">interface</span> <span class="hljs-title" style="color:#b58900;">Source</span> <span class="hljs-keyword" style="color:#859900;">extends</span> <span class="hljs-title" style="color:#b58900;">LifecycleAware</span>, <span class="hljs-title" style="color:#b58900;">NamedComponent</span> </span>{
+
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   * Specifies which channel processor will handle this source's events.
+   *
+   * <span class="hljs-doctag" style="color:#2aa198;">@param</span> channelProcessor
+   */</span>
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-keyword" style="color:#859900;">void</span> <span class="hljs-title" style="color:#268bd2;">setChannelProcessor</span><span class="hljs-params">(ChannelProcessor channelProcessor)</span></span>;
+
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   * Returns the channel processor that will handle this source's events.
+   */</span>
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> ChannelProcessor <span class="hljs-title" style="color:#268bd2;">getChannelProcessor</span><span class="hljs-params">()</span></span>;
+
+}</code></code></pre>
+<p style="text-align:justify;">Source提供了两种机制： PollableSource（轮询拉取）和EventDrivenSource（事件驱动）：</p>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-7cd50029e54496e8.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">B0F4FCCA-7DAF-4E2B-B1DB-1AC23ACA2128.png</div>
+</div>
+<p style="text-align:justify;"><br>上图展示的Source继承关系类图。<br><strong>通过类图我们可以看到NetcatSource，ExecSource和HttpSource属于事件驱动模型。KafkaSource，SequenceGeneratorSource和JmsSource属于轮询拉取模型。</strong><br>Source接口继承了LifecycleAware接口，它的的所有逻辑的实现在接口的start和stop方法中进行。</p>
+<p style="text-align:justify;">下图是类关系方法图：</p>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-2271e0791b9f2aa9.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">E8953D29-35EC-4A63-AC72-78675BE0A56E.png</div>
+</div>
+<p style="text-align:justify;">Source接口定义的是最终的实现过程，比如通过日志抓取日志，这个抓取的过程和实际操作就是在对应的Source实现中，比如：ExecSource。那么这些Source实现由谁来驱动的呢？现在我们将介绍SourceRunner类。将看一下类继承结构图：</p>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-c6ff57dd13c97c32.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">Paste_Image.png</div>
+</div>
+<p style="text-align:justify;"><br>我们看一下PollableSourceRunner和EventDrivenSourceRunner的具体实现：</p>
+<pre><code class="language-java"><code class="java" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-comment" style="color:#93a1a1;">//PollableSourceRunner：</span>
+<span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-keyword" style="color:#859900;">void</span> <span class="hljs-title" style="color:#268bd2;">start</span><span class="hljs-params">()</span> </span>{
+    PollableSource source = (PollableSource) getSource();
+    ChannelProcessor cp = source.getChannelProcessor();
+    cp.initialize();
+    source.start();
+
+    runner = <span class="hljs-keyword" style="color:#859900;">new</span> PollingRunner();
+
+    runner.source = source; <span class="hljs-comment" style="color:#93a1a1;">//Source实现类就在这里被赋与。</span>
+    runner.counterGroup = counterGroup;
+    runner.shouldStop = shouldStop;
+
+    runnerThread = <span class="hljs-keyword" style="color:#859900;">new</span> Thread(runner);
+    runnerThread.setName(getClass().getSimpleName() + <span class="hljs-string" style="color:#2aa198;">"-"</span> + 
+        source.getClass().getSimpleName() + <span class="hljs-string" style="color:#2aa198;">"-"</span> + source.getName());
+    runnerThread.start();
+
+    lifecycleState = LifecycleState.START;
+  }
+
+<span class="hljs-comment" style="color:#93a1a1;">//EventDrivenSourceRunner：</span>
+<span class="hljs-annotation">@Override</span>
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-keyword" style="color:#859900;">void</span> <span class="hljs-title" style="color:#268bd2;">start</span><span class="hljs-params">()</span> </span>{
+    Source source = getSource();
+    ChannelProcessor cp = source.getChannelProcessor();
+    cp.initialize();
+    source.start();
+    lifecycleState = LifecycleState.START;
+  }</code></code></pre>
+<p style="text-align:justify;"><strong>注：其实所有的Source实现类内部都维护着线程，执行source.start()其实就是启动了相应的线程。</strong><br>刚才我们看代码，代码中一直都在展示channelProcessor这个类，同时最上面架构设计图里面也提到了这个类，那它到底是干什么呢，下面我们就对其分解。</p>
+<h4 style="font-family:inherit;line-height:1.8;color:inherit;font-size:20px;">2、Channel组件</h4>
+<p style="text-align:justify;">Channel用于连接Source和Sink，Source将日志信息发送到Channel，Sink从Channel消费日志信息；Channel是中转日志信息的一个临时存储，保存有Source组件传递过来的日志信息。<br>先看代码如下：</p>
+<pre class="hljs bash"><code class="bash" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;">ChannelSelectorConfiguration selectorConfig = config.getSelectorConfiguration();
+
+ChannelSelector selector = ChannelSelectorFactory.create(<span class="hljs-built_in" style="color:#268bd2;">source</span>Channels, selectorConfig);
+
+ChannelProcessor channelProcessor = new ChannelProcessor(selector);
+Configurables.configure(channelProcessor, config);
+
+source.setChannelProcessor(channelProcessor);</code></pre>
+<p style="text-align:justify;">ChannelSelectorFactory.create方法实现如下：</p>
+<pre class="hljs scala"><code class="scala" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;">public static <span class="hljs-type" style="color:#b58900;">ChannelSelector</span> create(<span class="hljs-type" style="color:#b58900;">List</span>&lt;<span class="hljs-type" style="color:#b58900;">Channel</span>&gt; channels,
+      <span class="hljs-type" style="color:#b58900;">ChannelSelectorConfiguration</span> conf) {
+    <span class="hljs-type" style="color:#b58900;">String</span> <span class="hljs-class"><span class="hljs-keyword" style="color:#859900;">type</span> =</span> <span class="hljs-type" style="color:#b58900;">ChannelSelectorType</span>.<span class="hljs-type" style="color:#b58900;">REPLICATING</span>.toString();
+    <span class="hljs-keyword" style="color:#859900;">if</span> (conf != <span class="hljs-literal">null</span>){
+      <span class="hljs-class"><span class="hljs-keyword" style="color:#859900;">type</span> =</span> conf.getType();
+    }
+    <span class="hljs-type" style="color:#b58900;">ChannelSelector</span> selector = getSelectorForType(<span class="hljs-class"><span class="hljs-keyword" style="color:#859900;">type</span>);</span>
+    selector.setChannels(channels);
+    <span class="hljs-type" style="color:#b58900;">Configurables</span>.configure(selector, conf);
+    <span class="hljs-keyword" style="color:#859900;">return</span> selector;
+  }</code></pre>
+<p style="text-align:justify;">其中我们看一下ChannelSelectorType这个枚举类，包括了几种类型：</p>
+<pre class="hljs cs"><code class="cs" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-keyword" style="color:#859900;">enum</span> ChannelSelectorType {
+
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   * Place holder for custom channel selectors not part of this enumeration.
+   */</span>
+  OTHER(<span class="hljs-keyword" style="color:#859900;">null</span>),
+
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   * 复用通道选择器
+   */</span>
+  REPLICATING(<span class="hljs-string" style="color:#2aa198;">"org.apache.flume.channel.ReplicatingChannelSelector"</span>),
+
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   *  多路通道选择器
+   */</span>
+  MULTIPLEXING(<span class="hljs-string" style="color:#2aa198;">"org.apache.flume.channel.MultiplexingChannelSelector"</span>);
+}</code></pre>
+<p style="text-align:justify;">ChannelSelector的类结构图如下所示：</p>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-2b69d20c683c4dd7.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">Paste_Image.png</div>
+</div>
+<p style="text-align:justify;"><strong>注：RelicatingChannelSelector和MultiplexingChannelSelector是二个通道选择器，第一个是复用型通道选择器，也就是的默认的方式，会把接收到的消息发送给其他每个channel。第二个是多路通道选择器，这个会根据消息header中的参数进行通道选择。</strong></p>
+<p style="text-align:justify;">说完通道选择器，正式来解释Channel是什么，先看一个接口类：</p>
+<pre><code class="language-java"><code class="java" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-class"><span class="hljs-keyword" style="color:#859900;">interface</span> <span class="hljs-title" style="color:#b58900;">Channel</span> <span class="hljs-keyword" style="color:#859900;">extends</span> <span class="hljs-title" style="color:#b58900;">LifecycleAware</span>, <span class="hljs-title" style="color:#b58900;">NamedComponent</span> </span>{  
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-keyword" style="color:#859900;">void</span> <span class="hljs-title" style="color:#268bd2;">put</span><span class="hljs-params">(Event event)</span> <span class="hljs-keyword" style="color:#859900;">throws</span> ChannelException</span>;  
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> Event <span class="hljs-title" style="color:#268bd2;">take</span><span class="hljs-params">()</span> <span class="hljs-keyword" style="color:#859900;">throws</span> ChannelException</span>;  
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> Transaction <span class="hljs-title" style="color:#268bd2;">getTransaction</span><span class="hljs-params">()</span></span>;  
+}</code></code></pre>
+<p style="text-align:justify;"><strong>注：put方法是用来发送消息，take方法是获取消息，transaction是用于事务操作。</strong><br>类结构图如下：</p>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-bb86b30d04249bf3.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">Paste_Image.png</div>
+</div>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-19eb8fa0e42d22df.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">Paste_Image.png</div>
+</div>
+<h4 style="font-family:inherit;line-height:1.8;color:inherit;font-size:20px;">3、Sink组件</h4>
+<p style="text-align:justify;">Sink负责取出Channel中的消息数据，进行相应的存储文件系统，数据库，或者提交到远程服务器。<br>Sink在设置存储数据时，可以向文件系统中，数据库中，hadoop中储数据，在日志数据较少时，可以将数据存储在文件系中，并且设定一定的时间间隔保存数据。在日志数据较多时，可以将相应的日志数据存储到Hadoop中，便于日后进行相应的数据分析。</p>
+<p style="text-align:justify;">Sink接口类内容如下：</p>
+<pre><code class="language-java"><code class="java" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-class"><span class="hljs-keyword" style="color:#859900;">interface</span> <span class="hljs-title" style="color:#b58900;">Sink</span> <span class="hljs-keyword" style="color:#859900;">extends</span> <span class="hljs-title" style="color:#b58900;">LifecycleAware</span>, <span class="hljs-title" style="color:#b58900;">NamedComponent</span> </span>{  
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-keyword" style="color:#859900;">void</span> <span class="hljs-title" style="color:#268bd2;">setChannel</span><span class="hljs-params">(Channel channel)</span></span>;  
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> Channel <span class="hljs-title" style="color:#268bd2;">getChannel</span><span class="hljs-params">()</span></span>;  
+  <span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> Status <span class="hljs-title" style="color:#268bd2;">process</span><span class="hljs-params">()</span> <span class="hljs-keyword" style="color:#859900;">throws</span> EventDeliveryException</span>;  
+  <span class="hljs-keyword" style="color:#859900;">public</span> <span class="hljs-keyword" style="color:#859900;">static</span> <span class="hljs-keyword" style="color:#859900;">enum</span> Status {  
+    READY, BACKOFF  
+  }  
+}</code></code></pre>
+<p style="text-align:justify;">Sink是通过如下代码进行的创建：</p>
+<pre class="hljs undefined"><code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;">Sink sink = sinkFactory.create(comp.getComponentName(),  comp.getType());</code></pre>
+<p style="text-align:justify;">DefaultSinkFactory.create方法如下：</p>
+<pre class="hljs cs"><code class="cs" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> Sink <span class="hljs-title" style="color:#268bd2;">create</span>(<span class="hljs-params">String name, String type</span>) throws FlumeException </span>{
+    Preconditions.checkNotNull(name, <span class="hljs-string" style="color:#2aa198;">"name"</span>);
+    Preconditions.checkNotNull(type, <span class="hljs-string" style="color:#2aa198;">"type"</span>);
+    logger.info(<span class="hljs-string" style="color:#2aa198;">"Creating instance of sink: {}, type: {}"</span>, name, type);
+    Class&lt;? extends Sink&gt; sinkClass = getClass(type);
+    <span class="hljs-keyword" style="color:#859900;">try</span> {
+      Sink sink = sinkClass.newInstance();
+      sink.setName(name);
+      <span class="hljs-keyword" style="color:#859900;">return</span> sink;
+    } <span class="hljs-keyword" style="color:#859900;">catch</span> (Exception ex) {
+      System.<span class="hljs-keyword" style="color:#859900;">out</span>.println(ex);
+      <span class="hljs-keyword" style="color:#859900;">throw</span> <span class="hljs-keyword" style="color:#859900;">new</span> FlumeException(<span class="hljs-string" style="color:#2aa198;">"Unable to create sink: "</span> + name
+          + <span class="hljs-string" style="color:#2aa198;">", type: "</span> + type + <span class="hljs-string" style="color:#2aa198;">", class: "</span> + sinkClass.getName(), ex);
+    }
+  }</code></pre>
+<p style="text-align:justify;"><strong>注：Sink是通过SinkFactory工厂来创建，提供了DefaultSinkFactory默认工厂，程序会查找org.apache.flume.conf.sink.SinkType这个枚举类找到相应的Sink处理类，比如：org.apache.flume.sink.LoggerSink，如果没找到对应的处理类，直接通过Class.forName(className)进行直接查找实例化实现类。</strong></p>
+<p style="text-align:justify;">Sink的类结构图如下：</p>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-ba0695e99e28f33b.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">Paste_Image.png</div>
+</div>
+<p style="text-align:justify;">与ChannelProcessor处理类对应的是SinkProcessor，由SinkProcessorFactory工厂类负责创建，SinkProcessor的类型由一个枚举类提供，看下面代码：</p>
+<pre><code class="language-php"><code class="php" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-keyword" style="color:#859900;">public</span> enum SinkProcessorType {
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   * Place holder for custom sinks not part of this enumeration.
+   */</span>
+  OTHER(<span class="hljs-keyword" style="color:#859900;">null</span>),
+
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   * 故障转移 processor
+   *
+   * <span class="hljs-doctag" style="color:#2aa198;">@see</span> org.apache.flume.sink.FailoverSinkProcessor
+   */</span>
+  FAILOVER(<span class="hljs-string" style="color:#2aa198;">"org.apache.flume.sink.FailoverSinkProcessor"</span>),
+
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   * 默认processor
+   *
+   * <span class="hljs-doctag" style="color:#2aa198;">@see</span> org.apache.flume.sink.DefaultSinkProcessor
+   */</span>
+  <span class="hljs-keyword" style="color:#859900;">DEFAULT</span>(<span class="hljs-string" style="color:#2aa198;">"org.apache.flume.sink.DefaultSinkProcessor"</span>),
+
+  <span class="hljs-comment" style="color:#93a1a1;">/**
+   * 负载processor
+   *
+   * <span class="hljs-doctag" style="color:#2aa198;">@see</span> org.apache.flume.sink.LoadBalancingSinkProcessor
+   */</span>
+  LOAD_BALANCE(<span class="hljs-string" style="color:#2aa198;">"org.apache.flume.sink.LoadBalancingSinkProcessor"</span>);
+
+  <span class="hljs-keyword" style="color:#859900;">private</span> <span class="hljs-keyword" style="color:#859900;">final</span> String processorClassName;
+
+  <span class="hljs-keyword" style="color:#859900;">private</span> SinkProcessorType(String processorClassName) {
+    this.processorClassName = processorClassName;
+  }
+
+  <span class="hljs-keyword" style="color:#859900;">public</span> String getSinkProcessorClassName() {
+    <span class="hljs-keyword" style="color:#859900;">return</span> processorClassName;
+  }
+}</code></code></pre>
+<p style="text-align:justify;">SinkProcessor的类结构图如下：</p>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-40703e3b1da7c847.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">Paste_Image.png</div>
+</div>
+<p style="text-align:justify;"><br><strong>说明：</strong><br>1、FailoverSinkProcessor是故障转移处理器，当sink从通道拿数据信息时出错进行的相关处理，代码如下：</p>
+<pre class="hljs cs"><code class="cs" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> Status <span class="hljs-title" style="color:#268bd2;">process</span>() throws EventDeliveryException </span>{
+    <span class="hljs-comment" style="color:#93a1a1;">// 经过了冷却时间，再次发起重试</span>
+    Long now = System.currentTimeMillis();
+    <span class="hljs-keyword" style="color:#859900;">while</span>(!failedSinks.isEmpty() &amp;&amp; failedSinks.peek().getRefresh() &lt; now) {
+      <span class="hljs-comment" style="color:#93a1a1;">//从失败队列中获取sink节点</span>
+      FailedSink cur = failedSinks.poll(); 
+      Status s;
+      <span class="hljs-keyword" style="color:#859900;">try</span> {
+        <span class="hljs-comment" style="color:#93a1a1;">//调用相应sink进行处理，比如将channel的数据读取存放到文件中，</span>
+        <span class="hljs-comment" style="color:#93a1a1;">//这个存放文件的动作就在process中进行。</span>
+        s = cur.getSink().process();
+        <span class="hljs-keyword" style="color:#859900;">if</span> (s  == Status.READY) {
+          <span class="hljs-comment" style="color:#93a1a1;">//如果处理成功，则放到存活队列中</span>
+          liveSinks.put(cur.getPriority(), cur.getSink());
+          activeSink = liveSinks.<span class="hljs-keyword" style="color:#859900;">get</span>(liveSinks.lastKey());
+          logger.debug(<span class="hljs-string" style="color:#2aa198;">"Sink {} was recovered from the fail list"</span>,
+                  cur.getSink().getName());
+        } <span class="hljs-keyword" style="color:#859900;">else</span> {
+          <span class="hljs-comment" style="color:#93a1a1;">// if it's a backoff it needn't be penalized.</span>
+          <span class="hljs-comment" style="color:#93a1a1;">//如果处理失败，则继续放到失败队列中</span>
+          failedSinks.add(cur);
+        }
+        <span class="hljs-keyword" style="color:#859900;">return</span> s;
+      } <span class="hljs-keyword" style="color:#859900;">catch</span> (Exception e) {
+        cur.incFails();
+        failedSinks.add(cur);
+      }
+    }
+
+    Status ret = <span class="hljs-keyword" style="color:#859900;">null</span>;
+    <span class="hljs-keyword" style="color:#859900;">while</span>(activeSink != <span class="hljs-keyword" style="color:#859900;">null</span>) {
+      <span class="hljs-keyword" style="color:#859900;">try</span> {
+        ret = activeSink.process();
+        <span class="hljs-keyword" style="color:#859900;">return</span> ret;
+      } <span class="hljs-keyword" style="color:#859900;">catch</span> (Exception e) {
+        logger.warn(<span class="hljs-string" style="color:#2aa198;">"Sink {} failed and has been sent to failover list"</span>,
+                activeSink.getName(), e);
+        activeSink = moveActiveToDeadAndGetNext();
+      }
+    }</code></pre>
+<p style="text-align:justify;">2、LoadBalancingSinkProcessor是负载Sink处理器<br>首先我们和ChannelProcessor一样，我们也要重点说明一下SinkSelector这个选择器。<br>先看一下SinkSelector.configure方法的部分代码：</p>
+<pre class="hljs scala"><code class="scala" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-keyword" style="color:#859900;">if</span> (selectorTypeName.equalsIgnoreCase(<span class="hljs-type" style="color:#b58900;">SELECTOR_NAME_ROUND_ROBIN</span>)) {
+      selector = <span class="hljs-keyword" style="color:#859900;">new</span> <span class="hljs-type" style="color:#b58900;">RoundRobinSinkSelector</span>(shouldBackOff);
+    } <span class="hljs-keyword" style="color:#859900;">else</span> <span class="hljs-keyword" style="color:#859900;">if</span> (selectorTypeName.equalsIgnoreCase(<span class="hljs-type" style="color:#b58900;">SELECTOR_NAME_RANDOM</span>)) {
+      selector = <span class="hljs-keyword" style="color:#859900;">new</span> <span class="hljs-type" style="color:#b58900;">RandomOrderSinkSelector</span>(shouldBackOff);
+    } <span class="hljs-keyword" style="color:#859900;">else</span> {
+      <span class="hljs-keyword" style="color:#859900;">try</span> {
+        <span class="hljs-annotation">@SuppressWarnings</span>(<span class="hljs-string" style="color:#2aa198;">"unchecked"</span>)
+        <span class="hljs-type" style="color:#b58900;">Class</span>&lt;? <span class="hljs-keyword" style="color:#859900;">extends</span> <span class="hljs-type" style="color:#b58900;">SinkSelector</span>&gt; klass = (<span class="hljs-type" style="color:#b58900;">Class</span>&lt;? <span class="hljs-keyword" style="color:#859900;">extends</span> <span class="hljs-type" style="color:#b58900;">SinkSelector</span>&gt;)
+            <span class="hljs-type" style="color:#b58900;">Class</span>.forName(selectorTypeName);
+
+        selector = klass.newInstance();
+      } <span class="hljs-keyword" style="color:#859900;">catch</span> (<span class="hljs-type" style="color:#b58900;">Exception</span> ex) {
+        <span class="hljs-keyword" style="color:#859900;">throw</span> <span class="hljs-keyword" style="color:#859900;">new</span> <span class="hljs-type" style="color:#b58900;">FlumeException</span>(<span class="hljs-string" style="color:#2aa198;">"Unable to instantiate sink selector: "</span>
+            + selectorTypeName, ex);
+      }
+    }</code></pre>
+<p style="text-align:justify;">结合上面的代码，再看类结构图如下：</p>
+<div class="image-package imagebubble" style="text-align:center;">
+<img class="imagebubble-image" src="http://upload-images.jianshu.io/upload_images/1049928-e9992fba23d2c50d.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""><br><div class="image-caption" style="min-width:20%;display:inline-block;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#d9d9d9;font-size:13px;color:#999999;font-style:italic;line-height:1.7;">Paste_Image.png</div>
+</div>
+<p style="text-align:justify;"><br><strong>注：RoundRobinSinkSelector是轮询选择器，RandomOrderSinkSelector是随机分配选择器。</strong></p>
+<p style="text-align:justify;">最后我们以KafkaSink为例看一下Sink里面的具体实现：</p>
+<pre class="hljs cs"><code class="cs" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:12px;border:none;background-color:transparent;"><span class="hljs-function"><span class="hljs-keyword" style="color:#859900;">public</span> Status <span class="hljs-title" style="color:#268bd2;">process</span>() throws EventDeliveryException </span>{
+    Status result = Status.READY;
+    Channel channel = getChannel();
+    Transaction transaction = <span class="hljs-keyword" style="color:#859900;">null</span>;
+    Event <span class="hljs-keyword" style="color:#859900;">event</span> = <span class="hljs-keyword" style="color:#859900;">null</span>;
+    String eventTopic = <span class="hljs-keyword" style="color:#859900;">null</span>;
+    String eventKey = <span class="hljs-keyword" style="color:#859900;">null</span>;
+
+    <span class="hljs-keyword" style="color:#859900;">try</span> {
+      <span class="hljs-keyword" style="color:#859900;">long</span> processedEvents = <span class="hljs-number" style="color:#2aa198;">0</span>;
+
+      transaction = channel.getTransaction();
+      transaction.begin();
+
+      messageList.clear();
+      <span class="hljs-keyword" style="color:#859900;">for</span> (; processedEvents &lt; batchSize; processedEvents += <span class="hljs-number" style="color:#2aa198;">1</span>) {
+        <span class="hljs-keyword" style="color:#859900;">event</span> = channel.take();
+
+        <span class="hljs-keyword" style="color:#859900;">if</span> (<span class="hljs-keyword" style="color:#859900;">event</span> == <span class="hljs-keyword" style="color:#859900;">null</span>) {
+          <span class="hljs-comment" style="color:#93a1a1;">// no events available in channel</span>
+          <span class="hljs-keyword" style="color:#859900;">break</span>;
+        }
+
+        <span class="hljs-keyword" style="color:#859900;">byte</span>[] eventBody = <span class="hljs-keyword" style="color:#859900;">event</span>.getBody();
+        Map&lt;String, String&gt; headers = <span class="hljs-keyword" style="color:#859900;">event</span>.getHeaders();
+
+        <span class="hljs-keyword" style="color:#859900;">if</span> ((eventTopic = headers.<span class="hljs-keyword" style="color:#859900;">get</span>(TOPIC_HDR)) == <span class="hljs-keyword" style="color:#859900;">null</span>) {
+          eventTopic = topic;
+        }
+
+        eventKey = headers.<span class="hljs-keyword" style="color:#859900;">get</span>(KEY_HDR);
+
+        <span class="hljs-keyword" style="color:#859900;">if</span> (logger.isDebugEnabled()) {
+          logger.debug(<span class="hljs-string" style="color:#2aa198;">"{Event} "</span> + eventTopic + <span class="hljs-string" style="color:#2aa198;">" : "</span> + eventKey + <span class="hljs-string" style="color:#2aa198;">" : "</span>
+            + <span class="hljs-keyword" style="color:#859900;">new</span> String(eventBody, <span class="hljs-string" style="color:#2aa198;">"UTF-8"</span>));
+          logger.debug(<span class="hljs-string" style="color:#2aa198;">"event #{}"</span>, processedEvents);
+        }
+
+        <span class="hljs-comment" style="color:#93a1a1;">// create a message and add to buffer</span>
+        KeyedMessage&lt;String, <span class="hljs-keyword" style="color:#859900;">byte</span>[]&gt; data = <span class="hljs-keyword" style="color:#859900;">new</span> KeyedMessage&lt;String, <span class="hljs-keyword" style="color:#859900;">byte</span>[]&gt;
+          (eventTopic, eventKey, eventBody);
+        messageList.add(data);
+
+      }
+
+      <span class="hljs-comment" style="color:#93a1a1;">// publish batch and commit.</span>
+      <span class="hljs-keyword" style="color:#859900;">if</span> (processedEvents &gt; <span class="hljs-number" style="color:#2aa198;">0</span>) {
+        <span class="hljs-keyword" style="color:#859900;">long</span> startTime = System.nanoTime();
+        producer.send(messageList);
+        <span class="hljs-keyword" style="color:#859900;">long</span> endTime = System.nanoTime();
+        counter.addToKafkaEventSendTimer((endTime-startTime)/(<span class="hljs-number" style="color:#2aa198;">1000</span>*<span class="hljs-number" style="color:#2aa198;">1000</span>));
+        counter.addToEventDrainSuccessCount(Long.valueOf(messageList.size()));
+      }
+
+      transaction.commit();
+
+    } <span class="hljs-keyword" style="color:#859900;">catch</span> (Exception ex) {
+      String errorMsg = <span class="hljs-string" style="color:#2aa198;">"Failed to publish events"</span>;
+      logger.error(<span class="hljs-string" style="color:#2aa198;">"Failed to publish events"</span>, ex);
+      result = Status.BACKOFF;
+      <span class="hljs-keyword" style="color:#859900;">if</span> (transaction != <span class="hljs-keyword" style="color:#859900;">null</span>) {
+        <span class="hljs-keyword" style="color:#859900;">try</span> {
+          transaction.rollback();
+          counter.incrementRollbackCount();
+        } <span class="hljs-keyword" style="color:#859900;">catch</span> (Exception e) {
+          logger.error(<span class="hljs-string" style="color:#2aa198;">"Transaction rollback failed"</span>, e);
+          <span class="hljs-keyword" style="color:#859900;">throw</span> Throwables.propagate(e);
+        }
+      }
+      <span class="hljs-keyword" style="color:#859900;">throw</span> <span class="hljs-keyword" style="color:#859900;">new</span> EventDeliveryException(errorMsg, ex);
+    } <span class="hljs-keyword" style="color:#859900;">finally</span> {
+      <span class="hljs-keyword" style="color:#859900;">if</span> (transaction != <span class="hljs-keyword" style="color:#859900;">null</span>) {
+        transaction.close();
+      }
+    }
+
+    <span class="hljs-keyword" style="color:#859900;">return</span> result;
+  }</code></pre>
+<p style="text-align:justify;"><strong>注：方法从channel中不断的获取数据，然后通过Kafka的producer生产者将消息发送到Kafka里面</strong></p>
+</div>
+</div>            </div>
+                </div>

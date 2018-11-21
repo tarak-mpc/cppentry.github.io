@@ -1,0 +1,159 @@
+---
+layout:     post
+title:      c++ 操作HDFS
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/hanlaipeng11/article/details/75040123				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+     如果由于业务需求无法用python、java以及命令行来操作HDFS，需要用c++的话，不用着急，libhdfs将是为你带来方便。Libhdfs是专门为c以及c++开发者提供的操作HDFS的API库，下面就是两个demo的介绍：</p>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>向HDFS的文件中写数据</li><li>从HDFS的文件中读数据</li></ol><h3>向HDFS的文件中写数据</h3>
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+     代码如下：</p>
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+</p><pre><code class="language-cpp">#ifndef WRITE_H
+#define WRITE_H
+ 
+#include &lt;iostream&gt;
+#include "hdfs.h"
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+ 
+using namespace std;
+ 
+class WriteData{
+public:
+    WriteData(){
+    }
+    virtual ~WriteData(){
+    }
+ 
+    void writeData(char* writepath, char* data){
+        //连接HDFS
+        hdfsFS fs = hdfsConnect("default", 8080);
+        if (!fs){
+            cout &lt;&lt;"cannot connect to HDFS"&lt;&lt;endl;
+            exit(1);
+        }
+        cout &lt;&lt;"connect success!" &lt;&lt;endl;
+        //检查写入的文件是否存在
+        int a = hdfsExists(fs,writepath);
+        cout &lt;&lt;a&lt;&lt;endl;
+        hdfsFile writeFile;
+        if (a == 0){
+            //如果文件存在，打开文件，并且设置项文件中追加数据
+            writeFile = hdfsOpenFile(fs, writepath, O_WRONLY|O_APPEND, 0, 0, 0);
+        }else{
+            //如果文件不存在，则创建文件，并将数据写入
+            writeFile = hdfsOpenFile(fs, writepath, O_WRONLY|O_CREAT, 0, 0, 0);
+        }
+        if (!writeFile){
+            cout &lt;&lt;"Faile to open the file"&lt;&lt;endl;
+            exit(1);
+        }
+        //将数据写入到HDFS中
+        tSize num_written_bytes = hdfsWrite(fs, writeFile, (void*)data, strlen(data)+1);
+        if (hdfsFlush(fs, writeFile)) {
+            cout &lt;&lt; "Failed to flush" &lt;&lt; endl;
+            exit(1);
+        }
+        //关闭连接
+        hdfsCloseFile(fs, writeFile);
+    }
+};
+ 
+#endif</code></pre>
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+     整体流程主要分为三步：</p>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>连接HDFS：主要的方法接口为：<span style="color:rgb(51,102,255);">hdfsFS hdfsConnect(const char* host, tPort port)    </span>其中参数为：hdfs的主机IP以及端口号。</li></ol><p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+     2.  打开HDFS文件：主要的方法接口为：<span style="color:rgb(51,102,255);">hdfsFile hdfsOpenFile(hdfsFS fs, const char* path, int flags, int bufferSize, short replication, tSize blocksize)    </span>其中参数依次为：连接HDFS的Handle，文件的位置，文件的操作设置（如只读、读写、追加、创建新的文件等），如果文件在HDFS上的话，后三个参数可以忽略直接设置为0。</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+     3.  写文件：主要的方法接口为：<span style="color:rgb(51,102,255);">tsize hdfsWrite(hdfsFS fs, hdfsFile file, const void* buffer, tSize length)    </span>其中参数依次为：连接HDFS的Handle，文件的Handle，写入的data，写入数据的长度。</p>
+<div>
+<h3>从HDFS的文件中读数据</h3>
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+代码如下：</p>
+<pre><code class="language-cpp">#ifndef READ_H
+#define READ_H
+ 
+#include &lt;iostream&gt;
+#include "hdfs.h"
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdio.h&gt;
+ 
+using namespace std;
+ 
+class ReadData{
+public:
+    ReadData(){
+    }
+    virtual ~ReadData(){
+    }
+    int readData(char* getpath, char* buffer, tSize bufferSize){
+        //连接到HDFS
+        hdfsFS fs = hdfsConnect("default",8080);
+        if (!fs){
+            cout &lt;&lt;"cannot connect to HDFS"&lt;&lt;endl;
+            exit(1);
+        }
+        cout &lt;&lt;"connect success!"&lt;&lt;endl;
+        //以读文件的方式打开文件
+        hdfsFile readFile = hdfsOpenFile(fs, getpath, O_RDONLY, 0, 0, 0);
+        if (!readFile){
+            cout &lt;&lt;"Faile to open the file"&lt;&lt;endl;
+            exit(1);
+        }
+        if(buffer == NULL){
+            cout &lt;&lt;"buffer is null"&lt;&lt; endl;
+        }
+        //读取文件中的数据到buffer中
+        tSize result = hdfsRead(fs, readFile, (void*)buffer, bufferSize);
+        if (result &lt; 0){
+            cout &lt;&lt; "hdfsRead faile!" &lt;&lt; endl;
+        }
+        cout &lt;&lt;result&lt;&lt; endl;
+        //关闭连接
+        hdfsCloseFile(fs,readFile);
+        return result;
+    }
+};
+ 
+#endif</code></pre>
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+同样，他也主要分为三部分：连接到HDFS、打开HDFS文件、读取文件。</p>
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+     其中读取文件的主要方法接口为：<span style="color:rgb(51,102,255);">tSize hdfsRead(hdfsFS fs, hdfsFile file, void* buffer, tSize length)</span>.   其中参数依次为：连接HDFS的Handle，文件的Handle，读取的数据存放的buffer，buffer的大小</p>
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">     在运行与make的时候请注意：由于libhdfs是依赖Java的，所以要将JAVA_HOME、JRE_HOME配置进去，同样也需要将其所依赖的Hadoop的包配置进去。以下是我的运行脚本作为参考：</span><br></p>
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<span style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"></span></p><pre><code class="language-python">#!/bin/bash
+ 
+#配置参数
+CLASSPATH=${JAVA_HOME}/lib:${JRE_HOME}/lib
+CLASSPATH=${CLASSPATH}":"`find ${HADOOP_HOME}/share/hadoop | awk '{path=path":"$0}END{print path}'`
+export CLASSPATH
+ 
+rm ./test
+ 
+#c++make指令
+g++ *.cpp -I${HADOOP_HOME}/include -L${HADOOP_HOME}/lib/native -lhdfs -Wl,-rpath=${HADOOP_HOME}/lib/native -L${JRE_HOME}/lib/amd64/server -ljvm -Wl,-rpath=${JRE_HOME}/lib/amd64/server -o test
+ 
+ 
+hdfs dfs -rm /tmp/testlibhdfs.txt
+ 
+#写入的示例指令
+./test write /tmp/testlibhdfs.txt "beautiful girl"
+ 
+#读取的示例指令
+./test read /tmp/testlibhdfs.txt 100</code></pre><br>
+由于是第一次写c++，如有不对的地方，还请大神指正。
+<p align="left" style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div><br></div>
+<br></div>
+<br><br>            </div>
+                </div>

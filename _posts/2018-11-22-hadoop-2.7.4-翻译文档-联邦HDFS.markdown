@@ -1,0 +1,224 @@
+---
+layout:     post
+title:      hadoop-2.7.4-翻译文档-联邦HDFS
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div class="section" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:13px;">
+<h2 style="font-size:17px;color:rgb(51,51,51);"><a name="Background"></a><span style="vertical-align:inherit;">背景</span></h2>
+<p style="line-height:1.3em;font-size:12px;"><img src="http://hadoop.apache.org/docs/r2.7.4/hadoop-project-dist/hadoop-hdfs/images/federation-background.gif" alt="HDFS图层" style="border:none;"></p>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">HDFS有两个主要层：</span></p>
+<ul><li style="font-size:12px;color:rgb(51,51,51);"><strong>名字空间</strong>
+<ul><li><span style="vertical-align:inherit;">包含目录，文件和块信息。</span></li><li><span style="vertical-align:inherit;">它支持所有名字空间相关的文件系统操作，如创建，删除，修改和列出文件和目录。</span></li></ul></li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><strong>块存储服务</strong><span style="vertical-align:inherit;">有两部分：</span></p>
+<ul><li><span style="vertical-align:inherit;">块管理（在Namenode中执行）</span>
+<ul><li><span style="vertical-align:inherit;">通过处理注册和周期性心跳信息来提供Datanode集群成员管理服务。</span></li><li><span style="vertical-align:inherit;">处理块报告并持久存储块的位置信息。</span></li><li><span style="vertical-align:inherit;">支持块相关操作，如增、删、改、查。</span></li><li><span style="vertical-align:inherit;">管理块副本的存放，对副本数不足的块进行复制，以及对副本数超量的块进行副本删除。</span></li></ul></li><li><span style="vertical-align:inherit;">块存储 - 由Datanodes提供服务，通过在本地文件系统上进行块存储，并提供读/写访问来实现。</span></li></ul><p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">之前的HDFS架构只运行一个NN来对整个集群提供支持。</span><span style="vertical-align:inherit;">在该配置下，单个NN管理整个名字空间。而联邦</span><span style="vertical-align:inherit;">HDFS通过向HDFS添加对多个<span style="font-family:Verdana, Helvetica, Arial, sans-serif;line-height:15.6px;">Namenodes/namespaces</span>的支持，解决了此限制。</span></span></p>
+</li></ul></div>
+<div class="section" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:13px;">
+<h2 style="font-size:17px;color:rgb(51,51,51);"><a name="Multiple_NamenodesNamespaces"></a><span style="vertical-align:inherit;">多个<span style="font-family:Verdana, Helvetica, Arial, sans-serif;line-height:15.6px;">Namenodes/namespaces</span></span></h2>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">为了水平扩展名称服务，联邦模式使用多个独立的<span style="font-family:Verdana, Helvetica, Arial, sans-serif;line-height:15.6px;">Namenodes/namespaces</span>。多个</span><span style="vertical-align:inherit;">Namenode之间组成了一个联盟，并且各个</span><span style="vertical-align:inherit;">Namenode之间是独立的，不需要相互协调。</span><span style="vertical-align:inherit;">Datanodes被所有Namenodes通用，来做块的存储工作。</span><span style="vertical-align:inherit;">每个Datanode向集群中所有的NameNode发起注册，并向其</span><span style="vertical-align:inherit;">发送周期性的心跳和块报告，同事</span><span style="vertical-align:inherit;">还处理Namenodes发来的命令。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"></span>用户可以使用ViewFs来创建个性化的命名空间视图<span style="vertical-align:inherit;"><span style="vertical-align:inherit;">。</span><span style="vertical-align:inherit;">ViewFs类似于某些Unix / Linux系统中的客户端安装表。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">ViewFS使用参照 <a href="http://blog.csdn.net/anyuzun/article/details/78109320" rel="nofollow">http://blog.csdn.net/anyuzun/article/details/78109320</a> 。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;"><br></span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><img src="http://hadoop.apache.org/docs/r2.7.4/hadoop-project-dist/hadoop-hdfs/images/federation.gif" alt="HDFS联合体系结构" style="border:none;"></p>
+<p style="line-height:1.3em;font-size:12px;"><strong>块池</strong></p>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">单个块池是属于单个名字空间的一个组件。</span><span style="vertical-align:inherit;">Datanodes为集群中所有的块池提供块存储服务。</span><span style="vertical-align:inherit;">每个块池都是独立管理的。</span><span style="vertical-align:inherit;">这将允许名字空间为新块生成块ID，并且不需要与其他名字空间协调。集群中单个</span><span style="vertical-align:inherit;">Namenode故障不会阻止Datanode继续向其他Namenode提供服务。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">名字空间及其所属块池统称为名字空间卷。</span><span style="vertical-align:inherit;">这是一个独立的管理单位。</span><span style="vertical-align:inherit;">当Namenode或名字空间被删除时，在Datanodes中其相应的块池也被删除。</span><span style="vertical-align:inherit;">在集群升级期间，每个名字空间卷都将作为单独一个单元进行升级。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><strong>集群ID</strong></p>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">集群ID用于识别该集群中的所有节点。当一个</span><span style="vertical-align:inherit;">Namenode被格式化时时，其集群ID被主动提供或自动生成。</span><span style="vertical-align:inherit;">该ID将用于格式化其他的Namenodes到集群。</span></span></p>
+<div class="section">
+<h3 style="color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Key_Benefits"></a><span style="vertical-align:inherit;">主要优点</span></h3>
+<ul><li style="font-size:12px;color:rgb(51,51,51);"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">名字空间的可扩展性 - 联邦模式水平拓展了NameSpace。在集群中通过增加NameNode来水平拓展名字空间，使得</span><span style="vertical-align:inherit;">大型集群或包含多量小文件的集群得以受益。</span></span></li><li style="font-size:12px;color:rgb(51,51,51);"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">性能的提高 - 文件系统的吞吐量不再受单个Namenode限制。</span><span style="vertical-align:inherit;">向集群添加更多的Namenode大大提高了文件系统的读/写吞吐量。</span></span></li><li style="font-size:12px;color:rgb(51,51,51);"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">隔离性 - 单个Namenode并不能在多用户环境中提供隔离。</span><span style="vertical-align:inherit;">例如，一个实验阶段的应用程序可能会使生产环境的应用程序达到超载。</span><span style="vertical-align:inherit;">通过使用多个Namenode，可以使得不同类别的应用程序和用户隔离到不同的名字空间中去。</span></span></li></ul></div>
+</div>
+<div class="section" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:13px;">
+<h2 style="font-size:17px;color:rgb(51,51,51);"><a name="Federation_Configuration"></a><span style="vertical-align:inherit;">联邦配置</span></h2>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">联盟配置向后兼容</span><strong>，</strong><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">并允许单个Namenode使用现有的配置继续工作，而无需任何变化。</span><span style="vertical-align:inherit;">新的配置模式使得集群中的所有节点具有相同的配置，不需要根据集群中的节点类型部署不同而做出改变。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">联邦模式添加了一个新的</span><tt>NameServiceID</tt><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">抽象。一个</span><span style="vertical-align:inherit;">Namenode及其对应的secondary/backup/checkpointer节点都属于同一个NameServiceId。</span><span style="vertical-align:inherit;">为了支持多个NameNode配置写入到单个配置文件中，Namenode和其附属节点r配置参数均添加</span></span><tt>NameServiceID作为后缀</tt><span style="vertical-align:inherit;">。</span></p>
+<div class="section">
+<h3 style="color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Configuration:"></a>配置</h3>
+<p style="line-height:1.3em;font-size:12px;"><strong>步骤1</strong><span style="vertical-align:inherit;">：将</span><tt>dfs.nameservices</tt><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">参数</span><span style="vertical-align:inherit;">添加</span><span style="vertical-align:inherit;">到配置文件中，并使用逗号分隔的NameServiceID列表进行配置。</span><span style="vertical-align:inherit;">Datanodes将使用此配置来确定集群中的Namenode。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><strong>步骤2</strong><span style="vertical-align:inherit;">：对于每个Namenode和其附属节点的配置信息，以相应的N</span><tt>ameServiceID为后缀，添加</tt><span style="vertical-align:inherit;">到通用配置文件中：</span></p>
+<table border="0" class="bodyTable" style="margin-left:-2px;font-size:10px;color:rgb(0,0,0);font-family:Verdana, Helvetica, Arial, sans-serif;"><thead><tr class="a" style="background-color:rgb(221,221,221);"><th align="left" style="vertical-align:top;color:#FFFFFF;font-size:11px;background-color:rgb(187,187,187);">
+守护进程</th>
+<th align="left" style="vertical-align:top;color:#FFFFFF;font-size:11px;background-color:rgb(187,187,187);">
+配置参数</th>
+</tr></thead><tbody><tr class="b" style="background-color:rgb(238,238,238);"><td align="left" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:11px;color:rgb(51,51,51);vertical-align:top;">
+Namenode</td>
+<td align="left" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:11px;color:rgb(51,51,51);vertical-align:top;">
+<tt>dfs.namenode.rpc-address</tt> <br><tt>dfs.namenode.servicerpc-address</tt> <br><tt>dfs.namenode.http-address</tt> <br><tt>dfs.namenode.https-address</tt> <br><tt>dfs.namenode.keytab.file</tt> <br><tt>dfs.namenode.name.dir</tt> <br><tt>dfs.namenode.edits.dir</tt> <br><tt>dfs.namenode.checkpoint.dir</tt> <br><tt>dfs.namenode.checkpoint.edits.dir</tt></td>
+</tr><tr class="a" style="background-color:rgb(221,221,221);"><td align="left" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:11px;color:rgb(51,51,51);vertical-align:top;">
+Secondary Namenode</td>
+<td align="left" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:11px;color:rgb(51,51,51);vertical-align:top;">
+<tt>dfs.namenode.secondary.http-address</tt> <br><tt>dfs.secondary.namenode.keytab.file</tt></td>
+</tr><tr class="b" style="background-color:rgb(238,238,238);"><td align="left" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:11px;color:rgb(51,51,51);vertical-align:top;">
+BackupNode</td>
+<td align="left" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:11px;color:rgb(51,51,51);vertical-align:top;">
+<tt>dfs.namenode.backup.address</tt> <br><tt>dfs.secondary.namenode.keytab.file</tt></td>
+</tr></tbody></table><table border="0" class="bodyTable" style="margin-left:-2px;font-size:10px;"><tbody><tr class="b" style="background-color:rgb(238,238,238);"><td align="left" style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:11px;color:rgb(51,51,51);vertical-align:top;">
+<tt></tt></td>
+</tr></tbody></table><p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">这是一个包含双Namenode的配置示例：</span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">&lt;configuration&gt;
+  &lt;property&gt;
+    &lt;name&gt;dfs.nameservices&lt;/name&gt;
+    &lt;value&gt;ns1,ns2&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;dfs.namenode.rpc-address.ns1&lt;/name&gt;
+    &lt;value&gt;nn-host1:rpc-port&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;dfs.namenode.http-address.ns1&lt;/name&gt;
+    &lt;value&gt;nn-host1:http-port&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;</pre><pre style="font-size:13px;background-color:rgb(255,255,255);">    #官网中此配置少了一个 "." ，我也是无语了。以下是正确配置。
+    &lt;name&gt;dfs.namenode.secondary.http-address.ns1&lt;/name&gt;
+    &lt;value&gt;snn-host1:http-port&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;dfs.namenode.rpc-address.ns2&lt;/name&gt;
+    &lt;value&gt;nn-host2:rpc-port&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;dfs.namenode.http-address.ns2&lt;/name&gt;
+    &lt;value&gt;nn-host2:http-port&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;dfs.namenode.secondary.http-address.ns2&lt;/name&gt;
+    &lt;value&gt;snn-host2:http-port&lt;/value&gt;
+  &lt;/property&gt;
+
+  .... Other common configuration ...
+&lt;/configuration&gt;</pre>
+</div>
+</div>
+</div>
+<div class="section">
+<h3 style="color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Formatting_Namenodes"></a><span style="vertical-align:inherit;">格式化Namenode</span></h3>
+<p style="line-height:1.3em;font-size:12px;"><strong>步骤1</strong><span style="vertical-align:inherit;">：使用以下命令格式化Namenode：</span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/bin/hdfs namenode -format [-clusterId &lt;cluster_id&gt;]</pre>
+</div>
+</div>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">选择一个不会与其他集群发生冲突的cluster_id。</span><span style="vertical-align:inherit;">如果未提供cluster_id，则会自动生成。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><strong>步骤2</strong><span style="vertical-align:inherit;">：使用以下命令格式化其他的Namenodes：</span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/bin/hdfs namenode -format -clusterId &lt;cluster_id&gt;</pre>
+</div>
+</div>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">请注意，步骤2中的cluster_id必须与步骤1中的cluster_id相同。如果它们不同，则附加的Namenode不会成为联邦集群的一部分。</span></p>
+</div>
+<div class="section">
+<h3 style="color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Upgrading_from_an_older_release_and_configuring_federation"></a><span style="vertical-align:inherit;">从旧版本升级为联邦集群</span></h3>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">较旧的版本只支持单个Namenode。需要</span><span style="vertical-align:inherit;">将集群升级到较新版本以启用联邦模式，在升级期间，您可以使用如下的ClusterID：</span></span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/bin/hdfs start namenode --config $HADOOP_CONF_DIR  -upgrade -clusterId &lt;cluster_ID&gt;</pre>
+</div>
+</div>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">如果未提供cluster_id，则会自动生成。</span></p>
+</div>
+<div class="section">
+<h3 style="color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Adding_a_new_Namenode_to_an_existing_HDFS_cluster"></a><span style="vertical-align:inherit;">将新的Namenode添加到现有的HDFS集群</span></h3>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">执行以下步骤：</span></p>
+<ul><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;">将</span><tt>dfs.nameservices参数</tt><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">添加</span><span style="vertical-align:inherit;">到配置文件中。</span></span></p>
+</li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">使用NameServiceID后缀更新配置。</span><span style="vertical-align:inherit;">配置键名称已更改为0.20发布版本。</span><span style="vertical-align:inherit;">您必须使用新的配置参数名才能启用联邦模式。</span></span></p>
+</li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;">将新的Namenode相关配置信息添加到配置文件中。</span></p>
+</li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;">将配置文件分发到集群中的所有节点。</span></p>
+</li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;">启动新的Namenode及其附属节点。</span></p>
+</li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;">通过对集群中的所有Datanode运行以下命令，来刷新Datanode以使其获取新添加的Namenode：</span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="color:rgb(51,51,51);background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/bin/hdfs dfsadmin -refreshNameNodes &lt;datanode_host_name&gt;:&lt;datanode_rpc_port&gt;</pre>
+</div>
+</div>
+</li></ul></div>
+</div>
+<div class="section" style="font-size:13px;">
+<h2 style="font-family:Verdana, Helvetica, Arial, sans-serif;font-size:17px;color:rgb(51,51,51);">
+<a name="Managing_the_cluster"></a><span style="vertical-align:inherit;">管理集群</span></h2>
+<div class="section" style="font-family:Verdana, Helvetica, Arial, sans-serif;">
+<h3 style="color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Starting_and_stopping_cluster"></a><span style="vertical-align:inherit;">启动和停止集群</span></h3>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">要启动集群，请运行以下命令：</span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/sbin/start-dfs.sh</pre>
+</div>
+</div>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">要停止集群，请运行以下命令：</span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/sbin/stop-dfs.sh</pre>
+</div>
+</div>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">这些命令可以在拥有HDFS配置文件的任何节点运行。</span><span style="vertical-align:inherit;">该命令使用配置文件来确定集群中的Namenode节点，然后在这些节点上启动Namenode进程。DataNode则</span><span style="vertical-align:inherit;">在[slaves]</span></span><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">文件中获取节点信息，并在</span><span style="vertical-align:inherit;">指定的节点上启动</span><span style="vertical-align:inherit;">。</span><span style="vertical-align:inherit;">该脚本可参考用来构建自己的脚本以启动和停止集群。</span></span></p>
+</div>
+<div class="section" style="font-family:Verdana, Helvetica, Arial, sans-serif;">
+<h3 style="color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Balancer"></a><span style="vertical-align:inherit;">平衡器</span></h3>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">使用多个NameNode时，平衡器已经发生更改。</span><span style="vertical-align:inherit;">可以使用以下命令运行平衡器：</span></span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/sbin/hadoop-daemon.sh start balancer [-policy &lt;policy&gt;]</pre>
+</div>
+</div>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">策略参数可以是以下任一项：</span></p>
+<ul><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><tt>datanode</tt><span style="vertical-align:inherit;"> - 这是默认</span><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">策略。</span><span style="vertical-align:inherit;">这样可以在DataNode级别平衡存储空间。</span><span style="vertical-align:inherit;">这与以前版本的平衡策略相似。</span></span></p>
+</li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><tt>blockpool</tt><span style="vertical-align:inherit;"> -这将在块池级别平衡存储空间，同时也对Datanode级别的存储空间进行平衡。</span></p>
+</li></ul><p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">请注意，平衡器仅平衡数据，不会平衡名字空间。</span><span style="vertical-align:inherit;">有关完整的命令用法，请参阅平衡器</span></span>文档<span style="vertical-align:inherit;">。</span></p>
+</div>
+<div class="section" style="font-family:Verdana, Helvetica, Arial, sans-serif;">
+<h3 style="color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Decommissioning"></a><span style="vertical-align:inherit;">退役</span></h3>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">退役类似于以前的版本。将</span><span style="vertical-align:inherit;">需要退役的节点添加到所有Namenodes的[exclude]文件中。</span><span style="vertical-align:inherit;">每个Namenode将会退役其对应的Block
+ Pool。</span><span style="vertical-align:inherit;">当所有Namenode完成DataNode的退役后，Datanode宣告退役。</span></span></p>
+<p style="line-height:1.3em;font-size:12px;"><strong>步骤1</strong><span style="vertical-align:inherit;">：要将排除文件分发到所有的Namenodes，请使用以下命令：</span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/sbin/distribute-exclude.sh &lt;exclude_file&gt;</pre>
+</div>
+</div>
+<p style="line-height:1.3em;font-size:12px;"><strong>步骤2</strong><span style="vertical-align:inherit;">：刷新所有的Namenode以接收新的排除文件：</span></p>
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<div class="source" style="border:1px solid rgb(153,153,153);overflow:auto;">
+<pre><span style="vertical-align:inherit;"></span></pre><pre style="font-size:13px;background-color:rgb(255,255,255);">[hdfs]$ $HADOOP_PREFIX/sbin/refresh-namenodes.sh</pre>
+</div>
+</div>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;">上述命令使用HDFS配置信息来确定集群中的Namenode，并刷新它们来接收新的排除文件。</span></p>
+</div>
+<div class="section">
+<h3 style="font-family:Verdana, Helvetica, Arial, sans-serif;color:rgb(102,102,102);font-size:14px;background-color:rgb(204,204,204);">
+<a name="Cluster_Web_Console"></a><span style="vertical-align:inherit;">集群Web控制台</span></h3>
+<p style="line-height:1.3em;font-size:12px;"><span style="vertical-align:inherit;"><span style="font-family:Verdana, Helvetica, Arial, sans-serif;">与Namenode状态网页类似，当使用联邦集群时，可以通过访问 </span><span style="font-family:monospace;line-height:15.6px;">http://&lt;any_nn_host:port&gt;/dfsclusterhealth.jsp
+ 页面来</span><span style="font-family:Verdana, Helvetica, Arial, sans-serif;">使用Cluster Web Console监视</span><span style="font-family:monospace;">联邦</span></span><span style="font-family:Verdana, Helvetica, Arial, sans-serif;vertical-align:inherit;"><span style="vertical-align:inherit;">集群</span><span style="vertical-align:inherit;">。集群</span><span style="vertical-align:inherit;">中的任何Namenode都可用于访问此网页。</span></span></p>
+<p style="font-family:Verdana, Helvetica, Arial, sans-serif;line-height:1.3em;font-size:12px;">
+<span style="vertical-align:inherit;">集群Web控制台提供以下信息：</span></p>
+<ul style="font-family:Verdana, Helvetica, Arial, sans-serif;"><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;">一个集群摘要，显示了整个集群的文件数量，块数，总配置存储容量以及可用/已用存储。</span></p>
+</li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;"><span style="vertical-align:inherit;">一个Namenodes的列表和一个摘要，包含了每个Namenode的文件数，块数，缺失块数，以及存活和挂掉的数据节点数。</span><span style="vertical-align:inherit;">它还提供访问每个Namenode的Web UI的链接。</span></span></p>
+</li><li style="font-size:12px;color:rgb(51,51,51);">
+<p style="line-height:1.3em;color:rgb(0,0,0);"><span style="vertical-align:inherit;">Datanodes的退役状态。</span></p>
+</li></ul></div>
+</div>
+            </div>
+                </div>

@@ -1,0 +1,205 @@
+---
+layout:     post
+title:      flume组合模式之高可用配置
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/lzxlfly/article/details/80672267				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h3>1、flume简介</h3><p></p><h4>（1）概念简述</h4><p>Flume NG是一个分布式，高可用，可靠的系统，它能将不同的海量数据收集，移动并存储到一个数据存储系统中。轻量，配置简单，适用于各种日志收集，并支持 Failover和负载均衡。并且它拥有非常丰富的组件。Flume NG采用的是三层架构：Agent层，Collector层和Store层，每一层均可水平拓展。其中Agent包含Source，Channel和 Sink，三者组建了一个Agent。三者的职责如下所示：</p>•Source：用来消费（收集）数据源到Channel组件中<br>•Channel：中转临时存储，保存所有Source组件信息<br><p>•Sink：从Channel中读取，读取成功后会删除Channel中的信息</p><p></p><p>下图是Flume NG的架构图，如下所示：</p><p><br></p><img src="https://img-blog.csdn.net/20180618130827650?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2x6eGxmbHk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br><br><p> 图中描述了，从外部系统（Web Server）中收集产生的日志，然后通过Flume的Agent的Source组件将数据发送到临时存储Channel组件，最后传递给Sink组件，Sink组件直接把数据存储到HDFS文件系统中。</p><h4>（2）常见模式</h4><p></p><ul><li>Setting multi-agent flow（设置多个agent流）</li></ul><p><img src="https://img-blog.csdn.net/20180618131137488?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2x6eGxmbHk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p>为了让数据可以流过多个agents或者hops，前面那个agent的sink和当前的hop的source都必须是avro类型并且sink还要指向source的主机名（IP地址）和端口。<br></p><p>这种模式是将多个flume给顺序连接起来了，从最初的source开始到最终sink传送的目的存储系统。此模式不建议桥接过多的flume数量，就像路由器的桥接一样，多了网速会慢，flume过多不仅会影响传输速率，而且一旦传输过程中某个节点flume宕机，会影响整个传输系统。</p><ul><li>Consolidation（结合）</li></ul><p><img src="https://img-blog.csdn.net/20180618131152937?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2x6eGxmbHk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p>这种模式也是我们日常常见的，也非常实用，日常web应用通常分布在上百个服务器，大者甚至上千个、上万个服务器。</p><p>产生的日志，处理起来也非常麻烦。用flume的这种组合方式能很好的解决这一问题，每台服务器一个flume采集日志，</p><p>传送到一个集中收集日志的flume，再由此flume上传到hdfs、hive、hbase、jms等，进行日志分析。</p><ul><li>Multiplexing the flow（选择分流）</li></ul><p><img src="https://img-blog.csdn.net/20180618131209118?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2x6eGxmbHk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p>此模式，Flume支持将事件流向一个或者多个目的地。这个可以通过定义一个流的能够复制或者可选路径的多路选择器来将事件导向一个或者多个Channel来实现。<br></p><p>这种模式将数据源复制到多个channel中，每个channel都有相同的数据，sink可以选择传送的不同的目的地。</p><p><br></p><h3>2、模式应用</h3><p></p><ul><li> 编辑hosts</li></ul><p>    这里用5台机搭建flume-HA集群，hosts加入以下内容</p><p>    192.168.1.71 node01<br>    192.168.1.72 node02<br>    192.168.1.73 node03<br>    192.168.1.74 node04<br></p><p>    192.168.1.75 node05</p><p></p><ul><li> 案例说明-Consolidation（结合-高可用）</li></ul><p>    假设node01、node02、node03是我们的部署web应用的服务器，</p><p>    在每个服务器上flume Agent模式部署，采集web应用产生的日志</p><p>    并传送给Collector。node04、node05是flume Collector模式部署，</p><p>    负责接收每个Agent传送过来的日志，并上传到hdfs。</p><table border="1" width="200" cellspacing="1" cellpadding="1"><tbody><tr><td>nodes</td><td>Web Server</td><td>flume Agent</td><td>flume Collector</td></tr><tr><td>node01</td><td>1</td><td>1</td><td> </td></tr><tr><td>node02</td><td>1</td><td>1</td><td> </td></tr><tr><td>node03</td><td>1</td><td>1</td><td> </td></tr><tr><td>node04</td><td> </td><td> </td><td>1(主)</td></tr><tr><td>node05</td><td> </td><td> </td><td>1(备)</td></tr></tbody></table><br><h3>3、下载安装</h3><p>    去<a href="http://flume.apache.org/download.html" rel="nofollow">http://flume.apache.org/download.html</a>下载，这里下载最新稳定版apache-flume-1.8.0-bin.tar.gz</p><p>    在node01下，/opt/bigdata/ 路径下，解压 </p><pre><code class="language-plain"> tar -zxvf apache-flume-1.8.0-bin.tar.gz</code></pre><p>    为了方便，重命名下</p><pre><code class="language-plain">mv apache-flume-1.8.0-bin ./flume-1.8.0</code></pre><br><h3>4、配置flume</h3><h4>（1）配置环境变量</h4><p>    在/opt/bigdata/ 下，默认flume-env.sh.template，复制一份命名flume-env.sh</p><pre><code class="language-plain">cp flume-1.8.0/conf/flume-env.sh.template  flume-1.8.0/conf/flume-env.sh</code></pre><p>    编辑 vim flume-1.8.0/conf/flume-env.sh,指定jdk路径</p><pre><code class="language-plain">export JAVA_HOME=$JAVA_HOME 或直接指定jdk路径 export JAVA_HOME=/usr/local/jdk1.8</code></pre><h4>（2）配置启动参数</h4><p></p><ul><li>在node01，/opt/bigdata/ 下，默认flume-conf.properties.template，复制一份命名flume-conf.properties</li></ul><pre><code class="language-plain">cp flume-1.8.0/conf/flume-conf.properties.template  flume-1.8.0/conf/flume-conf.properties</code></pre><p></p><ul><li>编辑 vim flume-1.8.0/conf/flume-conf.properties,设置相关参数</li></ul><p>    由于node01、node02、node03上的flume是Agent角色，所以这三台flume-conf.properties配置一样</p><pre><code class="language-plain">#agent1 name  
+agent1.channels = c1  
+agent1.sources = r1  
+agent1.sinks = k1 k2  
+
+#set channel  
+agent1.channels.c1.type = memory  
+agent1.channels.c1.capacity = 1000 #channel中存储 events 的最大数量
+agent1.channels.c1.transactionCapacity = 100  #事物容量，不能大于capacity，不能小于batchSize
+
+#agent1.sources.r1.type = exec  
+#agent1.sources.r1.command = tail -F /data/logdfs/f.log  #实时采集文件
+#agent1.sources.r1.channels = c1
+
+agent1.sources.r1.type = spooldir #spooldir类型
+agent1.sources.r1.spoolDir = /data/logdfs #此路径下每产生新文件，flume就会自动采集
+agent1.sources.r1.fileHeader = true
+agent1.sources.r1.channels = c1  
+
+# set sink1  
+agent1.sinks.k1.channel = c1  
+agent1.sinks.k1.type = avro  
+agent1.sinks.k1.hostname = node04  
+agent1.sinks.k1.port = 52020  
+# set sink2  
+agent1.sinks.k2.channel = c1  
+agent1.sinks.k2.type = avro  #协议类型
+agent1.sinks.k2.hostname = node05  
+agent1.sinks.k2.port = 52020 
+
+#set gruop  
+agent1.sinkgroups = g1  
+#set sink group  
+agent1.sinkgroups.g1.sinks = k1 k2  
+#set failover  
+agent1.sinkgroups.g1.processor.type = failover  #故障转移，若node04故障，node05自动接替node04工作
+agent1.sinkgroups.g1.processor.priority.k1 = 10  #优先级10
+agent1.sinkgroups.g1.processor.priority.k2 = 5   #优先级5
+agent1.sinkgroups.g1.processor.maxpenalty = 10000 #最长等待10秒转移故障</code></pre><p></p><ul><li>分发flume</li></ul><pre><code class="language-plain">scp flume-1.8.0 node02:`pwd`
+scp flume-1.8.0 node03:`pwd`
+scp flume-1.8.0 node04:`pwd`
+scp flume-1.8.0 node05:`pwd`</code></pre><br><p></p><ul><li>node04、node05上的flume是Collector角色，而node04承担了master角色，node05承担了slave角色</li></ul><p>    所以配置不一样，清空node04、node05配置，从新配置。</p><p>    node04如下：</p><pre><code class="language-plain">a1.sources = r1  
+a1.channels = kafka_c1 hdfs_c2  
+a1.sinks = kafka_k1 hdfs_k2
+
+#properties of avro-AppSrv-source 
+a1.sources.r1.type = avro  
+a1.sources.r1.bind = node04  
+a1.sources.r1.port = 52020
+a1.sources.r1.channels=kafka_c1 hdfs_c2   #设置sources的channels
+#增加拦截器 所有events,增加头,类似json格式里的"headers":{" key":" value"}
+a1.sources.r1.interceptors = i1  #拦截器名字
+a1.sources.r1.interceptors.i1.type = static  #拦截器类型
+a1.sources.r1.interceptors.i1.key = Collector  #自定义 
+a1.sources.r1.interceptors.i1.value = node04   #自定义
+
+#set kafka channel  
+a1.channels.kafka_c1.type = memory  
+a1.channels.kafka_c1.capacity = 1000  
+a1.channels.kafka_c1.transactionCapacity = 100 
+#set hdfs channel  
+a1.channels.hdfs_c2.type = memory
+a1.channels.hdfs_c2.capacity = 1000
+a1.channels.hdfs_c2.transactionCapacity = 100
+
+#set sink to kafka
+a1.sinks.kafka_k1.type=org.apache.flume.sink.kafka.KafkaSink
+a1.sinks.kafka_k1.channel=kafka_c1  #传输的channel名
+a1.sinks.kafka_k1.topic = rwb_topic #kafka中的topic
+a1.sinks.kafka_k1.brokerList = node01:9092,node02:9092,node03:9092
+a1.sinks.kafka_k1.requiredAcks = 1
+a1.sinks.kafka_k1.batchSize = 1000
+#set sink to hdfs  
+a1.sinks.hdfs_k2.type=hdfs  #传输到hdfs
+a1.sinks.hdfs_k2.channel=hdfs_c2 #传输的channel名
+a1.sinks.hdfs_k2.hdfs.path=hdfs://mycluster:8020/flume/logdfs  #这里hadoop集群时HA集群，所以这里写的是集群的Namespace
+a1.sinks.hdfs_k2.hdfs.fileType=DataStream  
+a1.sinks.hdfs_k2.hdfs.writeFormat=TEXT  #文本格式
+a1.sinks.hdfs_k2.hdfs.rollInterval=1    #失败1s回滚
+a1.sinks.hdfs_k2.hdfs.filePrefix=%Y-%m-%d  #文件名前缀
+a1.sinks.hdfs_k2.hdfs.fileSuffix=.txt      #文件名后缀
+a1.sinks.hdfs_k2.hdfs.useLocalTimeStamp = true  
+</code></pre><p>    node05如下：</p><pre><code class="language-plain">a1.sources = r1  
+a1.channels = kafka_c1 hdfs_c2  
+a1.sinks = kafka_k1 hdfs_k2
+
+#properties of avro-AppSrv-source 
+a1.sources.r1.type = avro  
+a1.sources.r1.bind = node05 
+a1.sources.r1.port = 52020
+a1.sources.r1.channels=kafka_c1 hdfs_c2   #设置sources的channels
+#增加拦截器 所有events,增加头,类似json格式里的"headers":{" key":" value"}
+a1.sources.r1.interceptors = i1  #拦截器名字
+a1.sources.r1.interceptors.i1.type = static  #拦截器类型
+a1.sources.r1.interceptors.i1.key = Collector  #自定义 
+a1.sources.r1.interceptors.i1.value = node04   #自定义
+
+#set kafka channel  
+a1.channels.kafka_c1.type = memory  
+a1.channels.kafka_c1.capacity = 1000  
+a1.channels.kafka_c1.transactionCapacity = 100 
+#set hdfs channel  
+a1.channels.hdfs_c2.type = memory
+a1.channels.hdfs_c2.capacity = 1000
+a1.channels.hdfs_c2.transactionCapacity = 100
+
+#set sink to kafka
+a1.sinks.kafka_k1.type=org.apache.flume.sink.kafka.KafkaSink
+a1.sinks.kafka_k1.channel=kafka_c1  #传输的channel名
+a1.sinks.kafka_k1.topic = rwb_topic #kafka中的topic
+a1.sinks.kafka_k1.brokerList = node01:9092,node02:9092,node03:9092
+a1.sinks.kafka_k1.requiredAcks = 1
+a1.sinks.kafka_k1.batchSize = 1000
+#set sink to hdfs  
+a1.sinks.hdfs_k2.type=hdfs  #传输到hdfs
+a1.sinks.hdfs_k2.channel=hdfs_c2 #传输的channel名
+a1.sinks.hdfs_k2.hdfs.path=hdfs://mycluster:8020/flume/logdfs  #这里hadoop集群时HA集群，所以这里写的是集群的Namespace
+a1.sinks.hdfs_k2.hdfs.fileType=DataStream  
+a1.sinks.hdfs_k2.hdfs.writeFormat=TEXT  #文本格式
+a1.sinks.hdfs_k2.hdfs.rollInterval=1    #失败1s回滚
+a1.sinks.hdfs_k2.hdfs.filePrefix=%Y-%m-%d  #文件名前缀
+a1.sinks.hdfs_k2.hdfs.fileSuffix=.txt      #文件名后缀
+a1.sinks.hdfs_k2.hdfs.useLocalTimeStamp = true  
+</code></pre><h4>（3）启动flume</h4><p></p><ul><li>启动Collector</li></ul><p>    在node04、node05/opt/bigdata/下分别如下命令启动 </p><pre><code class="language-plain">flume-1.8.0/bin/flume-ng agent --conf conf --conf-file flume-1.8.0/conf/flume-conf.properties --name a1 -Dflume.root.logger=INFO,console &gt; flume-1.8.0/logs/flume-server.log 2&gt;&amp;1 &amp;</code></pre><p></p><ul><li>启动Agent</li></ul><p>    在node01、node02、node03 /opt/bigdata/下分别如下命令启动 </p><pre><code class="language-plain">flume-1.8.0/bin/flume-ng agent --conf conf --conf-file flume-1.8.0/conf/flume-conf.properties --name agent1 -Dflume.root.logger=DEBUG,console &gt; flume-1.8.0/logs/flume-server.log 2&gt;&amp;1 &amp;</code></pre>    a1、agent1 为各自flume的代理名<br><h3>5、高可用测试</h3><p>    在node01、node02、node03任一节点 /data/logdfs下，产生新文件，</p><p>    该节点下的flume就会采集传送的node04的flume。</p><p></p><ul><li>这里在node01下 复制cp /root/install.log 到 /data/logdfs 下</li></ul><p>       此时tail -f flume-1.8.0/logs/flume-server.log 查看node04的flume日志，部分日志如下</p><pre><code class="language-plain">18/06/17 14:54:22 INFO hdfs.HDFSEventSink: Writer callback called.
+18/06/17 14:58:28 INFO ipc.NettyServer: Connection to /192.168.1.73:34166 disconnected.
+18/06/17 14:59:21 INFO ipc.NettyServer: [id: 0xeffc35bb, /192.168.1.71:34175 =&gt; /192.168.1.74:52020] OPEN
+18/06/17 14:59:21 INFO ipc.NettyServer: [id: 0xeffc35bb, /192.168.1.71:34175 =&gt; /192.168.1.74:52020] BOUND: /192.168.1.74:52020
+18/06/17 14:59:21 INFO ipc.NettyServer: [id: 0xeffc35bb, /192.168.1.71:34175 =&gt; /192.168.1.74:52020] CONNECTED: /192.168.1.73:34175
+18/06/17 14:59:21 INFO hdfs.HDFSDataStream: Serializer = TEXT, UseRawLocalFileSystem = false
+18/06/17 14:59:21 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961816.txt.tmp
+18/06/17 14:59:21 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961816.txt.tmp
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961816.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529261961816.txt
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961817.txt.tmp
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961817.txt.tmp
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961817.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529261961817.txt
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961818.txt.tmp
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961818.txt.tmp
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961818.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529261961818.txt
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961819.txt.tmp
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961819.txt.tmp
+18/06/17 14:59:22 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529261961819.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529261961819.txt
+</code></pre><p>    与此此时看node05的flume日志是没有任何情况的，也就是node05的flume没有工作</p><p><br></p><p></p><ul><li>接下啦kill掉node04的flume</li></ul><p>    在node01下，复制一个新文件到cp /root/install.log.syslog 到 /data/logdfs 下，部分日志如下</p><pre><code class="language-plain">18/06/17 14:24:17 INFO hdfs.HDFSEventSink: Writer callback called.
+18/06/17 14:39:42 INFO ipc.NettyServer: [id: 0x7079374a, /192.168.1.71:51692 =&gt; /192.168.1.75:52020] OPEN
+18/06/17 14:39:42 INFO ipc.NettyServer: [id: 0x7079374a, /192.168.1.71:51692 =&gt; /192.168.1.75:52020] BOUND: /192.168.1.75:52020
+18/06/17 14:39:42 INFO ipc.NettyServer: [id: 0x7079374a, /192.168.1.71:51692 =&gt; /192.168.1.75:52020] CONNECTED: /192.168.1.71:51692
+18/06/17 14:39:45 INFO hdfs.HDFSDataStream: Serializer = TEXT, UseRawLocalFileSystem = false
+18/06/17 14:39:45 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785844.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785844.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785844.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785844.txt
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785845.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785845.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785845.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785845.txt
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785846.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785846.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785846.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785846.txt
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785847.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785847.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785847.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785847.txt
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785848.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785848.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785848.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785848.txt
+</code></pre><p>    可以看到node01与node05建立的连接，node05把采集到的文件开始上传到hdfs</p><p>    node05-flume接替了node04-flume的工作，故障自动转移了。</p><p><br></p><p></p><ul><li>此时在重新启动node04的flume，这次我们换台机，在node02 /data/lodfs下产生新文件，</li></ul><p>    复制cp /root/nohup.out 到 /data/lodfs 下，查看node04的flume日志，部分日志如下</p><pre><code class="language-plain">18/06/17 14:24:17 INFO hdfs.HDFSEventSink: Writer callback called.
+18/06/17 14:39:42 INFO ipc.NettyServer: [id: 0x7079374a, /192.168.1.72:51692 =&gt; /192.168.1.74:52020] OPEN
+18/06/17 14:39:42 INFO ipc.NettyServer: [id: 0x7079374a, /192.168.1.72:51692 =&gt; /192.168.1.74:52020] BOUND: /192.168.1.74:52020
+18/06/17 14:39:42 INFO ipc.NettyServer: [id: 0x7079374a, /192.168.1.72:51692 =&gt; /192.168.1.74:52020] CONNECTED: /192.168.1.72:51692
+18/06/17 14:39:45 INFO hdfs.HDFSDataStream: Serializer = TEXT, UseRawLocalFileSystem = false
+18/06/17 14:39:45 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785844.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785844.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785844.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785844.txt
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785845.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785845.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785845.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785845.txt
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785846.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785846.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785846.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785846.txt
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785847.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785847.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785847.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785847.txt
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Creating hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785848.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Closing hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785848.txt.tmp
+18/06/17 14:39:46 INFO hdfs.BucketWriter: Renaming hdfs://mycluster:8020/flume/logdfs/2018-06-17.1529260785848.txt.tmp to hdfs://myclu
+ster:8020/flume/logdfs/2018-06-17.1529260785848.txt</code></pre>可以看到node02与node04建立的连接，node04的flume把采集到的文件开始上传到hdfs，node04的flume启动后，又重新下恢复正常工作了<br><p><br></p><p>参考：<a href="https://blog.csdn.net/shouhuzhezhishen/article/details/64904848" rel="nofollow">https://blog.csdn.net/shouhuzhezhishen/article/details/64904848</a></p><p>参考：<a href="https://www.cnblogs.com/simple-focus/p/6138896.html" rel="nofollow">https://www.cnblogs.com/simple-focus/p/6138896.html</a></p><p>参考：<a href="http://flume.apache.org/FlumeUserGuide.html" rel="nofollow">http://flume.apache.org/FlumeUserGuide.html</a></p>            </div>
+                </div>

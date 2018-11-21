@@ -1,0 +1,1029 @@
+---
+layout:     post
+title:      Hbase作为Web的数据库
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-family:'microsoft yahei';color:#444444;line-height:30px;background-color:#ffffff;font-size:15px;">在此之前我们使用Mysql作为数据源，但发现这数据增长速度太快，并且由于种种原因，因此必须使用HBase，所以我们要把Mysql表里面的数据迁移到HBase中，在这里我就不讲解、不争论为什么要使用HBase，HBase是什么了，喜欢的就认真看下去，总有些地方是有用的</span><a href="http://static.oschina.net/uploads/img/201504/10164605_AzhS.gif" rel="nofollow"><img alt="" src="http://static.oschina.net/uploads/img/201504/10164605_AzhS.gif"></a><a href="http://static.oschina.net/uploads/img/201504/10164605_AzhS.gif" rel="nofollow"><img alt="" src="http://static.oschina.net/uploads/img/201504/10164605_AzhS.gif"></a><a href="http://static.oschina.net/uploads/img/201504/10164605_AzhS.gif" rel="nofollow"><img alt="" src="http://static.oschina.net/uploads/img/201504/10164605_AzhS.gif"></a>
+</p>
+<p><span style="font-family:'microsoft yahei';color:#444444;line-height:30px;background-color:#ffffff;font-size:15px;">我们要做的3大步骤：</span>
+</p>
+<p><br></p>
+<ol><li>
+<p><span style="line-height:1.5;font-size:10pt;">新建HBase表格。</span> </p>
+</li><li>
+<p><span style="line-height:1.5;font-size:10pt;">把MYSQL数据迁移到HBase中。</span> </p>
+</li><li>
+<p><span style="line-height:1.5;font-size:10pt;">在Java Web项目中读取HBase的数据。</span> </p>
+</li></ol><p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<br></p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+先介绍一下必要的一些环境： </p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<strong>HBase的版本</strong>：0.98.8-hadoop2 </p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<strong>所需的依赖包</strong>： </p>
+<pre class="prettyprint">commons-codec-1.7.jar
+commons-collections-3.2.1.jar
+commons-configuration-1.6.jar
+commons-lang-2.6.jar
+commons-logging-1.1.3.jar
+guava-12.0.1.jar
+hadoop-auth-2.5.0.jar
+hadoop-common-2.5.0.jar
+hbase-client-0.98.8-hadoop2.jar
+hbase-common-0.98.8-hadoop2.jar
+hbase-protocol-0.98.8-hadoop2.jar
+htrace-core-2.04.jar
+jackson-core-asl-1.9.13.jar
+jackson-mapper-asl-1.9.13.jar
+log4j-1.2.17.jar
+mysql-connector-java-5.1.7-bin.jar
+netty-3.6.6.Final.jar
+protobuf-java-2.5.0.jar
+slf4j-api-1.7.5.jar
+slf4j-log4j12-1.7.5.jar
+zookeeper-3.4.6.jar</pre>
+<p><span style="font-family:'microsoft yahei';color:#444444;line-height:30px;background-color:#ffffff;font-size:15px;">如果在你的web项目中有些包已经存在，保留其中一个就好了，免得报奇怪的错误就麻烦了。</span>
+</p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<br></p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:24px;"><strong>步骤1：建表</strong></span> </p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+在此之前，我在Mysql中的业务数据表一共有6个，其结构重复性太高了，首先看看我在HBase里面的表结构： </p>
+<table border="1" cellspacing="0" cellpadding="0" style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;"><tbody><tr><td><strong>表名</strong></td>
+<td style="text-align:center;">kpi</td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+</tr><tr><td><strong>key</strong></td>
+<td style="text-align:center;">fid+tid+date</td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+</tr><tr><td><strong>簇(family)</strong></td>
+<td style="text-align:center;">base</td>
+<td style="text-align:center;">gpower</td>
+<td style="text-align:center;">userate</td>
+<td style="text-align:center;">consum</td>
+<td style="text-align:center;">time</td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+</tr><tr><td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr><tr><td><strong>描述</strong></td>
+<td style="text-align:center;">基础信息</td>
+<td style="text-align:center;">发电量相关指标</td>
+<td style="text-align:center;">可利用率</td>
+<td style="text-align:center;">自耗电量</td>
+<td style="text-align:center;">累计运行小时数</td>
+<td style="text-align:center;">检修小时数</td>
+<td style="text-align:center;">利用小时数</td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+<td style="text-align:center;"> </td>
+</tr><tr><td><strong>列(qualifier)</strong></td>
+<td style="text-align:center;">fid</td>
+<td style="text-align:center;">tid</td>
+<td style="text-align:center;">date</td>
+<td style="text-align:center;">power</td>
+<td style="text-align:center;">windspeed</td>
+<td style="text-align:center;">unpower</td>
+<td style="text-align:center;">theory</td>
+<td style="text-align:center;">coup</td>
+<td style="text-align:center;">time</td>
+<td style="text-align:center;">power</td>
+<td style="text-align:center;">num</td>
+<td style="text-align:center;">cpower</td>
+<td style="text-align:center;">gpower</td>
+<td style="text-align:center;">runtime</td>
+<td style="text-align:center;">checktime</td>
+<td style="text-align:center;">usetime</td>
+</tr><tr><td><strong>描述</strong></td>
+<td style="text-align:center;">风场ID</td>
+<td style="text-align:center;">风机号</td>
+<td style="text-align:center;">日期</td>
+<td style="text-align:center;">发电量</td>
+<td style="text-align:center;">风速</td>
+<td style="text-align:center;">弃风电量</td>
+<td style="text-align:center;">理论电量</td>
+<td style="text-align:center;">耦合度</td>
+<td style="text-align:center;">故障时间</td>
+<td style="text-align:center;">故障损失电量</td>
+<td style="text-align:center;">故障台次</td>
+<td style="text-align:center;">当天自耗电量</td>
+<td style="text-align:center;">当天发电量</td>
+<td style="text-align:center;">当天并网秒数</td>
+<td style="text-align:center;">当天检修秒数</td>
+<td style="text-align:center;">当天利用秒数</td>
+</tr></tbody></table><p><span style="font-family:'microsoft yahei';color:#444444;line-height:30px;background-color:#ffffff;font-size:15px;">这个表中我们有5个family，其中base Family是对应6个mysql表中的key列，</span>
+<span style="font-family:'microsoft yahei';font-size:12px;color:#444444;line-height:18px;background-color:#ffffff;">
+gpower、userate、consum分别对应一个表，time对应3个表。</span> <span style="font-family:'microsoft yahei';color:#444444;line-height:30px;background-color:#ffffff;font-size:15px;">
+</span></p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:12px;line-height:18px;">这个kpi表的rowkey设计是base中的3个qualifier，分别从3个维度查询数据，这样的设计已经可以满足我们的需求了。</span>
+</p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:12px;line-height:18px;">具体在HBase中如何建表如何搭建环境自己参考我写的【手把手教你配置HBase完全分布式环境】这篇文章吧。</span>
+</p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:12px;line-height:18px;"><br></span></p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:24px;line-height:18px;"><strong>步骤2：把MySQL数据迁移到HBase</strong></span>
+</p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:24px;line-height:18px;"><strong><br></strong></span></p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:12px;line-height:18px;">这时我用gpower对应的mysql表来做演示吧，其他表的道理都一样。（这里可能有人会说为什么不用第三方插件直接数据库对数据库迁移，这里我统一回答一下，我不会，我也不需要。）</span>
+</p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:12px;line-height:18px;">okay,首先我们来看看代码先吧：</span> </p>
+<div>
+<div id="highlighter_185608" class="syntaxhighlighter java ie">
+<div class="toolbar"><span><a class="toolbar_item command_help help" href="#" rel="nofollow"><span style="color:#ff8373;">?</span></a></span></div>
+<table border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="gutter">
+<div class="line number1 index0 alt2">1</div>
+<div class="line number2 index1 alt1">2</div>
+<div class="line number3 index2 alt2">3</div>
+<div class="line number4 index3 alt1">4</div>
+<div class="line number5 index4 alt2">5</div>
+<div class="line number6 index5 alt1">6</div>
+<div class="line number7 index6 alt2">7</div>
+<div class="line number8 index7 alt1">8</div>
+<div class="line number9 index8 alt2">9</div>
+<div class="line number10 index9 alt1">10</div>
+<div class="line number11 index10 alt2">11</div>
+<div class="line number12 index11 alt1">12</div>
+<div class="line number13 index12 alt2">13</div>
+<div class="line number14 index13 alt1">14</div>
+<div class="line number15 index14 alt2">15</div>
+<div class="line number16 index15 alt1">16</div>
+<div class="line number17 index16 alt2">17</div>
+<div class="line number18 index17 alt1">18</div>
+<div class="line number19 index18 alt2">19</div>
+<div class="line number20 index19 alt1">20</div>
+<div class="line number21 index20 alt2">21</div>
+<div class="line number22 index21 alt1">22</div>
+<div class="line number23 index22 alt2">23</div>
+<div class="line number24 index23 alt1">24</div>
+<div class="line number25 index24 alt2">25</div>
+<div class="line number26 index25 alt1">26</div>
+<div class="line number27 index26 alt2">27</div>
+<div class="line number28 index27 alt1">28</div>
+<div class="line number29 index28 alt2">29</div>
+<div class="line number30 index29 alt1">30</div>
+<div class="line number31 index30 alt2">31</div>
+<div class="line number32 index31 alt1">32</div>
+<div class="line number33 index32 alt2">33</div>
+<div class="line number34 index33 alt1">34</div>
+<div class="line number35 index34 alt2">35</div>
+<div class="line number36 index35 alt1">36</div>
+<div class="line number37 index36 alt2">37</div>
+<div class="line number38 index37 alt1">38</div>
+<div class="line number39 index38 alt2">39</div>
+<div class="line number40 index39 alt1">40</div>
+<div class="line number41 index40 alt2">41</div>
+<div class="line number42 index41 alt1">42</div>
+<div class="line number43 index42 alt2">43</div>
+<div class="line number44 index43 alt1">44</div>
+<div class="line number45 index44 alt2">45</div>
+<div class="line number46 index45 alt1">46</div>
+<div class="line number47 index46 alt2">47</div>
+<div class="line number48 index47 alt1">48</div>
+<div class="line number49 index48 alt2">49</div>
+<div class="line number50 index49 alt1">50</div>
+<div class="line number51 index50 alt2">51</div>
+<div class="line number52 index51 alt1">52</div>
+<div class="line number53 index52 alt2">53</div>
+<div class="line number54 index53 alt1">54</div>
+<div class="line number55 index54 alt2">55</div>
+<div class="line number56 index55 alt1">56</div>
+<div class="line number57 index56 alt2">57</div>
+<div class="line number58 index57 alt1">58</div>
+<div class="line number59 index58 alt2">59</div>
+<div class="line number60 index59 alt1">60</div>
+<div class="line number61 index60 alt2">61</div>
+<div class="line number62 index61 alt1">62</div>
+<div class="line number63 index62 alt2">63</div>
+<div class="line number64 index63 alt1">64</div>
+<div class="line number65 index64 alt2">65</div>
+<div class="line number66 index65 alt1">66</div>
+<div class="line number67 index66 alt2">67</div>
+<div class="line number68 index67 alt1">68</div>
+<div class="line number69 index68 alt2">69</div>
+<div class="line number70 index69 alt1">70</div>
+<div class="line number71 index70 alt2">71</div>
+<div class="line number72 index71 alt1">72</div>
+<div class="line number73 index72 alt2">73</div>
+<div class="line number74 index73 alt1">74</div>
+<div class="line number75 index74 alt2">75</div>
+<div class="line number76 index75 alt1">76</div>
+<div class="line number77 index76 alt2">77</div>
+<div class="line number78 index77 alt1">78</div>
+<div class="line number79 index78 alt2">79</div>
+<div class="line number80 index79 alt1">80</div>
+<div class="line number81 index80 alt2">81</div>
+<div class="line number82 index81 alt1">82</div>
+<div class="line number83 index82 alt2">83</div>
+</td>
+<td class="code">
+<div>
+<div class="line number1 index0 alt2"><code class="java keyword"><span style="color:#ff0000;">import</span></code>
+<span style="color:#ff0000;"><code class="java plain">java.io.File; </code><code class="java keyword">import</code></span>
+<span style="color:#ff0000;"><code class="java plain">java.sql.Connection; </code>
+<code class="java keyword">import</code></span> <span style="color:#ff0000;"><code class="java plain">java.sql.DriverManager;
+</code><code class="java keyword">import</code></span> <span style="color:#ff0000;">
+<code class="java plain">java.sql.PreparedStatement; </code><code class="java keyword">import</code></span>
+<span style="color:#ff0000;"><code class="java plain">java.sql.ResultSet; </code><code class="java keyword">import</code></span>
+<span style="color:#ff0000;"><code class="java plain">java.text.SimpleDateFormat; </code>
+<code class="java keyword">import</code></span> <span style="color:#ff0000;"><code class="java plain">java.util.ArrayList;
+</code><code class="java keyword">import</code></span> <code class="java plain"><span style="color:#ff0000;">java.util.List;
+</span></code></div>
+<div class="line number2 index1 alt1"><span style="color:#ff0000;"><code class="java spaces"> </code><code class="java keyword">import</code></span>
+<span style="color:#ff0000;"><code class="java plain">org.apache.hadoop.conf.Configuration;
+</code><code class="java keyword">import</code></span> <span style="color:#ff0000;">
+<code class="java plain">org.apache.hadoop.hbase.HBaseConfiguration; </code><code class="java keyword">import</code></span>
+<span style="color:#ff0000;"><code class="java plain">org.apache.hadoop.hbase.client.HBaseAdmin;
+</code><code class="java keyword">import</code></span> <span style="color:#ff0000;">
+<code class="java plain">org.apache.hadoop.hbase.client.HTable; </code><code class="java keyword">import</code></span>
+<span style="color:#ff0000;"><code class="java plain">org.apache.hadoop.hbase.client.Put;
+</code><code class="java keyword">import</code></span> <span style="color:#ff0000;">
+<code class="java plain">org.apache.hadoop.hbase.util.Bytes; </code><code class="java keyword">import</code></span>
+<span style="color:#ff0000;"><code class="java plain">org.apache.log4j.BasicConfigurator;
+</code><code class="java keyword">import</code></span> <span style="color:#ff0000;">
+<code class="java plain">org.apache.log4j.Level; </code><code class="java keyword">import</code></span>
+<code class="java plain"><span style="color:#ff0000;">org.apache.log4j.Logger; </span>
+</code></div>
+<div class="line number3 index2 alt2"><span style="color:#ff0000;"><code class="java spaces"> </code><code class="java keyword">public</code></span>
+<code class="java keyword"><span style="color:#ff0000;">class</span></code> <code class="java plain">
+<span style="color:#ff0000;">GpowerTransfer{ </span></code></div>
+<div class="line number4 index3 alt1"><code class="java spaces"><span style="color:#ff0000;">     </span></code> </div>
+<div class="line number5 index4 alt2"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">private</code></span>
+<code class="java keyword"><span style="color:#ff0000;">static</span></code> <code class="java keyword">
+<span style="color:#ff0000;">final</span></code> <span style="color:#ff0000;"><code class="java plain">String QUOREM =
+</code><code class="java string">"192.168.103.50,192.168.103.51,192.168.103.52,192.168.103.53,192.168.103.54,192.168.103.55,192.168.103.56,192.168.103.57,192.168.103.58,192.168.103.59,192.168.103.60"</code><code class="java plain">;</code><code class="java comments">//这里是你HBase的分布式集群结点，用逗号分开。
+</code></span>    <code class="java keyword"><span style="color:#ff0000;">private</span></code>
+<code class="java keyword"><span style="color:#ff0000;">static</span></code> <code class="java keyword">
+<span style="color:#ff0000;">final</span></code> <span style="color:#ff0000;"><code class="java plain">String CLIENT_PORT =
+</code><code class="java string">"2181"</code><code class="java plain">;</code><code class="java comments">//端口
+</code></span>    <code class="java keyword"><span style="color:#ff0000;">private</span></code>
+<code class="java keyword"><span style="color:#ff0000;">static</span></code> <span style="color:#ff0000;">
+<code class="java plain">Logger log = Logger.getLogger(GpowerTransfer.</code><code class="java keyword">class</code><code class="java plain">);
+</code></span></div>
+<div class="line number6 index5 alt1"><code class="java spaces"><span style="color:#ff0000;">     </span></code> </div>
+<div class="line number7 index6 alt2"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java preprocessor">/**
+</code></span></div>
+<div class="line number8 index7 alt1"><span style="color:#ff0000;"><code class="java spaces">     </code><code class="java preprocessor">* @param args
+</code></span></div>
+<div class="line number9 index8 alt2"><span style="color:#ff0000;"><code class="java spaces">     </code><code class="java preprocessor">*/</code></span></div>
+<div class="line number10 index9 alt1"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">public</code></span>
+<code class="java keyword"><span style="color:#ff0000;">static</span></code> <code class="java keyword">
+<span style="color:#ff0000;">void</span></code> <code class="java plain"><span style="color:#ff0000;">main(String[] args) {
+</span></code></div>
+<div class="line number11 index10 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">BasicConfigurator.configure();
+</code></span></div>
+<div class="line number12 index11 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">log.setLevel(Level.DEBUG);
+</code></span></div>
+<div class="line number13 index12 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">String tableName =
+</code><code class="java string">"kpi"</code><code class="java plain">;</code><code class="java comments">//HBase表名称
+</code></span>        <code class="java plain"><span style="color:#ff0000;">Configuration conf = HBaseConfiguration.create();
+</span></code></div>
+<div class="line number14 index13 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">conf.set(</code><code class="java string">"hbase.zookeeper.quorum"</code><code class="java plain">, QUOREM);   
+</code></span></div>
+<div class="line number15 index14 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">conf.set(</code><code class="java string">"hbase.zookeeper.property.clientPort"</code><code class="java plain">, CLIENT_PORT);
+</code></span></div>
+<div class="line number16 index15 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java keyword">try</code></span>
+<span style="color:#ff0000;"><code class="java plain">{ File workaround = </code><code class="java keyword">new</code></span>
+<span style="color:#ff0000;"><code class="java plain">File(</code><code class="java string">"."</code><code class="java plain">);
+</code></span></div>
+<div class="line number17 index16 alt2"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">System.getProperties().put(</code><code class="java string">"hadoop.home.dir"</code><code class="java plain">, workaround.getAbsolutePath());
+</code></span></div>
+<div class="line number18 index17 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java keyword">new</code></span>
+<span style="color:#ff0000;"><code class="java plain">File(</code><code class="java string">"./bin"</code><code class="java plain">).mkdirs();
+</code></span></div>
+<div class="line number19 index18 alt2"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java keyword">new</code></span>
+<span style="color:#ff0000;"><code class="java plain">File(</code><code class="java string">"./bin/winutils.exe"</code><code class="java plain">).createNewFile();</code><code class="java comments">//这几段奇怪的代码在windows跑的时候不加有时候分报错，在web项目中可以不要,但单独的java程序还是加上去吧，知道什么原因的小伙伴可以告诉我一下，不胜感激。
+</code></span>            <span style="color:#ff0000;"><code class="java plain">HBaseAdmin admin =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">HBaseAdmin(conf);
+</span></code></div>
+<div class="line number20 index19 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java keyword">if</code><code class="java plain">(admin.tableExists(tableName)){
+</code></span></div>
+<div class="line number21 index20 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">Class.forName(</code><code class="java string">"com.mysql.jdbc.Driver"</code><code class="java plain">);</code><code class="java comments">//首先将mysql中的数据读取出来，然后再插入到HBase中
+</code></span>                <span style="color:#ff0000;"><code class="java plain">String url =
+</code><code class="java string">"jdbc:mysql://192.168.***.***:3306/midb?useUnicode=true&amp;amp;characterEncoding=utf-8"</code><code class="java plain">;
+</code></span></div>
+<div class="line number22 index21 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">String username =
+</code><code class="java string">"********"</code><code class="java plain">; </code>
+</span></div>
+<div class="line number23 index22 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">String password =
+</code><code class="java string">"********"</code><code class="java plain">; </code>
+</span></div>
+<div class="line number24 index23 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">Connection con = DriverManager.getConnection(url, username, password);
+</code></span></div>
+<div class="line number25 index24 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">PreparedStatement pstmt = con.prepareStatement(</code><code class="java string">"select * from kpi_gpower"</code><code class="java plain">);
+</code></span></div>
+<div class="line number26 index25 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">ResultSet rs = pstmt.executeQuery();
+</code></span></div>
+<div class="line number27 index26 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">HTable table =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">HTable(conf, tableName);
+</span></code></div>
+<div class="line number28 index27 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">log.debug(tableName +
+</code><code class="java string">":start copying data to hbase..."</code><code class="java plain">);
+</code></span></div>
+<div class="line number29 index28 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">List&lt;Put&gt; list =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">ArrayList&lt;Put&gt;();
+</span></code></div>
+<div class="line number30 index29 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">SimpleDateFormat sdf =
+</code><code class="java keyword">new</code></span> <span style="color:#ff0000;"><code class="java plain">SimpleDateFormat(</code><code class="java string">"yyyyMMdd"</code><code class="java plain">);
+</code></span></div>
+<div class="line number31 index30 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">String base =
+</code><code class="java string">"base"</code><code class="java plain">;</code><code class="java comments">//family名称
+</code></span>                <span style="color:#ff0000;"><code class="java plain">String gpower =
+</code><code class="java string">"gpower"</code><code class="java plain">;</code><code class="java comments">//family名称
+</code></span>                <span style="color:#ff0000;"><code class="java plain">String[] qbase = {</code><code class="java string">"fid"</code><code class="java plain">,</code><code class="java string">"tid"</code><code class="java plain">,</code><code class="java string">"date"</code><code class="java plain">};</code><code class="java comments">//qualifier名称
+</code></span>                <span style="color:#ff0000;"><code class="java plain">String[] qgpower = {</code><code class="java string">"power"</code><code class="java plain">,</code><code class="java string">"windspeed"</code><code class="java plain">,</code><code class="java string">"unpower"</code><code class="java plain">,</code><code class="java string">"theory"</code><code class="java plain">,</code><code class="java string">"coup"</code><code class="java plain">};</code><code class="java comments">//qualifier名称
+</code></span>                <span style="color:#ff0000;"><code class="java keyword">while</code><code class="java plain">(rs.next()){
+</code></span></div>
+<div class="line number32 index31 alt1"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">String rowKey = rs.getString(</code><code class="java string">"farmid"</code><code class="java plain">) +
+</code><code class="java string">":"</code></span> <span style="color:#ff0000;"><code class="java plain">+ (rs.getInt(</code><code class="java string">"turbineid"</code><code class="java plain">)&lt;</code><code class="java value">10</code><code class="java plain">?(</code><code class="java string">"0"</code><code class="java plain">+rs.getInt(</code><code class="java string">"turbineid"</code><code class="java plain">)):rs.getInt(</code><code class="java string">"turbineid"</code><code class="java plain">))
+ + </code><code class="java string">":"</code></span> <span style="color:#ff0000;">
+<code class="java plain">+ sdf.format(rs.getDate(</code><code class="java string">"vtime"</code><code class="java plain">));</code><code class="java comments">//拼接rowkey
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">Put put =
+</code><code class="java keyword">new</code></span> <span style="color:#ff0000;"><code class="java plain">Put(Bytes.toBytes(rowKey));</code><code class="java comments">//新建一条记录，然后下面对相应的列进行赋值
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">put.add(base.getBytes(), qbase[</code><code class="java value">0</code><code class="java plain">].getBytes(), Bytes.toBytes(rs.getString(</code><code class="java string">"farmid"</code><code class="java plain">)));</code><code class="java comments">//base:fid
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">put.add(base.getBytes(), qbase[</code><code class="java value">1</code><code class="java plain">].getBytes(), Bytes.toBytes(rs.getInt(</code><code class="java string">"turbineid"</code><code class="java plain">)+</code><code class="java string">""</code><code class="java plain">));</code><code class="java comments">//base:tid
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">put.add(base.getBytes(), qbase[</code><code class="java value">2</code><code class="java plain">].getBytes(), Bytes.toBytes(rs.getDate(</code><code class="java string">"vtime"</code><code class="java plain">)+</code><code class="java string">""</code><code class="java plain">));</code><code class="java comments">//base:date
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">put.add(gpower.getBytes(), qgpower[</code><code class="java value">0</code><code class="java plain">].getBytes(), Bytes.toBytes(rs.getFloat(</code><code class="java string">"value"</code><code class="java plain">)+</code><code class="java string">""</code><code class="java plain">));</code><code class="java comments">//gpower:power
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">put.add(gpower.getBytes(), qgpower[</code><code class="java value">1</code><code class="java plain">].getBytes(), Bytes.toBytes(rs.getFloat(</code><code class="java string">"windspeed"</code><code class="java plain">)+</code><code class="java string">""</code><code class="java plain">));</code><code class="java comments">//gpower:windspeed
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">put.add(gpower.getBytes(), qgpower[</code><code class="java value">2</code><code class="java plain">].getBytes(), Bytes.toBytes(rs.getFloat(</code><code class="java string">"unvalue"</code><code class="java plain">)+</code><code class="java string">""</code><code class="java plain">));</code><code class="java comments">//gpower:unvalue
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">put.add(gpower.getBytes(), qgpower[</code><code class="java value">3</code><code class="java plain">].getBytes(), Bytes.toBytes(rs.getFloat(</code><code class="java string">"theory"</code><code class="java plain">)+</code><code class="java string">""</code><code class="java plain">));</code><code class="java comments">//gpower:theory
+</code></span>                    <span style="color:#ff0000;"><code class="java plain">put.add(gpower.getBytes(), qgpower[</code><code class="java value">4</code><code class="java plain">].getBytes(), Bytes.toBytes(rs.getFloat(</code><code class="java string">"coup"</code><code class="java plain">)+</code><code class="java string">""</code><code class="java plain">));</code><code class="java comments">//gpower:coup
+</code></span>                    <code class="java plain"><span style="color:#ff0000;">list.add(put);
+</span></code></div>
+<div class="line number33 index32 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">}
+</code></span></div>
+<div class="line number34 index33 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">table.put(list);</code><code class="java comments">//这里真正对表进行插入操作
+</code></span>                <span style="color:#ff0000;"><code class="java plain">log.debug(tableName +
+</code><code class="java string">":completed data copy!"</code><code class="java plain">);
+</code></span></div>
+<div class="line number35 index34 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">table.close();</code><code class="java comments">//这里要非常注意一点，如果你频繁地对表进行打开跟关闭，性能将会直线下降，可能跟集群有关系。
+</code></span>            <span style="color:#ff0000;"><code class="java plain">}</code><code class="java keyword">else</code><code class="java plain">{
+</code></span></div>
+<div class="line number36 index35 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">admin.close();
+</code></span></div>
+<div class="line number37 index36 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">log.error(</code><code class="java string">"table '"</code></span>
+<span style="color:#ff0000;"><code class="java plain">+ tableName + </code><code class="java string">"' not exisit!"</code><code class="java plain">);
+</code></span></div>
+<div class="line number38 index37 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java keyword">throw</code></span>
+<code class="java keyword"><span style="color:#ff0000;">new</span></code> <span style="color:#ff0000;">
+<code class="java plain">IllegalArgumentException(</code><code class="java string">"table '"</code></span>
+<span style="color:#ff0000;"><code class="java plain">+ tableName + </code><code class="java string">"' not exisit!"</code><code class="java plain">);
+</code></span></div>
+<div class="line number39 index38 alt2"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">}
+</code></span></div>
+<div class="line number40 index39 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">admin.close();
+</code></span></div>
+<div class="line number41 index40 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">}
+</code><code class="java keyword">catch</code></span> <code class="java plain"><span style="color:#ff0000;">(Exception e) {
+</span></code></div>
+<div class="line number42 index41 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">e.printStackTrace();
+</code></span></div>
+<div class="line number43 index42 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">} 
+</code></span></div>
+<div class="line number44 index43 alt1"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java plain">}
+</code></span></div>
+<div class="line number45 index44 alt2"><code class="java plain"><span style="color:#ff0000;">}</span></code></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+<p><span style="color:#ff0000;"><br></span></p>
+<p><span style="color:#ff0000;"><br></span></p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<strong>在put语句进行add的时候要特别注意</strong>：对于int、float、Date等等非String类型的数据，要记得将其转换成String类型，这里我直接用+""解决了，否则在你读取数据的时候就会遇到麻烦了。
+</p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+<span style="font-size:24px;"><strong>步骤3：Java Web项目读取HBase里面的数据</strong></span> </p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+ok,我们成功地把数据迁移到HBase，我们剩下的任务就是在Web应用中读取数据了。 </p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+首先我们要确保Web项目中已经把必要的Jar包添加到ClassPath了，下面我对一些HBase的连接做了小封装： </p>
+<div>
+<div id="highlighter_453019" class="syntaxhighlighter java ie">
+<div class="toolbar"><span><a class="toolbar_item command_help help" href="#" rel="nofollow"><span style="color:#ff8373;">?</span></a></span></div>
+<table border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="gutter">
+<div class="line number1 index0 alt2">1</div>
+<div class="line number2 index1 alt1">2</div>
+<div class="line number3 index2 alt2">3</div>
+<div class="line number4 index3 alt1">4</div>
+<div class="line number5 index4 alt2">5</div>
+<div class="line number6 index5 alt1">6</div>
+<div class="line number7 index6 alt2">7</div>
+<div class="line number8 index7 alt1">8</div>
+<div class="line number9 index8 alt2">9</div>
+<div class="line number10 index9 alt1">10</div>
+<div class="line number11 index10 alt2">11</div>
+<div class="line number12 index11 alt1">12</div>
+<div class="line number13 index12 alt2">13</div>
+<div class="line number14 index13 alt1">14</div>
+<div class="line number15 index14 alt2">15</div>
+<div class="line number16 index15 alt1">16</div>
+<div class="line number17 index16 alt2">17</div>
+<div class="line number18 index17 alt1">18</div>
+<div class="line number19 index18 alt2">19</div>
+<div class="line number20 index19 alt1">20</div>
+<div class="line number21 index20 alt2">21</div>
+<div class="line number22 index21 alt1">22</div>
+<div class="line number23 index22 alt2">23</div>
+<div class="line number24 index23 alt1">24</div>
+<div class="line number25 index24 alt2">25</div>
+<div class="line number26 index25 alt1">26</div>
+<div class="line number27 index26 alt2">27</div>
+<div class="line number28 index27 alt1">28</div>
+<div class="line number29 index28 alt2">29</div>
+<div class="line number30 index29 alt1">30</div>
+<div class="line number31 index30 alt2">31</div>
+<div class="line number32 index31 alt1">32</div>
+<div class="line number33 index32 alt2">33</div>
+<div class="line number34 index33 alt1">34</div>
+</td>
+<td class="code">
+<div>
+<div class="line number1 index0 alt2"><code class="java keyword"><span style="color:#ff0000;">import</span></code>
+<span style="color:#ff0000;"><code class="java plain">org.apache.hadoop.conf.Configuration;
+</code><code class="java keyword">import</code></span> <span style="color:#ff0000;">
+<code class="java plain">org.apache.hadoop.hbase.HBaseConfiguration; </code><code class="java keyword">import</code></span>
+<code class="java plain"><span style="color:#ff0000;">org.apache.hadoop.hbase.client.HBaseAdmin;
+</span></code></div>
+<div class="line number2 index1 alt1"><span style="color:#ff0000;"><code class="java spaces"> </code><code class="java preprocessor">/**
+</code></span></div>
+<div class="line number3 index2 alt2"><span style="color:#ff0000;"><code class="java spaces"> </code><code class="java preprocessor">* @author a01513
+</code></span></div>
+<div class="line number4 index3 alt1"><span style="color:#ff0000;"><code class="java spaces"> </code><code class="java preprocessor">*
+</code></span></div>
+<div class="line number5 index4 alt2"><span style="color:#ff0000;"><code class="java spaces"> </code><code class="java preprocessor">*/</code></span>
+<code class="java keyword"><span style="color:#ff0000;">public</span></code> <code class="java keyword">
+<span style="color:#ff0000;">class</span></code> <code class="java plain"><span style="color:#ff0000;">HBaseConnector {
+</span></code></div>
+<div class="line number6 index5 alt1"><code class="java spaces"><span style="color:#ff0000;">     </span></code> </div>
+<div class="line number7 index6 alt2"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">private</code></span>
+<code class="java keyword"><span style="color:#ff0000;">static</span></code> <code class="java keyword">
+<span style="color:#ff0000;">final</span></code> <span style="color:#ff0000;"><code class="java plain">String QUOREM =
+</code><code class="java string">"192.168.103.50,192.168.103.51,192.168.103.52,192.168.103.53,192.168.103.54,192.168.103.55,192.168.103.56,192.168.103.57,192.168.103.58,192.168.103.59,192.168.103.60"</code><code class="java plain">;
+</code></span></div>
+<div class="line number8 index7 alt1"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">private</code></span>
+<code class="java keyword"><span style="color:#ff0000;">static</span></code> <code class="java keyword">
+<span style="color:#ff0000;">final</span></code> <span style="color:#ff0000;"><code class="java plain">String CLIENT_PORT =
+</code><code class="java string">"2181"</code><code class="java plain">; </code></span></div>
+<div class="line number9 index8 alt2"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">private</code></span>
+<code class="java plain"><span style="color:#ff0000;">HBaseAdmin admin; </span></code></div>
+<div class="line number10 index9 alt1"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">private</code></span>
+<code class="java plain"><span style="color:#ff0000;">Configuration conf; </span></code></div>
+<div class="line number11 index10 alt2"><code class="java spaces"><span style="color:#ff0000;">     </span></code> </div>
+<div class="line number12 index11 alt1"><code class="java spaces"><span style="color:#ff0000;">     </span></code> </div>
+<div class="line number13 index12 alt2"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">public</code></span>
+<code class="java plain"><span style="color:#ff0000;">HBaseAdmin getHBaseAdmin(){ </span>
+</code></div>
+<div class="line number14 index13 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">getConfiguration();
+</code></span></div>
+<div class="line number15 index14 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java keyword">try</code></span>
+<code class="java plain"><span style="color:#ff0000;">{ </span></code></div>
+<div class="line number16 index15 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">admin =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">HBaseAdmin(conf);
+</span></code></div>
+<div class="line number17 index16 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">}
+</code><code class="java keyword">catch</code></span> <code class="java plain"><span style="color:#ff0000;">(Exception e) {
+</span></code></div>
+<div class="line number18 index17 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">e.printStackTrace();
+</code></span></div>
+<div class="line number19 index18 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">}
+</code></span></div>
+<div class="line number20 index19 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java keyword">return</code></span>
+<code class="java plain"><span style="color:#ff0000;">admin;  </span></code></div>
+<div class="line number21 index20 alt2"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java plain">}
+</code></span></div>
+<div class="line number22 index21 alt1"><code class="java spaces"><span style="color:#ff0000;">     </span></code> </div>
+<div class="line number23 index22 alt2"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">public</code></span>
+<code class="java plain"><span style="color:#ff0000;">Configuration getConfiguration(){
+</span></code></div>
+<div class="line number24 index23 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java keyword">if</code><code class="java plain">(conf ==
+</code><code class="java keyword">null</code><code class="java plain">){ </code></span></div>
+<div class="line number25 index24 alt2"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">conf = HBaseConfiguration.create();
+</code></span></div>
+<div class="line number26 index25 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">conf.set(</code><code class="java string">"hbase.zookeeper.quorum"</code><code class="java plain">, QUOREM);   
+</code></span></div>
+<div class="line number27 index26 alt2"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">conf.set(</code><code class="java string">"hbase.zookeeper.property.clientPort"</code><code class="java plain">, CLIENT_PORT);   
+</code></span></div>
+<div class="line number28 index27 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">}
+</code></span></div>
+<div class="line number29 index28 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java keyword">return</code></span>
+<code class="java plain"><span style="color:#ff0000;">conf; </span></code></div>
+<div class="line number30 index29 alt1"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java plain">}</code></span></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+<p><span style="color:#ff0000;"><br></span></p>
+<p><span style="color:#ff0000;"><br></span></p>
+<p><span style="font-family:'microsoft yahei';color:#444444;line-height:30px;background-color:#ffffff;font-size:15px;">这里的代码基本上跟迁移的那部分代码一样，由于我在其他地方都要重用这些代码，就装在一个地方免得重复写了。</span>
+</p>
+<p style="background-color:#ffffff;font-family:'microsoft yahei';color:#444444;font-size:15px;">
+我在Service层做了一下测试，下面看看具体的读取过程： </p>
+<div>
+<div id="highlighter_690817" class="syntaxhighlighter java ie">
+<div class="toolbar"><span><a class="toolbar_item command_help help" href="#" rel="nofollow"><span style="color:#ff8373;">?</span></a></span></div>
+<table border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="gutter">
+<div class="line number1 index0 alt2">1</div>
+<div class="line number2 index1 alt1">2</div>
+<div class="line number3 index2 alt2">3</div>
+<div class="line number4 index3 alt1">4</div>
+<div class="line number5 index4 alt2">5</div>
+<div class="line number6 index5 alt1">6</div>
+<div class="line number7 index6 alt2">7</div>
+<div class="line number8 index7 alt1">8</div>
+<div class="line number9 index8 alt2">9</div>
+<div class="line number10 index9 alt1">10</div>
+<div class="line number11 index10 alt2">11</div>
+<div class="line number12 index11 alt1">12</div>
+<div class="line number13 index12 alt2">13</div>
+<div class="line number14 index13 alt1">14</div>
+<div class="line number15 index14 alt2">15</div>
+<div class="line number16 index15 alt1">16</div>
+<div class="line number17 index16 alt2">17</div>
+<div class="line number18 index17 alt1">18</div>
+<div class="line number19 index18 alt2">19</div>
+<div class="line number20 index19 alt1">20</div>
+<div class="line number21 index20 alt2">21</div>
+<div class="line number22 index21 alt1">22</div>
+<div class="line number23 index22 alt2">23</div>
+<div class="line number24 index23 alt1">24</div>
+<div class="line number25 index24 alt2">25</div>
+<div class="line number26 index25 alt1">26</div>
+<div class="line number27 index26 alt2">27</div>
+<div class="line number28 index27 alt1">28</div>
+<div class="line number29 index28 alt2">29</div>
+<div class="line number30 index29 alt1">30</div>
+<div class="line number31 index30 alt2">31</div>
+<div class="line number32 index31 alt1">32</div>
+<div class="line number33 index32 alt2">33</div>
+<div class="line number34 index33 alt1">34</div>
+<div class="line number35 index34 alt2">35</div>
+<div class="line number36 index35 alt1">36</div>
+<div class="line number37 index36 alt2">37</div>
+<div class="line number38 index37 alt1">38</div>
+<div class="line number39 index38 alt2">39</div>
+<div class="line number40 index39 alt1">40</div>
+<div class="line number41 index40 alt2">41</div>
+<div class="line number42 index41 alt1">42</div>
+<div class="line number43 index42 alt2">43</div>
+<div class="line number44 index43 alt1">44</div>
+<div class="line number45 index44 alt2">45</div>
+<div class="line number46 index45 alt1">46</div>
+<div class="line number47 index46 alt2">47</div>
+<div class="line number48 index47 alt1">48</div>
+<div class="line number49 index48 alt2">49</div>
+<div class="line number50 index49 alt1">50</div>
+<div class="line number51 index50 alt2">51</div>
+<div class="line number52 index51 alt1">52</div>
+<div class="line number53 index52 alt2">53</div>
+<div class="line number54 index53 alt1">54</div>
+<div class="line number55 index54 alt2">55</div>
+<div class="line number56 index55 alt1">56</div>
+<div class="line number57 index56 alt2">57</div>
+<div class="line number58 index57 alt1">58</div>
+<div class="line number59 index58 alt2">59</div>
+<div class="line number60 index59 alt1">60</div>
+<div class="line number61 index60 alt2">61</div>
+<div class="line number62 index61 alt1">62</div>
+<div class="line number63 index62 alt2">63</div>
+<div class="line number64 index63 alt1">64</div>
+<div class="line number65 index64 alt2">65</div>
+<div class="line number66 index65 alt1">66</div>
+<div class="line number67 index66 alt2">67</div>
+<div class="line number68 index67 alt1">68</div>
+<div class="line number69 index68 alt2">69</div>
+<div class="line number70 index69 alt1">70</div>
+<div class="line number71 index70 alt2">71</div>
+<div class="line number72 index71 alt1">72</div>
+<div class="line number73 index72 alt2">73</div>
+<div class="line number74 index73 alt1">74</div>
+<div class="line number75 index74 alt2">75</div>
+<div class="line number76 index75 alt1">76</div>
+<div class="line number77 index76 alt2">77</div>
+<div class="line number78 index77 alt1">78</div>
+<div class="line number79 index78 alt2">79</div>
+<div class="line number80 index79 alt1">80</div>
+<div class="line number81 index80 alt2">81</div>
+<div class="line number82 index81 alt1">82</div>
+<div class="line number83 index82 alt2">83</div>
+<div class="line number84 index83 alt1">84</div>
+<div class="line number85 index84 alt2">85</div>
+<div class="line number86 index85 alt1">86</div>
+<div class="line number87 index86 alt2">87</div>
+<div class="line number88 index87 alt1">88</div>
+<div class="line number89 index88 alt2">89</div>
+<div class="line number90 index89 alt1">90</div>
+<div class="line number91 index90 alt2">91</div>
+<div class="line number92 index91 alt1">92</div>
+<div class="line number93 index92 alt2">93</div>
+<div class="line number94 index93 alt1">94</div>
+<div class="line number95 index94 alt2">95</div>
+<div class="line number96 index95 alt1">96</div>
+<div class="line number97 index96 alt2">97</div>
+<div class="line number98 index97 alt1">98</div>
+<div class="line number99 index98 alt2">99</div>
+<div class="line number100 index99 alt1">100</div>
+<div class="line number101 index100 alt2">101</div>
+<div class="line number102 index101 alt1">102</div>
+<div class="line number103 index102 alt2">103</div>
+<div class="line number104 index103 alt1">104</div>
+<div class="line number105 index104 alt2">105</div>
+<div class="line number106 index105 alt1">106</div>
+<div class="line number107 index106 alt2">107</div>
+<div class="line number108 index107 alt1">108</div>
+<div class="line number109 index108 alt2">109</div>
+<div class="line number110 index109 alt1">110</div>
+<div class="line number111 index110 alt2">111</div>
+<div class="line number112 index111 alt1">112</div>
+<div class="line number113 index112 alt2">113</div>
+<div class="line number114 index113 alt1">114</div>
+<div class="line number115 index114 alt2">115</div>
+<div class="line number116 index115 alt1">116</div>
+<div class="line number117 index116 alt2">117</div>
+<div class="line number118 index117 alt1">118</div>
+<div class="line number119 index118 alt2">119</div>
+<div class="line number120 index119 alt1">120</div>
+<div class="line number121 index120 alt2">121</div>
+<div class="line number122 index121 alt1">122</div>
+<div class="line number123 index122 alt2">123</div>
+<div class="line number124 index123 alt1">124</div>
+<div class="line number125 index124 alt2">125</div>
+<div class="line number126 index125 alt1">126</div>
+</td>
+<td class="code">
+<div>
+<div class="line number1 index0 alt2"><code class="java keyword"><span style="color:#ff0000;">private</span></code>
+<code class="java keyword"><span style="color:#ff0000;">final</span></code> <span style="color:#ff0000;">
+<code class="java plain">String tableName = </code><code class="java string">"kpi"</code><code class="java plain">;
+</code><code class="java color1">@Override</code></span></div>
+<div class="line number2 index1 alt1"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java keyword">public</code></span>
+<span style="color:#ff0000;"><code class="java plain">List&lt;GenPowerEntity&gt; getGenPower(String farmid,</code><code class="java keyword">int</code></span>
+<span style="color:#ff0000;"><code class="java plain">ltb,</code><code class="java keyword">int</code></span>
+<code class="java plain"><span style="color:#ff0000;">htb,String start,String end) {
+</span></code></div>
+<div class="line number3 index2 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">List&lt;GenPowerEntity&gt; list =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">ArrayList&lt;GenPowerEntity&gt;();
+</span></code></div>
+<div class="line number4 index3 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">HBaseConnector hbaseConn =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">HBaseConnector();
+</span></code></div>
+<div class="line number5 index4 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">HBaseAdmin admin = hbaseConn.getHBaseAdmin();
+</code></span></div>
+<div class="line number6 index5 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java keyword">try</code></span>
+<code class="java plain"><span style="color:#ff0000;">{ </span></code></div>
+<div class="line number7 index6 alt2"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java keyword">if</code><code class="java plain">(admin.tableExists(tableName)){
+</code></span></div>
+<div class="line number8 index7 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">HTable table =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">HTable(hbaseConn.getConfiguration(), tableName);
+</span></code></div>
+<div class="line number9 index8 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">Scan scan =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">Scan();
+</span></code></div>
+<div class="line number10 index9 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">scan.addFamily(Bytes.toBytes(</code><code class="java string">"base"</code><code class="java plain">));
+</code></span></div>
+<div class="line number11 index10 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">scan.addFamily(Bytes.toBytes(</code><code class="java string">"gpower"</code><code class="java plain">));
+</code></span></div>
+<div class="line number12 index11 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">scan.addFamily(Bytes.toBytes(</code><code class="java string">"userate"</code><code class="java plain">));
+</code></span></div>
+<div class="line number13 index12 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">String startRowKey =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">String();
+</span></code></div>
+<div class="line number14 index13 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">String stopRowKey =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">String();
+</span></code></div>
+<div class="line number15 index14 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java keyword">if</code><code class="java plain">(</code><code class="java string">""</code><code class="java plain">.equals(start)
+ &amp;&amp; !</code><code class="java string">""</code><code class="java plain">.equals(end)){
+</code></span></div>
+<div class="line number16 index15 alt1"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">stopRowKey = farmid +
+</code><code class="java string">":"</code></span> <span style="color:#ff0000;"><code class="java plain">+ Tools.addZero(htb) +
+</code><code class="java string">":"</code></span> <code class="java plain"><span style="color:#ff0000;">+ end;
+</span></code></div>
+<div class="line number17 index16 alt2"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">scan.setStopRow(Bytes.toBytes(stopRowKey));
+</code></span></div>
+<div class="line number18 index17 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">}</code><code class="java keyword">else</code></span>
+<span style="color:#ff0000;"><code class="java keyword">if</code><code class="java plain">(!</code><code class="java string">""</code><code class="java plain">.equals(start) &amp;&amp;
+</code><code class="java string">""</code><code class="java plain">.equals(end)){
+</code></span></div>
+<div class="line number19 index18 alt2"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">startRowKey = farmid +
+</code><code class="java string">":"</code></span> <span style="color:#ff0000;"><code class="java plain">+ Tools.addZero(ltb) +
+</code><code class="java string">":"</code></span> <code class="java plain"><span style="color:#ff0000;">+ start;
+</span></code></div>
+<div class="line number20 index19 alt1"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">scan.setStartRow(Bytes.toBytes(startRowKey));
+</code></span></div>
+<div class="line number21 index20 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">}</code><code class="java keyword">else</code></span>
+<span style="color:#ff0000;"><code class="java keyword">if</code><code class="java plain">(!</code><code class="java string">""</code><code class="java plain">.equals(start) &amp;&amp; !</code><code class="java string">""</code><code class="java plain">.equals(end)){
+</code></span></div>
+<div class="line number22 index21 alt1"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">startRowKey = farmid +
+</code><code class="java string">":"</code></span> <span style="color:#ff0000;"><code class="java plain">+ Tools.addZero(ltb) +
+</code><code class="java string">":"</code></span> <code class="java plain"><span style="color:#ff0000;">+ start;
+</span></code></div>
+<div class="line number23 index22 alt2"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">stopRowKey = farmid +
+</code><code class="java string">":"</code></span> <span style="color:#ff0000;"><code class="java plain">+ Tools.addZero(htb) +
+</code><code class="java string">":"</code></span> <code class="java plain"><span style="color:#ff0000;">+ end;
+</span></code></div>
+<div class="line number24 index23 alt1"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">scan.setStartRow(Bytes.toBytes(startRowKey));
+</code></span></div>
+<div class="line number25 index24 alt2"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">scan.setStopRow(Bytes.toBytes(stopRowKey));
+</code></span></div>
+<div class="line number26 index25 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">}</code><code class="java keyword">else</code><code class="java plain">{
+</code></span></div>
+<div class="line number27 index26 alt2"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">table.close();
+</code></span></div>
+<div class="line number28 index27 alt1"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">admin.close();
+</code></span></div>
+<div class="line number29 index28 alt2"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java keyword">return</code></span>
+<span style="color:#ff0000;"><code class="java keyword">null</code><code class="java plain">;
+</code></span></div>
+<div class="line number30 index29 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">}
+</code></span></div>
+<div class="line number31 index30 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">ResultScanner rsc = table.getScanner(scan);
+</code></span></div>
+<div class="line number32 index31 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">Iterator&lt;Result&gt; it = rsc.iterator();
+</code></span></div>
+<div class="line number33 index32 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">List&lt;GenPowerEntity&gt; slist =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">ArrayList&lt;GenPowerEntity&gt;();
+</span></code></div>
+<div class="line number34 index33 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">List&lt;UseRateEntity&gt; ulist =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">ArrayList&lt;UseRateEntity&gt;();
+</span></code></div>
+<div class="line number35 index34 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">String tempRowKey =
+</code><code class="java string">""</code><code class="java plain">;</code><code class="java comments">//这个临时rowkey是用来判断一行数据是否已经读取完了的。
+</code></span>                <span style="color:#ff0000;"><code class="java plain">GenPowerEntity gpower =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">GenPowerEntity();
+</span></code></div>
+<div class="line number36 index35 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">UseRateEntity userate =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">UseRateEntity();
+</span></code></div>
+<div class="line number37 index36 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java keyword">while</code><code class="java plain">(it.hasNext()){
+</code></span></div>
+<div class="line number38 index37 alt1"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java keyword">for</code><code class="java plain">(Cell cell: it.next().rawCells()){
+</code></span></div>
+<div class="line number39 index38 alt2"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java plain">String rowKey =
+</code><code class="java keyword">new</code></span> <span style="color:#ff0000;"><code class="java plain">String(cell.getRowArray(),cell.getRowOffset(),cell.getRowLength(),</code><code class="java string">"UTF-8"</code><code class="java plain">);
+</code></span></div>
+<div class="line number40 index39 alt1"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java plain">String family =
+</code><code class="java keyword">new</code></span> <span style="color:#ff0000;"><code class="java plain">String(cell.getFamilyArray(),cell.getFamilyOffset(),cell.getFamilyLength(),</code><code class="java string">"UTF-8"</code><code class="java plain">);
+</code></span></div>
+<div class="line number41 index40 alt2"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java plain">String qualifier =
+</code><code class="java keyword">new</code></span> <span style="color:#ff0000;"><code class="java plain">String(cell.getQualifierArray(),cell.getQualifierOffset(),cell.getQualifierLength(),</code><code class="java string">"UTF-8"</code><code class="java plain">);
+</code></span></div>
+<div class="line number42 index41 alt1"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java plain">String value =
+</code><code class="java keyword">new</code></span> <span style="color:#ff0000;"><code class="java plain">String(cell.getValueArray(),cell.getValueOffset(),cell.getValueLength(),</code><code class="java string">"UTF-8"</code><code class="java plain">);</code><code class="java comments">//假如我们当时插入HBase的时候没有把int、float等类型的数据转换成String，这里就会乱码了，并且用Bytes.toInt()这个方法还原也没有用，哈哈
+</code></span>                        <span style="color:#ff0000;"><code class="java plain">System.out.println(</code><code class="java string">"RowKey=&gt;"</code><code class="java plain">+rowKey+</code><code class="java string">"-&gt;"</code><code class="java plain">+family+</code><code class="java string">":"</code><code class="java plain">+qualifier+</code><code class="java string">"="</code><code class="java plain">+value);
+</code></span></div>
+<div class="line number43 index42 alt2"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java keyword">if</code><code class="java plain">(</code><code class="java string">""</code><code class="java plain">.equals(tempRowKey))
+</code></span></div>
+<div class="line number44 index43 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">tempRowKey = rowKey;
+</code></span></div>
+<div class="line number45 index44 alt2"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java keyword">if</code><code class="java plain">(!rowKey.equals(tempRowKey)){
+</code></span></div>
+<div class="line number46 index45 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">slist.add(gpower);
+</code></span></div>
+<div class="line number47 index46 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">ulist.add(userate);
+</code></span></div>
+<div class="line number48 index47 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">gpower =
+</code><code class="java keyword">null</code><code class="java plain">; </code></span></div>
+<div class="line number49 index48 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">userate =
+</code><code class="java keyword">null</code><code class="java plain">; </code></span></div>
+<div class="line number50 index49 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">gpower =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">GenPowerEntity();
+</span></code></div>
+<div class="line number51 index50 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">userate =
+</code><code class="java keyword">new</code></span> <code class="java plain"><span style="color:#ff0000;">UseRateEntity();
+</span></code></div>
+<div class="line number52 index51 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">tempRowKey = rowKey;
+</code></span></div>
+<div class="line number53 index52 alt2"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java plain">}
+</code></span></div>
+<div class="line number54 index53 alt1"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java keyword">switch</code><code class="java plain">(family){
+</code></span></div>
+<div class="line number55 index54 alt2"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"base"</code><code class="java plain">:
+</code></span></div>
+<div class="line number56 index55 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">switch</code><code class="java plain">(qualifier){
+</code></span></div>
+<div class="line number57 index56 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"fid"</code><code class="java plain">:
+</code></span></div>
+<div class="line number58 index57 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">gpower.setFarmid(value);
+</code></span></div>
+<div class="line number59 index58 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">userate.setFarmid(value);
+</code></span></div>
+<div class="line number60 index59 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number61 index60 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"tid"</code><code class="java plain">:
+</code></span></div>
+<div class="line number62 index61 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">gpower.setTurbineid(Integer.parseInt(value));
+</code></span></div>
+<div class="line number63 index62 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">userate.setTurbineid(Integer.parseInt(value));
+</code></span></div>
+<div class="line number64 index63 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number65 index64 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"date"</code><code class="java plain">:
+</code></span></div>
+<div class="line number66 index65 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">SimpleDateFormat sdf =
+</code><code class="java keyword">new</code></span> <span style="color:#ff0000;"><code class="java plain">SimpleDateFormat(</code><code class="java string">"yyyy-MM-dd"</code><code class="java plain">);
+</code></span></div>
+<div class="line number67 index66 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">Date date =
+</code><code class="java keyword">null</code><code class="java plain">; </code></span></div>
+<div class="line number68 index67 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">try</code></span>
+<code class="java plain"><span style="color:#ff0000;">{ </span></code></div>
+<div class="line number69 index68 alt2"><span style="color:#ff0000;"><code class="java spaces">                                    </code><code class="java plain">date = sdf.parse(value);
+</code></span></div>
+<div class="line number70 index69 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">}
+</code><code class="java keyword">catch</code></span> <code class="java plain"><span style="color:#ff0000;">(ParseException e) {
+</span></code></div>
+<div class="line number71 index70 alt2"><span style="color:#ff0000;"><code class="java spaces">                                    </code><code class="java plain">e.printStackTrace();
+</code></span></div>
+<div class="line number72 index71 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">}
+</code></span></div>
+<div class="line number73 index72 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">gpower.setVtime(date);
+</code></span></div>
+<div class="line number74 index73 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">userate.setVtime(date);
+</code></span></div>
+<div class="line number75 index74 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number76 index75 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">}
+</code></span></div>
+<div class="line number77 index76 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number78 index77 alt1"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"gpower"</code><code class="java plain">:
+</code></span></div>
+<div class="line number79 index78 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">switch</code><code class="java plain">(qualifier){
+</code></span></div>
+<div class="line number80 index79 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"power"</code><code class="java plain">:
+</code></span></div>
+<div class="line number81 index80 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">gpower.setValue(Float.parseFloat(value));
+</code></span></div>
+<div class="line number82 index81 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number83 index82 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"windspeed"</code><code class="java plain">:
+</code></span></div>
+<div class="line number84 index83 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">gpower.setWindspeed(Float.parseFloat(value));
+</code></span></div>
+<div class="line number85 index84 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number86 index85 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"unpower"</code><code class="java plain">:
+</code></span></div>
+<div class="line number87 index86 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">gpower.setUnvalue(Float.parseFloat(value));
+</code></span></div>
+<div class="line number88 index87 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number89 index88 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"theory"</code><code class="java plain">:
+</code></span></div>
+<div class="line number90 index89 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">gpower.setTvalue(Float.parseFloat(value));
+</code></span></div>
+<div class="line number91 index90 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number92 index91 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"coup"</code><code class="java plain">:
+</code></span></div>
+<div class="line number93 index92 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">gpower.setCoup(Float.parseFloat(value));
+</code></span></div>
+<div class="line number94 index93 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number95 index94 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">}
+</code></span></div>
+<div class="line number96 index95 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number97 index96 alt2"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"userate"</code><code class="java plain">:
+</code></span></div>
+<div class="line number98 index97 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">switch</code><code class="java plain">(qualifier){
+</code></span></div>
+<div class="line number99 index98 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"num"</code><code class="java plain">:
+</code></span></div>
+<div class="line number100 index99 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">userate.setFnum(Integer.parseInt(value));
+</code></span></div>
+<div class="line number101 index100 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number102 index101 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"power"</code><code class="java plain">:
+</code></span></div>
+<div class="line number103 index102 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">userate.setFpower(Float.parseFloat(value));
+</code></span></div>
+<div class="line number104 index103 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number105 index104 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">case</code></span>
+<span style="color:#ff0000;"><code class="java string">"time"</code><code class="java plain">:
+</code></span></div>
+<div class="line number106 index105 alt1"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java plain">userate.setFvalue(Float.parseFloat(value));
+</code></span></div>
+<div class="line number107 index106 alt2"><span style="color:#ff0000;"><code class="java spaces">                                </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number108 index107 alt1"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java plain">}
+</code></span></div>
+<div class="line number109 index108 alt2"><span style="color:#ff0000;"><code class="java spaces">                            </code><code class="java keyword">break</code><code class="java plain">;
+</code></span></div>
+<div class="line number110 index109 alt1"><span style="color:#ff0000;"><code class="java spaces">                        </code><code class="java plain">}
+</code></span></div>
+<div class="line number111 index110 alt2"><code class="java spaces"><span style="color:#ff0000;">                         </span></code> </div>
+<div class="line number112 index111 alt1"><span style="color:#ff0000;"><code class="java spaces">                    </code><code class="java plain">}
+</code></span></div>
+<div class="line number113 index112 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">}
+</code></span></div>
+<div class="line number114 index113 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">rsc.close();
+</code></span></div>
+<div class="line number115 index114 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">table.close();
+</code></span></div>
+<div class="line number116 index115 alt1"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">admin.close();
+</code></span></div>
+<div class="line number117 index116 alt2"><span style="color:#ff0000;"><code class="java spaces">                </code><code class="java plain">......
+</code></span></div>
+<div class="line number118 index117 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">}
+</code></span></div>
+<div class="line number119 index118 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">}
+</code><code class="java keyword">catch</code></span> <code class="java plain"><span style="color:#ff0000;">(IOException e) {
+</span></code></div>
+<div class="line number120 index119 alt1"><span style="color:#ff0000;"><code class="java spaces">            </code><code class="java plain">e.printStackTrace();
+</code></span></div>
+<div class="line number121 index120 alt2"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java plain">}
+</code></span></div>
+<div class="line number122 index121 alt1"><span style="color:#ff0000;"><code class="java spaces">        </code><code class="java keyword">return</code></span>
+<code class="java plain"><span style="color:#ff0000;">list; </span></code></div>
+<div class="line number123 index122 alt2"><span style="color:#ff0000;"><code class="java spaces">    </code><code class="java plain">}</code></span></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+<p><span style="color:#ff0000;"><br></span></p>
+<p><span style="color:#ff0000;"><br></span></p>
+<p><span style="font-family:'microsoft yahei';color:#444444;line-height:30px;background-color:#ffffff;font-size:15px;">这是我在Service层中用作测试的一个方法，业务逻辑代码可以直接无视（已经用.....代替了，哈哈），至此我们的所有工作完成，对于更深入的应用，还要靠自己去认真挖掘学习了。</span>
+</p>
+            </div>
+                </div>

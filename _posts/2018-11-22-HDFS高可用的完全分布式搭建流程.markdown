@@ -1,0 +1,186 @@
+---
+layout:     post
+title:      HDFS高可用的完全分布式搭建流程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-light">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2><a id="HDFS_0"></a>HDFS高可用的完全分布式设计架构图</h2>
+<p><img src="https://img-blog.csdn.net/20181010200050148?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NoZW5tZW5neGkxMjIw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+HDFS的高可用指的是HDFS持续对各类客户端提供读、写服务的能力，因为客户端对HDFS的读、写操作之前都要访问Namenode服务器，客户端只有从Namenode获取元数据之后才能继续进行读、写。所以HDFS的高可用的关键在于Namenode上的元数据持续可用。<br>
+主NameNode对外提供服务，备NameNode同步主NameNode元数据，以待切换。所有DataNode同时向两个NameNode汇报数据块信息。Zookeeper监控NameNode健康状态，实现主备节点自动切换。</p>
+<h2><a id="_6"></a>搭建流程</h2>
+<p>集群规划：</p>
+
+<table>
+<thead>
+<tr>
+<th></th>
+<th>NN-1</th>
+<th>NN-2</th>
+<th>DN</th>
+<th>ZK</th>
+<th>ZKFC</th>
+<th>JNN</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>node01</td>
+<td>*</td>
+<td></td>
+<td></td>
+<td></td>
+<td>*</td>
+<td>*</td>
+</tr>
+<tr>
+<td>node02</td>
+<td></td>
+<td>*</td>
+<td>*</td>
+<td>*</td>
+<td>*</td>
+<td>*</td>
+</tr>
+<tr>
+<td>node03</td>
+<td></td>
+<td></td>
+<td>*</td>
+<td>*</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>node04</td>
+<td></td>
+<td></td>
+<td>*</td>
+<td>*</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table><p><strong>配置免密登录</strong><br>
+node01-&gt;node01  node01-&gt;node02  node01-&gt;node03 node01-&gt;node04 node02-&gt;node01<br>
+在node02节点执行：</p>
+<pre><code>ssh-copy-id -i ~/.ssh/id_rsa.pub root@node01
+</code></pre>
+<p><strong>修改hdfs-site.xml配置文件</strong></p>
+<pre><code>&lt;property&gt;
+  &lt;name&gt;dfs.nameservices&lt;/name&gt;
+  &lt;value&gt;mycluster&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.ha.namenodes.mycluster&lt;/name&gt;
+  &lt;value&gt;nn1,nn2&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.rpc-address.mycluster.nn1&lt;/name&gt;
+  &lt;value&gt;node01:8020&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.rpc-address.mycluster.nn2&lt;/name&gt;
+  &lt;value&gt;node02:8020&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.http-address.mycluster.nn1&lt;/name&gt;
+  &lt;value&gt;node01:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.http-address.mycluster.nn2&lt;/name&gt;
+  &lt;value&gt;node02:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.shared.edits.dir&lt;/name&gt;
+  &lt;value&gt;qjournal://node01:8485;node02:8485;node03:8485/mycluster&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.journalnode.edits.dir&lt;/name&gt;
+  &lt;value&gt;/var/sxt/hadoop/ha/jn&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.client.failover.proxy.provider.mycluster&lt;/name&gt;
+  &lt;value&gt;org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.ha.fencing.methods&lt;/name&gt;
+  &lt;value&gt;sshfence&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.ha.fencing.ssh.private-key-files&lt;/name&gt;
+  &lt;value&gt;/root/.ssh/id_rsa&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.ha.automatic-failover.enabled&lt;/name&gt;
+   &lt;value&gt;true&lt;/value&gt;
+ &lt;/property&gt;
+</code></pre>
+<p><strong>修改core-site.xml配置文件</strong>（配置Datanode节点以及Zookeeper节点）</p>
+<pre><code>&lt;property&gt;
+   &lt;name&gt;fs.defaultFS&lt;/name&gt;
+   &lt;value&gt;hdfs://mycluster&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;ha.zookeeper.quorum&lt;/name&gt;
+   &lt;value&gt;node02:2181,node03:2181,node04:2181&lt;/value&gt;
+&lt;/property&gt;
+</code></pre>
+<p><strong>修改slaves配置文件</strong></p>
+<pre><code>node02
+node03
+node04
+</code></pre>
+<p><strong>将配置好的HDFS安装包拷贝到node02 node03 node04</strong></p>
+<pre><code>scp -r hadoop-2.6.5 root@node02:`pwd`
+scp -r hadoop-2.6.5 root@node03:`pwd`
+scp -r hadoop-2.6.5 root@node04:`pwd`
+</code></pre>
+<p><strong>搭建zookeeper集群</strong><br>
+上传zookeeper-3.4.10.tar.gz到node02并解压。<br>
+修改conf目录下的zoo_sample.cfg的名称，改为zoo.cfg<br>
+修改zoo.cfg</p>
+<pre><code>dataDir=/var/zfg/zookeeper
+server.1=node02:2888:3888
+server.2=node03:2888:3888
+server.3=node04:2888:3888
+</code></pre>
+<p>将配置好的zookeeper安装包拷贝到node03 node04</p>
+<pre><code>scp -r zookeeper-3.4.10 root@node03:`pwd`
+scp -r zookeeper-3.4.10 root@node04:`pwd`
+</code></pre>
+<p>在各自节点上的dataDir目录创建myid号，ID号要依次递增<br>
+在node02 node03 node04节点上启动Zookeeper</p>
+<pre><code>cd ./zookeeper-3.4.10/bin/
+./zkServer.sh start
+</code></pre>
+<p><img src="https://img-blog.csdn.net/20181011165824726?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NoZW5tZW5neGkxMjIw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="启动Zookeeper"><br>
+<strong>格式化NameNode(创建目录以及文件)</strong><br>
+①	在node01、node02、node03分别执行如下命令，启动journalnode</p>
+<pre><code>hadoop-daemon.sh start journalnode
+</code></pre>
+<p>②	随机选择一台NameNode执行，格式化Namenode并启动：</p>
+<pre><code>hdfs namenode -format
+hadoop-daemon.sh start namenode
+</code></pre>
+<p>③	另外一台NameNode节点执行，启动Standby Namenode：</p>
+<pre><code>hdfs namenode -bootstrapStandby
+</code></pre>
+<p><strong>格式化ZKFC</strong></p>
+<pre><code>hdfs zkfc -formatZK
+</code></pre>
+<p><strong>关闭所有节点上的进程</strong></p>
+<pre><code>stop-dfs.sh
+</code></pre>
+<p><strong>启动HDFS</strong></p>
+<pre><code>start-dfs.sh
+</code></pre>
+<p><img src="https://img-blog.csdn.net/20181011170234636?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NoZW5tZW5neGkxMjIw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="启动HDFS"><br>
+<strong>操作HDFS文件系统</strong><br>
+<img src="https://img-blog.csdn.net/20181011170445365?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NoZW5tZW5neGkxMjIw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

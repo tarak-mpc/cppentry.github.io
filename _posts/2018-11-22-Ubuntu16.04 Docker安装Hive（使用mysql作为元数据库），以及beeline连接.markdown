@@ -1,0 +1,173 @@
+---
+layout:     post
+title:      Ubuntu16.04 Docker安装Hive（使用mysql作为元数据库），以及beeline连接
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，如若转载请注明出处					https://blog.csdn.net/tonydz0523/article/details/82785418				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>本篇要做的事：基于上一篇使用docker搭建的spark集群安装一个hive。</p>
+<h4><a id="Hive_2"></a>Hive下载：</h4>
+<p><code>wget https://mirrors.tuna.tsinghua.edu.cn/apache/hive/stable-2/apache-hive-2.3.3-bin.tar.gz</code></p>
+<h4><a id="Hive_4"></a>Hive镜像创建</h4>
+<p>写一个dockerfile来安装hive：</p>
+<pre class=" language-shell"><code class="prism  language-shell"><span class="token comment"># 引用镜像</span>
+FROM spark:v1
+<span class="token comment">#设置维护人员</span>
+MAINTAINER ffzs
+
+<span class="token comment"># 复制文件 并解压</span>
+ADD apache-hive-2.3.3-bin.tar.gz /usr/lib
+
+<span class="token comment"># 环境设置</span>
+ENV HIVE_HOME<span class="token operator">=</span>/usr/lib/apache-hive-2.3.3-bin
+ENV PATH<span class="token operator">=</span><span class="token variable">$PATH</span><span class="token keyword">:</span><span class="token variable">$HIVE_HOME</span>/bin
+</code></pre>
+<p>创建一个叫hive:v1的镜像<br>
+<code>docker build -t hive:v1 .</code></p>
+<p>此时，我们运行hive:v1镜像，对hive进行配置：</p>
+<p><code>docker run -it hive:v1</code></p>
+<p>创建hive-site.xml:</p>
+<pre class=" language-xml"><code class="prism  language-xml">vim $HIVE_HOME/conf/hive-site.xml
+# 添加内容如下
+<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>configuration</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>property</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>name</span><span class="token punctuation">&gt;</span></span>javax.jdo.option.ConnectionURL<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>name</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>value</span><span class="token punctuation">&gt;</span></span>jdbc:mysql://hadoop5:3306/hivedb?createDatabaseIfNotExist=true<span class="token entity" title="&amp;">&amp;amp;</span>useSSL=false<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>value</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>description</span><span class="token punctuation">&gt;</span></span>JDBC connect string for a JDBC metastore<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>description</span><span class="token punctuation">&gt;</span></span>
+                <span class="token comment">&lt;!-- 如果 mysql 和 hive 在同一个服务器节点，那么请更改 hadoop05 为 localhost --&gt;</span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>property</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>property</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>name</span><span class="token punctuation">&gt;</span></span>javax.jdo.option.ConnectionDriverName<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>name</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>value</span><span class="token punctuation">&gt;</span></span>com.mysql.jdbc.Driver<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>value</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>description</span><span class="token punctuation">&gt;</span></span>Driver class name for a JDBC metastore<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>description</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>property</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>property</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>name</span><span class="token punctuation">&gt;</span></span>javax.jdo.option.ConnectionUserName<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>name</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>value</span><span class="token punctuation">&gt;</span></span>root<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>value</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>description</span><span class="token punctuation">&gt;</span></span>username to use against metastore database<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>description</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>property</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>property</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>name</span><span class="token punctuation">&gt;</span></span>javax.jdo.option.ConnectionPassword<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>name</span><span class="token punctuation">&gt;</span></span>
+                <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>value</span><span class="token punctuation">&gt;</span></span>root<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>value</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>description</span><span class="token punctuation">&gt;</span></span>password to use against metastore database<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>description</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>property</span><span class="token punctuation">&gt;</span></span>
+<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>configuration</span><span class="token punctuation">&gt;</span></span>
+</code></pre>
+<p>修改hadoop的core-site.xml文件，以使beeline可以访问hive：</p>
+<pre class=" language-xml"><code class="prism  language-xml">vim $HADOOP_CONFIG_HOME/core-site.xml
+#添加内容如下
+    <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>property</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>name</span><span class="token punctuation">&gt;</span></span>hadoop.proxyuser.root.hosts<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>name</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>value</span><span class="token punctuation">&gt;</span></span>*<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>value</span><span class="token punctuation">&gt;</span></span>
+    <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>property</span><span class="token punctuation">&gt;</span></span>
+    <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>property</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>name</span><span class="token punctuation">&gt;</span></span>hadoop.proxyuser.root.groups<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>name</span><span class="token punctuation">&gt;</span></span>
+        <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;</span>value</span><span class="token punctuation">&gt;</span></span>*<span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>value</span><span class="token punctuation">&gt;</span></span>
+    <span class="token tag"><span class="token tag"><span class="token punctuation">&lt;/</span>property</span><span class="token punctuation">&gt;</span></span>
+</code></pre>
+<p>要连接msyql需要在hive中的lib文件加中添加驱动：</p>
+<pre class=" language-shell"><code class="prism  language-shell">apt <span class="token function">install</span> libmysql-java
+<span class="token function">find</span> / -name mysql-connector-java*
+<span class="token comment">#我的在这/usr/share/java/mysql-connector-java-5.1.38.jar</span>
+<span class="token comment">#复制</span>
+<span class="token function">cp</span> /usr/share/java/mysql-connector-java-5.1.38.jar <span class="token variable">$HIVE_HOME</span>/lib/
+</code></pre>
+<p>配置完成 保存：</p>
+<p><code>docker commit `docker ps -q` hive:v1</code><br>
+关闭container：</p>
+<pre class=" language-shell"><code class="prism  language-shell">docker stop <span class="token variable"><span class="token variable">`</span>docker <span class="token function">ps</span> -aq<span class="token variable">`</span></span>
+docker <span class="token function">rm</span>  <span class="token variable"><span class="token variable">`</span>docker <span class="token function">ps</span> -aq<span class="token variable">`</span></span>
+</code></pre>
+<h4><a id="mysql_85"></a>安装mysql镜像</h4>
+<p>我们要使用mysql作为元数据库，需要安装mysql，但是在docker上安装mysql保存的密码总是无法保存，操作总是出现问题，于是我选着直接pull 一个官方镜像，外接mysql，这里选用mysql5.7：<br>
+<code>docker pull mysql:5.7</code></p>
+<p>运行</p>
+<pre><code>docker run -e MYSQL_ROOT_PASSWORD=root -d mysql:5.7
+</code></pre>
+<p>保存一下：<br>
+<code>docker commit `docker ps -q` mysql:v1</code><br>
+关闭同上。。</p>
+<h4><a id="hadoop_97"></a>开启hadoop集群</h4>
+<p>改写docker的开启shell：<br>
+<a href="http://run-docker-hive.sh" rel="nofollow">run-docker-hive.sh</a></p>
+<pre class=" language-shell"><code class="prism  language-shell"><span class="token shebang important">#!/bin/bash</span>
+
+docker <span class="token function">rm</span> -f hadoop1 <span class="token operator">&gt;</span>/dev/null 2<span class="token operator">&gt;</span><span class="token operator">&amp;</span>1
+<span class="token keyword">echo</span> <span class="token string">"start hadoop1 container..."</span>
+docker run -itd \
+			--network hadoop \
+			--name hadoop1 \
+			--ip 172.19.0.2 \
+			--hostname hadoop1 \
+			hive:v1 <span class="token operator">&gt;</span>/dev/null 2<span class="token operator">&gt;</span><span class="token operator">&amp;</span>1
+docker <span class="token function">exec</span> hadoop1 <span class="token function">bash</span> -c <span class="token string">"echo 1 &gt; /home/hadoop/data/zkdata/myid"</span>
+
+
+
+N<span class="token operator">=</span><span class="token variable">${1:-5}</span>
+i<span class="token operator">=</span>2
+<span class="token keyword">while</span> <span class="token punctuation">[</span> <span class="token variable">$i</span> -lt <span class="token variable">$N</span> <span class="token punctuation">]</span>
+<span class="token keyword">do</span>
+        docker <span class="token function">rm</span> -f hadoop<span class="token variable">$i</span> <span class="token operator">&gt;</span>/dev/null 2<span class="token operator">&gt;</span><span class="token operator">&amp;</span>1
+        <span class="token keyword">echo</span> <span class="token string">"start hadoop<span class="token variable">$i</span> container..."</span>
+        docker run -itd \
+				--network hadoop \
+				--name hadoop<span class="token variable">$i</span> \
+				--ip 172.19.0.<span class="token variable"><span class="token variable">$((</span> $i <span class="token operator">+</span> <span class="token number">1</span> <span class="token variable">))</span></span> \
+				--hostname hadoop<span class="token variable">$i</span> \
+				spark:v1 <span class="token operator">&gt;</span>/dev/null 2<span class="token operator">&gt;</span><span class="token operator">&amp;</span>1
+	docker <span class="token function">exec</span> hadoop<span class="token variable">$i</span> <span class="token function">bash</span> -c <span class="token string">"echo <span class="token variable">$i</span> &gt; /home/hadoop/data/zkdata/myid"</span>
+
+        i<span class="token operator">=</span><span class="token variable"><span class="token variable">$((</span> $i <span class="token operator">+</span> <span class="token number">1</span> <span class="token variable">))</span></span>
+<span class="token keyword">done</span>
+
+docker <span class="token function">rm</span> -f hadoop5 <span class="token operator">&gt;</span>/dev/null 2<span class="token operator">&gt;</span><span class="token operator">&amp;</span>1
+<span class="token keyword">echo</span> <span class="token string">"start hadoop5 container..."</span>
+docker run -d \
+		--network hadoop \
+		--name hadoop5 \
+		--ip 172.19.0.6 \
+		--hostname hadoop5 \
+		mysql:v1 <span class="token operator">&gt;</span>/dev/null 2<span class="token operator">&gt;</span><span class="token operator">&amp;</span>1
+</code></pre>
+<p>如果你的172.19.0.0ip段被其他network占用:<br>
+删除network<br>
+<code>docker network rm network名</code><br>
+创建hadoop network 指定 172.19.0.0 ip：<br>
+<code>docker network create --driver=bridge --subnet=172.19.0.0/16 hadoop</code></p>
+<p><a href="http://xn--hive-start-pf2pypr28a.sh" rel="nofollow">写一个hive-start.sh</a></p>
+<pre class=" language-shell"><code class="prism  language-shell"><span class="token shebang important">#! /bin/bash</span>
+
+sh run-docker-hive.sh
+sh zk-start.sh
+sh jnn-start.sh
+sh hadoop-start.sh
+</code></pre>
+<p>开启hive：<br>
+<code>sh hive-start.sh</code><br>
+开启hadoop1的bash：<br>
+<code>docker exec -it hadoop1 bash</code></p>
+<h4><a id="_162"></a>初始化元数据库：</h4>
+<p><code>schematool -dbType mysql -initSchema</code><br>
+<img src="https://img-blog.csdn.net/2018092015284040?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3RvbnlkejA1MjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+出现红框内容说明成功…</p>
+<h4><a id="hive_166"></a>启动hive</h4>
+<p>此时运行hive --service cli或hive效果一样：<br>
+<code>hive --service cli</code><br>
+<img src="https://img-blog.csdn.net/2018092015354989?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3RvbnlkejA1MjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<h4><a id="beelinehive_171"></a>beeline连接hive</h4>
+<p>先启动 hiveserver2 服务：<br>
+<code>nohup hiveserver2 1&gt;/home/hadoop/hiveserver.log 2&gt;/home/hadoop/hiveserver.err &amp;</code><br>
+<img src="https://img-blog.csdn.net/20180920153831505?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3RvbnlkejA1MjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+出现 RunJar说明开启成功。。<br>
+启动beeline连接：<br>
+<code>beeline -u jdbc:hive2://hadoop1:10000 -n root</code></p>
+<p><img src="https://img-blog.csdn.net/20180920161051695?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3RvbnlkejA1MjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<p>出现上面的内容说明连接成功。。</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

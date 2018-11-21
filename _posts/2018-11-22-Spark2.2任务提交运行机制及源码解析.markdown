@@ -1,0 +1,339 @@
+---
+layout:     post
+title:      Spark2.2任务提交运行机制及源码解析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="editor-inline-macro" src="https://wiki.sankuai.com/plugins/servlet/confluence/placeholder/macro?definition=e3RvY30&amp;locale=zh_CN&amp;version=2" alt="" style="background-color:rgb(240,240,240);border:1px solid rgb(221,221,221);min-height:24px;vertical-align:text-bottom;"></p>
+<div>源码版本：2.2</div>
+<div>参考《Spark内核机制解析及性能调优》</div>
+<div>如有错误请指正</div>
+<h1 style="color:rgb(51,51,51);font-size:24px;font-weight:normal;line-height:1.25;font-family:Arial, sans-serif;">
+一、Spark运行的核心概念</h1>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">Spark调度器的设计体现得非常简洁清晰和高效，其输入是Spark RDD，输出是Spark执行器(Executor)。正是Spark调度器的设计思想极大地区分出了基于MapReduce模型的Hadoop和基于DAG模型的Spark。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">主要内容包括Spark运行核心概念，Spark Driver Program剖析，Spark作业（Job）的触发，高层DAG调度器（DAGScheduler），底层的Task调度器（TaskScheduler）和调度器的通信终端（Scheduler-Backend）。 </div>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+1.1 Spark运行的基本对象</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">RDD是Spark运行的基本对象。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">RDD是一种数据模型，与分布式的共享内存类似，RDD具有以下几个特征</div>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>是只读的内存数据，但可以持久化</li><li>是可以分区的数据集合</li><li>是一个对象，可以调用它的方法执行一些变换操作(Transformation)，如flapMap、filter等</li><li>是可恢复。与数据多副本的备份方式不同，RDD的恢复可以通过重复执行变换操作(Transformation)得到</li></ol><div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">有下列两种方式可以创建RDD</div>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>从持久化的数据上创建，如硬盘和HDFS上的文件</li><li>从其他RDD上通过变换Transformation操作创建</li></ol><h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+1.2 Spark运行框架及各组件的基本运行原理</h2>
+<h1 style="color:rgb(51,51,51);font-size:24px;font-weight:normal;line-height:1.25;font-family:Arial, sans-serif;">
+二、Spark Driver Program剖析</h1>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+2.1 什么是Spark Driver Program</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">Driver是运行Application的Main函数，并且新建SparkContext实例的程序。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">初始化SparkContext是为了准备Spark应用程序的环境，在Spark中由SparkContext负责与集群进行通信、资源的申请，以及任务的分配和监控等。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">当Worker节点中的Executor运行完Task后，Driver同时负责将SparkContext关闭，通常也可以使用SparkContext来代表驱动程序。 </div>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+2.2 SparkContext原理剖析</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">SparkContext是用户通往Spark集群的唯一入口，可以用来在Spark集群中创建RDD、累加器Accumulator和广播变量Braodcast Variable。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">SparkContext 也是整个Spark应用程序中至关重要的一个对象，可以说是整个应用运行调度的核心(不是指资源调度)。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">SparkContext在实例化的过程中会初始化DAGScheduler、TaskScheduler和SchedulerBackend，而当RDD的action出发了作业Job之后，</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">SparkContext会调用DAGScheduler将整个Job划分成几个小的阶段(Stage),TaskScheduler会调度每个Stage的任务(Task)应该如何处理。另外，SchedulerBackend管理整个集群中为这个当前的应用分配的计算资源(Executor). </div>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+2.3 SparkContext源码解析 <span style="color:rgb(255,0,0);">（2.2中被SparkSession取代）</span></h2>
+<h3 style="color:rgb(51,51,51);font-size:16px;line-height:1.5;font-family:Arial, sans-serif;">
+2.3.1构造函数</h3>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+SparkContext提供了多种不同的构造函数</p>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li><strong>默认构造函数， 完全以系统配置作为参数进行初始化，例如，通过./bin/spark-submit提交任务</strong></li></ol><p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:13:8.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A13%3A8.png?version=1&amp;modificationDate=1506751988000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+    2. <strong> 提供master url和应用名称进行初始化</strong></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<strong>    3.  提供master url，appname，sparkhome，jars和环境变量</strong></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+等等</p>
+<h3 style="color:rgb(51,51,51);font-size:16px;line-height:1.5;font-family:Arial, sans-serif;">
+2.3.2成员变量</h3>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">成员变量都是私有的，SparkContext另外提供了一系列的方法允许外界进行访问</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">SparkContext中比较重要的成员：</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">SchedulerBackend</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">TaskScheduler</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">DAGScheduler </div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:14:53.png" height="400" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A14%3A53.png?version=1&amp;modificationDate=1506752093000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<h3 style="color:rgb(51,51,51);font-size:16px;line-height:1.5;font-family:Arial, sans-serif;">
+2.3.3初始化和校验</h3>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>初始化异步监听bus</li></ol><p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+监听spark事件，<span style="color:rgb(255,0,0);">用于SparkUI的跟踪管理</span></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:15:29.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A15%3A29.png?version=1&amp;modificationDate=1506752129000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+    2.  创建spark环境变量</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:15:49.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A15%3A49.png?version=1&amp;modificationDate=1506752149000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+    3.  启动心跳接收器</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+在创建taskScheduler之间需要先注册HeartbeatReceiver，因为Executor在创建时回去检索HeartbeatReceiver</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:16:30.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A16%3A30.png?version=1&amp;modificationDate=1506752190000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+    4.  创建SchedulerBackend、TaskScheduler、DAGScheduler</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:16:52.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A16%3A52.png?version=1&amp;modificationDate=1506752212000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+    5.  启动TaskScheduler</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+在TaskScheduler被DAGScheduler引用后，就可以进行启动</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:17:30.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A17%3A30.png?version=1&amp;modificationDate=1506752250000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+    6. pos init</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:18:5.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A18%3A5.png?version=1&amp;modificationDate=1506752286000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<h3 style="color:rgb(51,51,51);font-size:16px;line-height:1.5;font-family:Arial, sans-serif;">
+2.3.4方法相关</h3>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>RDD相关</li><li>Accumulator相关</li><li>Job相关</li><li>Cluster相关</li><li>缓存相关</li></ol><h1 style="color:rgb(51,51,51);font-size:24px;font-weight:normal;line-height:1.25;font-family:Arial, sans-serif;">
+三、Spark Job的触发</h1>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+3.1 Job的执行逻辑</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">典型的Job逻辑执行有下列四个步骤</div>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>从数据源（本地File，内存数据结构，HDFS，HBase等）读取数据，创建最初的RDD</li><li>对RDD进行一系列的transformation（）操作，每一个transformat会产生一个或多个包含不同类型T的RDD[T]</li></ol><div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">T可以是Scala里的基本类型或数据结构，不限于（K,V）。但如果是（K,V），K不能是Array等复杂类型（因为难以在复杂类型上定义partition函数）</div>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>队最后的final RDD进行action()操作，每个partition计算后产生结果Result</li><li>将Result回送到Driver端，进行最后的f(list[result])计算。</li></ol><h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+3.2 Job具体的物理执行</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">Spark Application里可以产生1个或者多个Job，程序中一般而言可以有不同的Action，每一个Action一般也会触发一个Job.</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">有了Job的逻辑执行图后，如何合理划分Stage，并确定Task的类型和个数?</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">基于Pipeline的思想：数据用的时候再算，而且数据是流到要计算的位置的。我们可以将整个流程图看成一个Stage，为最后一个finalRDD中的每个partition分配一个Task。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">Spark算法构造和物理执行时最基本的核心：最大化Pipeline。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">整体流程：整个Computing Chain根据数据依赖关系自后向前建立，遇到ShuffleDependency后形成Stage。在每个Stage中，每个RDD的compute（）调用parentRDD.iter（）来将parent RDD中的Record一个个fetch过来。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">stage内部计算的逻辑是完全一样的，只是计算的数据不同而已。 </div>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+3.3 Job触发流程源代码解析</h2>
+<h3 style="color:rgb(51,51,51);font-size:16px;line-height:1.5;font-family:Arial, sans-serif;">
+3.3.1 SparkContext提交Job</h3>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">runJob有多个重载方法，下面是一个最典型的</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">触发针对一个RDD的所有partition的计算，并将处理结果返回在一个数组里 </div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:30:21.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A30%3A21.png?version=1&amp;modificationDate=1506753021000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<div>调用runJob的重载方法</div>
+<div>触发一个在RDD的给定partition上运行的Job，并将处理结果返回在一个数组里 </div>
+</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:30:43.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A30%3A43.png?version=1&amp;modificationDate=1506753043000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">在这个方法里首先会针对func调用一个clean，目的是针对传输的闭包进行清理，保证func可以正常序列化发送到task上</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:31:20.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A31%3A20.png?version=1&amp;modificationDate=1506753080000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">然后再调用一个重载方法</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><span style="color:rgb(255,0,0);">这里的ctx是从哪里来的???这是什么语法   ctx到底是从哪里来的。。。</span></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:31:39.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A31%3A39.png?version=1&amp;modificationDate=1506753099000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">重载方法如下</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:32:12.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A32%3A12.png?version=1&amp;modificationDate=1506753132000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<div><span style="color:rgb(255,0,0);">方法里的index是从哪里来的???</span></div>
+<div>构造出result集合,最后一次进入SparkContext 中runJob的另一个同名重载方法，构造出了result handler函数</div>
+<div>触发一个Job处理一个RDD的指定部分的partition，并把处理结果给指定的handler函数，这是Spark的所有Action 的主入口 </div>
+</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:33:13.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A33%3A13.png?version=1&amp;modificationDate=1506753193000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">向高层调度器DAGScheduler提交Job，从而获得执行结果</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:33:26.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A33%3A26.png?version=1&amp;modificationDate=1506753206000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<h3 style="color:rgb(51,51,51);font-size:16px;line-height:1.5;font-family:Arial, sans-serif;">
+3.3.2 DAGScheduler接收Job</h3>
+<h4 style="color:rgb(51,51,51);font-size:14px;line-height:1.42857;font-family:Arial, sans-serif;">
+3.3.2.1 DAGScheduler实例化</h4>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+DAGScheduler是在SparkContext中实例化的，相关实例化代码如下</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:34:58.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A34%3A58.png?version=1&amp;modificationDate=1506753300000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<h4 style="color:rgb(51,51,51);font-size:14px;line-height:1.42857;font-family:Arial, sans-serif;">
+3.3.2.2 DAGScheduler提交Job</h4>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+RDD的action操作会调用SparkContext中的runJob方法，SparkContex的runJob方法最终会调用自身维护的已经实例化过的DAGScheduler的runJob</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:35:43.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A35%3A43.png?version=1&amp;modificationDate=1506753343000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+DAGScheduler的runJob方法，会先调用submitJob方法构造一个JobWaiter对象（干嘛的?就是一个future）,在submitJob方法，真正执行提交job操作</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>先校验partition是否有不合理partition</li><li>获取递增的jobId</li><li>构造新的JobWaiter对象，JobWaiter对象等待DAGScheduler 任务完成，任务结束时，它会将task的结果传递给result handler</li><li>提交一个JobSubmitted任务给eventProcessLoop</li></ol><p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:35:57.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A35%3A57.png?version=1&amp;modificationDate=1506753359000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">eventProcessLoop是一个<span style="color:rgb(0,0,0);">DAGSchedulerEventProcessLoop，它的父类是</span><span style="color:rgb(0,0,0);">EventLoop</span></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><span style="color:rgb(0,0,0);">EventLoop接收事件，放在队列中，不断从队列中获取新事件，进行处理</span></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:36:33.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A36%3A33.png?version=1&amp;modificationDate=1506753393000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><span style="color:rgb(0,0,0);">DAGSchedulerEventProcessLoop</span>重写了onReceive，定义了对于不同事件的不同处理形式</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<div>不同Job的处理方式如下：</div>
+<ol><li><span style="color:rgb(0,0,0);">JobSubmitted =》 </span><span style="color:rgb(0,0,0);">handleJobSubmitted</span></li><li><span style="color:rgb(0,0,0);">MapStageSubmitted =》</span><span style="color:rgb(0,0,0);">handleMapStageSubmitted</span></li><li><span style="color:rgb(0,0,0);">StageCancelled =》 </span><span style="color:rgb(0,0,0);">handleStageCancellation</span></li><li><span style="color:rgb(0,0,0);">JobCancelled =-》 handleJobCancellation</span></li><li><span style="color:rgb(0,0,0);">JobGroupCancelled =》</span><span style="color:rgb(0,0,0);">handleJobGroupCancelled</span></li><li><span style="color:rgb(0,0,0);">AllJobsCancelled =》 </span><span style="color:rgb(0,0,0);">doCancelAllJobs</span></li><li><span style="color:rgb(0,0,0);">ExecutorAdded =》 </span><span style="color:rgb(0,0,0);">handleExecutorAdded</span></li><li><span style="color:rgb(0,0,0);">ExecutorLost =》</span><span style="color:rgb(0,0,0);">handleExecutorLost</span></li><li><span style="color:rgb(0,0,0);">BeginEvent =》 </span><span style="color:rgb(0,0,0);">handleBeginEvent</span></li><li><span style="color:rgb(0,0,0);">GettingResultEvent =》 </span><span style="color:rgb(0,0,0);">handleGetTaskResult</span></li><li><span style="color:rgb(0,0,0);">CompletionEvent =》</span><span style="color:rgb(0,0,0);">handleTaskCompletion</span></li><li><span style="color:rgb(0,0,0);">TaskSetFailed =》handleTaskSetFailed</span></li><li><span style="color:rgb(0,0,0);">ResubmitFailedStages =》</span><span style="color:rgb(0,0,0);">resubmitFailedStages</span></li></ol></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:36:54.png" height="400" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A36%3A54.png?version=1&amp;modificationDate=1506753414000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<div><span style="color:rgb(0,0,0);">可以看出，这里不仅是处理RDD的action操作，还处理了所有的执行流程相关事件</span></div>
+<div><span style="color:rgb(0,0,0);"> </span>
+<h4 style="line-height:1.42857;">3.3.2.3 DAGScheduler划分Stage</h4>
+</div>
+<div><span style="color:rgb(0,0,0);">这里主要分析一下</span><span style="color:rgb(0,0,0);">JobSubmitted事件 </span><span style="color:rgb(0,0,0);">handleJobSubmitted</span></div>
+</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:37:42.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A37%3A42.png?version=1&amp;modificationDate=1506753462000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<div>处理步骤：</div>
+<ol><li>创建finalStage，获取所有依赖的Parent Stage列表，以及ResultStage的Stage ID</li></ol><div><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:39:46.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A39%3A46.png?version=1&amp;modificationDate=1506753586000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<p>    2. 创建Job</p>
+<div><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:40:0.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A40%3A0.png?version=1&amp;modificationDate=1506753600000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<p>    3. 将job设置到stage中</p>
+<div><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:40:8.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A40%3A8.png?version=1&amp;modificationDate=1506753608000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<p>    4. 设置监听事件，提交stage</p>
+</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:40:14.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A40%3A14.png?version=1&amp;modificationDate=1506753614000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><span style="color:rgb(0,0,0);">提交stage，根据RDD的依赖关系，递归提交所有的Stage，实际提交Stage时，调用的是submitMissingTasks</span></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:42:4.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A42%3A4.png?version=1&amp;modificationDate=1506753724000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    5. 提交Task  submitMissingTasks</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">submitMissingTasks 方法中体现了利用RDD的本地性来得到Task的本地性，从而获取Stage内部Task的最佳位置。通过调用getPreferredLocs方法得到Task的最佳位置，并把结果存放到taskIdToLocations Map中方便调用。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:43:36.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A43%3A36.png?version=1&amp;modificationDate=1506753816000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:43:44.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A43%3A44.png?version=1&amp;modificationDate=1506753825000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:43:54.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A43%3A54.png?version=1&amp;modificationDate=1506753835000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">submitMissingTasks中调用了<span style="color:rgb(0,0,0);">getPreferredLocs方法来获取数据本地化信息</span></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:44:12.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A44%3A12.png?version=1&amp;modificationDate=1506753852000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">调用方法<span style="color:rgb(0,0,0);">getPreferredLocsInternal</span></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:44:36.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A44%3A36.png?version=1&amp;modificationDate=1506753876000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">调用方法getPreferredLocsInternal</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:44:46.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A44%3A46.png?version=1&amp;modificationDate=1506753886000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<div>处理流程</div>
+<ol><li>检查数据是否在之前的迭代中已经被访问过了，没有必要重复访问</li></ol><p><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:45:21.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A45%3A21.png?version=1&amp;modificationDate=1506753921000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p>      2.  检查数据是否cache，如果有，直接返回</p>
+<p><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:45:37.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A45%3A37.png?version=1&amp;modificationDate=1506753937000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p>      3.  检查内存数据结构中是否存在当前partition的数据本地信息，如果有，直接返回</p>
+<p><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:45:53.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A45%3A53.png?version=1&amp;modificationDate=1506753953000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p>      4.  如果RDD有窄依赖，判断RDD本身是否有首选地址，如有，就用来构造TaskLocation并返回</p>
+<p><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:46:10.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A46%3A10.png?version=1&amp;modificationDate=1506753970000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+</div>
+<h3 style="color:rgb(51,51,51);font-size:16px;line-height:1.5;font-family:Arial, sans-serif;">
+3.3.3 TaskScheduler接收Task</h3>
+<h4 style="color:rgb(51,51,51);font-size:14px;line-height:1.42857;font-family:Arial, sans-serif;">
+3.3.3.1 TaskScheduler实例化</h4>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+TaskScheduler的实例化发生在SparkContext实例化过程中</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:52:18.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A52%3A18.png?version=1&amp;modificationDate=1506754338000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+具体实例化时会根据当前启动模式进行选择如何初始化TaskSchedulerImpl和SchedulerBackend</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:52:42.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A52%3A42.png?version=1&amp;modificationDate=1506754362000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<h4 style="color:rgb(51,51,51);font-size:14px;line-height:1.42857;font-family:Arial, sans-serif;">
+3.3.3.2 TaskScheduler初始化</h4>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+    TaskScheduler的初始化过程其实就是在实现类TaskSchedulerImpl的initialize方法中，初始化过程中会设置对SchedulerBackend对象的引用，实例化SchedulerBuilder具体实现类的对象用来创建和管理TaskSetManager池。</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+TaskSchedulerImpl中默认的调度模式是FIFO</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:55:44.png" height="150" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A55%3A44.png?version=1&amp;modificationDate=1506754544000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+初始化过程initailize会设置对SchedulerBackend对象的引用，根据调度模式，初始化ScheduleBuiler</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:56:0.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A56%3A0.png?version=1&amp;modificationDate=1506754560000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">然后开始构建不同SchedulableBuilder的Pool </div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">FIFO的buildPools实现为空</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">FAIR的buildPools实现如下，啊？看不懂目的</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:56:43.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A56%3A43.png?version=1&amp;modificationDate=1506754603000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<h4 style="color:rgb(51,51,51);font-size:14px;line-height:1.42857;font-family:Arial, sans-serif;">
+3.3.3.3 TaskScheduler启动</h4>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">TaskScheduler实例对象在DAGScheduler实例化后启动，并且TaskScheduler启动的过程由TaskSchedulerImpl具体实现。在启动过程中，主要是调用SchedulerBackend的启动方法，然后对不是本地部署模式并且开启任务的推测执行？？？（设置spark.speculation为true）情况，根据配置判断是否周期性地调用TaskSetManager的checkSpeculatable方法检测任务的推测执行？？？、 
+  </div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    SparkDeploySchedulerBackend的start方法最终会注册应用程序AppClient。 </div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">创建完Scheduler之后执行TaskScheduler的启动</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:57:38.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A57%3A38.png?version=1&amp;modificationDate=1506754658000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">TaskSchedulerImpl中的start方法直接调用了backend.start，但只有在standalone模式下才会调用</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:58:4.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A58%3A4.png?version=1&amp;modificationDate=1506754684000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<h4 style="color:rgb(51,51,51);font-size:14px;line-height:1.42857;font-family:Arial, sans-serif;">
+3.3.3.4 TaskScheduler提交任务</h4>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"> TaskSchedulerImpl启动后，就可以接收DAGScheduler的submitMissingTasks方法提交过来的TaskSet进行进一步处理了。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    对于ShuffleMapStage类型的Stage，DAGScheduler初始化一组ShuffleMapTask实例对象；对于ResultStage类型的Stage，DAGScheduler初始化一组ResultTask实例对象。   <span style="color:rgb(255,38,0);">怎么区分的stage类型？？？</span></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    最后，DAGScheduler将这组ResultTask实例对象封装成TaskSet实例对象提交给TaskSchedulerImpl</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    注意，ShuffleMapTask是根据Stage所依赖的RDD的partition分布产生跟partition数量相等的Task，这些Task根据partition的本地性分布在不同的集群节点；ResultTask负责输出整个Job的结果。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">DAGScheduler.submitMissingTasks流程</div>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>区分stage类型ShuffleMapStage，生成新的StageStatus</li><li>区分stage类型，查看数据资源位置信息</li><li>区分stage类型，将task进行序列化，广播出去</li><li>区分stage类型，创建一组ShuffleMapTask/ ResultTask实例对象</li></ol><div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:59:44.png" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A59%3A44.png?version=1&amp;modificationDate=1506754784000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<div>TaskSchedulerImpl.submitTasks</div>
+<div>TaskSchedulerImpl在submitTasks中初始化一个TaskSetManager，并通过SchedulerBuilder对其进行生命周期管理，最后调用SchedulerBackend的reviveOffers方法进行TaskSet所需资源的分配。在TaskSet得到足够的资源后，在SchedulerBackend的launchTasks方法中将TaskSet中的Task一个个地发送到Executor中去执行。 </div>
+</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"> <img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 14:59:16.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2014%3A59%3A16.png?version=1&amp;modificationDate=1506754756000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></div>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<h1 style="color:rgb(51,51,51);font-size:24px;font-weight:normal;line-height:1.25;font-family:Arial, sans-serif;">
+四、高层的DAGScheduler</h1>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+4.1 DAGScheduler的定义</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">2.2章节中介绍了RDD DAG构建了RDD的数据流，即RDD的各个分区数据是从哪里来的，还进一步分析了RDD DAG的生成机制和RDD DAG的逻辑视图。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">RDD DAG还构建了基于数据流之上的操作算子流，即RDD的各个分区的数据总共会经过哪些Transformation和Action这两种类型的一系列操作的调度运行，从而RDD先被Transformation操作转换为新的RDD，然后被Action操作将结果反馈到Driver Program或存储到外部存储系统上。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    上面提到的一系列操作的调度运行其实是DAG提交给DAGScheduler来解析完成的，DAGScheduler是面向Stage的高层级的调度器，DAGScheduler把DAG拆分成很多Tasks，每组Tasks都是一个Stage。解析时是以Shuffle为边界反向解析构建Stage，每当遇到Shuffle就会产生新的Stage，然后以一个个TaskSet的形式提交给底层调度器TaskScheduler。另外，DAGScheduler需要记录哪些RDD被存入磁盘等物化动作，同时要寻求Task的最优化调度，如在Stage内部数据的本地性等。DAGScheduler还需要监视因为Shuffle跨节点输出可能导致的失败，如果发现这个Stage失败，可能就要重新提交该Stage。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    概念说明：</div>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>Stage：一个Job需要拆分成多组任务来完成，每组任务由Stage封装。跟一个Job的所有涉及的partitionRDD类似，Stage之间也有依赖关系</li><li>TaskSet：一组任务就是一个TaskSet，对应一个Stage，其中，一个TaskSet的所有Task之间没有Shuffle依赖，因此互相之间可以并行运行</li><li>Task：一个独立的工作单元，由Driver Program发送到Executor上去执行，通常情况下，一个Task处理RDD的一个Partition的数据。根据Task返回类型的不同，Task又分为ShuffleMapTask和ResultTask。</li></ol><h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+4.2 DAGScheduler的实例化</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+参考</p>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+4.3 DAGScheduler划分Stage的原理</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+从后往前，根据是否需要Shuffle来划分Stage</p>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+4.4 DAGScheduler划分Stage的具体算法</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">RDD的Action操作算子如count会触发一个Spark Job，其实是RDD的count方法调用了SparkContext的runJob方法。然后，在SparkContext的runJob方法中调用3次重载的runJob方法。最后被调用的重载runJob方法中调用了DAGScheduler的runJob方法，从而进入DAGScheduler的源代码。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    在DAGScheduler的源代码中，DAGScheduler的runJob方法中调用submitJob方法。submitJob方法中最重要的是创建一个<span style="color:rgb(255,38,0);">JobWaiter</span>对象，以及创建JobSubmitted事件对象把JobWaiter对象发送给DAGScheduler的内嵌类DAGSchedulerEventProcessLoop对象实例，DAGSchedulerEventProcessLoop在doOnReceive方法中反过来调用了DAGScheduler中实现划分Stage算法很关键的handleJobSubmitted方法。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">DAGScheduler的handleJobSubmitted方法中调用了newResultStage方法，newResultStage方法根据finalRDD创建finalStage，这时便真正开始了Stage的划分。DAGScheduler的handleJobSubmitted方法中最后调用submitStage方法，根据RDD的依赖的关系，递归提交所有的Stage。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    DAGScheduler的<span style="color:rgb(255,38,0);">getShuffleDependencies</span>方法是划分Stage的核心实现。在该方法中，Stage的划分由最后一个Rsult Stage开始，从后往前回溯边划分边创建。给定的RDD会先被压入Stack，以便被逐个访问。对每个被访问的RDD，判断其Dependency是否是ShuffleDependency宽依赖，如果是，就调用getShuffleMapStage方法获取或创建Stage，并放到一个临时的HashSet中，便于统一最后转为列表返回；如果不是，就把Dependency的RDD也压入Stack中，继续判断该RDD的Denpendency，该方法的结束标志是Stack中所有压入的临时RDD都被访问过。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    Stage划分完成后，DAGScheduler就会回到HandleJobSubmitted方法中调用submitStage方法。在submitStage方法中，从finalStage开始回溯，直到没有Parent Stage为止，提交整个Job的所有Stage，在某一个Stage，DAGScheduler会调用<span style="color:rgb(255,38,0);">submitMissingTasks</span>方法把Tasks提交给TaskScheduler进行细粒度的Task调度。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">JobWaiter    JobSubmitted  DAGSchedulerEventProcessLoop   handleJobSubmitted </div>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+4.5 Stage内部Task获取最佳位置的算法</h2>
+<h1 style="color:rgb(51,51,51);font-size:24px;font-weight:normal;line-height:1.25;font-family:Arial, sans-serif;">
+五、底层的Task调度器TaskScheduler</h1>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">TaskScheduler的核心任务是提交TaskSet到集群运算并汇报结果。</div>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>为TaskSet创建和维护一个TaskSetManager，并追踪任务的本地性以及错误信息</li><li>遇到Straggle任务会放到其他节点进行重试</li><li>向DAGScheduler汇报执行情况，包括在Shuffle输出丢失时报告fetch failed错误等信息</li></ol><h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+5.1 TaskScheduler原理剖析</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">DAGScheduler将划分的一系列Stage（每个Stage封装一个TaskSet），按照Stage的先后顺序依次提交给底层的TaskScheduler去执行。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    DAGScheduler在SparkContext实例化时，TaskScheduler和SchedulerBackend就已经先在SparkContext的createTaskScheduler方法中创建出实例对象了。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    TaskSchedulerImpl在createTaskScheduler方法中实例化后，就立即调用自己的initialize方法把SparkDeploySchedulerBackedn的实例对象传进来，从而赋值给TaskSchedulerImpl的backend。在TaskScheduler的initialize方法中，根据调度模式的配置创建实现了SchedulerBuilder接口的相应实例对象，并且创建的对象会立即调用buildPools创建相应数量的Pool存放和管理TaskManager的实例对象。</div>
+<ol style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;"><li>FIFOSchedulableBuilder</li><li>FairSchedulableBuilder</li></ol><p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<img class="confluence-embedded-image" title="外卖技术部&amp;产品部 &gt; Spark任务提交运行机制及源码解析 &gt; image2017-9-30 15:2:16.png" height="250" src="https://wiki.sankuai.com/download/attachments/1123133873/image2017-9-30%2015%3A2%3A16.png?version=1&amp;modificationDate=1506754936000&amp;api=v2" alt="" style="margin-left:2px;vertical-align:text-bottom;"></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">在createTaskScheduler方法返回后，TaskSchedulerImpl通过DAGScheduler的实例化过程设置DAGScheduler的实例对象，然后调用自己的start方法，在SparkDeploySchedulerBackend的start方法中会最终注册应用程序AppClient。TaskSchedulerImpl的start方法中还会根据配置判断是否周期地检测任务的推测执行。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    TaskScheduler启动后，就可以接收DAGScheduler的submitMissingTasks方法提交过来的TaskSet进行进一步处理。TaskSchedulerImpl在submitTasks中初始化一个TaskSetManager对其进行生命周期管理，当TaskSchedulerImpl得到Worker节点上的Executor计算资源时，会通过TaskManager来发送具体的Task到Executor上执行计算。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    如果Task执行过程中有错误导致失败，会调用TaskSetManager来处理Task失败的情况，进而通知DAGScheduler结束当前的Task。TaskSetManager会将失败的Task再次添加到待执行的Task队列中。Task的默认失败次数是4次。</div>
+<div style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">    如果Task执行完毕，执行的结果会反馈给TaskManager，由TaskManager通知DAGScheduler。DAGScheduler根据是否还存在待执行的Stage，继续迭代提交对应的TaskSet给TaskScheduler去执行，或者输出Job的结果。 </div>
+<h2 style="color:rgb(51,51,51);font-size:20px;font-weight:normal;line-height:1.5;font-family:Arial, sans-serif;">
+5.2 TaskScheduler源代码解析</h2>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+。。。</p>
+<h1 style="color:rgb(51,51,51);font-size:24px;font-weight:normal;line-height:1.25;font-family:Arial, sans-serif;">
+六、调度器的通信终端SchedulerBackend</h1>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+。。。</p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+<p style="color:rgb(51,51,51);font-family:Arial, sans-serif;font-size:14px;">
+<br></p>
+            </div>
+                </div>

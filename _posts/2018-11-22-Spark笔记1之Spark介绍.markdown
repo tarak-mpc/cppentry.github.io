@@ -1,0 +1,128 @@
+---
+layout:     post
+title:      Spark笔记1之Spark介绍
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p id="main-toc"><strong>目录</strong></p>
+
+<p id="%E4%B8%80%E3%80%81%E4%BB%80%E4%B9%88%E6%98%AFSpark-toc" style="margin-left:0px;"><a href="#%E4%B8%80%E3%80%81%E4%BB%80%E4%B9%88%E6%98%AFSpark" rel="nofollow">一、什么是Spark</a></p>
+
+<p id="%E4%BA%8C%E3%80%81Spark%E7%9A%84%E7%8E%B0%E7%8A%B6-toc" style="margin-left:0px;"><a href="#%E4%BA%8C%E3%80%81Spark%E7%9A%84%E7%8E%B0%E7%8A%B6" rel="nofollow">二、Spark的现状</a></p>
+
+<p id="%E4%B8%89%E3%80%81spark%E4%BC%98%E5%8A%BF-toc" style="margin-left:0px;"><a href="#%E4%B8%89%E3%80%81spark%E4%BC%98%E5%8A%BF" rel="nofollow">三、spark优势</a></p>
+
+<p id="1%E3%80%81%E9%80%9F%E5%BA%A6speed-toc" style="margin-left:40px;"><a href="#1%E3%80%81%E9%80%9F%E5%BA%A6speed" rel="nofollow">1、速度speed</a></p>
+
+<p id="2%E3%80%81%E4%BD%BF%E7%94%A8%E6%96%B9%E4%BE%BF-toc" style="margin-left:40px;"><a href="#2%E3%80%81%E4%BD%BF%E7%94%A8%E6%96%B9%E4%BE%BF" rel="nofollow">2、使用方便</a></p>
+
+<p id="3%E3%80%81%E5%BC%BA%E9%80%9A%E7%94%A8%E6%80%A7-toc" style="margin-left:40px;"><a href="#3%E3%80%81%E5%BC%BA%E9%80%9A%E7%94%A8%E6%80%A7" rel="nofollow">3、强通用性</a></p>
+
+<p id="4%E3%80%81%E5%BC%BA%E9%80%82%E5%BA%94%E6%80%A7-toc" style="margin-left:40px;"><a href="#4%E3%80%81%E5%BC%BA%E9%80%82%E5%BA%94%E6%80%A7" rel="nofollow">4、强适应性</a></p>
+
+<p id="%E5%9B%9B%E3%80%81Spark%E4%B8%AD%E7%9A%84%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8BRDD-toc" style="margin-left:0px;"><a href="#%E5%9B%9B%E3%80%81Spark%E4%B8%AD%E7%9A%84%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8BRDD" rel="nofollow">四、Spark中的数据模型RDD</a></p>
+
+<hr id="hr-toc"><h3 id="%E5%AE%98%E7%BD%91%EF%BC%9Ahttps%3A%2F%2Fspark.apache.org%2F">官网：<a href="https://spark.apache.org/" rel="nofollow">https://spark.apache.org/</a></h3>
+
+<h1 id="%E4%B8%80%E3%80%81%E4%BB%80%E4%B9%88%E6%98%AFSpark">一、什么是Spark</h1>
+
+<p>      spark：分布式计算框架，类似hadoop生态圈中的MapReduce（MR分布式计算框架），计算思想和MR相似</p>
+
+<p>      都是分而治之的思想</p>
+
+<p>       Spark比MR火</p>
+
+<h1 id="%E4%BA%8C%E3%80%81Spark%E7%9A%84%E7%8E%B0%E7%8A%B6">二、Spark的现状</h1>
+
+<p>    2016年底 1000组织正在使用spark</p>
+
+<h1 id="%E4%B8%89%E3%80%81spark%E4%BC%98%E5%8A%BF">三、spark优势</h1>
+
+<p>    spark的计算效率比MR要高100倍以上</p>
+
+<p>    因为</p>
+
+<h2 id="1%E3%80%81%E9%80%9F%E5%BA%A6speed">1、速度speed</h2>
+
+<p><img alt="" class="has" height="229" src="https://img-blog.csdnimg.cn/20181120130751208.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9saXV5aXRpbmc=,size_16,color_FFFFFF,t_70" width="852"></p>
+
+<p>   1、有向sql无环图，</p>
+
+<p>    2、查询优化器（主要用于Spark SQL）</p>
+
+<p>    SQL -&gt; sparkSQL -&gt;spark任务 -&gt; 分布式集群中计算</p>
+
+<p>    SQL -&gt;Hive -&gt; MR任务 -&gt; 分布式集群中计算</p>
+
+<p>     虽然Hive的计算能力不行，但Hive非常适合做数据仓库</p>
+
+<p>    3、物理执行引擎</p>
+
+<p>    4、资源复用</p>
+
+<p>    5、粗粒度的资源调度</p>
+
+<h2 id="2%E3%80%81%E4%BD%BF%E7%94%A8%E6%96%B9%E4%BE%BF">2、使用方便</h2>
+
+<p>1、支持使用多门语言</p>
+
+<p>2、Spark提供了80多种方法（算子）来供我们使用</p>
+
+<p><img alt="" class="has" height="217" src="https://img-blog.csdnimg.cn/20181120130813100.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9saXV5aXRpbmc=,size_16,color_FFFFFF,t_70" width="857"></p>
+
+<p> </p>
+
+<p>scala语言：</p>
+
+<p>基于JVM的编程语言</p>
+
+<p>java和scala可以无缝集成</p>
+
+<p>都是由.class -&gt;JVM</p>
+
+<p>scala和python有99%的相似性</p>
+
+<p>scala简洁方便，但是可读性差</p>
+
+<p> </p>
+
+<h2 id="3%E3%80%81%E5%BC%BA%E9%80%9A%E7%94%A8%E6%80%A7">3、强通用性</h2>
+
+<p><img alt="" class="has" height="229" src="https://img-blog.csdnimg.cn/20181120131029601.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9saXV5aXRpbmc=,size_16,color_FFFFFF,t_70" width="912"></p>
+
+<p>Spark SQL：通过一条SQL语句在海量数据上查询</p>
+
+<p>Spark Streaming: 流式处理（每产生一条数据就会立马对这条数据进行处理)框架<br>
+流式处理框架：Spark Streaming、storm、flink</p>
+
+<p>批处理(等一段时间的数据，在未来的某个时间点，对这些数据进行批量处理)框架</p>
+
+<p>批处理框架：MR、Spark Core</p>
+
+<h2 id="4%E3%80%81%E5%BC%BA%E9%80%82%E5%BA%94%E6%80%A7">4、强适应性</h2>
+
+<p><img alt="" class="has" height="319" src="https://img-blog.csdnimg.cn/20181120132537115.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9saXV5aXRpbmc=,size_16,color_FFFFFF,t_70" width="892"></p>
+
+<p>1、Spark Application 可以运行在各种各样的资源调度框架上，如Yarn、Mesos、 S<a href="https://spark.apache.org/docs/latest/spark-standalone.html" rel="nofollow">tandalone</a></p>
+
+<p>2、可接收上百种数据源 Access data in <a href="https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HdfsUserGuide.html" rel="nofollow">HDFS</a>, <a href="https://alluxio.org/" rel="nofollow">Alluxio</a>, <a href="https://cassandra.apache.org/" rel="nofollow">Apache Cassandra</a>, <a href="https://hbase.apache.org/" rel="nofollow">Apache HBase</a>, <a href="https://hive.apache.org/" rel="nofollow">Apache Hive</a>, and hundreds of other data sources.</p>
+
+<p> </p>
+
+<h1 id="%E5%9B%9B%E3%80%81Spark%E4%B8%AD%E7%9A%84%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8BRDD">四、Spark中的数据模型RDD</h1>
+
+<p>RDD（Resilient Distributed Datasets）弹性的分布式数据集</p>
+
+<p>在Spark中一切计算都是基于RDD计算的</p>
+
+<p>Spark分布式计算框架</p>
+
+<p>HDFS分布式存储框架</p>
+
+<p>假设Spark处理的数据在HDFS</p>
+
+<p><img alt="" class="has" height="793" src="https://img-blog.csdnimg.cn/20181120140441653.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9saXV5aXRpbmc=,size_16,color_FFFFFF,t_70" width="1060"></p>
+
+<p> </p>            </div>
+                </div>

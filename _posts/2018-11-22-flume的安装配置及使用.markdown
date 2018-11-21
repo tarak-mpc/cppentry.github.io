@@ -1,0 +1,455 @@
+---
+layout:     post
+title:      flume的安装配置及使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u011331430/article/details/79043746				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);">flume 作为 cloudera 开发的实时日志收集系统，受到了业界的认可与广泛应用。Flume 初始的发行版本目前被统称为 Flume OG（original generation），属于 cloudera。但随着 FLume 功能的扩展，Flume OG 代码工程臃肿、核心组件设计不合理、核心配置不标准等缺点暴露出来，尤其是在 Flume OG 的最后一个发行版本 0.94.0
+ 中，日志传输不稳定的现象尤为严重，为了解决这些问题，2011 年 10 月 22 号，cloudera 完成了 Flume-728，对 Flume 进行了里程碑式的改动：重构核心组件、核心配置以及代码架构，重构后的版本统称为 Flume NG（next generation）；改动的另一原因是将 Flume 纳入 apache 旗下，cloudera Flume 改名为 Apache Flume。</span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span></p>
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify"><strong><span style="color:rgb(68,68,68);background:rgb(255,255,255);">flume的特点：</span></strong><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">flume是一个分布式、可靠、和高可用的海量日志采集、聚合和传输的系统。支持在日志系统中定制各类数据发送方，用于收集数据;同时，Flume提供对数据进行简单处理，并写到各种数据接受方(比如文本、HDFS、Hbase等)的能力 。</span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">flume的数据流由事件(Event)贯穿始终。事件是Flume的基本数据单位，它携带日志数据(字节数组形式)并且携带有头信息，这些Event由Agent外部的Source生成，当Source捕获事件后会进行特定的格式化，然后Source会把事件推入(单个或多个)Channel中。你可以把Channel看作是一个缓冲区，它将保存事件直到Sink处理完该事件。Sink负责持久化日志或者把事件推向另一个Source。</span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><strong><span style="color:rgb(68,68,68);background:rgb(255,255,255);">flume的可靠性</span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"> </span></strong><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><span style="font-family:'宋体';">　　当节点出现故障时，日志能够被传送到其他节点上而不会丢失。</span>Flume提供了三种级别的可靠性保障，从强到弱依次分别为：end-to-end（收到数据agent首先将event写到磁盘上，当数据传送成功后，再删除；如果数据发送失败，可以重新发送。），Store on failure（这也是scribe采用的策略，当数据接收方crash时，将数据写到本地，待恢复后，继续发送），Besteffort（数据发送到接收方后，不会进行确认）。</span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><strong><span style="color:rgb(68,68,68);background:rgb(255,255,255);">flume的可恢复性：</span></strong><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><span style="font-family:'宋体';">　　还是靠</span>Channel。推荐使用FileChannel，事件持久化在本地文件系统里(性能较差)。 </span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><strong><span style="color:rgb(68,68,68);background:rgb(255,255,255);">flume的一些核心概念：</span></strong></p>
+<p align="justify"><span style="color:rgb(68,68,68);background:rgb(255,255,255);">· </span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">Agent        使用JVM 运行Flume。每台机器运行一个agent，但是可以在一个agent中包含多个sources和sinks。</span></p>
+<p align="justify"><span style="color:rgb(68,68,68);background:rgb(255,255,255);">· </span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">Client        生产数据，运行在一个独立的线程。</span></p>
+<p align="justify"><span style="color:rgb(68,68,68);background:rgb(255,255,255);">· </span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">Source        从Client收集数据，传递给Channel。</span></p>
+<p align="justify"><span style="color:rgb(68,68,68);background:rgb(255,255,255);">· </span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">Sink        从Channel收集数据，运行在一个独立线程。</span></p>
+<p align="justify"><span style="color:rgb(68,68,68);background:rgb(255,255,255);">· </span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">Channel        连接 sources 和 sinks ，这个有点像一个队列。</span></p>
+<p align="justify"><span style="color:rgb(68,68,68);background:rgb(255,255,255);">· </span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">Events        可以是日志记录、 avro 对象等。</span></p>
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span><span style="color:rgb(68,68,68);background:rgb(255,255,255);">Flume以agent为最小的独立运行单位。一个agent就是一个JVM。单agent由Source、Sink和Channel三大组件构成，如下图：</span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span></p>
+<img src="https://img-blog.csdn.net/20180112143610044?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><span style="font-family:'宋体';">　值得注意的是，</span>Flume提供了大量内置的Source、Channel和Sink类型。不同类型的Source,Channel和Sink可以自由组合。组合方式基于用户设置的配置文件，非常灵活。比如：Channel可以把事件暂存在内存里，也可以持久化到本地硬盘上。Sink可以把日志写入HDFS, HBase，甚至是另外一个Source等等。Flume支持用户建立多级流，也就是说，多个agent可以协同工作，并且支持Fan-in、Fan-out、Contextual
+ Routing、Backup Routes，这也正是NB之处。如下图所示:</span><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><br></span></p>
+<img src="https://img-blog.csdn.net/20180112143625506?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">Flume的安装和部署</p>
+<p align="justify"><span style="font-family:'宋体';">下载上传</span>   cdh版本</p>
+<p align="justify">1).解压</p>
+<p align="justify">$ tar -zxf flume-ng-1.5.0-cdh5.3.6.tar.gz -C /opt/modules/cdh/</p>
+<p align="justify"> </p>
+<p align="justify">2).配置${FLUME_HOME}/conf/</p>
+<p align="justify">$ cp  flume-env.sh.template flume-env.sh</p>
+<p align="justify"><span style="font-family:'宋体';">修改</span>flume-env.sh</p>
+<p align="justify">export JAVA_HOME=/opt/modules/jdk1.7.0_67</p>
+<p align="justify"> </p>
+<p align="justify">3).拷贝HDFS依赖及配置的jar包到${FLUME_HOME}/lib</p>
+<p align="justify"> </p>
+<p align="justify">${HADOOP_HOME}/</p>
+<p align="justify">$ cp share/hadoop/common/hadoop-common-2.5.0-cdh5.3.6.jar share/hadoop/common/lib/commons-configuration-1.6.jar share/hadoop/common/lib/hadoop-auth-2.5.0-cdh5.3.6.jar share/hadoop/hdfs/hadoop-hdfs-2.5.0-cdh5.3.6.jar /opt/modules/cdh/flume-1.5.0-cdh5.3.6/lib/</p>
+<p align="justify"> </p>
+<p align="justify">4).拷贝HDFS相关的配置文件到flume的conf</p>
+<p align="justify">${HADOOP_HOME}/etc/hadoop    --&gt;  ${FLUME_HOME}/conf</p>
+<p align="justify">$ cp  etc/hadoop/core-site.xml etc/hadoop/hdfs-site.xml    /opt/modules/cdh/flume-1.5.0-cdh5.3.6/conf/</p>
+<p align="justify">[案例一： source：telnet     sink:生成日志文件，直接打印到控制台] </p>
+<p align="justify">1.生成agent模板</p>
+<p align="justify">$ cp flume-conf.properties.template flume-conf.properties</p>
+<p align="justify">$ cp flume-conf.properties a1.conf</p>
+<p align="justify"> </p>
+<p align="justify">2.编辑agent配置文件（source  channel sink）</p>
+<p align="justify"> </p>
+<p align="justify"> </p>
+<p align="justify"># Name the components on this agent  </p>
+<p align="justify">#a1指的是Agent的name，需要与启动agent的--name相对应</p>
+<p align="justify">a1.sources = r1      #当前agent的sources名称</p>
+<p align="justify">a1.sinks = k1        #当前agent的sinks名称</p>
+<p align="justify">a1.channels = c1     #当前agent的channels名称</p>
+<p align="justify"> </p>
+<p align="justify"># Describe/configure the source</p>
+<p align="justify">a1.sources.r1.type = netcat     #sources的类型</p>
+<p align="justify">a1.sources.r1.bind = bigdata.ibeifeng.com   #绑定的主机</p>
+<p align="justify">a1.sources.r1.port = 44444      #监听的端口</p>
+<p align="justify"> </p>
+<p align="justify"># Describe the sink  </p>
+<p align="justify">a1.sinks.k1.type = logger       #输出到日志 </p>
+<p align="justify"> </p>
+<p align="justify"># Use a channel which buffers events in memory</p>
+<p align="justify">a1.channels.c1.type = memory        #缓冲到内存中</p>
+<p align="justify">a1.channels.c1.capacity = 1000    #存储到channels中的events的最大数据</p>
+<p align="justify">a1.channels.c1.transactionCapacity = 100    数量##每次event在channel传输的最大的</p>
+<p align="justify"> </p>
+<p align="justify"># Bind the source and sink to the channel  将对应的source和sink绑定到channel</p>
+<p align="justify">a1.sources.r1.channels = c1       </p>
+<p align="justify">a1.sinks.k1.channel = c1 </p>
+<img src="https://img-blog.csdn.net/20180112143655755?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">3.yum 安装 telnet</p>
+<p align="justify"># yum  -y install telnet</p>
+<p align="justify"> </p>
+<p align="justify">4.启动agent  ${FLUME_HOME}/</p>
+<p align="justify">$ bin/flume-ng agent --conf conf --conf-file conf/a1.conf --name a1 -Dflume.root.logger=INFO,console</p>
+<p align="justify"> </p>
+<p align="justify">--conf 指定配置文件所在目录</p>
+<p align="justify">        --name <span style="font-family:'宋体';">指定</span>agent的名称,与a1.conf文件指定的一致</p>
+<p align="justify">        --conf-file <span style="font-family:'宋体';">指定</span>agent配置文件名称</p>
+<p align="justify">        -Dflume.root.logger=INFO,console <span style="font-family:'宋体';">
+日志输出到</span>console</p>
+<p align="justify"> </p>
+<p align="justify">Event: { headers:{} body: 48 65 6C 6C 6F 20 77 6F 72 6C 64 21 0D          Hello world!. }</p>
+<img src="https://img-blog.csdn.net/20180112143850822?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">5.启动telnet</p>
+<p align="justify">$ telnet linux1 44444</p>
+<p align="justify"> </p>
+<p align="justify"><span style="font-family:'宋体';">【退出</span>telnet】</p>
+<p align="justify">Ctrl+]</p>
+<p align="justify">telnet&gt;quit </p>
+<p align="justify">Connection closed.</p>
+<img src="https://img-blog.csdn.net/20180112143915812?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><img src="https://img-blog.csdn.net/20180112143919968?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="" style="color:rgb(68,68,68);"><br></span></p>
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">6.停止agent</p>
+<p align="justify">${FLUME_HOME}</p>
+<p align="justify">Ctrl+c 退出flume agent同时也就退出了telnet</p>
+<p align="justify"> </p>
+<p align="justify">[案例二：flume抽取日志文件]</p>
+<p align="justify">source: 类型exec </p>
+<p align="justify">tail -f </p>
+<p align="justify">channel:memchannel</p>
+<p align="justify">sink:HDFS</p>
+<p align="justify"> </p>
+<p align="justify">//使用agent  a1 作为模板生成a2 agent 的配置文件</p>
+<p align="justify">${FLUME_HOME}/conf</p>
+<p align="justify">$ cp   a1.conf   a2.conf</p>
+<p align="justify"> </p>
+<p align="justify">1.配置a2.conf</p>
+<p align="justify">=================修改a2.conf</p>
+<p align="justify">#a2:agent name</p>
+<p align="justify">a2.sources = r2</p>
+<p align="justify">a2.channels = c2</p>
+<p align="justify">a2.sinks = k2</p>
+<p align="justify"> </p>
+<p align="justify"># define sources</p>
+<p align="justify">#主动获取日志</p>
+<p align="justify">a2.sources.r2.type = exec</p>
+<p align="justify">#获取日志的命令（注意要有权限）</p>
+<p align="justify">a2.sources.r2.command = tail -F tail -F /opt/modules/cdh/hive-0.13.1-cdh5.3.6/logs/hive.log  #上一行命令所运行的环境</p>
+<p align="justify">a2.sources.r2.shell = /bin/bash -c</p>
+<p align="justify"> </p>
+<p align="justify"># define channels</p>
+<p align="justify">a2.channels.c2.type = memory</p>
+<p align="justify">a2.channels.c2.capacity = 1000</p>
+<p align="justify">a2.channels.c2.transactionCapacity = 100</p>
+<p align="justify"> </p>
+<p align="justify"># define sinks</p>
+<p align="justify">#目标上传到hdfs</p>
+<p align="justify">a2.sinks.k2.type = hdfs</p>
+<p align="justify">a2.sinks.k2.hdfs.path=hdfs:linux1:8020/flume/%Y%m%d/%H</p>
+<p align="justify">a2.sinks.k2.hdfs.filePrefix = accesslog</p>
+<p align="justify">#启用按时间生成文件夹</p>
+<p align="justify">a2.sinks.k2.hdfs.round=true</p>
+<p align="justify">#设置roundValue:1，round单位：小时  </p>
+<p align="justify">a2.sinks.k2.hdfs.roundValue=1</p>
+<p align="justify">a2.sinks.k2.hdfs.roundUnit=hour</p>
+<p align="justify">#使用本地时间戳（这个必须设置不然会报错）</p>
+<p align="justify">a2.sinks.k2.hdfs.useLocalTimeStamp=true</p>
+<p align="justify">#多少个events会flush to hdfs</p>
+<p align="justify">a2.sinks.k2.hdfs.batchSize=1000</p>
+<p align="justify"># File format: 默认是SequenceFile（key:value对），DataStream是无压缩的一般数据流</p>
+<p align="justify">a2.sinks.k2.hdfs.fileType=DataStream</p>
+<p align="justify">#序列化的格式Text</p>
+<p align="justify">a2.sinks.k2.hdfs.writeFormat=Text</p>
+<p align="justify"> </p>
+<p align="justify">#设置解决文件过多、过小问题</p>
+<p align="justify">#每60秒生成一个文件</p>
+<p align="justify">a2.sinks.k2.hdfs.rollInterval=60</p>
+<p align="justify">#当达到128000000bytes时，创建新文件 127*1024*1024（in bytes）</p>
+<p align="justify">#实际环境中如果按照128M回滚文件,那么这里设置一般设置成127M</p>
+<p align="justify">a2.sinks.k2.hdfs.rollSize=128000000</p>
+<p align="justify">#设置文件的生成不和events数相关</p>
+<p align="justify">a2.sinks.k2.hdfs.rollCount=0</p>
+<p align="justify">#设置成1，否则当有副本复制时就重新生成文件，上面三条则没有效果</p>
+<p align="justify">a2.sinks.k2.hdfs.minBlockReplicas=1</p>
+<p align="justify"> </p>
+<p align="justify"># bind the sources and sinks to the channels</p>
+<p align="justify">a2.sources.r2.channels = c2</p>
+<p align="justify">a2.sinks.k2.channel = c2</p>
+<img src="https://img-blog.csdn.net/20180112144401094?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><img src="https://img-blog.csdn.net/20180112144407570?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></span></p>
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">2.安装Apache HTTP服务器程序用于生成网站日志文件</p>
+<p align="justify">2.1 安装Apache HTTP</p>
+<p align="justify">#  yum -y  install httpd</p>
+<p align="justify">2.2 启动httpd服务 </p>
+<p align="justify"># service  httpd start</p>
+<img src="https://img-blog.csdn.net/20180112144436476?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">2.3 编辑一个静态的html的页面</p>
+<p align="justify"># vi /var/www/html/index.html</p>
+<p align="justify">this is  a test html</p>
+<p align="justify">2.4 浏览器输入主机名访问这个页面</p>
+<p align="justify">Linux1</p>
+<img src="https://img-blog.csdn.net/20180112144453293?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">2.5 实时监控httpd日志</p>
+<p align="justify"># chmod -R 777  /var/log/httpd</p>
+<p align="justify">$ tail -f /var/log/httpd/access_log</p>
+<p align="justify">3.启动hadoop</p>
+<p align="justify">$ sbin/start-dfs.sh</p>
+<p align="justify"> </p>
+<p align="justify">4.启动Flume-agent a2</p>
+<p align="justify">$ bin/flume-ng agent --conf conf --conf-file conf/a2.conf --name a2 -Dflume.root.logger=INFO,console</p>
+<p align="justify"> </p>
+<p align="justify">5.刷新静态页面，观察HDFS是否生成指定的目录和文件</p>
+<p align="justify"> <img src="https://img-blog.csdn.net/20180112144512331?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""></p>
+<p align="justify"><img src="https://img-blog.csdn.net/20180112144521469?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></p>
+<p align="justify">3.启动hadoop</p>
+<p align="justify">$ sbin/start-dfs.sh</p>
+<p align="justify"> </p>
+<p align="justify">4.启动Flume-agent a2</p>
+<p align="justify">$ bin/flume-ng agent --conf conf --conf-file conf/a2.conf --name a2 -Dflume.root.logger=INFO,console</p>
+<p align="justify"> </p>
+<p align="justify">5.刷新静态页面，观察HDFS是否生成指定的目录和文件</p>
+<p align="justify"> </p>
+<p align="justify"> </p>
+<p align="justify">[案例三：flume抽取目录]</p>
+<p align="justify"> </p>
+<p align="justify">source: 类型spooldir</p>
+<p align="justify">channel:memchannel</p>
+<p align="justify">sink:HDFS</p>
+<p align="justify"> </p>
+<p align="justify">//使用agent  a2 作为模板生成a3 agent 的配置文件</p>
+<p align="justify">${FLUME_HOME}/conf</p>
+<p align="justify">$ cp   a2.conf   a3.conf</p>
+<p align="justify"> </p>
+<p align="justify">1.配置a3.conf</p>
+<p align="justify">=================修改a3.conf</p>
+<p align="justify"> </p>
+<p align="justify">a3.sources = r3</p>
+<p align="justify">a3.sinks = k3</p>
+<p align="justify">a3.channels = c3</p>
+<p align="justify"> </p>
+<p align="justify"># Describe/configure the source</p>
+<p align="justify"># 源是某个目录使用spooldir</p>
+<p align="justify">a3.sources.r3.type = spooldir</p>
+<p align="justify"># 抽取的目录 $ cp -r ${HADOOP_HOME}/logs/* /home/user01/logs -&gt;执行完之后，会在原文件后面自动加一个.COMPLETED，所以换个目录比较合适</p>
+<p align="justify">a3.sources.r3.spoolDir = /home/beifeng/logs</p>
+<p align="justify"># 抽取该目录下符合包含.log结尾的文件 第一个.匹配任意字符 *重复一次或多次 \转义 .log$ -&gt;以.log结尾</p>
+<p align="justify">a3.sources.r3.ignorePattern =  ^.*out.*</p>
+<p align="justify"> </p>
+<p align="justify"># Use a channel which buffers events in file</p>
+<p align="justify"># 设置channel类型是file</p>
+<p align="justify">a3.channels.c3.type = file</p>
+<p align="justify"># 设置检查点目录，记录已经获取哪些文件，一些元数据信息</p>
+<p align="justify">a3.channels.c3.checkpointDir= = /opt/modules/cdh/flume-1.5.0-cdh5.3.6/checkpoint</p>
+<p align="justify">#设置缓存的数据存储目录</p>
+<p align="justify">a3.channels.c3.dataDirs = /opt/modules/cdh/flume-1.5.0-cdh5.3.6/bufferdata</p>
+<p align="justify"> </p>
+<p align="justify"># Describe the sink</p>
+<p align="justify">a3.sinks.k3.type = hdfs</p>
+<p align="justify"># 启用设置多级目录，这里按年/月/日/时 2级目录，每个小时生成一个文件夹</p>
+<p align="justify">a3.sinks.k3.hdfs.path = hdfs://linux1:8020/flume2/%Y%m%d/%H</p>
+<p align="justify"># 设置HDFS生成文件的的前缀</p>
+<p align="justify">a3.sinks.k3.hdfs.filePrefix = accesslog</p>
+<p align="justify"> </p>
+<p align="justify">#启用按时间生成文件夹</p>
+<p align="justify">a3.sinks.k3.hdfs.round = true</p>
+<p align="justify">#设置round单位:小时 </p>
+<p align="justify">a3.sinks.k3.hdfs.roundValue = 1</p>
+<p align="justify">a3.sinks.k3.hdfs.roundUnit = hour</p>
+<p align="justify">#使用本地时间戳  </p>
+<p align="justify">a3.sinks.k3.hdfs.useLocalTimeStamp = true</p>
+<p align="justify"> </p>
+<p align="justify"># 设置每次写入的DFS的event的个数为100个</p>
+<p align="justify">a3.sinks.k3.hdfs.batchSize = 100</p>
+<p align="justify"># 写入HDFS的方式</p>
+<p align="justify">a3.sinks.k3.hdfs.fileType = DataStream</p>
+<p align="justify"># 写入HDFS的文件格式</p>
+<p align="justify">a3.sinks.k3.hdfs.writeFormat = Text</p>
+<p align="justify"> </p>
+<p align="justify">#设置解决文件过多过小问题</p>
+<p align="justify">#每60秒生成一个文件</p>
+<p align="justify">a3.sinks.k3.hdfs.rollInterval = 60</p>
+<p align="justify">#当达到128000000bytes时，创建新文件 127*1024*1024</p>
+<p align="justify">#实际环境中如果按照128M回顾文件,那么这里设置一般设置成127M</p>
+<p align="justify">a3.sinks.k3.hdfs.rollSize = 128000000</p>
+<p align="justify">#设置文件的生成不和events数相关，与时间和大小相关</p>
+<p align="justify">a3.sinks.k3.hdfs.rollCount = 0</p>
+<p align="justify">#设置成1，否则当有副本复制时就重新生成文件，上面三条则没有效果</p>
+<p align="justify">a3.sinks.k3.hdfs.minBlockReplicas =1</p>
+<p align="justify"> </p>
+<p align="justify"># Bind the source and sink to the channel</p>
+<p align="justify">a3.sources.r3.channels = c3</p>
+<p align="justify">a3.sinks.k3.channel = c3 </p>
+<p align="justify"> <img src="https://img-blog.csdn.net/20180112144950848?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""></p>
+<p align="justify"><img src="https://img-blog.csdn.net/20180112144956623?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></p>
+<img src="https://img-blog.csdn.net/20180112145026088?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">===================================</p>
+<p align="justify"> </p>
+<p align="justify"> </p>
+<p align="justify"><span style="font-family:'宋体';">【案例</span>4：fan out】</p>
+<p align="justify"># Name the components on this agent  </p>
+<p align="justify">a4.sources = r1</p>
+<p align="justify">a4.sinks = k1 k2</p>
+<p align="justify">a4.channels = c1 c2</p>
+<p align="justify"> </p>
+<p align="justify"># Describe/configure the source</p>
+<p align="justify">a4.sources.r1.type = exec</p>
+<p align="justify">a4.sources.r1.command = tail -f /var/log/httpd/access_log</p>
+<p align="justify">a4.sources.r1.shell = /bin/bash -c</p>
+<p align="justify"> </p>
+<p align="justify"># Use a channel which buffers events in memory</p>
+<p align="justify">a4.channels.c1.type = memory</p>
+<p align="justify">a4.channels.c1.capacity = 1000</p>
+<p align="justify">a4.channels.c1.transactionCapacity = 100</p>
+<p align="justify"> </p>
+<p align="justify">a4.channels.c2.type = file</p>
+<p align="justify">a4.channels.c2.checkpointDir = /opt/modules/cdh/flume-1.5.0-cdh5.3.6/checkpoint</p>
+<p align="justify">a4.channels.c2.dataDirs = /opt/modules/cdh/flume-1.5.0-cdh5.3.6/bufferdata</p>
+<p align="justify"> </p>
+<p align="justify"> </p>
+<p align="justify"># Describe the sink</p>
+<p align="justify">a4.sinks.k1.type = logger</p>
+<p align="justify"> </p>
+<p align="justify">a4.sinks.k2.type = hdfs</p>
+<p align="justify">a4.sinks.k2.hdfs.path = hdfs://linux1:8020/fanout/%Y%m%d/%H</p>
+<p align="justify">a4.sinks.k2.hdfs.filePrefix = accesslog</p>
+<p align="justify"> </p>
+<p align="justify">a4.sinks.k2.hdfs.round = true</p>
+<p align="justify">a4.sinks.k2.hdfs.roundValue = 1</p>
+<p align="justify">a4.sinks.k2.hdfs.roundUnit = hour</p>
+<p align="justify">a4.sinks.k2.hdfs.useLocalTimeStamp = true</p>
+<p align="justify"> </p>
+<p align="justify">a4.sinks.k2.hdfs.batchSize = 100</p>
+<p align="justify">a4.sinks.k2.hdfs.fileType = DataStream</p>
+<p align="justify">a4.sinks.k2.hdfs.writeFormat = Text</p>
+<p align="justify"> </p>
+<p align="justify">a4.sinks.k2.hdfs.rollInterval = 60</p>
+<p align="justify">a4.sinks.k2.hdfs.rollSize = 128000000</p>
+<p align="justify">a4.sinks.k2.hdfs.rollCount = 0</p>
+<p align="justify">a4.sinks.k2.hdfs.minBlockReplicas =1</p>
+<p align="justify"> </p>
+<p align="justify"># Bind the source and sink to the channel</p>
+<p align="justify">a4.sources.r1.channels = c1 c2</p>
+<p align="justify">a4.sinks.k1.channel = c1 </p>
+<p align="justify">a4.sinks.k2.channel = c2 </p>
+<p align="justify"> </p>
+<p align="justify">a4.sources.r1.selector.type = replicating</p>
+<p align="justify"> </p>
+<p align="justify">刷新页面控制台打印日志</p>
+<img src="https://img-blog.csdn.net/20180112145044982?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><img src="https://img-blog.csdn.net/20180112145051522?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></span></p>
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><img src="https://img-blog.csdn.net/20180112145058829?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></span></p>
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify">===============</p>
+<p align="justify"><span style="font-family:'宋体';">【案例五、综合应用</span>  <span style="font-family:'宋体';">两级架构】</span></p>
+<p align="justify"> </p>
+<p align="justify">$ vi flume1.conf</p>
+<p align="justify"> </p>
+<p align="justify">## name是agent1</p>
+<p align="justify">agent1.sources = r1</p>
+<p align="justify">agent1.channels = c1</p>
+<p align="justify">agent1.sinks = k1</p>
+<p align="justify"> </p>
+<p align="justify"># define sources</p>
+<p align="justify">agent1.sources.r1.type = exec</p>
+<p align="justify">## 注意一定要执行flume命令的用户对该/var/log/httpd/access_log文件</p>
+<p align="justify">## 具有可读的权限</p>
+<p align="justify">agent1.sources.r1.command = tail -F /var/log/httpd/access_log</p>
+<p align="justify">agent1.sources.r1.shell = /bin/bash -c</p>
+<p align="justify"> </p>
+<p align="justify"># define channels</p>
+<p align="justify">agent1.channels.c1.type = memory</p>
+<p align="justify">agent1.channels.c1.capacity = 1000</p>
+<p align="justify">agent1.channels.c1.transactionCapacity = 100</p>
+<p align="justify"> </p>
+<p align="justify"># define sinks</p>
+<p align="justify">#启用设置多级目录，这里按年/月/日/时 2级目录，每个小时生成一个文件夹</p>
+<p align="justify">agent1.sinks.k1.type = avro</p>
+<p align="justify"># agent3所在的IP</p>
+<p align="justify">agent1.sinks.k1.hostname = 192.168.152.100</p>
+<p align="justify"># agent3监听的端口</p>
+<p align="justify">agent1.sinks.k1.port = 4545</p>
+<p align="justify"> </p>
+<p align="justify"># bind the sources and sinks to the channels</p>
+<p align="justify">agent1.sources.r1.channels = c1</p>
+<p align="justify">agent1.sinks.k1.channel = c1</p>
+<p align="justify"> </p>
+<p align="justify"> </p>
+<p align="justify">$ vi flume2.conf</p>
+<p align="justify"> </p>
+<p align="justify">agent2.sources = r2</p>
+<p align="justify">agent2.channels = c2</p>
+<p align="justify">agent2.sinks = k2</p>
+<p align="justify"> </p>
+<p align="justify"># define sources</p>
+<p align="justify">agent2.sources.r2.type = exec</p>
+<p align="justify">## 注意一定要执行flume命令的用户对该/var/log/httpd/access_log文件</p>
+<p align="justify">## 具有可读的权限</p>
+<p align="justify">agent2.sources.r2.command = tail -F /opt/modules/cdh/hive-0.13.1-cdh5.3.6/logs/hive.log</p>
+<p align="justify">agent2.sources.r2.shell = /bin/bash -c</p>
+<p align="justify"> </p>
+<p align="justify"># define channels</p>
+<p align="justify">agent2.channels.c2.type = memory</p>
+<p align="justify">agent2.channels.c2.capacity = 1000</p>
+<p align="justify">agent2.channels.c2.transactionCapacity = 100</p>
+<p align="justify"> </p>
+<p align="justify"># define sinks</p>
+<p align="justify">#启用设置多级目录，这里按年/月/日/时 2级目录，每个小时生成一个文件夹</p>
+<p align="justify">agent2.sinks.k2.type = avro</p>
+<p align="justify">agent2.sinks.k2.hostname = 192.168.152.100</p>
+<p align="justify">agent2.sinks.k2.port = 4545</p>
+<p align="justify"> </p>
+<p align="justify"># bind the sources and sinks to the channels</p>
+<p align="justify">agent2.sources.r2.channels = c2</p>
+<p align="justify">agent2.sinks.k2.channel = c2</p>
+<p align="justify"> </p>
+<p align="justify"> </p>
+<p align="justify">$ vi flume-collector.conf</p>
+<p align="justify"># 配置agent3：</p>
+<p align="justify">agent3.sources = r3</p>
+<p align="justify">agent3.channels = c3</p>
+<p align="justify">agent3.sinks = k3</p>
+<p align="justify"> </p>
+<p align="justify"># define sources</p>
+<p align="justify"># source:avro 对应flume1和flume2的sink</p>
+<p align="justify">agent3.sources.r3.type = avro</p>
+<p align="justify"># agent3所在的IP</p>
+<p align="justify">agent3.sources.r3.bind = 192.168.152.100</p>
+<p align="justify"># agent3监听的端口</p>
+<p align="justify">agent3.sources.r3.port = 4545</p>
+<p align="justify"> </p>
+<p align="justify"># define channels</p>
+<p align="justify">agent3.channels.c3.type = memory</p>
+<p align="justify">agent3.channels.c3.capacity = 1000</p>
+<p align="justify">agent3.channels.c3.transactionCapacity = 100</p>
+<p align="justify"> </p>
+<p align="justify"># define sinks</p>
+<p align="justify">#启用设置多级目录，这里按年/月/日/时 2级目录，每个小时生成一个文件夹</p>
+<p align="justify">agent3.sinks.k3.type = hdfs</p>
+<p align="justify">agent3.sinks.k3.hdfs.path=hdfs://192.168.152.100:8020/flume3/%Y%m%d/%H</p>
+<p align="justify">agent3.sinks.k3.hdfs.filePrefix = accesslog</p>
+<p align="justify">#启用按时间生成文件夹</p>
+<p align="justify">agent3.sinks.k3.hdfs.round=true</p>
+<p align="justify">#设置round单位：小时  </p>
+<p align="justify">agent3.sinks.k3.hdfs.roundValue=1</p>
+<p align="justify">agent3.sinks.k3.hdfs.roundUnit=hour</p>
+<p align="justify">#使用本地时间戳  </p>
+<p align="justify">agent3.sinks.k3.hdfs.useLocalTimeStamp=true</p>
+<p align="justify"> </p>
+<p align="justify">agent3.sinks.k3.hdfs.batchSize=1000</p>
+<p align="justify">agent3.sinks.k3.hdfs.fileType=DataStream</p>
+<p align="justify">agent3.sinks.k3.hdfs.writeFormat=Text</p>
+<p align="justify"> </p>
+<p align="justify">#设置解决文件过多过小问题</p>
+<p align="justify">#每60秒生成一个文件</p>
+<p align="justify">agent3.sinks.k3.hdfs.rollInterval=60</p>
+<p align="justify">#当达到128000000bytes时，创建新文件 127*1024*1024</p>
+<p align="justify">#实际环境中如果按照128M回滚文件,那么这里设置一般设置成127M</p>
+<p align="justify">agent3.sinks.k3.hdfs.rollSize=128000</p>
+<p align="justify">#设置文件的生成不和events数相关</p>
+<p align="justify">agent3.sinks.k3.hdfs.rollCount=0</p>
+<p align="justify">#设置成1，否则当有副本复制时就重新生成文件，上面三条则没有效果</p>
+<p align="justify">agent3.sinks.k3.hdfs.minBlockReplicas=1</p>
+<p align="justify"> </p>
+<p align="justify"># bind the sources and sinks to the channels</p>
+<p align="justify">agent3.sources.r3.channels = c3</p>
+<p align="justify">agent3.sinks.k3.channel = c3</p>
+<p align="justify"> </p>
+<p align="justify"> </p>
+<p align="justify">##启动agent1：</p>
+<p align="justify">bin/flume-ng agent --conf conf/ --name agent1 --conf-file conf/flum1.conf</p>
+<p align="justify"> </p>
+<p align="justify">##启动agent2：</p>
+<p align="justify">bin/flume-ng agent --conf conf/ --name agent2 --conf-file conf/flum2.conf</p>
+<p align="justify"> </p>
+<p align="justify">##启动agent3：</p>
+<img src="https://img-blog.csdn.net/20180112145137425?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br><p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"><img src="https://img-blog.csdn.net/20180112145144069?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br></span></p>
+<p><span style="color:rgb(68,68,68);background:rgb(255,255,255);"></span></p>
+<p align="justify"><span style="font-family:'宋体';">在</span>hdfs<span style="font-family:'宋体';">上可以同时读到事件</span><span style="font-family:Calibri;">1</span><span style="font-family:'宋体';">和事件</span><span style="font-family:Calibri;">2</span><span style="font-family:'宋体';">的日志</span></p>
+<p align="justify"> </p>
+<img src="https://img-blog.csdn.net/20180112145200932?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMTMzMTQzMA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""><br>            </div>
+                </div>

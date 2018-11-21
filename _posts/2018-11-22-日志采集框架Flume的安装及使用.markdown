@@ -1,0 +1,391 @@
+---
+layout:     post
+title:      日志采集框架Flume的安装及使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_25371579/article/details/56840249				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="日志采集框架flume的安装及使用">日志采集框架Flume的安装及使用</h1>
+
+
+
+<h2 id="1flume介绍">1.Flume介绍</h2>
+
+
+
+<h3 id="11flume概述">1.1.Flume概述</h3>
+
+<pre><code>Flume是一个分布式、可靠、和高可用(旧版Flume og才有高可用)的海量日志采集、传输和聚合的系统。
+Flume可以采集文件，socket数据包等各种形式源数据，
+    又可以将采集到的数据输出到HDFS、hbase、hive、kafka等众多外部存储系统中
+    一般的采集需求，通过对flume的简单配置即可实现
+Flume针对特殊场景也具备良好的自定义扩展能力，因此，flume可以适用于大部分的日常数据采集场景
+</code></pre>
+
+
+
+<h3 id="12运行机制">1.2.运行机制</h3>
+
+<pre><code>1、Flume分布式系统中最核心的角色是agent，flume采集系统就是由一个个agent所连接起来形成
+2、每一个agent相当于一个数据传递员，内部有三个组件：
+a)Source：采集源，用于跟数据源对接，以获取数据
+b)Sink：下沉地，采集数据的传送目的，用于往下一级agent传递数据或者往最终存储系统传递数据
+c)Channel：angent内部的数据传输通道，用于从source中将数据传递到sink
+</code></pre>
+
+<p><img src="http://i1.piimg.com/1949/033389fa9221da11.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="13flume采集系统结构图">1.3.Flume采集系统结构图</h3>
+
+
+
+<h3 id="131简单结构">1.3.1.简单结构</h3>
+
+<pre><code>单个agent采集数据
+</code></pre>
+
+<p><img src="http://i1.piimg.com/1949/033389fa9221da11.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="132复杂结构">1.3.2.复杂结构</h3>
+
+<pre><code>多级agent之间串联
+</code></pre>
+
+<p><img src="http://i1.piimg.com/1949/7745c6bbadf90b9f.png" alt="Markdown" title=""></p>
+
+
+
+<h2 id="2安装flume">2.安装Flume</h2>
+
+
+
+<h3 id="21解压flume压缩文件到指定目录">2.1.解压Flume压缩文件到指定目录</h3>
+
+<pre><code>[root@node02 software]# tar -zxvf apache-flume-1.6.0-bin.tar.gz -C /opt/modules/
+</code></pre>
+
+
+
+<h3 id="22文件重命名">2.2.文件重命名</h3>
+
+<pre><code>[root@node02 modules]# mv apache-flume-1.6.0-bin flume-1.6.0
+You have new mail in /var/spool/mail/root
+[root@node02 modules]# ll
+total 24
+drwxr-xr-x.  9 matrix matrix 4096 Jan  7 13:44 elasticsearch-2.4.2
+drwxr-xr-x.  7 root   root   4096 Jan 24 13:09 flume-1.6.0
+drwxr-xr-x. 12 matrix matrix 4096 Jan 23 21:00 hadoop-2.5.1
+drwxr-xr-x.  8 root   root   4096 Jan 23 18:43 hive-1.2.1
+drwxr-xr-x.  3 matrix matrix 4096 Dec 19 16:01 journalnode
+drwxr-xr-x. 12 matrix matrix 4096 Dec 17 21:20 zookeeper
+</code></pre>
+
+
+
+<h3 id="23配置flume环境变量">2.3.配置Flume环境变量</h3>
+
+<pre><code>[root@node02 ~]# ls -a
+.   anaconda-ks.cfg  .bash_logout   .bashrc  .hivehistory  install.log.syslog      .mysql_history  .ssh     zookeeper.out
+..  .bash_history    .bash_profile  .cshrc   install.log   jdk-7u79-linux-x64.rpm  .pki            .tcshrc
+[root@node02 ~]# vi .bash_profile
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/1949/d3332495ac648392.png" alt="Markdown" title=""></p>
+
+<pre><code>export FLUME_HOME=/opt/modules/flume-1.6.0
+export PATH=$PATH:$FLUME_HOME/bin
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/1949/4f1eaf6ed58d37b9.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="24使配置生效">2.4.使配置生效</h3>
+
+<pre><code>[root@node02 ~]# source .bash_profile
+</code></pre>
+
+
+
+<h3 id="25采集文件到hdfs">2.5.采集文件到HDFS</h3>
+
+<pre><code>采集需求：比如业务系统使用log4j生成的日志，日志内容不断增加，
+需要把追加到日志文件中的数据实时采集到hdfs
+
+根据需求，首先定义以下3大要素
+采集源，即source——监控文件内容更新：exec  'tail -F file'
+下沉目标，即sink——HDFS文件系统：hdfs sink
+Source和sink之间的传递通道——channel，可用file channel也可以用内存channel
+</code></pre>
+
+
+
+<h4 id="251配置flume配置文件">2.5.1.配置Flume配置文件</h4>
+
+<pre><code>[root@node02 flume-1.6.0]# vi conf/tail-hdfs.conf
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/1949/61970282aeda1a59.png" alt="Markdown" title=""></p>
+
+<pre><code># Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+#exec 指的是命令
+# Describe/configure the source
+a1.sources.r1.type = exec
+#F根据文件名追中, f根据文件的nodeid追中
+a1.sources.r1.command = tail -F /home/hadoop/log/test.log
+a1.sources.r1.channels = c1
+
+# Describe the sink
+#下沉目标
+a1.sinks.k1.type = hdfs
+a1.sinks.k1.channel = c1
+#指定目录, flum帮做目的替换
+a1.sinks.k1.hdfs.path = /flume/events/%y-%m-%d/%H%M/
+#文件的命名, 前缀
+a1.sinks.k1.hdfs.filePrefix = events-
+
+#10 分钟就改目录
+a1.sinks.k1.hdfs.round = true
+a1.sinks.k1.hdfs.roundValue = 10
+a1.sinks.k1.hdfs.roundUnit = minute
+
+#文件滚动之前的等待时间(秒)
+a1.sinks.k1.hdfs.rollInterval = 3
+
+#文件滚动的大小限制(bytes)
+a1.sinks.k1.hdfs.rollSize = 500
+
+#写入多少个event数据后滚动文件(事件个数)
+a1.sinks.k1.hdfs.rollCount = 20
+
+#5个事件就往里面写入
+a1.sinks.k1.hdfs.batchSize = 5
+
+#用本地时间格式化目录
+a1.sinks.k1.hdfs.useLocalTimeStamp = true
+
+#下沉后, 生成的文件类型，默认是Sequencefile，可用DataStream，则为普通文本
+a1.sinks.k1.hdfs.fileType = DataStream
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/1949/30f5242e00ea0183.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="26写数据到指定的文件中">2.6.写数据到指定的文件中</h3>
+
+<pre><code>[root@node02 flume-1.6.0]# mkdir -p /home/hadoop/log
+[root@node02 flume-1.6.0]# touch /home/hadoop/log/test.log
+[root@node02 ~]# while true
+&gt; do
+&gt; echo 11111111111 &gt;&gt; /home/hadoop/log/test.log
+&gt; sleep 0.6
+&gt; done
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-keyword">while</span> <span class="hljs-literal">true</span>
+<span class="hljs-keyword">do</span>
+<span class="hljs-built_in">echo</span> <span class="hljs-number">11111111111</span> &gt;&gt; /home/hadoop/log/test.log
+sleep <span class="hljs-number">0.6</span>
+<span class="hljs-keyword">done</span></code></pre>
+
+<p><img src="http://i1.piimg.com/1949/110de4fa152b7234.png" alt="Markdown" title=""></p>
+
+<pre><code>[root@node02 flume-1.6.0]# tail -f /home/hadoop/log/test.log
+</code></pre>
+
+
+
+<h3 id="27启动flume日志收集">2.7.启动Flume日志收集</h3>
+
+<pre><code>注意：检查Hadoop HDFS是否启动，如没有启动，则启动
+[root@node02 flume-1.6.0]# ./bin/flume-ng agent -c conf -f conf/tail-hdfs.conf -n a1
+</code></pre>
+
+<p><img src="http://i1.piimg.com/1949/a25b38b7b357a3cf.png" alt="Markdown" title=""></p>
+
+<p><img src="http://i1.piimg.com/1949/dfce12af9d518a5f.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="28通过hadoop-web-ui查看flume在hdfs上创建的目录">2.8.通过Hadoop Web UI查看Flume在HDFS上创建的目录</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-title">[</span><span class="hljs-comment">root@node02</span> <span class="hljs-comment">hadoop</span><span class="hljs-literal">-</span><span class="hljs-comment">2</span><span class="hljs-string">.</span><span class="hljs-comment">5</span><span class="hljs-string">.</span><span class="hljs-comment">1</span><span class="hljs-title">]</span><span class="hljs-comment">#</span> <span class="hljs-string">.</span><span class="hljs-comment">/bin/hdfs</span> <span class="hljs-comment">dfs</span> <span class="hljs-literal">-</span><span class="hljs-comment">ls</span> <span class="hljs-literal">-</span><span class="hljs-comment">R</span> <span class="hljs-comment">/flume</span>
+<span class="hljs-comment">drwxr</span><span class="hljs-literal">-</span><span class="hljs-comment">xr</span><span class="hljs-literal">-</span><span class="hljs-comment">x</span>   <span class="hljs-literal">-</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>          <span class="hljs-comment">0</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events</span>
+<span class="hljs-comment">drwxr</span><span class="hljs-literal">-</span><span class="hljs-comment">xr</span><span class="hljs-literal">-</span><span class="hljs-comment">x</span>   <span class="hljs-literal">-</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>          <span class="hljs-comment">0</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span>
+<span class="hljs-comment">drwxr</span><span class="hljs-literal">-</span><span class="hljs-comment">xr</span><span class="hljs-literal">-</span><span class="hljs-comment">x</span>   <span class="hljs-literal">-</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>          <span class="hljs-comment">0</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>        <span class="hljs-comment">140</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236169660</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>        <span class="hljs-comment">140</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236169661</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">70</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236169662</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236189653</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236195683</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236201641</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236207790</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">84</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:36</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236213809</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">70</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236219808</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">84</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236225867</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236231852</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">70</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236238116</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">84</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236244133</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">63</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236250160</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">56</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236254744</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">42</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236260456</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">35</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236264210</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">35</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236267832</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">49</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:37</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236271410</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">84</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236275630</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236281581</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236287587</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">84</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236293646</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">70</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236299642</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">49</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236305888</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">70</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236311177</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">35</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236315362</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236320019</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">77</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236324629</span>
+<span class="hljs-literal">-</span><span class="hljs-comment">rw</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">r</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span>   <span class="hljs-comment">3</span> <span class="hljs-comment">root</span> <span class="hljs-comment">supergroup</span>         <span class="hljs-comment">42</span> <span class="hljs-comment">2017</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24</span> <span class="hljs-comment">13:38</span> <span class="hljs-comment">/flume/events/17</span><span class="hljs-literal">-</span><span class="hljs-comment">01</span><span class="hljs-literal">-</span><span class="hljs-comment">24/1330/events</span><span class="hljs-literal">-</span><span class="hljs-string">.</span><span class="hljs-comment">1485236330636</span></code></pre>
+
+<p><img src="http://i1.piimg.com/1949/dfce12af9d518a5f.png" alt="Markdown" title=""></p>
+
+
+
+<h2 id="3flume多个agent连接">3.Flume多个agent连接</h2>
+
+<p><img src="http://p1.bqimg.com/1949/15fc839be5c9f7ec.png" alt="Markdown" title=""></p>
+
+<pre><code>从tail命令获取数据发送到avro端口(tail-&gt;avro)
+另一个节点可配置一个avro源来中继数据，发送外部存储(avro-&gt;log)
+</code></pre>
+
+
+
+<h3 id="31在node03上安装flume">3.1.在node03上安装Flume</h3>
+
+
+
+<h3 id="32配置node02上的flume">3.2.配置node02上的Flume</h3>
+
+<pre><code>从tail命令获取数据发送到avro端口
+[root@node02 flume-1.6.0]# vi conf/tail-avro.conf
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor"># Name the components on this agent</span>
+a1<span class="hljs-preprocessor">.sources</span> = <span class="hljs-built_in">r1</span>
+a1<span class="hljs-preprocessor">.sinks</span> = k1
+a1<span class="hljs-preprocessor">.channels</span> = c1
+
+<span class="hljs-preprocessor"># Describe/configure the source</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = exec
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.command</span> = tail -F /home/hadoop/log/test<span class="hljs-preprocessor">.log</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channels</span> = c1
+
+<span class="hljs-preprocessor"># Describe the sink</span>
+<span class="hljs-preprocessor">#绑定的不是本机, 是另外一台机器的服务地址, sink端的avro是一个发送端, avro的客户端, 往node03这个机器上发</span>
+a1<span class="hljs-preprocessor">.sinks</span> = k1
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.type</span> = avro
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.channel</span> = c1
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.hostname</span> = <span class="hljs-number">192.168</span><span class="hljs-number">.230</span><span class="hljs-number">.12</span>
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">4141</span>
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.batch</span>-size = <span class="hljs-number">2</span>
+
+<span class="hljs-preprocessor"># Use a channel which buffers events in memory</span>
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor"># Bind the source and sink to the channel</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channels</span> = c1
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+
+
+<h4 id="321运行node02上的flume发送数据给node03">3.2.1.运行node02上的Flume,发送数据给node03</h4>
+
+<pre><code>[root@node02 flume-1.6.0]# ./bin/flume-ng agent -c conf -f conf/tail-avro.conf -n a1
+</code></pre>
+
+<p><img src="http://p1.bpimg.com/1949/803cacf1136b015f.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="33配置node03上的flume">3.3.配置node03上的Flume</h3>
+
+<pre><code>配置一个avro源来中继数据，发送外部存储/hdfs(avro-&gt;log)
+
+[root@node03 flume-1.6.0]# vi conf/avro-hdfs.conf
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor"># Name the components on this agent</span>
+a1<span class="hljs-preprocessor">.sources</span> = <span class="hljs-built_in">r1</span>
+a1<span class="hljs-preprocessor">.sinks</span> = k1
+a1<span class="hljs-preprocessor">.channels</span> = c1
+
+<span class="hljs-preprocessor"># Describe/configure the source</span>
+<span class="hljs-preprocessor">#source中的avro组件是接收者服务, 绑定本机</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = avro
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channels</span> = c1
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.bind</span> = <span class="hljs-number">0.0</span><span class="hljs-number">.0</span><span class="hljs-number">.0</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">4141</span>
+
+<span class="hljs-preprocessor"># Describe the sink</span>
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+<span class="hljs-preprocessor"># Use a channel which buffers events in memory</span>
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor"># Bind the source and sink to the channel</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channels</span> = c1
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+
+
+<h4 id="331运行node03上的flume接收来自node02的数据">3.3.1.运行node03上的Flume,接收来自node02的数据</h4>
+
+<pre><code>[root@node03 flume-1.6.0]# ./bin/flume-ng agent -c conf -f conf/avro-hdfs.conf -n a1 -Dflume.root.logger=INFO,console
+</code></pre>
+
+<p><img src="http://p1.bpimg.com/1949/6917bfd7e789a121.png" alt="Markdown" title=""></p>
+
+<pre><code>可以看到4141端口有监听
+[root@node03 ~]# netstat -nltp
+</code></pre>
+
+<p><img src="http://p1.bpimg.com/1949/34eac9f2dc9fe371.png" alt="Markdown" title=""></p>
+
+<p><img src="http://p1.bpimg.com/1949/63c1ead75a2bb7a2.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="33发送数据">3.3.发送数据</h3>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

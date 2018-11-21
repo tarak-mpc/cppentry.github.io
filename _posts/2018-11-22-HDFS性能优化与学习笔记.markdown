@@ -1,0 +1,53 @@
+---
+layout:     post
+title:      HDFS性能优化与学习笔记
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：欢迎转载，注明作者和出处就好！如果不喜欢或文章存在明显的谬误，请留言说明原因再踩哦，谢谢，我也可以知道原因，不断进步！					https://blog.csdn.net/Coder__CS/article/details/79662670				</div>
+								            <div id="content_views" class="markdown_views prism-tomorrow-night">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc">
+<ul>
+<li><ul>
+<li><ul>
+<li><a href="#hdfs%E8%A6%81%E7%82%B9" rel="nofollow">HDFS要点</a></li>
+<li><a href="#hdfs%E6%80%A7%E8%83%BD%E4%BC%98%E5%8C%96" rel="nofollow">HDFS性能优化</a></li>
+<li><a href="#hdfs%E6%95%85%E9%9A%9C%E6%81%A2%E5%A4%8D%E5%92%8C%E5%AE%B9%E7%81%BE%E5%A4%87%E4%BB%BD" rel="nofollow">HDFS故障恢复和容灾备份</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+
+
+
+
+<hr>
+
+<h3 id="hdfs要点">HDFS要点</h3>
+
+<p>1.HDFS具有主/从架构。一个HDFS集群包含一个NameNode，一个主服务器，用于管理文件系统名称空间并管理客户端对文件的访问。此外，还有许多DataNode，通常是群集中的每个节点一个，它们管理连接到它们所运行的节点的存储。HDFS公开文件系统名称空间并允许用户数据存储在文件中。在内部，文件被分成一个或多个块，这些块存储在一组DataNode中。NameNode执行文件系统命名空间操作，如打开，关闭和重命名文件和目录。它还确定块到DataNode的映射。DataNode负责提供来自文件系统客户端的读取和写入请求。DataNode还执行块创建，删除。 <br>
+2.数据分阶段被创建。客户端创建文件的请求不会立即到达NameNode。事实上，最初HDFS客户端将文件数据缓存到本地缓冲区。应用程序写入被透明地重定向到本地缓冲区。当本地文件累积超过一个块大小的数据时，客户端会联系NameNode。NameNode将文件名插入到文件系统层次结构中，并为其分配一个数据块。NameNode用DataNode的标识和目标数据块响应客户请求。然后客户端将本地缓冲区中的数据块刷新到指定的DataNode。当文件关闭时，本地缓冲区中剩余的未刷新数据将传输到DataNode。客户端然后告诉NameNode文件已关闭 <br>
+3.为了尽量减少全局带宽消耗和读取延迟，HDFS会尝试满足最接近读取器的读取请求的副本。如果在读取器节点的同一机架上存在副本，则该副本优先满足读取请求。如果HDFS群集跨越多个数据中心，则驻留在本地数据中心的副本优先于任何远程副本。</p>
+
+
+
+<h3 id="hdfs性能优化">HDFS性能优化</h3>
+
+<p>【1】HDFS联邦策略。文件系统吞吐量不受单个Namenode限制，向群集添加更多Namenodes可扩展文件系统的读/写吞吐量。 <br>
+【2】机架感知的放置策略的目的是提高数据可靠性，可用性和网络带宽利用率。对于常见情况，当复制因子为3时，HDFS的放置策略是将一个副本放在本地机架中的一个节点上,另一个放在本地机架中的不同节点上,而最后一个放在另一个机架中的不同节点上。该策略可以减少机架间写入流量，这通常会提高写入性能。 <br>
+【3】对于经常要访问的数据，使用HDFS中的集中缓存管理，创建堆外缓存和高速缓存池，这可以提高整体集群内存的利用率，防止同一个块的多个副本同时加入了缓冲区中缓存。这是一种显示缓存机制，允许用户指定要由HDFS缓存的路径。NameNode将与磁盘上具有所需块的DataNode进行通信，并指示他们将块缓存在堆外缓存中。 <br>
+【4】配置HDFS本地短路读取，在HDFS中，读取通常通过DataNode。因此，当客户端要求DataNode读取文件时，DataNode将该文件从磁盘读取出来并通过TCP套接字将数据发送到客户端。所谓的“短路”读取绕过DataNode，允许客户端直接读取文件。显然，这只有在客户与数据共存的情况下才有可能。短路读取为许多应用提供了显着的性能提升。 <br>
+【5】为减少数据写入HDFS的延迟，可以采取惰性持久写入的方式，当DataNode节点需要写入数据到磁盘时，通过惰性持久写入的方式，先写入到堆外内存中，再进行数据校验和异步写入磁盘。</p>
+
+
+
+<h3 id="hdfs故障恢复和容灾备份">HDFS故障恢复和容灾备份</h3>
+
+<p>1.HDFS HA高可用性配置和故障自动转移。  <br>
+2.HDFS快照。将损坏的HDFS实例回滚到先前已知的良好时间点。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

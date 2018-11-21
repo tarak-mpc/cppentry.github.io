@@ -1,0 +1,261 @@
+---
+layout:     post
+title:      Spark UI实现原理与事件监听机制
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="spark-ui实现原理与事件监听机制">Spark UI实现原理与事件监听机制</h1>
+
+
+
+<h2 id="一引言">一、引言</h2>
+
+<p>Spark UI是了解spark任务运行情况的入口，也是进行spark任务性能优化与调试必不可少的工具。在Spark UI中可以查看job、stage、storage、environment、excutors和spark sql等信息，那么这都是怎么实现的，这些信息都是怎么获取到的呢？本文从源码的角度对Spark UI的信息获取方式与Spark的事件监听机制进行解析。</p>
+
+
+
+<h2 id="二spark-ui实现原理与事件监听机制">二、Spark UI实现原理与事件监听机制</h2>
+
+<p>Spark UI是driver中提供的一个web服务，其中展现了整个应用的运行信息，由此肯定各executors在运行过程中不断上报其运行信息与资源情况。Spark应用是典型的主从结构，每个spark应用由一个driver（application master）进行管理，承担资源申请与任务分配管理的功能，而应用申请的executors则会将运行情况上报给driver，从而使其可以拥有整个应用的运行信息。</p>
+
+<ol>
+<li><p>Spark UI是在<code>SparkContext.scala</code>中进行创建初始化的，每个spark应用有且仅有一个活跃的SparkContext。在一个Spark应用中，首先必需新建一个SparkContext，也就同时新建了Spark UI对象，可以通过<code>spark.ui.enabled</code>关闭此功能。</p>
+
+<pre class="prettyprint"><code class=" hljs cs">_ui =
+  <span class="hljs-keyword">if</span> (conf.getBoolean(<span class="hljs-string">"spark.ui.enabled"</span>, <span class="hljs-keyword">true</span>)) {
+    Some(SparkUI.createLiveUI(<span class="hljs-keyword">this</span>, _conf, listenerBus, _jobProgressListener,
+      _env.securityManager, appName, startTime = startTime))
+  } <span class="hljs-keyword">else</span> {
+    <span class="hljs-comment">// For tests, do not enable the UI</span>
+    None
+  }
+<span class="hljs-comment">// Bind the UI before starting the task scheduler to communicate</span>
+<span class="hljs-comment">// the bound port to the cluster manager properly</span>
+_ui.<span class="hljs-keyword">foreach</span>(_.bind())</code></pre></li>
+<li><p>SparkUI.createLiveUI创建SparkUI对象实际是调用下面的create方法，可以看到其主要工作是初始化几个事件监听者，并将其注册到事件总线上去。这是设计模式中典型的观察者模式，其中的关键则是SparkListenerBus的实现，即spark的事件监听机制的实现原理。</p>
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-javadoc">/**
+ * Create a new Spark UI.
+ *
+ * <span class="hljs-javadoctag">@param</span> sc optional SparkContext; this can be None when reconstituting a UI from event logs.
+ * <span class="hljs-javadoctag">@param</span> jobProgressListener if supplied, this JobProgressListener will be used; otherwise, the
+ *                            web UI will create and register its own JobProgressListener.
+ */</span>
+<span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> create(
+    sc: Option[SparkContext],
+    conf: SparkConf,
+    listenerBus: SparkListenerBus,
+    securityManager: SecurityManager,
+    appName: String,
+    basePath: String = <span class="hljs-string">""</span>,
+    jobProgressListener: Option[JobProgressListener] = None,
+    startTime: Long): SparkUI = {
+
+  <span class="hljs-keyword">val</span> _jobProgressListener: JobProgressListener = jobProgressListener.getOrElse {
+    <span class="hljs-keyword">val</span> listener = <span class="hljs-keyword">new</span> JobProgressListener(conf)
+    listenerBus.addListener(listener)
+    listener
+  }
+
+  <span class="hljs-keyword">val</span> environmentListener = <span class="hljs-keyword">new</span> EnvironmentListener
+  <span class="hljs-keyword">val</span> storageStatusListener = <span class="hljs-keyword">new</span> StorageStatusListener(conf)
+  <span class="hljs-keyword">val</span> executorsListener = <span class="hljs-keyword">new</span> ExecutorsListener(storageStatusListener, conf)
+  <span class="hljs-keyword">val</span> storageListener = <span class="hljs-keyword">new</span> StorageListener(storageStatusListener)
+  <span class="hljs-keyword">val</span> operationGraphListener = <span class="hljs-keyword">new</span> RDDOperationGraphListener(conf)
+
+  listenerBus.addListener(environmentListener)
+  listenerBus.addListener(storageStatusListener)
+  listenerBus.addListener(executorsListener)
+  listenerBus.addListener(storageListener)
+  listenerBus.addListener(operationGraphListener)
+
+  <span class="hljs-keyword">new</span> SparkUI(sc, conf, securityManager, environmentListener, storageStatusListener,
+    executorsListener, _jobProgressListener, storageListener, operationGraphListener,
+    appName, basePath, startTime)
+}</code></pre></li>
+<li><p>spark的事件监听机制的实现类是LiveListenerBus</p>
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-comment">// An asynchronous listener bus for Spark events</span>
+<span class="hljs-keyword">private</span>[spark] val listenerBus = <span class="hljs-keyword">new</span> LiveListenerBus(<span class="hljs-keyword">this</span>)</code></pre>
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-javadoc">/**
+ * Asynchronously passes SparkListenerEvents to registered SparkListeners.
+ *
+ * Until `start()` is called, all posted events are only buffered. Only after this listener bus
+ * has started will events be actually propagated to all attached listeners. This listener bus
+ * is stopped when `stop()` is called, and it will drop further events after stopping.
+ */</span>
+ <span class="hljs-keyword">private</span>[spark] <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">LiveListenerBus</span><span class="hljs-params">(val sparkContext: SparkContext)</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">SparkListenerBus</span> {</span></code></pre>
+
+<p>LiveListenerBus作为消息分发的总线，利用阻塞队列加信号量来实现一个简单的消费者-生产者模式。</p>
+
+<pre class="prettyprint"><code class=" hljs markdown">// Cap the capacity of the event queue so we get an explicit error (rather than
+// an OOM exception) if it's perpetually being added to more quickly than it's being drained.
+private lazy val EVENT<span class="hljs-emphasis">_QUEUE_</span>CAPACITY = validateAndGetQueueSize()
+private lazy val eventQueue = new LinkedBlockingQueue[<span class="hljs-link_label">SparkListenerEvent</span>](<span class="hljs-link_url">EVENT_QUEUE_CAPACITY</span>)</code></pre>
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">// A counter that represents <span class="hljs-operator">the</span> <span class="hljs-built_in">number</span> <span class="hljs-operator">of</span> events produced <span class="hljs-operator">and</span> consumed <span class="hljs-operator">in</span> <span class="hljs-operator">the</span> queue
+<span class="hljs-keyword">private</span> val eventLock = <span class="hljs-built_in">new</span> Semaphore(<span class="hljs-number">0</span>)</code></pre>
+
+<p>LiveListenerBus将接收到的消息放入阻塞队列中，将调用<code>eventLock.release()</code>将信号量加1，从而唤起等待着消息消费者。LiveListenerBus通过一个守护线程，不断阻塞轮询来实现异步地将消息传送给注册到总线上的所有监听者（listeners）。</p>
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-keyword">private</span> val listenerThread = <span class="hljs-keyword">new</span> Thread(name) {
+setDaemon(<span class="hljs-keyword">true</span>)
+  <span class="hljs-keyword">override</span> def run(): Unit = Utils.tryOrStopSparkContext(sparkContext) {
+    LiveListenerBus.withinListenerThread.withValue(<span class="hljs-keyword">true</span>) {
+      <span class="hljs-keyword">while</span> (<span class="hljs-keyword">true</span>) {
+        eventLock.acquire()
+        self.synchronized {
+          processingEvent = <span class="hljs-keyword">true</span>
+        }
+        <span class="hljs-keyword">try</span> {
+          val <span class="hljs-keyword">event</span> = eventQueue.poll
+          <span class="hljs-keyword">if</span> (<span class="hljs-keyword">event</span> == <span class="hljs-keyword">null</span>) {
+            <span class="hljs-comment">// Get out of the while loop and shutdown the daemon thread</span>
+            <span class="hljs-keyword">if</span> (!stopped.<span class="hljs-keyword">get</span>) {
+              <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> IllegalStateException(<span class="hljs-string">"Polling `null` from eventQueue means"</span> +
+                <span class="hljs-string">" the listener bus has been stopped. So `stopped` must be true"</span>)
+            }
+            <span class="hljs-keyword">return</span>
+          }
+          postToAll(<span class="hljs-keyword">event</span>)
+        } <span class="hljs-keyword">finally</span> {
+          self.synchronized {
+            processingEvent = <span class="hljs-keyword">false</span>
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+
+<p>下面从源码角度了解一下Spark UI中storage页面的cache rdd的消息传送过程。</p></li>
+</ol>
+
+
+
+<h2 id="三spark-ui中cache-rdd的消息传送过程">三、Spark UI中cache RDD的消息传送过程</h2>
+
+<p>Spark中的存储管理都是通过BlockManager来进行实现的，而BlockManager是主从式的结构。BlockManager在每个节点（driver和executor）都会运行，提供一个从本地或远程向内存/磁盘/off-heap发送和接收blocks的接口。而BlockManager则复用其中的BlockManagerMaster服务来进行整个应用的存储管理。driver中的BlockManagerMaster才是真正的Master节点，而executor中的则只是对driver中Master节点一个连接符，通过该连接符，从而已可以和真正的Master节点进行通信。下面是updateBlockInfo消息传送全过程的源码分析：</p>
+
+<ol>
+<li><p>Executor中的BlockManagerMaster发出updateBlockInfo的rpc同步请求，driverEndpoint是连接driver的rpc终端，而askSync方法是以同步阻塞的方式发送消息，有一个默认超时时间，如果失败则抛出异常。</p>
+
+<pre class="prettyprint"><code class=" hljs python"><span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">updateBlockInfo</span><span class="hljs-params">(
+    blockManagerId: BlockManagerId,
+    blockId: BlockId,
+    storageLevel: StorageLevel,
+    memSize: Long,
+    diskSize: Long)</span>:</span> Boolean = {
+  val res = driverEndpoint.askSync[Boolean](
+    UpdateBlockInfo(blockManagerId, blockId, storageLevel, memSize, diskSize))
+  logDebug(s<span class="hljs-string">"Updated info of block $blockId"</span>)
+  res
+}</code></pre></li>
+<li><p>driver的BlockManagerMasterEndpoint接收到rpc请求：receiveAndReply（根据不同的请求分发给不同的处理者）。BlockManagerMasterEndpoint是一个在driver上线程安全的RPC终端，来追踪所有slaves（executor）的BlockManager的状态信息。BlockManagerMasterEndpoint收到消息后，构造了一个SparkListenerBlockUpdated消息并通过listenerBus将消息发送出去。</p>
+
+<pre class="prettyprint"><code class=" hljs python">override <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">receiveAndReply</span><span class="hljs-params">(context: RpcCallContext)</span>:</span> PartialFunction[Any, Unit] = {
+  case RegisterBlockManager(blockManagerId, maxOnHeapMemSize, maxOffHeapMemSize, slaveEndpoint) =&gt;
+    context.reply(register(blockManagerId, maxOnHeapMemSize, maxOffHeapMemSize, slaveEndpoint))
+
+  case _updateBlockInfo <span class="hljs-decorator">@</span>
+    UpdateBlockInfo(blockManagerId, blockId, storageLevel, deserializedSize, size) =&gt;
+    context.reply(updateBlockInfo(blockManagerId, blockId, storageLevel, deserializedSize, size))
+    listenerBus.post(SparkListenerBlockUpdated(BlockUpdatedInfo(_updateBlockInfo)))
+
+  // 省略部分源码</code></pre></li>
+<li>LiveListenerBus（有一个单独的后台守护线程处理消息，类似于计算机的总线，进行消息的传递）的post方法将updateBlockInfo消息加到阻塞队列中，并通过<code>eventLock.release()</code>唤起等待消息的消费者。LiveListenerBus中的listenerThread监听线程不断从阻塞队列中获取收到的消息事件进行处理，调用postToAll将消息分发给所有注册的监听者。</li>
+<li><p>SparkListenerBus（ListenerBus的子类）的doPostEvent方法根据不同的事件消息调用对应监听者相应的方法。</p>
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-javadoc">/**
+ * Post the event to all registered listeners. The `postToAll` caller should guarantee calling
+ * `postToAll` in the same thread for all events.
+ */</span>
+<span class="hljs-keyword">def</span> postToAll(event: E): Unit = {
+  <span class="hljs-comment">// JavaConverters can create a JIterableWrapper if we use asScala.</span>
+  <span class="hljs-comment">// However, this method will be called frequently. To avoid the wrapper cost, here we use</span>
+  <span class="hljs-comment">// Java Iterator directly.</span>
+  <span class="hljs-keyword">val</span> iter = listeners.iterator
+  <span class="hljs-keyword">while</span> (iter.hasNext) {
+    <span class="hljs-keyword">val</span> listener = iter.next()
+    <span class="hljs-keyword">try</span> {
+      doPostEvent(listener, event)
+    } <span class="hljs-keyword">catch</span> {
+      <span class="hljs-keyword">case</span> NonFatal(e) =&gt;
+        logError(s<span class="hljs-string">"Listener ${Utils.getFormattedClassName(listener)} threw an exception"</span>, e)
+    }
+  }
+}</code></pre>
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-keyword">protected</span> <span class="hljs-keyword">override</span> def <span class="hljs-title">doPostEvent</span>(
+    listener: SparkListenerInterface,
+    <span class="hljs-keyword">event</span>: SparkListenerEvent): Unit = {
+  <span class="hljs-keyword">event</span> match {
+    <span class="hljs-comment">// 省略部分代码</span>
+
+    <span class="hljs-keyword">case</span> blockUpdated: SparkListenerBlockUpdated =&gt;
+      listener.onBlockUpdated(blockUpdated)
+    <span class="hljs-keyword">case</span> logStart: SparkListenerLogStart =&gt; <span class="hljs-comment">// ignore event log metadata</span>
+    <span class="hljs-keyword">case</span> _ =&gt; listener.onOtherEvent(<span class="hljs-keyword">event</span>)
+}
+}</code></pre></li>
+<li><p>具体的监听者类是StorageListener，通过onBlockUpdated方法从而调用updateRDDInfo方法更新_rddInfoMap信息。</p>
+
+<pre class="prettyprint"><code class=" hljs python">override <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">onBlockUpdated</span><span class="hljs-params">(blockUpdated: SparkListenerBlockUpdated)</span>:</span> Unit = {
+  super.onBlockUpdated(blockUpdated)
+  val blockId = blockUpdated.blockUpdatedInfo.blockId
+  val storageLevel = blockUpdated.blockUpdatedInfo.storageLevel
+  val memSize = blockUpdated.blockUpdatedInfo.memSize
+  val diskSize = blockUpdated.blockUpdatedInfo.diskSize
+  val blockStatus = BlockStatus(storageLevel, memSize, diskSize)
+  updateRDDInfo(Seq((blockId, blockStatus)))
+}</code></pre></li>
+</ol>
+
+<h2 id="四如何增加自定义的监听者">四、如何增加自定义的监听者？</h2>
+
+<ol>
+<li><p>继承SparkListener类并实现对应方法</p>
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserDefinedListener</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">SparkListener</span> {</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> log = LoggerFactory.getLogger(<span class="hljs-keyword">this</span>.getClass)
+
+  <span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
+    <span class="hljs-keyword">try</span> {
+      <span class="hljs-keyword">val</span> taskDuration = <span class="hljs-keyword">if</span> (taskEnd.taskInfo != <span class="hljs-keyword">null</span>) {
+        taskEnd.taskInfo.duration
+      } <span class="hljs-keyword">else</span> {
+        <span class="hljs-number">0</span>
+      }
+      log.info(s<span class="hljs-string">"task duration: $taskDuration"</span>)
+
+      <span class="hljs-keyword">val</span> gcDuration = <span class="hljs-keyword">if</span> (taskEnd.taskMetrics != <span class="hljs-keyword">null</span>) {
+        taskEnd.taskMetrics.jvmGCTime
+      } <span class="hljs-keyword">else</span> {
+        <span class="hljs-number">0</span>
+      }
+      log.info(s<span class="hljs-string">"gc duration: $gcDuration"</span>)
+    } <span class="hljs-keyword">catch</span> {
+      <span class="hljs-keyword">case</span> NonFatal(e) =&gt; log.error(<span class="hljs-string">"onTaskEnd exception."</span>, e)
+    }
+  }
+}</code></pre></li>
+<li><p>向SparkContext中添加自定义的监听者对象</p>
+
+<pre class="prettyprint"><code class=" hljs fsharp"><span class="hljs-keyword">val</span> listener = <span class="hljs-keyword">new</span> UserDefinedListener()
+sparkContext.addSparkListener(listener)</code></pre></li>
+</ol>
+
+
+
+<h2 id="五参考文章">五、参考文章</h2>
+
+<ul>
+<li><a href="https://github.com/ColZer/DigAndBuried/blob/master/spark/spark-block-manager.md" rel="nofollow">https://github.com/ColZer/DigAndBuried/blob/master/spark/spark-block-manager.md</a></li>
+<li><a href="https://wongxingjun.github.io/2017/01/01/Spark%E4%BA%8B%E4%BB%B6%E7%9B%91%E5%90%AC%E8%AF%A6%E8%A7%A3/" rel="nofollow">https://wongxingjun.github.io/2017/01/01/Spark%E4%BA%8B%E4%BB%B6%E7%9B%91%E5%90%AC%E8%AF%A6%E8%A7%A3/</a></li>
+<li><a href="https://www.cnblogs.com/xing901022/p/6445254.html" rel="nofollow">https://www.cnblogs.com/xing901022/p/6445254.html</a></li>
+</ul>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

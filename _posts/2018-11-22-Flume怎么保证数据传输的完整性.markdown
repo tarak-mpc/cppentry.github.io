@@ -1,0 +1,61 @@
+---
+layout:     post
+title:      Flume怎么保证数据传输的完整性
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/bocai8058/article/details/82954466				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<pre><code>@Author  : Spinach | GHB
+@Link    : http://blog.csdn.net/bocai8058
+</code></pre>
+<hr>
+<p></p><div class="toc"><h3>文章目录</h3><ul><ul><ul><li><a href="#Flume_8" rel="nofollow">Flume的事物机制</a></li><li><a href="#FlumeAtleastonce_41" rel="nofollow">Flume的At-least-once提交方式</a></li><li><a href="#Flume_44" rel="nofollow">Flume的批处理机制</a></li><li><a href="#channel_47" rel="nofollow">channel配置说明</a></li></ul></ul></ul></div><p></p>
+<h3><a id="Flume_8"></a>Flume的事物机制</h3>
+<blockquote>
+<p>Flume使用两个独立的事务分别负责从soucrce到channel，以及从channel到sink的事件传递。</p>
+</blockquote>
+<p>比如：spooling directory source 为文件的每一行创建一个事件，一旦事务中所有的事件全部传递到channel且提交成功，那么source就将该文件标记为完成。同理，事务以类似的方式处理从channel到sink的传递过程，如果因为某种原因使得事件无法记录，那么事务将会回滚。且所有的事件都会保持到channel中，等待重新传递。</p>
+<pre><code># example.conf: A single-node Flume configuration
+
+# Name the components on this agent
+a1.sources = r1
+a1.channels = c1
+a1.sinks = k1
+
+# Describe/configure the source
+a1.sources.r1.type = spooldir
+a1.sources.r1.spoolDir = /home/ghb/HadoopCluster/Call
+a1.sources.r1.fileHeader = true
+a1.sources.r1.fileSuffix = .delete
+a1.sources.r1.batchSize = 100
+
+# Use file channel
+a1.channels.c1.type = file 
+a1.channels.c1.checkpointDir=/home/ghb/HadoopCluster/flume-1.6.0/checkpoint 
+a1.channels.c1.dataDirs=/home/ghb/HadoopCluster/flume-1.6.0/dataDir
+
+# Describe the sink
+a1.sinks.k1.type = org.apache.flume.sink.kafka.KafkaSink
+a1.sinks.k1.kafka.topic = CallLog
+a1.sinks.k1.kafka.bootstrap.servers =127.0.0.1:6667
+a1.sinks.k1.kafka.flumeBatchSize = 20
+a1.sinks.k1.kafka.producer.acks=1
+</code></pre>
+<h3><a id="FlumeAtleastonce_41"></a>Flume的At-least-once提交方式</h3>
+<p>Flume的事务机制，总的来说，保证了source产生的每个事件都会传送到sink中。但是值得一说的是，实际上Flume作为高容量并行采集系统<strong>采用的是At-least-once</strong>（传统的企业系统采用的是exactly-once机制）提交方式，这样就造成<strong>每个source产生的事件至少到达sink一次，换句话说就是同一事件有可能重复到达</strong>。这样虽然看上去是一个缺陷，但是相比为了保证Flume能够可靠地将事件从source,channel传递到sink,这也是一个可以接受的权衡。如spooldir的使用，Flume会对已经处理完的数据进行标记。</p>
+<h3><a id="Flume_44"></a>Flume的批处理机制</h3>
+<p>为了提高效率，Flume尽可能的以事务为单位来处理事件，而不是逐一基于事件进行处理。比如上篇博客提到的spooling directory source以100行文本作为一个批次来读取（BatchSize属性来配置，类似数据库的批处理模式）。批处理的设置尤其有利于提高file channle的效率，这样整个事务只需要写入一次本地磁盘，或者调用一次fsync，速度回快很多。</p>
+<h3><a id="channel_47"></a>channel配置说明</h3>
+<ol>
+<li><strong>MemoryChannel可以实现高速的吞吐， 但是无法保证数据完整性</strong>。</li>
+<li>MemoryRecoverChannel在官方文档的建议上已经建义使用FileChannel来替换。<strong>FileChannel保证数据的完整性与一致性</strong>。在具体配置不现的FileChannel时，建议FileChannel设置的目录和程序日志文件保存的目录设成不同的磁盘，以便提高效率。</li>
+</ol>
+<p>引用：<a href="https://blog.csdn.net/qq_26442553/article/details/79037298" rel="nofollow">https://blog.csdn.net/qq_26442553/article/details/79037298</a></p>
+<hr>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

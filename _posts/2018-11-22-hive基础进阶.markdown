@@ -1,0 +1,515 @@
+---
+layout:     post
+title:      hive基础进阶
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>一直在搞大数据，得以喘息把近期hive的知识点梳理一下-hive2.0版本以后操作</p>
+<p>一、启动</p>
+<p>1、普通连接，尤指1.0版本的连接</p>
+<p>a.启动hadoop： start-all.sh<br></p>
+<p>b.启动hive ：hive --service metastore</p>
+<p>c.进入hive客户端：hive cli</p>
+<p>2、beeline连接</p>
+<p>a.开启服务端 ：hive --service metastore（hive/conf下）</p>
+<p>b.开启服务：hiveserver2</p>
+<p>c.进入beeline ：beeline</p>
+<p>d.连接mysql: !connect jdbc:hive2://主机名:10000</p>
+<p>二、基本SQL语句操操作</p>
+<p>1、创建数据库<br></p>
+<p></p>
+<pre><code class="language-java">create database zgf;
+user zgf;</code></pre>2、创建表
+<p></p>
+<p></p>
+<pre><code class="language-java">create table student(Sno int,Sname string,Sex string,Sage int,Sdept string)row format delimited fields terminated by ','stored as textfile;
+create table course(Cno int,Cname string) row format delimited fields terminated by ',' stored as textfile;
+create table sc(Sno int,Cno int,Grade int)row format delimited fields terminated by ',' stored as textfile;
+</code></pre>3、将文件加载到hdfs的表目录下
+<p></p>
+<p></p>
+<pre><code class="language-java">load data local inpath '/home/hadoop/hivedata/students.txt' overwrite into table student;
+load data local inpath '/home/hadoop/hivedata/sc.txt' overwrite into table sc;
+load data local inpath '/home/hadoop/hivedata/course.txt' overwrite into table course;</code></pre>4、基础sql使用<br><pre><code class="language-java">查询全体学生的学号与姓名
+　　hive&gt; select Sno,Sname from student;
+
+查询选修了课程的学生姓名
+　　hive&gt; select distinct Sname from student inner join sc on student.Sno=Sc.Sno;
+
+----hive的group by 和集合函数
+
+查询学生的总人数
+　　hive&gt; select count(distinct Sno)count from student;
+
+计算1号课程的学生平均成绩
+　　hive&gt; select avg(distinct Grade) from sc where Cno=1;
+查询各科成绩平均分
+		hive&gt; select Cno,avg(Grade) from sc group by Cno;  
+查询选修1号课程的学生最高分数
+　　select Grade from sc where Cno=1 sort by Grade desc limit 1; 
+(注意比较:select * from sc where Cno=1 sort by Grade
+		  select Grade from sc where Cno=1 order by Grade)     
+　　   
+　　
+求各个课程号及相应的选课人数 
+　　hive&gt; select Cno,count(1) from sc group by Cno;
+
+
+查询选修了3门以上的课程的学生学号
+　　hive&gt; select Sno from (select Sno,count(Cno) CountCno from sc group by Sno)a where a.CountCno&gt;3;
+或　hive&gt; select Sno from sc group by Sno having count(Cno)&gt;3; 
+
+----hive的Order By/Sort By/Distribute By
+　　Order By ，在strict 模式下（hive.mapred.mode=strict),order by 语句必须跟着limit语句，但是在nonstrict下就不是必须的，这样做的理由是必须有一个reduce对最终的结果进行排序，如果最后输出的行数过多，一个reduce需要花费很长的时间。
+
+查询学生信息，结果按学号全局有序
+　　hive&gt; set hive.mapred.mode=strict;   &lt;默认nonstrict&gt;
+hive&gt; select Sno from student order by Sno;
+FAILED: Error in semantic analysis: 1:33 In strict mode, if ORDER BY is specified, LIMIT must also be specified. Error encountered near token 'Sno'
+　　Sort By，它通常发生在每一个redcue里，“order by” 和“sort by"的区别在于，前者能给保证输出都是有顺序的，而后者如果有多个reduce的时候只是保证了输出的部分有序。set mapred.reduce.tasks=&lt;number&gt;在sort by可以指定，在用sort by的时候，如果没有指定列，它会随机的分配到不同的reduce里去。distribute by 按照指定的字段对数据进行划分到不同的输出reduce中 
+　　此方法会根据性别划分到不同的reduce中 ，然后按年龄排序并输出到不同的文件中。
+
+查询学生信息，按性别分区，在分区内按年龄有序
+　　hive&gt; set mapred.reduce.tasks=2;
+　　hive&gt; insert overwrite local directory '/home/hadoop/out' 
+select * from student distribute by Sex sort by Sage;
+
+----Join查询,join只支持等值连接 
+查询每个学生及其选修课程的情况
+　　hive&gt; select student.*,sc.* from student join sc on (student.Sno =sc.Sno);
+查询学生的得分情况。
+　　hive&gt;select student.Sname,course.Cname,sc.Grade from student join sc on student.Sno=sc.Sno join course on sc.cno=course.cno;
+
+查询选修2号课程且成绩在90分以上的所有学生。
+　　hive&gt; select student.Sname,sc.Grade from student join sc on student.Sno=sc.Sno 
+where  sc.Cno=2 and sc.Grade&gt;90;
+　　
+----LEFT，RIGHT 和 FULL OUTER JOIN ,inner join, left semi join
+查询所有学生的信息，如果在成绩表中有成绩，则输出成绩表中的课程号
+　　hive&gt; select student.Sname,sc.Cno from student left outer join sc on student.Sno=sc.Sno;
+　　如果student的sno值对应的sc在中没有值，则会输出student.Sname null.如果用right out join会保留右边的值，左边的为null。
+　　Join 发生在WHERE 子句之前。如果你想限制 join 的输出，应该在 WHERE 子句中写过滤条件——或是在join 子句中写。
+　　
+----LEFT SEMI JOIN  Hive 当前没有实现 IN/EXISTS 子查询，可以用 LEFT SEMI JOIN 重写子查询语句
+
+重写以下子查询为LEFT SEMI JOIN
+  SELECT a.key, a.value
+  FROM a
+  WHERE a.key exist in
+   (SELECT b.key
+    FROM B);
+可以被重写为：
+   SELECT a.key, a.val
+   FROM a LEFT SEMI JOIN b on (a.key = b.key)
+
+查询与“刘晨”在同一个系学习的学生
+　　hive&gt; select s1.Sname from student s1 left semi join student s2 on s1.Sdept=s2.Sdept and s2.Sname='刘晨';
+
+注意比较：
+select * from student s1 left join student s2 on s1.Sdept=s2.Sdept and s2.Sname='刘晨';
+select * from student s1 right join student s2 on s1.Sdept=s2.Sdept and s2.Sname='刘晨';
+select * from student s1 inner join student s2 on s1.Sdept=s2.Sdept and s2.Sname='刘晨';
+select * from student s1 left semi join student s2 on s1.Sdept=s2.Sdept and s2.Sname='刘晨';
+select s1.Sname from student s1 right semi join student s2 on s1.Sdept=s2.Sdept and s2.Sname='刘晨';</code></pre>三、hive的分区
+<p></p>
+<p></p>
+<pre><code class="language-java">1、创建表时指定有分区(伪字段)
+0: jdbc:hive2://hadoop:10000&gt; create table t_part(id int,name string)
+. . . . . . . . . . . . . . &gt; partitioned by(country string)
+. . . . . . . . . . . . . . &gt; row format delimited
+. . . . . . . . . . . . . . &gt; fields terminated by ',';
+2、把数据加入HDFS上自定义的各个分区
+0: jdbc:hive2://hadoop:10000&gt; load data local inpath '/data/t01.dat'
+. . . . . . . . . . . . . . &gt; into table t_part partition(country='china');
+
+0: jdbc:hive2://hadoop:10000&gt; load data local inpath '/data/t01.dat.japan'
+. . . . . . . . . . . . . . &gt; into table t_part partition(country='japan');
+
+查询的结果：
+
+
+0: jdbc:hive2://hadoop:10000&gt; select * from t_part;
++------------+----------------+-----------------+--+
+| t_part.id  |  t_part.name   | t_part.country  |
++------------+----------------+-----------------+--+
+| 1          | zhangsan       | china           |
+| 2          | lisi           | china           |
+| 3          | mm             | china           |
+| 4          | nn             | china           |
+| 5          | ll             | china           |
+| 1          | shushang       | japan           |
+| 2          | jingxia        | japan           |
+| 3          | gaoshumaliya   | japan           |
+| 4          | sjk            | japan           |
+| 5          | cangcang       | japan           |
++------------+----------------+-----------------+--+
+利用伪字段分区字段 country查询
+select count(1) from t_part where country='china';
+select count(1) from t_part where country='china' group by(name='mm');
+
+分区的表现：
+HDFS上的表现：数据库/表/上传的文件 变成了：数据库/表/分区名/上传的文件
+表的表现：多出一个分区伪字段：country
+
+
+曾加分区
+alter table t_part add partition (country='america');</code></pre><img src="https://img-blog.csdn.net/20170305222713148?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXFfMzE3ODA1MjU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><img src="https://img-blog.csdn.net/20170305222721901?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXFfMzE3ODA1MjU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br>
+分区是一个表的操作，分桶是至少两个表的操作<br><p></p>
+<p>四、hive的分桶</p>
+<p></p>
+<pre><code class="language-java">分桶操作不能load，操作模型是：insert
+insert into table t_bucket
+. . . . . . . . . . . . . . &gt; select id,name from t_p distribute by(id) sort by(id);
+
+对其进行分桶操作，要先开启桶和设置reduce的个数和桶的个数相同
+set hive.enforce.bucketing
+set mapreduce.job.reduce=4;
+
+1、一个普通的表t_p
+create table t_p(id string ,name string)
+. . . . . . . . . . . . . . &gt; row format delimited fields terminated by ',';
+为其加载数据
+load  data local inpath '/data/t01.dat' into table t_p;
+
+2、创建可以分4个桶的表t_bucket
+create table t_bucket(id string ,name string) 
+clustered by(id) sorted by(id) into 4 buckets row format delimited fields terminated by ',';
+3、将查询到t_p的数据，加载到分桶的表
+insert into table t_bucket
+. . . . . . . . . . . . . . &gt; select id,name from t_p distribute by(id) sort by(id);
+ 
+现象 hdfs中 ：/hive/warehouse/zgf.db/t_bucket下出现4个分桶
+
+关于分桶操作需要注意的几个问题
+1、不能load直接加载到hdfs
+2、先开启桶并设置reduce个数量
+3、要事先创建好桶之后，reduce产生的数据往桶里放。该过程更类似于mapreduce过程中分区
+
+另：
+1、order by 会对输入做全局排序，因此只有一个reducer，会导致当输入规模较大时，需要较长的计算时间。
+2、sort by不是全局排序，其在数据进入reducer前完成排序。因此，如果用sort by进行排序，并且设置mapred.reduce.tasks&gt;1，则sort by只保证每个reducer的输出有序，不保证全局有序。
+3、distribute by(字段)根据指定的字段将数据分到不同的reducer，且分发算法是hash散列。
+4、Cluster by(字段) 除了具有Distribute by的功能外，还会对该字段进行排序。
+因此，如果分桶和sort字段是同一个时，此时，cluster by = distribute by + sort by
+
+分桶表的作用：最大的作用是用来提高join操作的效率；
+
+select a.id,a.name,b.addr from a join b on a.id = b.id;
+如果a表和b表已经是分桶表，而且分桶的字段是id字段
+难么在做join操作时，不需要全表做笛卡尔积。
+id相同的肯定在一个桶中，那么一个桶和另一个桶做笛卡尔积就OK了。
+
+
+
+附：windows下：/data/t01.dat数据模型简单如下
+1,zhangsan
+2,lisi
+3,mm
+4,nn
+5,ll
+</code></pre><br><p></p>
+<p><img src="https://img-blog.csdn.net/20170305222846167?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXFfMzE3ODA1MjU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p>五、hive的面试题</p>
+<p>见网上一道面试题，感觉略有兴趣，附共享之</p>
+<p></p>
+<p>有如下访客访问次数统计表 t_access_times</p>
+<table width="568" cellspacing="0" cellpadding="0" border="1"><tbody><tr><td valign="top">
+<p>访客</p>
+</td>
+<td valign="top">
+<p>月份</p>
+</td>
+<td valign="top">
+<p>访问次数</p>
+</td>
+</tr><tr><td valign="top">
+<p>A</p>
+</td>
+<td valign="top">
+<p>2015-01</p>
+</td>
+<td valign="top">
+<p>5</p>
+</td>
+</tr><tr><td valign="top">
+<p>A</p>
+</td>
+<td valign="top">
+<p>2015-01</p>
+</td>
+<td valign="top">
+<p>15</p>
+</td>
+</tr><tr><td valign="top">
+<p>B</p>
+</td>
+<td valign="top">
+<p>2015-01</p>
+</td>
+<td valign="top">
+<p>5</p>
+</td>
+</tr><tr><td valign="top">
+<p>A</p>
+</td>
+<td valign="top">
+<p>2015-01</p>
+</td>
+<td valign="top">
+<p>8</p>
+</td>
+</tr><tr><td valign="top">
+<p>B</p>
+</td>
+<td valign="top">
+<p>2015-01</p>
+</td>
+<td valign="top">
+<p>25</p>
+</td>
+</tr><tr><td valign="top">
+<p>A</p>
+</td>
+<td valign="top">
+<p>2015-01</p>
+</td>
+<td valign="top">
+<p>5</p>
+</td>
+</tr><tr><td valign="top">
+<p>A</p>
+</td>
+<td valign="top">
+<p>2015-02</p>
+</td>
+<td valign="top">
+<p>4</p>
+</td>
+</tr><tr><td valign="top">
+<p>A</p>
+</td>
+<td valign="top">
+<p>2015-02</p>
+</td>
+<td valign="top">
+<p>6</p>
+</td>
+</tr><tr><td valign="top">
+<p>B</p>
+</td>
+<td valign="top">
+<p>2015-02</p>
+</td>
+<td valign="top">
+<p>10</p>
+</td>
+</tr><tr><td valign="top">
+<p>B</p>
+</td>
+<td valign="top">
+<p>2015-02</p>
+</td>
+<td valign="top">
+<p>5</p>
+</td>
+</tr><tr><td valign="top">
+<p>……</p>
+</td>
+<td valign="top">
+<p>……</p>
+</td>
+<td valign="top">
+<p>……</p>
+</td>
+</tr></tbody></table><br><p></p>
+<p>需要输出报表：t_access_times_accumulate</p>
+<table width="565" cellspacing="0" cellpadding="0" border="1"><tbody><tr><td valign="top">
+<p>访客</p>
+</td>
+<td valign="top">
+<p>月份</p>
+</td>
+<td valign="top">
+<p>月访问总计</p>
+</td>
+<td valign="top">
+<p>累计访问总计</p>
+</td>
+</tr><tr><td valign="top">
+<p>A</p>
+</td>
+<td valign="top">
+<p>2015-01</p>
+</td>
+<td valign="top">
+<p>33</p>
+</td>
+<td valign="top">
+<p>33</p>
+</td>
+</tr><tr><td valign="top">
+<p>A</p>
+</td>
+<td valign="top">
+<p>2015-02</p>
+</td>
+<td valign="top">
+<p>10</p>
+</td>
+<td valign="top">
+<p>43</p>
+</td>
+</tr><tr><td valign="top">
+<p>…….</p>
+</td>
+<td valign="top">
+<p>…….</p>
+</td>
+<td valign="top">
+<p>…….</p>
+</td>
+<td valign="top">
+<p>…….</p>
+</td>
+</tr><tr><td valign="top">
+<p>B</p>
+</td>
+<td valign="top">
+<p>2015-01</p>
+</td>
+<td valign="top">
+<p>30</p>
+</td>
+<td valign="top">
+<p>30</p>
+</td>
+</tr><tr><td valign="top">
+<p>B</p>
+</td>
+<td valign="top">
+<p>2015-02</p>
+</td>
+<td valign="top">
+<p>15</p>
+</td>
+<td valign="top">
+<p>45</p>
+</td>
+</tr><tr><td valign="top">
+<p>…….</p>
+</td>
+<td valign="top">
+<p>…….</p>
+</td>
+<td valign="top">
+<p>…….</p>
+</td>
+<td valign="top">
+<p>…….</p>
+</td>
+</tr></tbody></table><p><br></p>
+<p>预热</p>
+<p>1、提炼原始数据 t_access_times</p>
+<p>A,2015-01,5<br>
+A,2015-01,15<br>
+B,2015-01,5<br>
+A,2015-01,8<br>
+B,2015-01,25<br>
+A,2015-01,5<br>
+A,2015-02,4<br>
+A,2015-02,6<br>
+B,2015-02,10<br>
+B,2015-02,5</p>
+<p>2、创建表 上传到hdfs<br></p>
+<p>create table t_access_times(username string,month string,salary int)<br>
+row format delimited fields terminated by ',';</p>
+<p>load data local inpath '/mnt/hgfs/共享文件/zgf/t_access_times.dat' into table t_access_times;<br></p>
+<p>操作</p>
+<p>1、第一步，先求个用户的月总金额</p>
+<p>select username,month,sum(salary) as salary from t_access_times group by username,month</p>
+<p></p>
+<pre><code class="language-java">+-----------+----------+---------+--+
+| username  |  month   | salary  |
++-----------+----------+---------+--+
+| A         | 2015-01  | 33      |
+| A         | 2015-02  | 10      |
+| B         | 2015-01  | 30      |
+| B         | 2015-02  | 15      |
++-----------+----------+---------+--+
+</code></pre>2、第二步，将月总金额表 自己连接 自己连接
+<p></p>
+<p>select A.*,B.* from<br>
+(select username,month,sum(salary) as salary from t_access_times group by username,month) A<br>
+inner join <br>
+(select username,month,sum(salary) as salary from t_access_times group by username,month) B<br>
+on<br>
+A.username=B.username</p>
+<p></p>
+<pre><code class="language-java">+-------------+----------+-----------+-------------+----------+-----------+--+
+| a.username  | a.month  | a.salary  | b.username  | b.month  | b.salary  |
++-------------+----------+-----------+-------------+----------+-----------+--+
+| A           | 2015-01  | 33        | A           | 2015-01  | 33        |
+| A           | 2015-01  | 33        | A           | 2015-02  | 10        |
+| A           | 2015-02  | 10        | A           | 2015-01  | 33        |
+| A           | 2015-02  | 10        | A           | 2015-02  | 10        |
+| B           | 2015-01  | 30        | B           | 2015-01  | 30        |
+| B           | 2015-01  | 30        | B           | 2015-02  | 15        |
+| B           | 2015-02  | 15        | B           | 2015-01  | 30        |
+| B           | 2015-02  | 15        | B           | 2015-02  | 15        |
++-------------+----------+-----------+-------------+----------+-----------+--+</code></pre>3、第三步，从上一步的结果中<br>
+进行分组查询，分组的字段是a.username a.month<br>
+求月累计值：  将b.month &lt;= a.month的所有b.salary求和
+<p></p>
+<p>select A.username,A.month,max(A.salary) as salary,sum(B.salary) as accumulate<br>
+from <br><br>
+(select username,month,sum(salary) as salary from t_access_times group by username,month) A<br>
+inner join <br>
+(select username,month,sum(salary) as salary from t_access_times group by username,month) B<br>
+on<br>
+A.username=B.username<br><br>
+where B.month &lt;= A.month<br>
+group by A.username,A.month<br>
+order by A.username,A.month;</p>
+<p></p>
+<pre><code class="language-java">+-------------+----------+---------+-------------+--+
+| a.username  | a.month  | salary  | accumulate  |
++-------------+----------+---------+-------------+--+
+| A           | 2015-01  | 33      | 33          |
+| A           | 2015-02  | 10      | 43          |
+| B           | 2015-01  | 30      | 30          |
+| B           | 2015-02  | 15      | 45          |
++-------------+----------+---------+-------------+--+</code></pre>小结：对于hive的操作更多是基于对mysql的操作，如上完全是考察sql语句
+<p></p>
+<p>建表：</p>
+<p></p>
+<pre><code class="language-java">create table t_access_times(
+username varchar(50),
+month varchar(50),
+salary int 
+);</code></pre>插入数据
+<p></p>
+<p></p>
+<pre><code class="language-java">INSERT INTO t_access_times VALUES('A','2015-01',5);
+INSERT INTO t_access_times VALUES('A','2015-01',15);
+INSERT INTO t_access_times VALUES('B','2015-01',5);
+INSERT INTO t_access_times VALUES('A','2015-01',8);
+INSERT INTO t_access_times VALUES('B','2015-01',25);
+INSERT INTO t_access_times VALUES('A','2015-01',5);
+INSERT INTO t_access_times VALUES('A','2015-02',4);
+INSERT INTO t_access_times VALUES('A','2015-02',6);
+INSERT INTO t_access_times VALUES('B','2015-02',10);
+INSERT INTO t_access_times VALUES('B','2015-02',5);</code></pre>别的就完全相同了<br><br><p></p>
+<p><br></p>
+<p><br></p>
+<p>附：join的表连接</p>
+<p><img src="https://img-blog.csdn.net/20170305222417237?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXFfMzE3ODA1MjU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>student、course、sc假数据连接地址：<br></p>
+<p><br></p>
+<p><br></p>
+<p><br></p>
+<p><br></p>
+<p><br></p>
+            </div>
+                </div>

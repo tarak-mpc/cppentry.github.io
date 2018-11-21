@@ -1,0 +1,819 @@
+---
+layout:     post
+title:      数据分析引擎Hive
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/cp_Mark/article/details/80289952				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>涉及到的知识点：</p>
+
+<ol>
+<li>Hive的体系结构</li>
+<li>安装和配置</li>
+<li>Hive的数据模型：内部表、分区表、外部表，桶表、视图</li>
+<li>Hive的查询（本质就是SQL）</li>
+<li>Hive的Java API（本质就是JDBC程序）</li>
+<li>Hive的自定义函数（UDF：user defined function。本质就是一个Java程序）</li>
+</ol>
+
+
+
+<h2 id="hive的体系结构">Hive的体系结构</h2>
+
+<p>Hive其实是构建在Hadoop上的<strong>数据仓库</strong>平台，为数据仓库管理提供了许多功能。其中最常用的功能就是翻译器，将我们的SQL语句，通过Hive引擎翻译称为MapReduce程序。不过需要注意的是Hive支持的是SQL99标准的一个子集，并不是全部支持。下面是Hive的体系结构图：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111228412?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="Hive的体系结构" title=""></p>
+
+<p>在这里顺便提一下Hive和HDFS的对应关系（后面会说到）：</p>
+
+<p>​           Hive             HDFS <br>
+            表       –&gt;      目录 <br>
+            分区    –&gt;     目录 <br>
+            数据    –&gt;     文件 <br>
+            桶        –&gt;     文件</p>
+
+
+
+<h2 id="hive的安装和配置">Hive的安装和配置</h2>
+
+<p>先安装并设置环境变量，后面再来说几种配置模式吧。</p>
+
+<p>安装命令如下：</p>
+
+<blockquote>
+  <p>tar -zxvf apache-hive-2.3.0-bin.tar.gz -C ~/training/</p>
+</blockquote>
+
+<p>安装完成之后就是环境变量的设置：</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-comment">//编辑环境变量配置文件</span>
+vi ~/.bash_profile
+
+HIVE_HOME=/root/training/apache-hive-<span class="hljs-number">2.3</span><span class="hljs-number">.0</span>-bin
+export HIVE_HOME
+
+PATH=$HIVE_HOME/bin:$PATH
+export PATH
+
+
+<span class="hljs-comment">//使环境变量生效</span>
+source ~/.bash_profile</code></pre>
+
+<p>设置完成之后在命令行输入hive，然后按两下Tab键，产生如下结果说明配置成功：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111326368?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="Hive安装并配置环境变量成功的标志" title=""></p>
+
+<p>接下来就是配置Hive的三种模式：</p>
+
+<p>（1）嵌入模式</p>
+
+<p>（2）本地模式</p>
+
+<p>（3）远程模式</p>
+
+<p>这三种模式都是通过配置文件: conf/hive-site.xml来实现的，需要注意的是hive-site.xml并不存在，我们需要自己新建。</p>
+
+
+
+<h3 id="嵌入模式">嵌入模式</h3>
+
+<p>特点：</p>
+
+<ul>
+<li><strong>不需要MySQL的支持，使用Hive的自带的数据库Derby</strong></li>
+<li><strong>局限：只支持一个连接</strong></li>
+</ul>
+
+<p>hive-site.xml具体配置如下：</p>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-pi">&lt;?xml version="1.0" encoding="UTF-8" standalone="no"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionURL<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>jdbc:derby:;databaseName=metastore_db;create=true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionDriverName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>org.apache.derby.jdbc.EmbeddedDriver<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.metastore.local<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-comment">&lt;!-- value对应的目录要事先存在 --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.metastore.warehouse.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>file:///root/training/apache-hive-2.3.0-bin/warehouse<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p>配置好hive-site.xml，我们需要初始化一下Derby数据库，我们在Hive的体系结构中提到，需要一个关系型数据库来保存Hive的元信息，在嵌入模式中使用自带的Derby即可，但是需要初始化，命令如下：</p>
+
+<blockquote>
+  <p>初始化Derby数据库 <br>
+  schematool -dbType derby -initSchema</p>
+</blockquote>
+
+<p>初始化成功的标志如下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111413919?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="嵌入模式初始化Derby成功标志" title=""></p>
+
+<p>下面在命令行输入hive等待即可，如果顺利进入hive命令行模式说明嵌入式配置成功，结果如下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111432571?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="嵌入模式配置成功标志" title=""></p>
+
+<p>现在我们来创建一个table1，并插入一条数据，查看一下效果： <br>
+<img src="https://img-blog.csdn.net/20180512111457888?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="嵌入模式创建table1" title=""> <br>
+<img src="https://img-blog.csdn.net/20180512111510126?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="嵌入模式插入数据" title=""></p>
+
+<p>显然已经成功，需要注意的是表的这些信息就是保存在我们上面配置的那个warehouse目录下，并不是在HDFS，我们可以去查看一下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111559352?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="嵌入模式数据保存结果" title=""></p>
+
+
+
+<h3 id="远程模式本地模式">远程模式、本地模式</h3>
+
+<p>在进行远程模式、本地模式的配置之前，我们需要安装配置一下MySQL,具体步骤如下：</p>
+
+<p>（1）解压压缩包 </p>
+
+<blockquote>
+  <p>tar -xvf mysql-5.7.19-1.el7.x86_64.rpm-bundle.tar</p>
+</blockquote>
+
+<p>（2）安装并配置MySQL：</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-comment">//先删除linux默认安装的mysql驱动</span>
+yum remove mysql-libs 
+rpm -ivh mysql-community-common-<span class="hljs-number">5.7</span><span class="hljs-number">.19</span>-<span class="hljs-number">1.</span>el7.x86_64.rpm
+rpm -ivh mysql-community-libs-<span class="hljs-number">5.7</span><span class="hljs-number">.19</span>-<span class="hljs-number">1.</span>el7.x86_64.rpm
+rpm -ivh mysql-community-client-<span class="hljs-number">5.7</span><span class="hljs-number">.19</span>-<span class="hljs-number">1.</span>el7.x86_64.rpm
+rpm -ivh mysql-community-server-<span class="hljs-number">5.7</span><span class="hljs-number">.19</span>-<span class="hljs-number">1.</span>el7.x86_64.rpm
+rpm -ivh mysql-community-devel-<span class="hljs-number">5.7</span><span class="hljs-number">.19</span>-<span class="hljs-number">1.</span>el7.x86_64.rpm  （可选）
+
+    启动MySQL：service mysqld start
+    或者：systemctl start mysqld.service
+
+    查看root用户的密码：cat /var/log/mysqld.log | grep password
+    登陆:mysql -uroot -p
+    修改密码：alter user <span class="hljs-string">'root'</span>@<span class="hljs-string">'localhost'</span> identified by <span class="hljs-string">'Welcome_1'</span>;
+
+MySQL数据库的配置：
+创建一个新的数据库：create database hive;
+创建一个新的用户：
+    create user <span class="hljs-string">'hiveowner'</span>@<span class="hljs-string">'%'</span> identified by <span class="hljs-string">'Welcome_1'</span>;
+给该用户授权
+    grant all on hive.* TO <span class="hljs-string">'hiveowner'</span>@<span class="hljs-string">'%'</span>; 
+    grant all on hive.* TO <span class="hljs-string">'hiveowner'</span>@<span class="hljs-string">'localhost'</span> identified by <span class="hljs-string">'Welcome_1'</span>;   </code></pre>
+
+<p>（3）安装MySQL的客户端 mysql front(免费的，百度到官网自己下即可) <br>
+    新建链接，配置如下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111710850?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="MySQL Front的配置" title=""></p>
+
+<p>填写完之后点击OK，然后选中点击Open，就可见到如下页面：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111729296?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="mysql-hive数据库初始状态" title=""></p>
+
+<p>好了，所有的MySQL相关的都已经安装配置完成了。下面我们进入Hive正式的配置：</p>
+
+<p>（1）hive-site.xml文件(其实就是JDBC相关的配置)：</p>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-pi">&lt;?xml version="1.0" encoding="UTF-8" standalone="no"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionURL<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>jdbc:mysql://localhost:3306/hive?useSSL=false<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionDriverName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>com.mysql.jdbc.Driver<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionUserName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hiveowner<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionPassword<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+   <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>Welcome_1<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p>（2）<strong>将mysql的jar包放到lib目录下，注意一定要使用高版本的MySQL驱动（5.1.43以上的版本）</strong></p>
+
+<p>（3）初始化MySQL数据库</p>
+
+<p>​（*）老版本：当第一次启动Hive的时候 自动进行初始化 <br>
+            （*）新版本：schematool -dbType mysql -initSchema <br>
+初始化成功日志如下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111835854?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="初始化MySQL成功标志" title=""> <br>
+现在我们再通过MySQL-Front看一下hive数据库：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512111908651?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="mysql初始化之后自动生成的表（用来记录hive的元信息）" title=""></p>
+
+<p>可以看见mysql生成了一系列的表用来保存hive的元信息。</p>
+
+<p>到这里关系环境的配置就都完成了，后面我们开始介绍hive的一些常用知识点。</p>
+
+
+
+<h2 id="hive的数据模型注意默认列的分隔符是tab键制表符">Hive的数据模型（注意：默认列的分隔符是tab键（制表符））</h2>
+
+<p><strong>了解数据模型的目的是可以根据我们的需求结合各种数据模型，选择出最合适的来创建，方便我们后期工作的开展。</strong></p>
+
+<p>测试数据为员工表和部分表：</p>
+
+<blockquote>
+  <p>7499,ALLEN,SALESMAN,7698,1981/2/20,1600,300,30（员工表中的一条）</p>
+</blockquote>
+
+
+
+<h3 id="内部表相当于mysql的表">内部表：相当于MySQL的表</h3>
+
+<p>我们以上面员工表中一条为模板来创建内部表:</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">table</span> emp(
+    empno <span class="hljs-keyword">int</span>,
+    ename string,
+    job   string,
+    mgr   <span class="hljs-keyword">int</span>,
+    hiredata string,
+    sal   <span class="hljs-keyword">int</span>,
+    comm  <span class="hljs-keyword">int</span>,
+    deptno  <span class="hljs-keyword">int</span>
+);</span></code></pre>
+
+<p>创建结果如下：</p>
+
+<p><img src="https://img-blog.csdn.net/2018051211194256?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="创建内部表emp1" title=""></p>
+
+<p>创建成功之后我们可以去看一下，在前面我们提到的关于hive的元信息，比如表名、列名等，我们通过MySQL-Front</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112001438?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="数据库表元信息" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180512112014131?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></p>
+
+<p>在体系结构的最后我们提到了，Hive的表对应HDFS下的目录，我们现在可以通过web控制台去查看，地址ip:50070:</p>
+
+<blockquote>
+  <p>HDFS控制台：192.168.171.113:50070</p>
+</blockquote>
+
+<p><img src="https://img-blog.csdn.net/2018051211204377?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="HDFS控制台查看hive新建内部表目录" title=""></p>
+
+<p>创建表完成之后，我们来导入数据，有以下两种方式：</p>
+
+<ul>
+<li><p>insert（平常用的插入一条数据）</p></li>
+<li><p>load（从某个HDFS的目录或者本地Linux的目录上，把数据导入Hive的表 本质ctrl+x）</p>
+
+<blockquote>
+  <p>load data inpath ‘/input/emp.csv’ into table emp1;    inpath表示导入HDFS的数据</p>
+  
+  <p>load data local inpath ‘/root/temp/emp.csv’ into table emp1;    local inpath表示导入本地Linux的数据</p>
+</blockquote></li>
+</ul>
+
+<p>我们执行load data inpath ‘/input/emp.csv’ into table emp1; 完成之后hdfs目录下/input下的emp.csv就不在了，因为被剪切走了，我们看一下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112110188?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="执行load inpath之后的结果" title=""></p>
+
+<p>既然已经load成功，我们就来查询一下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112133242?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="导入emp表的查询结果（默认以tab键分割时查看）" title=""></p>
+
+<p>这是什么鬼，难道我们那里操作失误了。答案是：我们确实失误了，因为所有Hive的数据模型，列的分隔符默认是Tab，而我们的emp.csv却是以，分割的，所以查询出来的数据异常，下面我们重新来创建表emp2，并制定分隔符为”,”，然后重新导入再来查看一下结果：</p>
+
+<p>（1）创建新表emp2，并指定lie分隔符</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">table</span> emp2
+(empno <span class="hljs-keyword">int</span>,
+ename string,
+job string,
+mgr <span class="hljs-keyword">int</span>,
+hiredate string,
+sal <span class="hljs-keyword">int</span>,
+comm <span class="hljs-keyword">int</span>,
+deptno <span class="hljs-keyword">int</span>)
+<span class="hljs-keyword">row</span> format delimited fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">','</span>;</span>  </code></pre>
+
+<p>（2）从linux本地导入数据</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">load</span> data <span class="hljs-keyword">local</span> inpath <span class="hljs-string">'/root/temp/emp.csv'</span> <span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> emp2;</span>  </code></pre>
+
+<p>（3）查询结果如下：</p>
+
+<p><img src="https://img-blog.csdn.net/2018051211215631?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="内部表二次操作" title=""></p>
+
+
+
+<h3 id="分区表">分区表</h3>
+
+<p>其实我们在<a href="https://blog.csdn.net/cp_mark/article/details/80216827#t2" rel="nofollow">MapperReduce的使用及高级功能</a>的分区功能中已经提到过分区的概念，不了解的建议花点时间去看一下。Hive创建分区表的步骤如下：</p>
+
+<p>（1）根据员工的部门号创建分区</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">table</span> emp_part
+            (empno <span class="hljs-keyword">int</span>,
+            ename string,
+            job string,
+            mgr <span class="hljs-keyword">int</span>,<span class="hljs-keyword">show</span>
+            hiredate string,
+            sal <span class="hljs-keyword">int</span>,
+            comm <span class="hljs-keyword">int</span>)
+            partitioned <span class="hljs-keyword">by</span> (deptno <span class="hljs-keyword">int</span>)                 --&gt;(部门号单独提取出来，用于作为分区条件)
+            <span class="hljs-keyword">row</span> format delimited fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">','</span>;</span></code></pre>
+
+<p>（2）指明导入的数据的分区（通过子查询导入数据） —-&gt; MapReduce程序  </p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">insert</span> <span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> emp_part partition(deptno=<span class="hljs-number">10</span>) <span class="hljs-keyword">select</span> empno,ename,job,mgr,hiredate,sal,comm <span class="hljs-keyword">from</span> emp2 <span class="hljs-keyword">where</span> deptno=<span class="hljs-number">10</span>;</span>
+
+<span class="hljs-operator"><span class="hljs-keyword">insert</span> <span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> emp_part partition(deptno=<span class="hljs-number">20</span>) <span class="hljs-keyword">select</span> empno,ename,job,mgr,hiredate,sal,comm <span class="hljs-keyword">from</span> emp2 <span class="hljs-keyword">where</span> deptno=<span class="hljs-number">20</span>;</span>
+
+<span class="hljs-operator"><span class="hljs-keyword">insert</span> <span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> emp_part partition(deptno=<span class="hljs-number">30</span>) <span class="hljs-keyword">select</span> empno,ename,job,mgr,hiredate,sal,comm <span class="hljs-keyword">from</span> emp2 <span class="hljs-keyword">where</span> deptno=<span class="hljs-number">30</span>;</span></code></pre>
+
+<p>我们在执行上面的插入数据时发现，每次执行一条语句默认会打印出很多日志，此时不利于我们的操作和观察，我们可以开启hive的静默模式，操作如下：</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs ">//先离开hive命令行模式
+quit；
+//重新启动
+hive -S         <span class="hljs-comment">--&gt;   报错不会受到影响</span></code></pre>
+
+<p>上两张图对比一下开启前后的效果：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112225599?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="hive非静默模式" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180512112239202?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="hive开启静默模式之后" title=""></p>
+
+<p>很明显，感觉爽多了。我们继续上面的正题。现在我们分区表已经初始化完成，我们分别通过内部表（普通表）和分区表来查询一下deptno=10的数据：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112333693?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="内部表、分区表查询deptno=10数据" title=""></p>
+
+<p>结果是一样的，那么分区表存在的意义是什么呢？答案是效率更高，我们通过查询SQL的执行计划来作一下对比：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112352656?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="[内部表（普通表）执行计划" title=""></p>
+
+<p><img src="https://img-blog.csdn.net/20180512112404377?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="分区表执行计划" title=""></p>
+
+<p>前面为内部表（普通表），后面为分区表，分区表明显查询数据的大小小了很多，在效率上有显著的提升。这就是分区表的用处。</p>
+
+<blockquote>
+  <p><strong>执行计划如何看？从下往上，从右往左</strong></p>
+</blockquote>
+
+<h3 id="视图">视图</h3>
+
+<p>视图其实是一个虚表，具有以下的特点：</p>
+
+<ul>
+<li>视图不存数据，依赖于其它的表，被视图依赖的表叫基表</li>
+<li>操作视图跟操作表 一样。原因其实就是第一条，它本身不存数据，而是依赖于其它基表</li>
+<li>视图并不可以提高查询的效率，它的作用是简化复杂的查询</li>
+<li><strong>物化视图（可以缓存数据）–&gt; 可以自己去研究一下</strong></li>
+</ul>
+
+<p>举例查询员工信息：部门名称 员工姓名</p>
+
+<p>（1）创建部门表并导入数据</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">table</span> dept
+            (deptno <span class="hljs-keyword">int</span>,
+            dname string,
+            loc string)
+            <span class="hljs-keyword">row</span> format delimited fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">','</span>;</span></code></pre>
+
+<p>然后导入数据：</p>
+
+<blockquote>
+  <p>load data inpath ‘/input/dept.csv’ into table dept;(linux本地导入)</p>
+</blockquote>
+
+<p>（2）创建视图</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">view</span> myview
+<span class="hljs-keyword">as</span>  
+<span class="hljs-keyword">select</span> dept.dname,emp2.ename
+<span class="hljs-keyword">from</span> emp2,dept
+<span class="hljs-keyword">where</span> emp2.deptno=dept.deptno;</span></code></pre>
+
+<p>（3）查询结果</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> myview;</span></code></pre>
+
+<p><img src="https://img-blog.csdn.net/20180512112433240?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="hive视图多表查询结果" title=""></p>
+
+
+
+<h3 id="外部表">外部表</h3>
+
+<p>外部表和内部表在元数据的组织上是相同的，而实际数据的存储则有较大的差异，它是<strong>指向HDFS上已经存在的数据</strong>，可以创建Partition。除此之外还具有以下特点：</p>
+
+<ul>
+<li>只有一个过程，加载数据和创建表同时完成，并不会移动到数据仓库目录中，只是与外部数据建立一个链接。当删除一个外部表时，仅删除该链接</li>
+</ul>
+
+<p>介绍完定义，我们下面来作一波操作演示一下外部表的使用：</p>
+
+<p>（1）创建两个测试数据（linux本地）</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-comment">//student01.txt</span>
+vi student01.txt
+<span class="hljs-number">1</span>,Tom,<span class="hljs-number">21</span>
+<span class="hljs-number">2</span>,Jane,<span class="hljs-number">22</span>
+
+<span class="hljs-comment">//student02.txt</span>
+<span class="hljs-number">3</span>,Anna,<span class="hljs-number">23</span></code></pre>
+
+<p>（2）在HDFS上创建student目录，并把上面的测试数据上传上去</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-comment">//在HDFS上创建student目录</span>
+hdfs dfs -mkdir /students
+
+<span class="hljs-comment">//上传数据到HDFS</span>
+hdfs dfs -put student01.txt /students
+hdfs dfs -put student02.txt /students</code></pre>
+
+<p>（3）创建外部表，关联HDFS上的student目录</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">external</span> <span class="hljs-keyword">table</span> students_ext              --&gt; 关键字<span class="hljs-keyword">external</span>用于标识这是一个外部表
+(sid <span class="hljs-keyword">int</span>,sname string,age <span class="hljs-keyword">int</span>)
+<span class="hljs-keyword">row</span> format delimited fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">','</span>
+location <span class="hljs-string">'/students'</span>;</span>                          <span class="hljs-comment">--&gt; 关键字location用于指定HDFS上的目录</span></code></pre>
+
+<p>（4）hive查看结果：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112510936?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="Hive初始化外部表查询结果" title=""></p>
+
+<p>（5）在Linux本地新建student03.txt，添加一条数据，然后上传到HDFS  /students目录下，再次查看Hive：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112527214?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="Hive外部表插入新数据到HDFS新查询结果" title=""></p>
+
+
+
+<h3 id="桶表桶是一个文件">桶表：桶是一个文件</h3>
+
+<p>桶表是对数据进行哈希取值，然后放到不同文件中存储。其思想和我们前面的文章<a href="https://blog.csdn.net/cp_mark/article/details/80216827#t2" rel="nofollow">MapperReduce的使用及高级功能 </a>里面提到的Hash分区是一样的，如果不了解的可以去看一下。</p>
+
+<p>下面以创建一个桶表为例：</p>
+
+<p>（1）创建桶表</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">table</span> emp_bucket
+            (empno <span class="hljs-keyword">int</span>,
+            ename string,
+            job string,
+            mgr <span class="hljs-keyword">int</span>,
+            hiredate string,
+            sal <span class="hljs-keyword">int</span>,
+            comm <span class="hljs-keyword">int</span>,
+            deptno <span class="hljs-keyword">int</span>)
+            clustered <span class="hljs-keyword">by</span> (job) <span class="hljs-keyword">into</span> <span class="hljs-number">4</span> buckets               --&gt; 关键字clustered标识桶表
+            <span class="hljs-keyword">row</span> format delimited fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">','</span>;</span>  
+</code></pre>
+
+<p>（2）<strong>设置环境变量打开桶表，否则无效</strong></p>
+
+<blockquote>
+  <p><strong>set hive.enforce.bucketing = true;</strong></p>
+</blockquote>
+
+<p>（3）通过子查询插入数据</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">insert</span> <span class="hljs-keyword">into</span> emp_bucket <span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> emp2;</span></code></pre>
+
+<p>（4）查询结果</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112558675?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="桶表查询结果" title=""></p>
+
+
+
+<h2 id="hive的查询">Hive的查询</h2>
+
+<p>Hive的查询本质就是SQL，通过输入sql语句，将其转化为MapReduce操作（简单的并不会转换），最终得到结果。我们列几个示例介绍一下即可。</p>
+
+<p>（1）查询所有的员工信息</p>
+
+
+
+<pre class="prettyprint"><code class="language-SQL hljs sql"><span class="hljs-operator"><span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> emp2;</span></code></pre>
+
+<p>（2）查询员工信息：员工号 姓名 薪水</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">select</span> empno,ename,sal <span class="hljs-keyword">from</span> emp2;</span></code></pre>
+
+<p>（3）多表查询：部门名称  员工姓名</p>
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">select</span> dept.dname,emp2.ename
+    <span class="hljs-keyword">from</span> emp2,dept
+    <span class="hljs-keyword">where</span> emp2.deptno=dept.deptno;</span>  </code></pre>
+
+<p>（4）子查询hive只支持：from和where子句中的子查询</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> emp2
+<span class="hljs-keyword">where</span> emp2.deptno <span class="hljs-keyword">in</span> (<span class="hljs-keyword">select</span> deptno <span class="hljs-keyword">from</span> dept <span class="hljs-keyword">where</span> dname=<span class="hljs-string">'SALES'</span>);</span></code></pre>
+
+<p>补充：Oracle数据库中可以使用子查询的：from、where、select、having后面 <br>
+                                  不能使用子查询：group by</p>
+
+<p>（5）条件函数:  case …. when ….（Oracle中叫条件表达式） <br>
+                       是标准的SQL语句 <br>
+               实际上就是在SQL中实现一个if  else 逻辑      </p>
+
+<p>​   举例：做报表，根据职位给员工涨工资 <br>
+            PRESIDENT   1000 <br>
+        MANAGER     800 <br>
+        其他              400</p>
+
+<p>把涨前、涨后的薪水显示出来</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">select</span> empno,ename,job,sal,
+    <span class="hljs-keyword">case</span> job <span class="hljs-keyword">when</span> <span class="hljs-string">'PRESIDENT'</span> <span class="hljs-keyword">then</span> sal+<span class="hljs-number">1000</span>
+            <span class="hljs-keyword">when</span> <span class="hljs-string">'MANAGER'</span> <span class="hljs-keyword">then</span> sal+<span class="hljs-number">800</span>
+            <span class="hljs-keyword">else</span> sal+<span class="hljs-number">400</span>
+    <span class="hljs-keyword">end</span> 
+    <span class="hljs-keyword">from</span> emp2;</span>    </code></pre>
+
+<p>补充：Oracle中，条件表达式还有一种方式：decode函数 —&gt; Oracle自己的语法</p>
+
+
+
+<h2 id="通过jdbc操作hive">通过JDBC操作Hive</h2>
+
+<p>在通过JDBC操作Hive时，有以下几点需要注意：</p>
+
+<p>（1）jar包，把hive下的jar包拷贝一份进入项目，具体目录如下：</p>
+
+<blockquote>
+  <p>/root/training/apache-hive-2.3.0-bin/lib (只要jar包即可)</p>
+</blockquote>
+
+<p>（2）启动HiveServer2（这个我们在最开始介绍Hive的体系结构的时候已经说明），命令如下：</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs ">hiveserver2 &amp;（不是hive命令行模式，而是正常linux命令行模式）</code></pre>
+
+<p>（3）修改hadoop的配置文件 – core-site.xml，否则会报以下错误：</p>
+
+<blockquote>
+  <p>Caused by: java.lang.RuntimeException: org.apache.hadoop.ipc.RemoteException:User: root is not allowed to impersonate anonymous</p>
+</blockquote>
+
+<p>具体配置如下：</p>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hadoop.proxyuser.root.hosts<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>*<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hadoop.proxyuser.root.groups<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+  <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>*<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span></code></pre>
+
+<p>配置完成之后将hadoop重启，然后运行代码，结果如下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112712472?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="hive JDBC实现范例结果" title=""></p>
+
+<p>下面把代码贴上，需要的直接复制，黏贴即可：</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">package</span> jdbc;
+
+<span class="hljs-keyword">import</span> java.sql.Connection;
+<span class="hljs-keyword">import</span> java.sql.DriverManager;
+<span class="hljs-keyword">import</span> java.sql.ResultSet;
+<span class="hljs-keyword">import</span> java.sql.SQLException;
+<span class="hljs-keyword">import</span> java.sql.Statement;
+
+<span class="hljs-javadoc">/**
+ * function：工具类
+ * 1、获取链接
+ * 2、释放资源：Connection、Statement、ResultSet
+ * author by cpMark
+ * create on 2018/5/11.
+ */</span>
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">JDBCUtils</span> {</span>
+
+    <span class="hljs-javadoc">/**
+     *  Hive的驱动(固定写法)
+     */</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> String mDriver = <span class="hljs-string">"org.apache.hive.jdbc.HiveDriver"</span>;
+    <span class="hljs-comment">//Oracle数据库: oracle.jdbc.OracleDriver</span>
+
+    <span class="hljs-javadoc">/**
+     * Hive的URL地址
+     */</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> String mUrl = <span class="hljs-string">"jdbc:hive2://192.168.171.113:10000/default"</span>;
+
+    <span class="hljs-javadoc">/**
+     * 注册数据库的驱动
+     */</span>
+    <span class="hljs-keyword">static</span>{
+        <span class="hljs-keyword">try</span>{
+            Class.forName(mDriver);
+        }<span class="hljs-keyword">catch</span>(Exception ex){
+            <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> ExceptionInInitializerError(ex);
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     * 获取Hive数据库的链接
+     *<span class="hljs-javadoctag"> @return</span>
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> Connection <span class="hljs-title">getConnection</span>(){
+        <span class="hljs-keyword">try</span>{
+            <span class="hljs-keyword">return</span> DriverManager.getConnection(mUrl);
+        }<span class="hljs-keyword">catch</span>(Exception ex){
+            ex.printStackTrace();
+        }
+
+        <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+    }
+
+    <span class="hljs-javadoc">/**
+     * 释放资源
+     *<span class="hljs-javadoctag"> @param</span> conn
+     *<span class="hljs-javadoctag"> @param</span> st
+     *<span class="hljs-javadoctag"> @param</span> rs
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">release</span>(Connection conn, Statement st, ResultSet rs){
+        <span class="hljs-keyword">if</span>(rs != <span class="hljs-keyword">null</span>){
+            <span class="hljs-keyword">try</span> {
+                rs.close();
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                e.printStackTrace();
+            }<span class="hljs-keyword">finally</span>{
+                rs = <span class="hljs-keyword">null</span>;
+            }
+        }
+        <span class="hljs-keyword">if</span>(st != <span class="hljs-keyword">null</span>){
+            <span class="hljs-keyword">try</span> {
+                st.close();
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                e.printStackTrace();
+            }<span class="hljs-keyword">finally</span>{
+                st = <span class="hljs-keyword">null</span>;
+            }
+        }
+        <span class="hljs-keyword">if</span>(conn != <span class="hljs-keyword">null</span>){
+            <span class="hljs-keyword">try</span> {
+                conn.close();
+            } <span class="hljs-keyword">catch</span> (SQLException e) {
+                e.printStackTrace();
+            }<span class="hljs-keyword">finally</span>{
+                conn = <span class="hljs-keyword">null</span>;
+            }
+        }
+    }
+
+
+}
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">package</span> jdbc;
+
+<span class="hljs-keyword">import</span> java.sql.Connection;
+<span class="hljs-keyword">import</span> java.sql.ResultSet;
+<span class="hljs-keyword">import</span> java.sql.Statement;
+
+<span class="hljs-javadoc">/**
+ * function：
+ * author by cpMark
+ * create on 2018/5/11.
+ */</span>
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">HiveMain</span> {</span>
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args){
+        <span class="hljs-comment">//查询员工信息</span>
+        String sql = <span class="hljs-string">"select * from emp2"</span>;
+
+        Connection conn = <span class="hljs-keyword">null</span>;
+        Statement st = <span class="hljs-keyword">null</span>;
+        ResultSet rs = <span class="hljs-keyword">null</span>;
+
+        <span class="hljs-keyword">try</span> {
+            conn = JDBCUtils.getConnection();
+
+            <span class="hljs-comment">//得到SQL的运行环境</span>
+            st = conn.createStatement();
+
+            <span class="hljs-comment">//运行SQL</span>
+            rs = st.executeQuery(sql);
+            <span class="hljs-keyword">while</span> (rs.next()){
+                <span class="hljs-comment">//姓名和薪水</span>
+                <span class="hljs-comment">//注意：好像不能通过列的索引号获取。只能通过列名来获取</span>
+                String ename = rs.getString(<span class="hljs-string">"ename"</span>);
+                <span class="hljs-keyword">double</span> sal = rs.getDouble(<span class="hljs-string">"sal"</span>);
+                System.out.println(ename+<span class="hljs-string">"\t"</span>+sal);
+            }
+        }<span class="hljs-keyword">catch</span> (Exception e){
+            e.printStackTrace();
+        }<span class="hljs-keyword">finally</span> {
+            JDBCUtils.release(conn,st,rs);
+        }
+    }
+
+}</code></pre>
+
+
+
+<h2 id="hive的自定义函数">Hive的自定义函数</h2>
+
+<p>Hive的自定义函数（UDF：user defined function）：本质就是一个Java程序，只是封装了我们自己的业务逻辑。下面我们以一个例子来演示如何使用自定义函数 – concat函数，拼接字符串：</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">package</span> udf;
+
+<span class="hljs-keyword">import</span> org.apache.hadoop.hive.ql.exec.UDF;
+
+<span class="hljs-javadoc">/**
+ * function：拼接字符串的功能
+ * author by cpMark
+ * create on 2018/5/12.
+ */</span>
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">MyConcatString</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">UDF</span> {</span>
+
+    <span class="hljs-javadoc">/**
+     *  定义的方法，方法名必须叫：evaluate
+     */</span>
+    <span class="hljs-keyword">public</span> String <span class="hljs-title">evaluate</span>(String a,String b){
+        <span class="hljs-keyword">return</span> a + <span class="hljs-string">"***"</span> + b;
+    }
+
+}</code></pre>
+
+<p>导出成jar包，并部署（部署命令在下图），结果如下：</p>
+
+<p><img src="https://img-blog.csdn.net/20180512112737145?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2NwX01hcms=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="自定义Hive函数" title=""></p>
+
+<p>到此为止关于Hive的所有知识点都已经介绍完了。下一篇数据分析引擎Pig，敬请期待！！！</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

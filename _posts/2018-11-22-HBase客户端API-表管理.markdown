@@ -1,0 +1,240 @@
+---
+layout:     post
+title:      HBase客户端API-表管理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/kongxx/article/details/79185355				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-light">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>上一篇博客说了怎样搭建HBase环境，今天说说怎样使用 HBase 的客户端 API 来操作 HBase 中的数据。</p>
+
+
+
+<h2 id="创建工程">创建工程</h2>
+
+<p>首先创建一个 Maven 工程，然后添加hbase客户端api的依赖项，如下：</p>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-tag">&lt;<span class="hljs-title">dependency</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">groupId</span>&gt;</span>org.apache.hbase<span class="hljs-tag">&lt;/<span class="hljs-title">groupId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">artifactId</span>&gt;</span>hbase-client<span class="hljs-tag">&lt;/<span class="hljs-title">artifactId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">version</span>&gt;</span>2.0.0-alpha4<span class="hljs-tag">&lt;/<span class="hljs-title">version</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">dependency</span>&gt;</span></code></pre>
+
+
+
+<h2 id="添加配置文件">添加配置文件</h2>
+
+<p>在 Maven 工程的resources目录下添加 hbase-site.xml 文件，hbase客户端 API 默认会在系统的 classpath 下找此文件来加载连接信息。</p>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.rootdir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>file:///apps/hbase-2.0.0-beta-1/data/hbase<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.zookeeper.property.dataDir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/apps/hbase-2.0.0-beta-1/data/zookeeper<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.zookeeper.quorum<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>bd1,bd2,bd3<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hbase.cluster.distributed<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+
+
+<h2 id="创建-connection-对象">创建 Connection 对象</h2>
+
+<p>要操作 HBase 的数据表，也和 JDBC 编程类似，需要创建一个 HBase Connection 对象，然后通过这个 Connection 对象来操作，操作完成后需要关闭此连接。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-comment">// 根据 hbase-site.xml 文件初始化 Configuration 对象</span>
+Configuration config = HBaseConfiguration.create();
+
+<span class="hljs-comment">// 根据 Configuration 对象初始化 Connection 对象</span>
+Connection connection = ConnectionFactory.createConnection(config);
+
+<span class="hljs-comment">// 操作数据</span>
+<span class="hljs-comment">// ...</span>
+
+connection.close();</code></pre>
+
+
+
+<h2 id="表管理">表管理</h2>
+
+<p>在 HBase中，要管理表，需要通过 org.apache.hadoop.hbase.client.Admin 类实现，可以通过 Connection.getAdmin() 方法来获取一个 Admin 对象实例。</p>
+
+
+
+<h3 id="查看表">查看表</h3>
+
+<p>在 HBase 中，表的描述信息保存在 org.apache.hadoop.hbase.client.TableDescriptor 类中，因此我们可以通过 Admin.listTableDescriptors() 来获取 HBase 中所有表的描述信息。然后可以通过 org.apache.hadoop.hbase.client.TableDescriptor 类的一些方法查看或修改表的定义。最后在要记得调用 Admin.close() 来关闭操作。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-keyword">private</span> <span class="hljs-keyword">void</span> <span class="hljs-title">listTable</span>() <span class="hljs-keyword">throws</span> IOException {
+        Admin admin = connection.getAdmin();
+
+        <span class="hljs-keyword">try</span> {
+            List&lt;TableDescriptor&gt; tableDescriptors = admin.listTableDescriptors();
+            <span class="hljs-keyword">for</span> (TableDescriptor tableDescriptor : tableDescriptors) {
+                TableName tableName = tableDescriptor.getTableName();
+                System.out.println(<span class="hljs-string">"Table: "</span> + tableName);
+                System.out.println(<span class="hljs-string">"\texists: "</span> + admin.tableExists(tableName));
+                System.out.println(<span class="hljs-string">"\tenabled: "</span> + admin.isTableEnabled(tableName));
+            }
+        } <span class="hljs-keyword">finally</span> {
+            admin.close();
+        }
+    }</code></pre>
+
+
+
+<h3 id="创建表">创建表</h3>
+
+<p>创建表的操作主要是通过 TableDescriptor 和 ColumnFamilyDescriptor 类来实现的，而要创建 TableDescriptor 和 ColumnFamilyDescriptor 对象需要使用 TableDescriptorBuilder.newBuilder(…) 和 ColumnFamilyDescriptorBuilder.newBuilder(…) 方法来创建。下面代码演示了怎样创建一个 user 表，其中包含了 base 和 address 两个列族。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-keyword">private</span> <span class="hljs-keyword">void</span> <span class="hljs-title">createTable</span>() <span class="hljs-keyword">throws</span> IOException {
+        Admin admin = connection.getAdmin();
+
+        <span class="hljs-keyword">try</span> {
+            TableDescriptor tableDesc = TableDescriptorBuilder.newBuilder(TableName.valueOf(<span class="hljs-string">"user"</span>))
+                    .addColumnFamily(ColumnFamilyDescriptorBuilder.newBuilder(Bytes.toBytes(<span class="hljs-string">"base"</span>)).build())
+                    .addColumnFamily(ColumnFamilyDescriptorBuilder.newBuilder(Bytes.toBytes(<span class="hljs-string">"address"</span>)).build())
+                    .build();
+            admin.createTable(tableDesc);
+        } <span class="hljs-keyword">finally</span> {
+            admin.close();
+        }
+    }</code></pre>
+
+
+
+<h3 id="删除表">删除表</h3>
+
+<p>在 HBase 中对表的删除需要通过 Admin.disableTable() 和 Admin.deleteTable() 方法来实现，如下：</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-keyword">private</span> <span class="hljs-keyword">void</span> <span class="hljs-title">deleteTable</span>() <span class="hljs-keyword">throws</span> IOException {
+        Admin admin = connection.getAdmin();
+
+        <span class="hljs-keyword">try</span> {
+            admin.disableTable(TableName.valueOf(<span class="hljs-string">"user"</span>));
+            admin.deleteTable(TableName.valueOf(<span class="hljs-string">"user"</span>));
+        } <span class="hljs-keyword">finally</span> {
+            admin.close();
+        }
+    }</code></pre>
+
+
+
+<h3 id="完整代码">完整代码</h3>
+
+<p>最后看一下 HBase 中表管理操作的完整例子代码。</p>
+
+
+
+<pre class="prettyprint"><code class="language-shell hljs java"><span class="hljs-keyword">package</span> my.hbasestudy;
+
+<span class="hljs-keyword">import</span> org.apache.hadoop.conf.Configuration;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.HBaseConfiguration;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.TableName;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.client.*;
+<span class="hljs-keyword">import</span> org.apache.hadoop.hbase.util.Bytes;
+
+<span class="hljs-keyword">import</span> java.io.IOException;
+<span class="hljs-keyword">import</span> java.util.Iterator;
+<span class="hljs-keyword">import</span> java.util.List;
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">TestAPI</span> {</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String TABLE_NAME = <span class="hljs-string">"user"</span>;
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String COLUMN_FAMILY_BASE = <span class="hljs-string">"base"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String COLUMN_FAMILY_ADDRESS = <span class="hljs-string">"address"</span>;
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String COLUMN_USERNAME = <span class="hljs-string">"username"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String COLUMN_PASSWORD = <span class="hljs-string">"password"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String COLUMN_HOME = <span class="hljs-string">"home"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String COLUMN_OFFICE = <span class="hljs-string">"office"</span>;
+
+    <span class="hljs-keyword">private</span> Connection connection;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) <span class="hljs-keyword">throws</span> Exception {
+        Configuration config = HBaseConfiguration.create();
+        Connection connection = ConnectionFactory.createConnection(config);
+
+        TestAPI t = <span class="hljs-keyword">new</span> TestAPI(connection);
+
+        t.listTable();
+
+        t.createTable();
+        t.listTable();
+        t.deleteTable();
+
+        connection.close();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-title">TestAPI</span>(Connection connection) {
+        <span class="hljs-keyword">this</span>.connection = connection;
+    }
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">void</span> <span class="hljs-title">listTable</span>() <span class="hljs-keyword">throws</span> IOException {
+        Admin admin = connection.getAdmin();
+
+        <span class="hljs-keyword">try</span> {
+            List&lt;TableDescriptor&gt; tableDescriptors = admin.listTableDescriptors();
+            <span class="hljs-keyword">for</span> (TableDescriptor tableDescriptor : tableDescriptors) {
+                TableName tableName = tableDescriptor.getTableName();
+                System.out.println(<span class="hljs-string">"Table: "</span> + tableName);
+                System.out.println(<span class="hljs-string">"\texists: "</span> + admin.tableExists(tableName));
+                System.out.println(<span class="hljs-string">"\tenabled: "</span> + admin.isTableEnabled(tableName));
+            }
+        } <span class="hljs-keyword">finally</span> {
+            admin.close();
+        }
+    }
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">void</span> <span class="hljs-title">createTable</span>() <span class="hljs-keyword">throws</span> IOException {
+        Admin admin = connection.getAdmin();
+
+        <span class="hljs-keyword">try</span> {
+            TableDescriptor tableDesc = TableDescriptorBuilder.newBuilder(TableName.valueOf(TABLE_NAME))
+                    .addColumnFamily(ColumnFamilyDescriptorBuilder.newBuilder(Bytes.toBytes(COLUMN_FAMILY_BASE)).build())
+                    .addColumnFamily(ColumnFamilyDescriptorBuilder.newBuilder(Bytes.toBytes(COLUMN_FAMILY_ADDRESS)).build())
+                    .build();
+            admin.createTable(tableDesc);
+        } <span class="hljs-keyword">finally</span> {
+            admin.close();
+        }
+    }
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">void</span> <span class="hljs-title">deleteTable</span>() <span class="hljs-keyword">throws</span> IOException {
+        Admin admin = connection.getAdmin();
+
+        <span class="hljs-keyword">try</span> {
+            admin.disableTable(TableName.valueOf(TABLE_NAME));
+            admin.deleteTable(TableName.valueOf(TABLE_NAME));
+        } <span class="hljs-keyword">finally</span> {
+            admin.close();
+        }
+    }
+}
+</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

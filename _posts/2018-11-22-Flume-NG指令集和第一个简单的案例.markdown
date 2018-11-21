@@ -1,0 +1,82 @@
+---
+layout:     post
+title:      Flume-NG指令集和第一个简单的案例
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+# flume-ng指令<br>
+commands:<br>
+  help                      display this help text<br>
+  agent                     run a Flume agent<br>
+  avro-client               run an avro Flume client<br>
+  version                   show Flume version info<br><br>
+global options:<br>
+  --conf,-c &lt;conf&gt;          使用 &lt;conf&gt; 目录下的配置<br>
+  --classpath,-C &lt;cp&gt;       添加 classpath<br>
+  --dryrun,-d               并没有开始Flume,只是打印命令<br>
+  --plugins-path &lt;dirs&gt;     colon-separated list of plugins.d 目录. 查看 plugins.d 用户指南的更多细节. Default: $FLUME_HOME/plugins.d<br>
+  -Dproperty=value          设置一个Java系统属性的值<br>
+  -Xproperty=value          设置一个Java -x 选项<br><br>
+agent options:<br>
+  --name,-n &lt;name&gt;          这个Agent的名称(必需)<br>
+  --conf-file,-f &lt;file&gt;     指定一个配置文件 (如果有 -z 可以缺失)<br>
+  --zkConnString,-z &lt;str&gt;   指定使用的ZooKeeper的链接 (如果有 -f 可以缺失)<br>
+  --zkBasePath,-p &lt;path&gt;    指定agent config 在 ZooKeeper Base Path<br>
+  --no-reload-conf          如果改变不重新加载配置文件<br>
+  --help,-h                 display help text<br><br>
+avro-client options:<br>
+  --rpcProps,-P &lt;file&gt;   远程客户端与服务器链接参数的属性文件<br>
+  --host,-H &lt;host&gt;       hostname to which events will be sent<br>
+  --port,-p &lt;port&gt;       port of the avro source<br>
+  --dirname &lt;dir&gt;        directory to stream to avro source<br>
+  --filename,-F &lt;file&gt;   text file to stream to avro source (default: std input)<br>
+  --headerFile,-R &lt;file&gt; 每个新的一行数据都会有的头信息key/value<br>
+  --help,-h              display help text<br><br>
+其中--rpcProps 或 --host 和 --port 必须制定一个。<br><br><br>
+# 新建hdfs目录并设置权限<br>
+sudo -u hdfs hdfs dfs -mkdir /flume<br>
+sudo -u hdfs hdfs dfs -chown root:root /flume<br><br><br>
+# 配置flume.conf, vi ./flume.conf<br>
+agent1.sources = tail_source1<br>
+agent1.channels = memory_channel1<br>
+agent1.sinks = hdfs_sink1<br><br>
+agent1.sources.tail_source1.type = exec<br>
+agent1.sources.tail_source1.command = tail -F /var/log/secure<br>
+agent1.sources.tail_source1.channels = memory_channel1<br><br>
+agent1.channels.memory_channel1.type = memory<br>
+agent1.channels.memory_channel1.capacipy = 1000<br><br>
+agent1.sinks.hdfs_sink1.type = hdfs<br>
+agent1.sinks.hdfs_sink1.channel = memory_channel1<br><br>
+agent1.sinks.hdfs_sink1.hdfs.path = hdfs://hadoop201:8020/flume<br>
+agent1.sinks.hdfs_sink1.hdfs.filePrefix = events-<br>
+agent1.sinks.hdfs_sink1.hdfs.round = true<br>
+agent1.sinks.hdfs_sink1.hdfs.roundValue = 10<br>
+agent1.sinks.hdfs_sink1.hdfs.roundUnit = minute<br><br><br>
+# 上面配置详解<br>
+Properties Name<span> </span>Description<br>
+agent1<span> </span>用来收集日志信息的 agent 节点名称<br>
+agent1.source<span> </span>需要收集的信息源，名字：tail_source1<br>
+agent1.sinks<span> </span>日志需要被收集到此处，名字：hdfs_sink1。<br>
+agent1.channels<span> </span>日志的收集需要通过此管道，名字：memory_channel1。<br>
+tail_source1.type<span> </span>定义 source 的类型，此处 exec 代表数据源是 exec 命令<br>
+tail_source1.command<span> </span>定义具体命令，此处是对文件/var/log/secure 做 tail<br><p>tail_source1.channels<span> </span>数据传输的管道，此处的管道名称应该和 sink 相同。从而将 source、sink 通过 channels 进行连接。</p>
+<p>memory_channel1.type<span> </span>管道类型，代表事件存储的方式。source 产生事件，sink 移除事件，以此代表数据传输完成。目前 Flume 支持 6 种 channel。此处是 momery，代表事件是存在内存里</p>
+memory_channel1.capacity<span> </span>管道里可以存放的最多的事件数目。此处代表 memory_channel1 最多可存放 1000 个事件。<br>
+hdfs_sink1.type<span> </span>数据目的地的类型，此处是将数据存放在 hdfs 中。<br>
+hdfs_sink1.channel<span> </span>定义和 source 相关联的管道。<br>
+hdfs_sink1.hdfs.path<span> </span>数据存放在 hdfs 中的位置。<br>
+hdfs_sink1.hdfs.filePrefix<span> </span>收集到的数据存放的文件以此为前缀。<br>
+hdfs_sink1.hdfs.round,<span> </span>定义在 hdfs 中生成的文件的时间戳。此处代表将 hdfs 中的文件的时间戳，向下取整到上一个十分钟内。<br>
+hdfs_sink1.hdfs.roundValue,<span> </span>比如说，在 2012 年 6 月 12 号上午 11:54:34 生成的事件，在 hdfs 中生成的路径将是/flume/events/2012-06-12/1150/00。<br>
+hdfs_sink1.hdfs.roundUnit<br><br><br>
+# 启动Flume Agent<br>
+$ flume-ng agent \<br>
+--conf-file ./flume.conf \<br>
+--name agent1 \<br><p>-Dflume.root.logger=INFO,cnsole</p>
+<p><br></p>
+# 查看hdfs<br>
+$ hadoop fs -ls /flume
+            </div>
+                </div>

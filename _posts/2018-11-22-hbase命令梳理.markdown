@@ -1,0 +1,138 @@
+---
+layout:     post
+title:      hbase命令梳理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p><strong>以下命令基于hbase版本：</strong></p>
+
+<pre class="has">
+<code>hbase(main):041:0&gt; version
+1.2.0-cdh5.7.1, rUnknown, Wed Jun  1 16:30:06 PDT 2016</code></pre>
+
+<ul><li> </li>
+</ul><h2 id="general"><a name="t0"></a>general</h2>
+
+<p><strong>status: 查看hbase状态</strong></p>
+
+<pre class="has">
+<code>hbase(main):002:0&gt; status
+1 active master, 1 backup masters, 4 servers, 0 dead, 0.5000 average load</code></pre>
+
+<p><strong>table_help:table操作简单入门</strong></p>
+
+<pre class="has">
+<code>t = create 't','cf'  
+t = get_table 't'
+t.put 'r1','cf:q','v'
+t.scan
+t.disable
+t.enable
+t.flush
+t.disable
+t.drop</code></pre>
+
+<p><strong>whoami: 查看当前用户以及分组</strong></p>
+
+<pre class="has">
+<code>hbase(main):252:0* whoami
+chengguoqiang (auth:SIMPLE)
+    groups: chengguoqiang, wheel</code></pre>
+
+<h2 id="ddl操作"><a name="t1"></a>ddl操作</h2>
+
+<ul><li>list 查看表列表</li>
+	<li>create 创建表</li>
+	<li>exists 查看表是否存在</li>
+	<li>describe / desc 查看表结构</li>
+	<li>enable / enable_all / is_enabled table生产可用，判断是否生产可用</li>
+	<li>disable / disable_all / is_disabled 禁用table,判断是否禁用</li>
+	<li>drop / drop_all 删除table</li>
+	<li>get_table 获取一个实例</li>
+	<li>locate_region 返回区域 ，hbase新增命令</li>
+	<li>show_filters 暂时没发现用途</li>
+	<li>alter 修改表结构,hbase.online.schema.update.enable参数决定是否可以生产修改</li>
+	<li>alter_async 异步修改表结构</li>
+</ul><pre class="has">
+<code>hbase(main):088:0* exists 't'
+hbase(main):089:0&gt; desc 't'
+hbase(main):090:0&gt; alter 't',{NAME=&gt;'cf', VERSIONS=&gt;'5'}, {NAME=&gt;'cf1', VERSIONS=&gt;'3', COMPRESSION=&gt;'GZ',TTL=&gt;'86400',IN_MEMORY=&gt;'true'}
+hbase(main):092:0&gt; alter_status 't'</code></pre>
+
+<p>创建table时，hbase默认的分配一个region给table，所有的读写请求都会访问regionServer的同一个region中，这个时候就达不到负载均衡的效果了，集群中的其他regionServer就可能会处于比较空闲的状态。解决这个问题可以用pre-splitting,在创建table的时候就配置好，生成多个region。Hbase自带了两种pre-split的算法，分别是 <strong>HexStringSplit</strong> 和 UniformSplit <strong>。如果我们的row key是十六进制的字符串作为前缀的，就比较适合用HexStringSplit，作为pre-split的算法</strong>。例如，我们使用HexHash(prefix)作为row key的前缀，其中Hexhash为最终得到十六进制字符串的hash算法。我们也可以用我们自己的split算法。</p>
+
+<pre class="has">
+<code>create 'profile:test','data',{NUMREGIONS =&gt; 4, SPLITALGO =&gt; 'HexStringSplit', REGION_REPLICATION =&gt; 1}</code></pre>
+
+<ul><li> </li>
+</ul><h2 id="namespace"><a name="t2"></a>namespace</h2>
+
+<ul><li>list_namespace 命名空间列表</li>
+	<li>create_namespace 创建命名空间</li>
+	<li>describe_namespace 命名空间描述</li>
+	<li>list_namespace_tables 查看指定命名空间下的table</li>
+	<li>alter_namespace 修改或者增加命名空间属性</li>
+	<li>drop_namespace 删除命名空间，必须是空的命名空间</li>
+</ul><pre class="has">
+<code>hbase(main):028:0&gt; create_namespace 'profile'
+hbase(main):029:0&gt; list_namespace 'profile'
+hbase(main):036:0* alter_namespace 'profile',{METHOD=&gt;'set', 'TEST_PROPERTY'=&gt;'TEST_VALUE'}
+hbase(main):030:0&gt; describe_namespace 'profile'</code></pre>
+
+<h2 id="dml"><a name="t3"></a>dml</h2>
+
+<ul><li>put 插入一条记录</li>
+	<li>append 如果记录不存在则put，存在则追加value</li>
+	<li>get 获取一条记录</li>
+	<li>scan 扫描记录</li>
+	<li>count 获取条数</li>
+	<li>delete 删除rowkey，必须指定column</li>
+	<li>deleteall 删除整个rowkey</li>
+	<li>incr 计数器，插入一条记录，如果存在则加1</li>
+	<li>get_counter 返回计数器值</li>
+	<li>truncate 清空table</li>
+	<li>truncate_preserve 清空table,但保存分区信息</li>
+	<li>get_splits 返回分区列表</li>
+</ul><pre class="has">
+<code>hbase(main):005:0&gt; put 't','r1','cf1:q1','v1',{ATTRIBUTES=&gt;{'att1'=&gt;'val1'}}
+hbase(main):006:0&gt; scan 't'
+hbase(main):007:0&gt; get 't','r1',{COLUMN =&gt; 'cf1'}
+hbase(main):042:0* put 't','r2','cf1:q2','v2',{ATTRIBUTES=&gt;{'att1'=&gt;'val1'}}
+
+hbase(main):043:0&gt; put 't','r3','cf1:q2','v3',{ATTRIBUTES=&gt;{'att1'=&gt;'val1'}}
+
+hbase(main):044:0&gt; put 't','r5','cf1:q5','v5',{ATTRIBUTES=&gt;{'att1'=&gt;'val1'}}`
+hbase(main):045:0&gt; put 't','r11','cf1:q11','v11',{ATTRIBUTES=&gt;{'att1'=&gt;'val1'}}
+hbase(main):046:0&gt; put 't','r8','cf1:q8','v8',{ATTRIBUTES=&gt;{'att1'=&gt;'val1'}}
+scan 't',{COLUMN=&gt;'cf1',LIMIT=&gt;5, STARTROW=&gt;'r2', ENDROW=&gt;'r5'}
+hbase(main):059:0* delete 't','r5','cf1:q5'
+hbase(main):076:0* count 't'
+hbase(main):051:0&gt; incr 't','r2','cf1:q5'
+hbase(main):053:0&gt; get_counter 't','r2','cf1:q5'
+
+hbase(main):105:0&gt; create 'profile:t1','cf1',{SPLITS=&gt;['a','b','c']}
+hbase(main):105:0&gt; get_split 'profile:t1'</code></pre>
+
+<h2 id="security"><a name="t4"></a>security</h2>
+
+<ul><li>grant 授权，可以细化到column</li>
+	<li>revoke 取消授权</li>
+	<li>
+	<p>user_permission 查看表开放权限</p>
+
+	<p>READ(‘R’), WRITE(‘W’), EXEC(‘X’), CREATE(‘C’), ADMIN(‘A’)</p>
+	</li>
+</ul><pre class="has">
+<code>// Syntax : grant &lt;user&gt; &lt;permissions&gt; [&lt;@namespace&gt; [&lt;table&gt; [&lt;column family&gt; [&lt;column qualifier&gt;]]]
+grant 'chengguoqiang','RW', 'profile:yingyun'
+
+// Syntax : user_permission &lt;table&gt;
+user_permission 'profile:yingyun'
+
+
+// Syntax : revoke &lt;user&gt; [&lt;table&gt; [&lt;column family&gt; [&lt;column qualifier&gt;]]
+revoke 'chengguoqiang','profile:yingyun'</code></pre>
+
+<p>转载自：<a href="https://blog.csdn.net/baidu_35482842/article/details/51803639" rel="nofollow">https://blog.csdn.net/baidu_35482842/article/details/51803639</a></p>            </div>
+                </div>

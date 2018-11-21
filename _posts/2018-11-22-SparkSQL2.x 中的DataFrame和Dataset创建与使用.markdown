@@ -1,0 +1,150 @@
+---
+layout:     post
+title:      SparkSQL2.x 中的DataFrame和Dataset创建与使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h2> SparkSQL 的概念 </h2>Spark SQL 是一个用来处理结构化数据的 spark 组件，也可被视为一个分布式的 SQL 查询引擎。与基础<br>的 Spark RDD API 不同, Spark SQL 提供了查询结构化数据及计算结果等信息的接口。在内部, Spark <br>SQL 使用这个额外的信息去执行额外的优化.有几种方式可以跟 Spark SQL 进行交互, 包括 SQL 和 <br><p>Dataset API(DSL)。 </p><p><br></p><h2> 什么是 DataFrames（1.3）</h2><h2><span style="font-size:16px;font-weight:normal;">dataframe 是从 1.3 版本引入的 <br>与 RDD 相似，DataFrame 也是一个不可变分布式的数据集合。但与 RDD 不同的是，数据都被组织到有名<br>字的列中，就像关系型数据库中的表一样,除了数据之外，还记录着数据的结构信息，即 schema。设计<br>DataFrame的目的就是要让对大型数据集的处理变得更简单，它让开发者可以为分布式的数据集指定一个<br>模式，进行更高层次的抽象。还提供了特定领域内专用的API来处理分布式数据。 <br>从API易用性的角度上 看，DataFrame API提供的是一套高层的关系操作，比函数式的RDD API要更加<br>友好，门槛更低。由于与R和Pandas的DataFrame类似，Spark DataFrame很好地继承了传统单机数<br>据分析的开发体验。 <br>dataframe = rdd + schema <br>dataframe就是带着schema信息的rdd  </span></h2><div><span style="font-size:16px;font-weight:normal;"><img src="https://img-blog.csdn.net/20180514191201802?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4NzcwMjE4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></span></div><div><span style="font-size:16px;font-weight:normal;"><br></span></div><p></p><p></p><h2> 创建 DataFrames </h2>1.在本地创建一个文件，有三列，分别是 id、name、age，用空格分隔，然后上传到 hdfs 上 hdfs dfs -put person.txt / <br> <br>2.在 spark shell 执行下面命令，读取数据，将每一行的数据使用列分隔符分割 <br>val lineRDD = sc.textFile("hdfs://hdp-01:9000/person.txt").map(_.split(" ")) <br> <br>3.定义 case class（相当于表的 schema） case class Person(id:Int, name:String, age:Int) <br> <br>4.将 RDD 和 case class 关联 val personRDD = lineRDD.map(x =&gt; Person(x(0).toInt, x(1), x(2).toInt)) <br> <br>5.将 RDD 转换成 DataFrame val personDF = personRDD.toDF <br> <br><p>6.对 DataFrame 进行处理 personDF.show </p><p><br></p><h2>使用简单案例wordcount 为例吧</h2><p>1. 使用的spark 1.x 的写法 使用的RDD转换 DataFrame</p><h3>DataFrame</h3><h4>1.使用的SQL 语法</h4><pre><code class="language-java">package org.yonggan
+
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{DataFrame, SQLContext}
+import org.apache.spark.{SparkConf, SparkContext}
+
+/**
+  * spark 1.x  版本中 DataFrame创建
+  */
+object WordCountDemo {
+
+  def main(args: Array[String]): Unit = {
+
+    val conf = new SparkConf().setAppName("app").setMaster("local")
+
+    val sc = new SparkContext(conf)
+    val sqlc = new SQLContext(sc)
+
+    val wcRdd = sc.textFile("wc.txt")
+
+    //单词切分
+    val wordAndOne: RDD[Word] = wcRdd.flatMap(_.split(" ")).map(Word(_))
+
+    import sqlc.implicits._
+    // 创建 word DataFrame
+    val wordDf: DataFrame = wordAndOne.toDF()
+
+    //注册 中间 表
+    wordDf.registerTempTable("t_word")
+//    , count(1)
+    val resFrame = sqlc.sql("select word,count(1) from t_word group by word")
+
+    resFrame.show()
+
+    sc.stop()
+  }
+
+}
+
+case class Word(word:String)</code></pre><p></p><h4>2. 使用的DSL语法</h4><pre><code class="language-java">package org.yonggan
+
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
+import org.apache.spark.sql._
+
+object WordCountDemo02 {
+
+  def main(args: Array[String]): Unit = {
+
+    val conf = new SparkConf().setAppName("app").setMaster("local")
+
+    val sc = new SparkContext(conf)
+    val sqlc = new SQLContext(sc)
+
+    val wcRdd = sc.textFile("wc.txt")
+
+    //单词切分
+    val rowRdd: RDD[Row] = wcRdd.flatMap(_.split(" ")).map(Row(_))
+
+    // schema
+    val schema = StructType(List(StructField("name", StringType, true)))
+
+    //创建DataFrame
+    val wdf: DataFrame = sqlc.createDataFrame(rowRdd, schema)
+
+    // 创建查询条件
+    val resDf = wdf.select("name").groupBy("name").count()
+    resDf.show()
+
+//    val wcDf: RelationalGroupedDataset = wdf.select("name", "count(1)").groupBy("name")
+
+  }
+
+}</code></pre><p><br></p><h3>使用的Dataset (spark2.x引入)</h3><p>创建初始化信息  使用的新的api 接口SparkSession</p><pre><code class="language-java">   val session = SparkSession.builder().getOrCreate()</code></pre><h4>1. 使用的SQL</h4><pre><code class="language-java">package org.yonggan
+
+import org.apache.spark.sql.{Dataset, SparkSession}
+
+object DatasetWordCount01 {
+
+  def main(args: Array[String]): Unit = {
+
+    /**
+      * spark 2.x 版本过后使用 新版本api
+      */
+    val session = SparkSession.builder()
+      .appName("app")
+      .master("local")
+      .getOrCreate()
+
+    val sqlContext = session.sqlContext
+    val wcDs = sqlContext.read.textFile("wc.txt")
+
+    // 导入隐式转换
+    import session.implicits._
+    val wordData: Dataset[String] = wcDs.flatMap(_.split(" "))
+    wordData.createTempView("t_word")
+
+    //    wordData.printSchema()
+    // 查询结果
+    val resDf =  session.sql("select value, count(1) from t_word group by value")
+    resDf.show()
+
+  }
+
+}
+</code></pre><p><br></p><p>2. 使用的DSL</p><pre><code class="language-java">package org.yonggan
+
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
+
+object DatasetWordCount02 {
+
+  def main(args: Array[String]): Unit = {
+
+    /**
+      * spark 2.x 版本过后使用 新版本api
+      */
+    val session = SparkSession.builder()
+      .appName("app")
+      .master("local")
+      .getOrCreate()
+
+    val sqlContext = session.sqlContext
+    val wcDs = sqlContext.read.textFile("wc.txt")
+
+    // 导入隐式转换
+    import session.implicits._
+    val wordData: Dataset[String] = wcDs.flatMap(_.split(" "))
+    wordData.createTempView("t_word")
+
+    // 查询结果
+
+    import org.apache.spark.sql.functions._
+    val wDs = wordData.groupBy("value").agg(count("value") as "cts")
+
+    //排序
+    val resDataset: Dataset[Row] = wDs.orderBy($"cts" desc)
+    resDataset.show()
+
+  }
+
+}</code></pre><p></p>            </div>
+                </div>

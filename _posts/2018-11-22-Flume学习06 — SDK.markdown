@@ -1,0 +1,294 @@
+---
+layout:     post
+title:      Flume学习06 — SDK
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>除了Flume内置的客户端，我们也可以自定义客户端向Flume发送数据。目前Flume支持自定义客户端通过Avro、Thrift、Log4j、Syslog和HTTP POST（JSON格式）发送的数据。客户端发送的数据必须是Flume能够识别的Event格式。</p>
+
+<p>Flume SDK是一个提供Flume连接和向Flume发送数据（通过RPC）的类库。Flume SDK封装了底层的细节，只提供了统一接口，包括Flume连接、Event封装和Event发送等。Flume SDK可以通过Maven方式引用到项目中。</p>
+
+
+
+<pre class="prettyprint"><code class="language-xml hljs "><span class="hljs-tag">&lt;<span class="hljs-title">dependency</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">groupId</span>&gt;</span>org.apache.flume<span class="hljs-tag">&lt;/<span class="hljs-title">groupId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">artifactId</span>&gt;</span>flume-ng-sdk<span class="hljs-tag">&lt;/<span class="hljs-title">artifactId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">version</span>&gt;</span>1.6.0<span class="hljs-tag">&lt;/<span class="hljs-title">version</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">dependency</span>&gt;</span></code></pre>
+
+<p><br></p>
+
+
+
+<h2 id="event">Event</h2>
+
+<p>Event有两个实现类SimpleEvent和JSONEvent。JSONEvent发送JSON格式数据，主要由HTTP Source接收。SimpleEvent和JSONEvent在使用上并没有区别。可以通过EventBuilder的静态方法创建Event，EventBuilder默认创建SimpleEvent。 <br>
+<br></p>
+
+<p>Event示例代码</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">String logBody = <span class="hljs-string">"这里是日志内容"</span>;
+
+<span class="hljs-comment">// 日志头文件，头文件是可选的</span>
+Map&lt;String, String&gt; logHeaders = <span class="hljs-keyword">new</span> HashMap&lt;String, String&gt;();                     
+<span class="hljs-comment">// 给日志添加时间戳</span>
+logHeaders.put(<span class="hljs-string">"timestamp"</span>, System.currentTimeMillis() + <span class="hljs-string">""</span>);                       
+
+<span class="hljs-comment">// SimpleEvent</span>
+Event simpleEvent = <span class="hljs-keyword">new</span> SimpleEvent();
+simpleEvent.setBody(logBody.getBytes());
+simpleEvent.setHeaders(logHeaders); <span class="hljs-comment">// 头文件是可选的</span>
+
+<span class="hljs-comment">// JSONEvent</span>
+Event jsonEvent = <span class="hljs-keyword">new</span> JSONEvent();
+jsonEvent.setBody(logBody.getBytes());
+jsonEvent.setHeaders(logHeaders); <span class="hljs-comment">// 头文件是可选的</span>
+
+<span class="hljs-comment">// EventBuilder</span>
+EventBuilder.withBody(logBody.getBytes());
+EventBuilder.withBody(logBody.getBytes(), logHeaders);</code></pre>
+
+<p><br></p>
+
+
+
+<h2 id="rpcclient">RpcClient</h2>
+
+<p>Flume连接和Event发送由RpcClient接口提供，RpcClient有两个基本实现类NettyAvroRpcClient和ThriftRpcClient，分别使用Avro协议和Thrift协议。RpcClient可以通过静态方法RpcClientFactory.getInstance()，getInstance有多个重载方法，如果不指定协议类型，默认使用Avro协议。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-javadoc">/**
+ * 返回NettyAvroRpcClient实例
+ *<span class="hljs-javadoctag"> @param</span> IP地址
+ *<span class="hljs-javadoctag"> @param</span> 端口
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> RpcClient <span class="hljs-title">getDefaultInstance</span>(String hostname, Integer port) <span class="hljs-keyword">throws</span> FlumeException;
+
+<span class="hljs-javadoc">/**
+ * 返回ThriftRpcClient实例
+ *<span class="hljs-javadoctag"> @param</span> IP地址
+ *<span class="hljs-javadoctag"> @param</span> 端口
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> RpcClient <span class="hljs-title">getThriftInstance</span>(String hostname, Integer port) <span class="hljs-keyword">throws</span> FlumeException;
+
+<span class="hljs-javadoc">/**
+ * 返回RpcClient实例，实例类型在配置项client.type中指定
+ *<span class="hljs-javadoctag"> @param</span> properties 配置文件
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> RpcClient <span class="hljs-title">getInstance</span>(Properties properties) <span class="hljs-keyword">throws</span> FlumeException;</code></pre>
+
+<p><br></p>
+
+<p>RpcClient配置可选参数</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vala"><span class="hljs-preprocessor"># 可选值为default和thrift，其中default表示使用avro协议</span>
+client.type = <span class="hljs-keyword">default</span>
+
+<span class="hljs-preprocessor"># 主机名称，只能配置一个名称，如果有多个名称，第一个名称有效。</span>
+hosts = h1
+
+<span class="hljs-preprocessor"># h1主机的ip和端口</span>
+hosts.h1 = host1.example.org:<span class="hljs-number">41414</span>
+
+<span class="hljs-preprocessor"># 批量发送的数量，该值必须大于0，默认是100。</span>
+batch-size = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor"># 连接超时，该值必须大于1000，默认是20000，单位毫秒。</span>
+connect-timeout = <span class="hljs-number">20000</span>
+
+<span class="hljs-preprocessor"># 请求超时，该值必须大于1000，默认是20000，单位毫秒。</span>
+request-timeout = <span class="hljs-number">20000</span></code></pre>
+
+<p><br></p>
+
+<p>RpcClient示例代码</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">import</span> java.nio.charset.Charset;
+<span class="hljs-keyword">import</span> java.util.Properties;
+
+<span class="hljs-keyword">import</span> org.apache.flume.Event;
+<span class="hljs-keyword">import</span> org.apache.flume.EventDeliveryException;
+<span class="hljs-keyword">import</span> org.apache.flume.api.RpcClient;
+<span class="hljs-keyword">import</span> org.apache.flume.api.RpcClientFactory;
+<span class="hljs-keyword">import</span> org.apache.flume.event.EventBuilder;
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">FlumeClient</span> {</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> RpcClient client;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> Charset charset = Charset.forName(<span class="hljs-string">"UTF-8"</span>);
+
+    <span class="hljs-comment">// type取值default，创建NettyAvroRpcClient实例。取值thrift，创建ThriftRpcClient实例。</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> String type = <span class="hljs-string">"default"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> String hostname = <span class="hljs-string">"127.0.0.1"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> String port = <span class="hljs-string">"41414"</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) {
+        init();
+
+        <span class="hljs-keyword">for</span>(<span class="hljs-keyword">int</span> i = <span class="hljs-number">0</span>; i &lt; <span class="hljs-number">10</span>; i++){
+            send(<span class="hljs-string">"发送第"</span> + i + <span class="hljs-string">"条数据"</span>);
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">init</span>(){
+        Properties props = <span class="hljs-keyword">new</span> Properties();
+        props.put(<span class="hljs-string">"client.type"</span>, type);
+        props.put(<span class="hljs-string">"hosts"</span>, <span class="hljs-string">"h1"</span>);
+        props.put(<span class="hljs-string">"host.h1"</span>, hostname + <span class="hljs-string">":"</span> + port);
+
+        client = RpcClientFactory.getInstance(props);
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">send</span>(String data){
+        Event event = EventBuilder.withBody(data, charset);
+
+        <span class="hljs-keyword">try</span> {
+            client.append(event);
+        } <span class="hljs-keyword">catch</span> (EventDeliveryException e) {
+            e.printStackTrace();
+
+            <span class="hljs-comment">// 如果连接失败，重置client</span>
+            client.close();
+            init();
+        }
+    }
+}</code></pre>
+
+<p><br></p>
+
+
+
+<h2 id="failoverrpcclient">FailoverRpcClient</h2>
+
+<p>FailoverRpcClient是RpcClient的实现类，该类包装了NettyAvroRpcClient，实现故障转移功能。故障转移客户端类只能使用Avro协议。</p>
+
+<p>FailoverRpcClient可选配置参数</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vala"><span class="hljs-preprocessor"># client.type必须为default_failover</span>
+client.type = default_failover
+
+<span class="hljs-preprocessor"># 那么hosts至少要配置两台主机。</span>
+hosts = h1 h2 h3
+
+<span class="hljs-preprocessor"># 主机配置</span>
+hosts.h1 = host1.example.org:<span class="hljs-number">41414</span>
+hosts.h2 = host2.example.org:<span class="hljs-number">41414</span>
+hosts.h3 = host3.example.org:<span class="hljs-number">41414</span>
+
+<span class="hljs-preprocessor"># 如果主机连接失败，是否把主机临时放入黑名单中，过一段时间再启用。</span>
+<span class="hljs-preprocessor"># 默认为false，不放入黑名单。</span>
+backoff = <span class="hljs-literal">false</span>
+
+<span class="hljs-preprocessor"># 主机连接失败，下次连接该主机的最大时间间隔，单位毫秒。</span>
+<span class="hljs-preprocessor"># 默认值为0，相当于30000毫秒。</span>
+maxBackoff = <span class="hljs-number">0</span>
+
+<span class="hljs-preprocessor"># 批量发送的数量，该值必须大于0，默认是100。</span>
+batch-size = <span class="hljs-number">500</span>
+
+<span class="hljs-preprocessor"># 连接超时，该值必须大于1000，默认是20000，单位毫秒。</span>
+connect-timeout = <span class="hljs-number">20000</span>
+
+<span class="hljs-preprocessor"># 请求超时，该值必须大于1000，默认是20000，单位毫秒。</span>
+request-timeout = <span class="hljs-number">20000</span></code></pre>
+
+<p><br></p>
+
+<p>FailoverRpcClient示例代码</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">Properties props = <span class="hljs-keyword">new</span> Properties();
+props.put(<span class="hljs-string">"client.type"</span>, <span class="hljs-string">"default_failover"</span>);
+
+<span class="hljs-comment">// 主机列表</span>
+props.put(<span class="hljs-string">"hosts"</span>, <span class="hljs-string">"h1 h2 h3"</span>);
+
+<span class="hljs-comment">// 主机地址和端口</span>
+String host1 = <span class="hljs-string">"host1.example.org:41414"</span>;
+String host2 = <span class="hljs-string">"host2.example.org:41414"</span>;
+String host3 = <span class="hljs-string">"host3.example.org:41414"</span>;
+props.put(<span class="hljs-string">"hosts.h1"</span>, host1);
+props.put(<span class="hljs-string">"hosts.h2"</span>, host2);
+props.put(<span class="hljs-string">"hosts.h3"</span>, host3);
+
+RpcClient client = RpcClientFactory.getInstance(props);</code></pre>
+
+<p><br></p>
+
+
+
+<h2 id="loadbalancingrpcclient">LoadBalancingRpcClient</h2>
+
+<p>LoadBalancingRpcClient和FailoverRpcClient一样，都包装了NettyAvroRpcClient。负载均衡客户端根据策略向Flume集群发送数据，负载均衡策略包括round_robin和random。</p>
+
+<p>LoadBalancingRpcClient可选配置参数</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vala"><span class="hljs-preprocessor"># client.type必须为default_loadbalance</span>
+client.type = default_loadbalance
+
+<span class="hljs-preprocessor"># 主机配置</span>
+hosts.h1 = host1.example.org:<span class="hljs-number">41414</span>
+hosts.h2 = host2.example.org:<span class="hljs-number">41414</span>
+hosts.h3 = host3.example.org:<span class="hljs-number">41414</span>
+
+<span class="hljs-preprocessor"># 如果主机连接失败，是否把主机临时放入黑名单中，过一段时间再启用。</span>
+<span class="hljs-preprocessor"># 默认为false，不放入黑名单。</span>
+backoff = <span class="hljs-literal">false</span>
+
+<span class="hljs-preprocessor"># 负载均衡轮询策略</span>
+<span class="hljs-preprocessor"># 可选策略有round_robin、random或者自定义策略（实现LoadBalancingRpcClient$HostSelector接口）。</span>
+<span class="hljs-preprocessor"># 默认是round_robin</span>
+host-selector = round_robin
+
+<span class="hljs-preprocessor"># 主机连接失败，下次连接该主机的最大时间间隔，单位毫秒。</span>
+<span class="hljs-preprocessor"># 默认值为0，相当于30000毫秒。</span>
+maxBackoff = <span class="hljs-number">0</span>
+
+<span class="hljs-preprocessor"># 批量发送的数量，该值必须大于0，默认是100。</span>
+batch-size = <span class="hljs-number">500</span>
+
+<span class="hljs-preprocessor"># 连接超时，该值必须大于1000，默认是20000，单位毫秒。</span>
+connect-timeout = <span class="hljs-number">20000</span>
+
+<span class="hljs-preprocessor"># 请求超时，该值必须大于1000，默认是20000，单位毫秒。</span>
+request-timeout = <span class="hljs-number">20000</span></code></pre>
+
+<p><br></p>
+
+<p>LoadBalancingRpcClient示例代码</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">Properties props = <span class="hljs-keyword">new</span> Properties();
+props.put(<span class="hljs-string">"client.type"</span>, <span class="hljs-string">"default_loadbalance"</span>);
+
+props.put(<span class="hljs-string">"hosts"</span>, <span class="hljs-string">"h1 h2 h3"</span>);
+
+String host1 = <span class="hljs-string">"host1.example.org:41414"</span>;
+String host2 = <span class="hljs-string">"host2.example.org:41414"</span>;
+String host3 = <span class="hljs-string">"host3.example.org:41414"</span>;
+props.put(<span class="hljs-string">"hosts.h1"</span>, host1);
+props.put(<span class="hljs-string">"hosts.h2"</span>, host2);
+props.put(<span class="hljs-string">"hosts.h3"</span>, host3);
+
+props.put(<span class="hljs-string">"host-selector"</span>, <span class="hljs-string">"random"</span>);
+<span class="hljs-comment">//props.put("host-selector", "round_robin");</span>
+props.put(<span class="hljs-string">"backoff"</span>, <span class="hljs-string">"true"</span>); 
+props.put(<span class="hljs-string">"maxBackoff"</span>, <span class="hljs-string">"10000"</span>);
+RpcClient client = RpcClientFactory.getInstance(props);
+</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

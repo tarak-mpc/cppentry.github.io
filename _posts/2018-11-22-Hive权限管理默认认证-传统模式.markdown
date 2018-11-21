@@ -1,0 +1,105 @@
+---
+layout:     post
+title:      Hive权限管理默认认证-传统模式
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="hive权限管理默认认证-传统模式">Hive权限管理默认认证-传统模式</h2>
+
+<p>本文档通过基本认证模式来描述Hive安全，在hive客户端层面控制进入hive元数据。 <br>
+<strong>免责声明:</strong> <br>
+hive authorization 不是完全安全，这个基本的认证模式打算主要是为了良好的用户去预防偶然的误操作，但是不能保证恶意的用户做恶意的事情，详情可以查看 Hive authorization main page中涉及安全的选项。</p>
+
+<p><strong>前提要求：</strong> <br>
+为了使用hive安全认证，必须将如下两个参数加载至hive-site.xml配置中。 <br>
+ <br>
+  hive.security.authorization.enabled <br>
+  true <br>
+  enable or disable the hive client authorization <br>
+ <br>
+ <br>
+  hive.security.authorization.createtable.owner.grants <br>
+  ALL <br>
+  the privileges automatically granted to the owner whenever a table gets created.  <br>
+   An example like "select,drop" will grant select and drop privilege to the owner of the table <br>
+ <br>
+提醒：默认的hive.security.authorization.createtable.owner.grants参数设置为null，这个会导致创建者无法使用自己创建的表。</p>
+
+<p><strong>Users, Groups, and Roles</strong> <br>
+hive认证系统的核心就是用户user，用户组group，用户角色role。用户角色Roles的存在更方便管理员administrator对一个集合的用户赋予权限更加容易。一个角色role可能被设计为users，groups，或者其他的roles。举个例子，考虑到一个系统有如下用户和用户组： <br>
+  ● : <br>
+  ● user_all_dbs:group_db1,group_db2 <br>
+  ● user_db1:group_db1 <br>
+  ● user_db2:group_db2 <br>
+如果我们想要严格的为每个用户指定特定的数据库集合，我们可以使用role去建立认证机制。 <br>
+step1：管理员可以创建2个角色，分别为role_db1和role_db2. 其中role_db1只提供第一个数据库的权限，而role_db2只提供第二个数据库的权限， <br>
+step2：管理员再将role_db1赋权给group_db1,或者明确指明user在这个group组中。role_db2同理操作。为了允许需要查看所有数据库权限的用户创建第三个角色third_role,其名称可以叫做role_all_dbs,它被role_db1以及role_db2赋权。当user_all_dbs用户被赋予了role_all_dbs的角色时，那么这个user_all_dbs用户明确由了role_db1和role_db2的权限。 <br>
+Hive的role角色不同于users和groups，它使用前必须手动创建。Users和Groups被这个hive.security.authenticator.manager管理着。当一个用户连接一个元数据服务器和发布一个查询语句时，元数据将判断这个连接的用户的名称以及用户组和ushive.security.authorization.ername参数联合在一起。而 这个信息被用作判断这个用户是否可以进入被请求的元数据。Hive操作的要求的权限和用户的权限相比较。 <br>
+通过以下规则： <br>
+  ● User privileges (Has the privilege been granted to the user) <br>
+  ● Group privileges (Does the user belong to any groups that the privilege has been granted to) <br>
+  ● Role privileges (Does the user or any of the groups that the user belongs to have a role that grants the privilege) <br>
+默认地，这个元数据使用hadoop默认的认证来阻止用户和用户组的映射，这种阻止认证通过使用元数据运行的机器上的unix 用户和组。为了讲解更清楚，引入一个场景，用户foo是组bar的成员在一台Hive CLI正在运行的机器上，与此同时，有一个相同名字的用户foo连接元数据运行在分开的服务器上，但是在这个元数据系统上，foo是属于baz的组成员。当操作被执行，这个元数据将阻止foo被属于组baz。 <br>
+在执行这一步之前，一个属于元数据系统服务器的用户所有的组可能不同于linux服务器同名用户所在的组这是可能发生的，这个取决于HDFS。这种情况如果Hive和HDFS都配置了非默认的用户和组的映射关系，或者Metastore和Namenode同时都使用默认，但是运行在不同的机器上，用户和组的映射在每个机器上都不相同。 <br>
+认识到Hive元数据系统仅仅能够控制认证元数据这点是非常重要的，底层数据是受到HDFS控制的，因此如果两个系统之间的权限和特权在不同步，那么用户可能能访问元数据，但是无法访问物理数据。如果用户和组的映射在Metastore(用于存储hive的元数据)和Namenode(管理文件系统的namespace)不同步，正如上面的场景，一个用户可能根据Metastore下有访问表所需要的权限，但是可能没有权限通过Namenode访问底层文件。这也有可能是由于管理员的干预而发生，如果文件的权限被手动更改，但是元数据系统的赋权还没有被更新。</p>
+
+<p><strong>Privileges</strong> <br>
+The following privileges are supported in Hive: <br>
+  ● ALL - Gives users all privileges <br>
+  ● ALTER - Allows users to modify the metadata of an object <br>
+  ● UPDATE - Allows users to modify the physical data of an object <br>
+  ● CREATE - Allows users to create objects. For a database, this means users can create tables, and for a table, this means users can create partitions <br>
+  ● DROP - Allows users to drop objects <br>
+  ● INDEX - Allows users to create indexes on an object (Note: this is not currently implemented) <br>
+  ● LOCK - Allows users to lock or unlock tables when concurrency is enabled <br>
+  ● SELECT - Allows users to access data for objects <br>
+  ● SHOW_DATABASE - Allows users to view available databases</p>
+
+<p><strong>Grant/Revoke Privileges</strong> <br>
+GRANT <br>
+    priv_type [(column_list)] <br>
+      [, priv_type [(column_list)]] … <br>
+    [ON object_specification] <br>
+    TO principal_specification [, principal_specification] … <br>
+    [WITH GRANT OPTION]</p>
+
+<p>REVOKE [GRANT OPTION FOR] <br>
+    priv_type [(column_list)] <br>
+      [, priv_type [(column_list)]] … <br>
+    [ON object_specification] <br>
+    FROM principal_specification [, principal_specification] …</p>
+
+<p>REVOKE ALL PRIVILEGES, GRANT OPTION <br>
+    FROM user [, user] …</p>
+
+<p>priv_type: <br>
+    ALL | ALTER | UPDATE | CREATE | DROP <br>
+  | INDEX | LOCK | SELECT | SHOW_DATABASE </p>
+
+<p>object_specification: <br>
+    TABLE tbl_name <br>
+  | DATABASE db_name</p>
+
+<p>principal_specification: <br>
+    USER user <br>
+  | GROUP group <br>
+  | ROLE role <br>
+Version <br>
+REVOKE priv_type will add the optional GRANT OPTION FOR clause in Hive 0.14.0 (HIVE-7404).</p>
+
+<p>Viewing Granted Privileges <br>
+SHOW GRANT principal_specification <br>
+[ON object_specification [(column_list)]]</p>
+
+<p>principal_specification: <br>
+    USER user <br>
+  | GROUP group <br>
+  | ROLE role</p>
+
+<p>object_specification: <br>
+    TABLE tbl_name <br>
+  | DATABASE db_name</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

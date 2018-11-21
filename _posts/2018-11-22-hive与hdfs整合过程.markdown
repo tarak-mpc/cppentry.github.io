@@ -1,0 +1,215 @@
+---
+layout:     post
+title:      hive与hdfs整合过程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+hive与hdfs整合过程---coco<br><br><br>
+# by coco<br>
+# 2014-07-25<br><br><br>
+hive的具体练习：（以下4个目标）<br>
+1. 第一普通的hdfs文件能导入到hive中，以供我们查询。<br>
+2. 第二hbase中的表，能导入hive中，以供我们查询。<br>
+3. 第三mysql中的表，能导入hive中，以供我们查询。<br>
+4. hive中的各种查询分析结果，能导入到mysql当中，以后页面展示。<br><br><br>
+本文是第一个目标：<br>
+ 第一普通的hdfs文件能导入到hive中，以供我们查询。同时，查询的结果能保存到一下3个地方：<br>
+1.将select的结果放到一个的的表格中（首先要用create table创建新的表格）<br>
+2.将select的结果放到本地文件系统中<br>
+3.将select的结果放到hdfs文件系统中<br><br><br><br><br>
+下面具体目标分别测试：<br>
+1. 普通的hdfs文件导入到hive中。<br>
+创建一个root目录下一个普通文件：<br>
+[root@db96 ~]# cat hello.txt <br>
+# This is a text txt<br>
+# by coco<br>
+# 2014-07-18<br>
+在hive中导入该文件：<br>
+hive&gt; create table pokes(foo int,bar string);<br>
+OK<br>
+Time taken: 0.068 seconds<br>
+hive&gt; load data local inpath '/root/hello.txt' overwrite into table pokes;<br>
+Copying data from file:/root/hello.txt<br>
+Copying file: file:/root/hello.txt<br>
+Loading data to table default.pokes<br>
+rmr: DEPRECATED: Please use 'rm -r' instead.<br>
+Deleted hdfs://db96:9000/user/hive/warehouse/pokes<br>
+Table default.pokes stats: [numFiles=1, numRows=0, totalSize=59, rawDataSize=0]<br>
+OK<br>
+Time taken: 0.683 seconds<br>
+hive&gt; select * from pokes;<br>
+OK<br>
+NULL    NULL<br>
+NULL    NULL<br>
+NULL    NULL<br>
+NULL    NULL<br>
+NULL    NULL<br>
+Time taken: 0.237 seconds, Fetched: 5 row(s)<br>
+hive&gt; <br>
+hive&gt; load data local inpath '/root/hello.txt' overwrite into table test;<br>
+Copying data from file:/root/hello.txt<br>
+Copying file: file:/root/hello.txt<br>
+Loading data to table default.test<br>
+rmr: DEPRECATED: Please use 'rm -r' instead.<br>
+Deleted hdfs://db96:9000/hive/warehousedir/test<br>
+Failed with exception Unable to alter table.<br>
+FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.MoveTask<br>
+hive&gt; show tables;<br>
+OK<br>
+hivetest<br>
+pokes<br>
+test<br>
+test3<br>
+Time taken: 1.045 seconds, Fetched: 4 row(s)<br>
+hive&gt; select * from test;<br>
+OK<br>
+# This is a text txt    NULL<br>
+# by coco       NULL<br>
+# 2014-07-18    NULL<br>
+        NULL<br>
+hello world!!   NULL<br>
+Time taken: 1.089 seconds, Fetched: 5 row(s)<br>
+从上面看导入成功，但是查询的都是null，那是因为没有加分隔.test表默认的有terminated by '\t' <br>
+lines terminated by '\n'  分隔符，所以尽管有报错，数据也是插入的。<br>
+正确的导入语法为：<br>
+create table aaa(time string,myname string,yourname string) row format delimited <br>
+fields terminated by '\t' lines terminated by '\n' stored as textfile<br>
+hive&gt; create table aaa(time string,myname string,yourname string) row format delimited <br>
+    &gt; fields terminated by '\t' lines terminated by '\n' stored as textfile;<br>
+OK<br>
+Time taken: 1.011 seconds<br>
+hive&gt; load data local inpath '/root/aaaa.txt' overwrite<br>
+    &gt; into table aaa;                                  <br>
+Copying data from file:/root/aaaa.txt<br>
+Copying file: file:/root/aaaa.txt<br>
+Loading data to table default.aaa<br>
+rmr: DEPRECATED: Please use 'rm -r' instead.<br>
+Deleted hdfs://db96:9000/hive/warehousedir/aaa<br>
+[Warning] could not update stats.<br>
+OK<br>
+Time taken: 2.686 seconds<br>
+hive&gt; select * from aaa;<br>
+OK<br>
+20140723,yting,xmei     NULL    NULL<br>
+Time taken: 0.054 seconds, Fetched: 1 row(s)<br><br><br>
+2. 查询结果导出来。<br>
+从hive中把表中的数据导出来，保存成文本类型。<br>
+先检索索要的结果：<br>
+hive&gt; select time from aaa;<br>
+Total jobs = 1<br>
+Launching Job 1 out of 1<br>
+Number of reduce tasks is set to 0 since there's no reduce operator<br>
+Starting Job = job_1405999790746_0002, Tracking URL = http://db96:8088/proxy/application_1405999790746_0002/<br>
+Kill Command = /usr/local/hadoop//bin/hadoop job  -kill job_1405999790746_0002<br>
+Hadoop job information for Stage-1: number of mappers: 1; number of reducers: 0<br>
+2014-07-23 16:28:51,690 Stage-1 map = 0%,  reduce = 0%<br>
+2014-07-23 16:29:02,457 Stage-1 map = 100%,  reduce = 0%, Cumulative CPU 1.33 sec<br>
+MapReduce Total cumulative CPU time: 1 seconds 330 msec<br>
+Ended Job = job_1405999790746_0002<br>
+MapReduce Jobs Launched: <br>
+Job 0: Map: 1   Cumulative CPU: 1.33 sec   HDFS Read: 221 HDFS Write: 20 SUCCESS<br>
+Total MapReduce CPU Time Spent: 1 seconds 330 msec<br>
+OK<br>
+20140723,yting,xmei<br>
+Time taken: 26.281 seconds, Fetched: 1 row(s)<br>
+将查询结果输出至本地目录<br>
+hive&gt; insert overwrite local directory '/tmp' select a.time from aaa a;        <br>
+Total jobs = 1<br>
+Launching Job 1 out of 1<br>
+Number of reduce tasks is set to 0 since there's no reduce operator<br>
+Starting Job = job_1405999790746_0004, Tracking URL = http://db96:8088/proxy/application_1405999790746_0004/<br>
+Kill Command = /usr/local/hadoop//bin/hadoop job  -kill job_1405999790746_0004<br>
+Hadoop job information for Stage-1: number of mappers: 1; number of reducers: 0<br>
+2014-07-23 16:34:28,474 Stage-1 map = 0%,  reduce = 0%<br>
+2014-07-23 16:34:35,128 Stage-1 map = 100%,  reduce = 0%, Cumulative CPU 1.27 sec<br>
+MapReduce Total cumulative CPU time: 1 seconds 270 msec<br>
+Ended Job = job_1405999790746_0004<br>
+Copying data to local directory /tmp<br>
+Copying data to local directory /tmp<br>
+MapReduce Jobs Launched: <br>
+Job 0: Map: 1   Cumulative CPU: 1.27 sec   HDFS Read: 221 HDFS Write: 20 SUCCESS<br>
+Total MapReduce CPU Time Spent: 1 seconds 270 msec<br>
+OK<br>
+Time taken: 21.943 seconds<br>
+可以看到/tmp下确实有一个文件，000000_0，该文件的内容为，我们查询看到的内容。<br>
+root@db96 tmp]# ll<br>
+总用量 4<br>
+-rw-r--r-- 1 root root 20 7月  23 16:34 000000_0<br>
+[root@db96 tmp]# vim 000000_0 <br><br><br>
+20140723,yting,xmei                                                                                                          <br>
+~<br>
+很多时候，我们在hive中执行select语句，希望将最终的结果保存到本地文件或者保存到hdfs系统中<br>
+或者保存到一个新的表中，hive提供了方便的关键词，来实现上面所述的功能。<br>
+1.将select的结果放到一个的的表格中（首先要用create table创建新的表格）<br>
+insert overwrite table test select uid,name from test2;<br>
+2.将select的结果放到本地文件系统中<br>
+INSERT OVERWRITE LOCAL DIRECTORY '/tmp/reg_3' SELECT a.* FROM events a;<br>
+3.将select的结果放到hdfs文件系统中<br>
+INSERT OVERWRITE DIRECTORY '/tmp/hdfs_out' SELECT a.* FROM invites a WHERE a.ds='&lt;DATE&gt;';<br><br><br>
+以上，我们实现了把普通本地的文本文件导入到hive中，并能实现相关的查询，并把查询结果导出到3个不同的地方。<br><br><br>
+具体示例：<br>
+hive&gt; select a.time from aaa a;<br>
+Total jobs = 1<br>
+Launching Job 1 out of 1<br>
+Number of reduce tasks is set to 0 since there's no reduce operator<br>
+Starting Job = job_1405999790746_0005, Tracking URL = http://db96:8088/proxy/application_1405999790746_0005/<br>
+Kill Command = /usr/local/hadoop//bin/hadoop job  -kill job_1405999790746_0005<br>
+Hadoop job information for Stage-1: number of mappers: 1; number of reducers: 0<br>
+2014-07-23 16:47:42,295 Stage-1 map = 0%,  reduce = 0%<br>
+2014-07-23 16:47:49,567 Stage-1 map = 100%,  reduce = 0%, Cumulative CPU 1.19 sec<br>
+MapReduce Total cumulative CPU time: 1 seconds 190 msec<br>
+Ended Job = job_1405999790746_0005<br>
+MapReduce Jobs Launched: <br>
+Job 0: Map: 1   Cumulative CPU: 1.19 sec   HDFS Read: 221 HDFS Write: 20 SUCCESS<br>
+Total MapReduce CPU Time Spent: 1 seconds 190 msec<br>
+OK<br>
+a.time<br>
+20140723,yting,xmei<br>
+Time taken: 21.155 seconds, Fetched: 1 row(s)<br>
+hive&gt; create table jieguo(content string);<br>
+OK<br>
+Time taken: 2.424 seconds<br>
+hive&gt; insert overwrite table jieguo <br>
+    &gt; select a.time from aaa a;<br>
+Total jobs = 3<br>
+Launching Job 1 out of 3<br>
+Number of reduce tasks is set to 0 since there's no reduce operator<br>
+Starting Job = job_1405999790746_0006, Tracking URL = http://db96:8088/proxy/application_1405999790746_0006/<br>
+Kill Command = /usr/local/hadoop//bin/hadoop job  -kill job_1405999790746_0006<br>
+Hadoop job information for Stage-1: number of mappers: 1; number of reducers: 0<br>
+2014-07-23 16:49:50,689 Stage-1 map = 0%,  reduce = 0%<br>
+2014-07-23 16:49:57,329 Stage-1 map = 100%,  reduce = 0%, Cumulative CPU 1.3 sec<br>
+MapReduce Total cumulative CPU time: 1 seconds 300 msec<br>
+Ended Job = job_1405999790746_0006<br>
+Stage-4 is selected by condition resolver.<br>
+Stage-3 is filtered out by condition resolver.<br>
+Stage-5 is filtered out by condition resolver.<br>
+Moving data to: hdfs://db96:9000/hive/scratchdir/hive_2014-07-23_16-49-36_884_4745480606977792448-1/-ext-10000<br>
+Loading data to table default.jieguo<br>
+rmr: DEPRECATED: Please use 'rm -r' instead.<br>
+Deleted hdfs://db96:9000/hive/warehousedir/jieguo<br>
+Failed with exception Unable to alter table.<br>
+FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.MoveTask<br>
+MapReduce Jobs Launched: <br>
+Job 0: Map: 1   Cumulative CPU: 1.3 sec   HDFS Read: 221 HDFS Write: 90 SUCCESS<br>
+Total MapReduce CPU Time Spent: 1 seconds 300 msec<br>
+hive&gt; show tables;<br>
+OK<br>
+tab_name<br>
+aaa<br>
+hello<br>
+hivetest<br>
+jieguo<br>
+pokes<br>
+test<br>
+test3<br>
+Time taken: 1.03 seconds, Fetched: 7 row(s)<br>
+hive&gt; select * from jieguo;<br>
+OK<br>
+jieguo.content<br>
+20140723,yting,xmei<br>
+Time taken: 1.043 seconds, Fetched: 1 row(s)
+            </div>
+                </div>

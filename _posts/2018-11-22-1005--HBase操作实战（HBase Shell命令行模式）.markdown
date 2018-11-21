@@ -1,0 +1,22 @@
+---
+layout:     post
+title:      1005--HBase操作实战（HBase Shell命令行模式）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<span></span>
+<pre><span style="font-family:'仿宋';"><span>通过HBase 命令行，创建一张表，用户存储用户信息，其中包括基本信息和额外信息</span><br>HBase shell 下所有命令可以使用： help “cmd” 进行了解
+<span>1、创建表</span><br><span>create 't_person', {NAME =&gt; 'basic_info'}, {NAME =&gt; 'extra_info'}</span><br><span>2、表中存储数据</span><br><span>put 't_person', 'g201425001', 'basic_info:username', '丽丽'</span><br><span>put 't_person', 'g201425001', 'basic_info:age', 28</span><br><span>put 't_person', 'g201425001', 'basic_info:sex', 'nv'</span><br><span>put 't_person', 'g201425001', 'extra_info:salary', 50000</span><br><span>put 't_person', 'g201425001', 'extra_info:career', 'singer'</span><br><br><br><span>put 't_person', 'g201425002', 'basic_info:username', '文文'</span><br><span>put 't_person', 'g201425002', 'basic_info:age', 27</span><br><span>put 't_person', 'g201425002', 'basic_info:sex', 'nan'</span><br><span>put 't_person', 'g201425002', 'extra_info:salary', 5000</span><br><span>put 't_person', 'g201425002', 'extra_info:career', 'UI设计师'</span><br><br><br><span>put 't_person', 'g201425003', 'basic_info:username', '福福'</span><br><span>put 't_person', 'g201425003', 'basic_info:age', 29</span><br><span>put 't_person', 'g201425003', 'basic_info:sex', 'nv'</span><br><span>put 't_person', 'g201425003', 'extra_info:salary', 5000</span><br><span>put 't_person', 'g201425003', 'extra_info:career', '产品经理'</span><br><br><span>3、查看表是否创建成功</span><br><span>list： 可以查看所有表的列表</span><br><span>list 't_person' :查看当前表的信息</span><br><br><span>4、查看标结构</span><br><span>describe 't_person'</span><br><span>得到的结果只会到列族，不会显示出列族下面的列名</span><br><br><span>5、修改表结构</span><br><span>5.1 修改表的时候需要</span><br><span>禁用表： disable '表名' </span><br><span>启用表： enable '表名'</span><br><br><span>5.2 添加列族</span><br><span>alter '表名','列族'</span><br><br><span>5.3 删除表</span><br><span>drop '表名'</span><br><br><span>drop 't_person'</span><br><span>5.4 删除列族</span><br><span>alert '表名','delete','列族'</span><br><br><span>alter 't_person','basic_info'</span><br><span>5.5 修改列族的属性</span><br><span>alter '表名',NAME=&gt;'basic_info',列族属性=&gt;列族属性的数值</span><br><br><span>6、查询数据</span><br><span>6.1 scan查看数据</span><br><span>//查看所有数据</span><br><span>scan 't_person'</span><br><span>//查看所有数据指定列</span><br><span>scan 't_person', {COLUMN =&gt; ['basic_info:sex']}</span><br><span>//范围行查询数据: hbase中默认rowkey升序排序，LIMIT 表示最多显示2行，STARTROW表示从该位置开始查询</span><br><span>scan 't_person', {COLUMNS =&gt; ['basic_info:username','basic_info:age'], LIMIT =&gt; 2, STARTROW =&gt; 'g201425002'} </span><br><span>6.2 查看某一行数据</span><br><span>get 't_person','g201425001'</span><br><span>6.3 查看某一行某一列族数据</span><br><span>get 't_person','g201425001,'basic_info'</span><br><span>6.4 查看某一行某一列的数据</span><br><span>get 't_person','g201425001,'basic_info:username'</span><br><span>6.5 查看某一行某几列</span><br><span>get 't_person','g201425001', {COLUMN =&gt; ['basic_info:username','basic_info:age','basic_info:sex']}</span><br>6.6 统计行数
+count('t_person')<br></span>6.7 清空表
+truncate 't_person'  
+</pre>
+<pre><span style="font-family:'仿宋';">9、修改数据</span><br><span style="font-family:'仿宋';">修改数据的话，是重新插入一条数据将将之前的数据覆盖</span><br><span style="font-family:'仿宋';">put 't_person','g201425001','basic_info:username','okok'</span><br><br><span style="font-family:'仿宋';">10、删除</span><br><span style="font-family:'仿宋';">先禁用表，然后在删除表</span><br><br><span style="font-family:'仿宋';">禁用表：</span><br><span style="font-family:'仿宋';">disable 't_person'</span><br><span style="font-family:'仿宋';">删除表：</span><br><span style="font-family:'仿宋';">delete 't_person'</span></pre>
+<pre><span style="font-family:'仿宋';"><span>
+</span></span></pre>
+<pre><span style="font-family:'仿宋';">参考文章：</span></pre>
+<pre><span style="font-family:'仿宋';">淘宝技术部： <a href="http://rdc.taobao.org/?p=457" rel="nofollow">http://rdc.taobao.org/?p=457</a></span></pre>
+<pre><span style="font-family:'仿宋';">搜索技术博客：http://www.searchtb.com/2011/01/understanding-hbase.html</span></pre>
+            </div>
+                </div>

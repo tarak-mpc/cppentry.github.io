@@ -1,0 +1,301 @@
+---
+layout:     post
+title:      flume大全，，，配置和相关实例
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="flume">flume</h1>
+
+
+
+<h3 id="agent-结构">agent 结构</h3>
+
+<p>flume运行的核心是agent。flume以agent为最小的独立运行单位， <br>
+flume有三个核心组件 <br>
+- source <br>
+是数据的收集端，负责将数据捕获后进行特殊的格式化，将数据封装到事件(event)里，然后将事件推入Channel中 <br>
+  -  source类型 <br>
+  - netcat source <br>
+  监控某个端口将流经端口的每一个文本行数据作为event输入 <br>
+  - syslog sources <br>
+  读取syslog数据，产生event，支持udp和tcp两种协议 <br>
+  - http source <br>
+  基于http post或get方法的数据源，支持json、blob表示形式 <br>
+- Channel <br>
+是连接source和sink的组件，大家可以将它看做一个数据的缓冲区，它可以将数据暂存到内存中也可以持久化到本地磁盘，知道sink处理完改事件 <br>
+两个常用的Channel <br>
+  - MemoryChannel <br>
+  event数据存储在内存中 <br>
+  - FileChannel <br>
+  event数据存储在磁盘文件中 <br>
+- sink <br>
+sink从channel中取出事件，然后将数据发到别处，可以向文件系统、数据库、hadoop存数据也可以是其他agent的source，在日志文件较少时，可以将数据存储在文件系统中，并且设定一定的时间间隔保存数据 <br>
+  - sink类型 <br>
+  - hdfs sink <br>
+  数据写入hdfs <br>
+  - avro sink <br>
+  数据将转换成avro event，然后发送到配置的rpc端口上 <br>
+  - logger sink <br>
+  数据写入日志文件 <br>
+  - file roll sink <br>
+  存储数据到本地文件系统 <br>
+  - hase sink <br>
+  数据写入hbase数据库</p>
+
+
+
+<h3 id="使用flume监控某个端口把端口写入的数据输出为logger">使用flume监控某个端口，把端口写入的数据输出为logger</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">$ <span class="hljs-keyword">cp</span> -a flume-conf<span class="hljs-preprocessor">.properties</span><span class="hljs-preprocessor">.template</span> flume-telnet<span class="hljs-preprocessor">.conf</span>
+修改flume-telnet<span class="hljs-preprocessor">.conf</span>
+
+<span class="hljs-preprocessor"># Name the components on this agent</span>
+a1<span class="hljs-preprocessor">.sources</span> = <span class="hljs-built_in">r1</span>
+a1<span class="hljs-preprocessor">.sinks</span> = k1
+a1<span class="hljs-preprocessor">.channels</span> = c1
+
+<span class="hljs-preprocessor"># Describe/configure the source</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = netcat
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">44444</span>
+
+<span class="hljs-preprocessor"># Describe the sink</span>
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+<span class="hljs-preprocessor"># Use a channel which buffers events in memory</span>
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+a1<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor"># Bind the source and sink to the channel</span>
+a1<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channels</span> = c1
+a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.channel</span> = c1
+
+测试：
+<span class="hljs-preprocessor"># yum -y install telnet</span>
+$ bin/flume-ng agent --conf conf/ --name a1 --conf-file conf/flume-telnet<span class="hljs-preprocessor">.conf</span> -Dflume<span class="hljs-preprocessor">.root</span><span class="hljs-preprocessor">.logger</span>=INFO,console
+
+$ netstat -an|grep <span class="hljs-number">44444</span>   --检查本机是否监听了<span class="hljs-number">44444</span>端口
+$ telnet localhost <span class="hljs-number">44444</span>   --telnet用于连接本机的<span class="hljs-number">44444</span>端口
+                --telnet是客户端去访问这个端口
+flume的sources用来监听<span class="hljs-number">44444</span>端口客户端发送的消息，
+接收到消息后sources将字符串提交到chanel中，sink从chanel中将字符串
+抽取输出到控制台
+
+输入字符串..</code></pre>
+
+
+
+<h3 id="使用flume去监控某个文件将新添加进文件的内容抽取到其他地方hdfs">使用flume去监控某个文件，将新添加进文件的内容抽取到其他地方[hdfs]</h3>
+
+<ul>
+<li>a1.sources.r1.type = exec <br>
+表示可以使用linux命令行命令</li>
+<li>a1.sources.r1.command = tail -F /文件 <br>
+对文件进行监控</li>
+<li>a1.sinks.k1.hdfs.rollInterval = 10 <br>
+表示hdfs sink 间隔多长时间将临时文件滚动成最终文件 <br>
+如果设置为0，则表示不根据时间来滚动文件 <br>
+默认值为30</li>
+<li>a1.sinks.k1.hdfs.rollSize = 20 <br>
+当临时文件达到大小20bytes时，滚动成自动文件 <br>
+如果设置为0，则表示不根据临时文件大小来滚动文件 <br>
+默认值是1024</li>
+<li><p>a1.sinks.k1.hdfs.rollCount = 5 <br>
+当events数据达到该数量时，将临时文件滚动成目标文件 <br>
+如果设置为0，则表示不根据event数量来表示 <br>
+默认值是10</p></li>
+<li><p>round <br>
+表示是否启用时间上的舍弃</p>
+
+<ul><li>a1.sinks.k1.hdfs.round = true</li>
+<li>a1.sinks.k1.hdfs.roundValue = 10</li>
+<li>a1.sinks.k1.hdfs.rountUnit = minute <br>
+上面三条配置信息表示 <br>
+当时间为2015-10-16 17:38:59 时候，hdfs.path 依然会被解析成 <br>
+/flume/events/20151016/17:30/00 <br>
+因为设置的时舍弃10分钟内的时间，因此，该目录没10分钟新生成一个</li></ul></li>
+</ul>
+
+
+
+<h5 id="配置文件">配置文件</h5>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">修改flume-apache<span class="hljs-preprocessor">.conf</span>             
+
+
+a2<span class="hljs-preprocessor">.sources</span> = <span class="hljs-built_in">r2</span>
+a2<span class="hljs-preprocessor">.channels</span> = c2
+a2<span class="hljs-preprocessor">.sinks</span> = k2
+
+<span class="hljs-preprocessor"># define sources</span>
+a2<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.type</span> = exec
+<span class="hljs-preprocessor">## 注意一定要执行flume命令的用户对该/var/log/httpd/access_log文件</span>
+<span class="hljs-preprocessor">## 具有可读的权限</span>
+a2<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.command</span> = tail -F /opt/q<span class="hljs-preprocessor">.txt</span>
+a2<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.shell</span> = /bin/bash -c
+
+<span class="hljs-preprocessor"># define channels</span>
+a2<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>2<span class="hljs-preprocessor">.type</span> = memory
+a2<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>2<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+a2<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>2<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor"># define sinks</span>
+<span class="hljs-preprocessor">#启用设置多级目录，这里按年/月/日/时 2级目录，每个小时生成一个文件夹</span>
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.type</span> = hdfs
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.path</span>=hdfs://node-<span class="hljs-number">1</span>:<span class="hljs-number">8020</span>/flume/%<span class="hljs-built_in">Y</span>%m%d/%H
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.filePrefix</span> = accesslog
+<span class="hljs-preprocessor">#启用按时间生成文件夹</span>
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.round</span>=true
+<span class="hljs-preprocessor">#设置round单位：小时  </span>
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.roundValue</span>=<span class="hljs-number">1</span>
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.roundUnit</span>=minute
+<span class="hljs-preprocessor">#使用本地时间戳  </span>
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.useLocalTimeStamp</span>=true
+
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.batchSize</span>=<span class="hljs-number">1000</span>
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.fileType</span>=DataStream
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.writeFormat</span>=Text
+a2<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.channels</span> = c2
+a2<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>2<span class="hljs-preprocessor">.channel</span> = c2</code></pre>
+
+<ul>
+<li>向文件添加数据命令 <br>
+<code>while true ; do echo 'access access' &gt;&gt;/opt/q.txt;sleep 0.5;done</code></li>
+</ul>
+
+
+
+<h3 id="使用flume监控某个目录">使用flume监控某个目录</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">a3<span class="hljs-preprocessor">.sources</span> = <span class="hljs-built_in">r3</span>
+a3<span class="hljs-preprocessor">.channels</span> = c3
+a3<span class="hljs-preprocessor">.sinks</span> = k3
+
+a3<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.type</span> = spooldir
+
+a3<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.spoolDir</span> = /opt/a
+
+a3<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.fileHeader</span> = true
+
+
+
+a3<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>3<span class="hljs-preprocessor">.type</span> = memory
+a3<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>3<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+a3<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>3<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.type</span> = hdfs
+
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.path</span> = hdfs://node-<span class="hljs-number">1</span>:<span class="hljs-number">8020</span>/flume1/%<span class="hljs-built_in">Y</span>%m%d
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.fileType</span> = DataStream
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.writeFormat</span> = Text
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.batchSize</span> = <span class="hljs-number">10</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.useLocalTimeStamp</span> = true
+a3<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.channels</span> = c3
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.channel</span> = c3</code></pre>
+
+<p>命令： <br>
+<code>bin/flume-ng agent --conf conf/ --name a3 --conf-file conf/flume-dir.conf -Dflume.root.logger=INFO,console</code></p>
+
+
+
+<h3 id="使用flume解决过多的小文件">使用flume解决过多的小文件</h3>
+
+<p>利用flume监控某个目录[/var/log/httpd],把里面回滚好的文件 <br>
+实时抽取到HDFS平台。 <br>
+这里的日志回滚是apache这种应用服务器自己完成的 <br>
+$ ls <br>
+access_log  access_log.1  access_log.2</p>
+
+<p>需求：抽取文件access_log.1和access_log.2</p>
+
+<p>$ cp -a flume-apache.conf  flume-dir.conf</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">a3<span class="hljs-preprocessor">.sources</span> = <span class="hljs-built_in">r3</span>
+a3<span class="hljs-preprocessor">.channels</span> = c3
+a3<span class="hljs-preprocessor">.sinks</span> = k3
+
+<span class="hljs-preprocessor"># define sources</span>
+a3<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.type</span> = spooldir
+a3<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.spoolDir</span> = /home/gao/logs
+a3<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.ignorePattern</span> = ^.*\_log$
+
+<span class="hljs-preprocessor"># define channels      断点续传功能   ，记录抽取暂停时的位置</span>
+a3<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>3<span class="hljs-preprocessor">.type</span> = file
+a3<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>3<span class="hljs-preprocessor">.checkpointDir</span> = /opt/modules/cdh/apache-flume-<span class="hljs-number">1.5</span><span class="hljs-number">.0</span>-cdh5<span class="hljs-number">.3</span><span class="hljs-number">.6</span>-bin/checkpoint
+a3<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>3<span class="hljs-preprocessor">.dataDirs</span> = /opt/modules/cdh/apache-flume-<span class="hljs-number">1.5</span><span class="hljs-number">.0</span>-cdh5<span class="hljs-number">.3</span><span class="hljs-number">.6</span>-bin/checkdata
+
+
+<span class="hljs-preprocessor"># define sinks</span>
+<span class="hljs-preprocessor">#启用设置多级目录，这里按年/月/日/时 2级目录，每个小时生成一个文件夹</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.type</span> = hdfs
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.path</span>=hdfs://node-<span class="hljs-number">1</span>:<span class="hljs-number">8020</span>/flume2/%<span class="hljs-built_in">Y</span>%m%d/%H
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.filePrefix</span> = accesslog
+<span class="hljs-preprocessor">#启用按时间生成文件夹</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.round</span>=true
+<span class="hljs-preprocessor">#设置round单位:小时  </span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.roundValue</span>=<span class="hljs-number">1</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.roundUnit</span>=hour
+<span class="hljs-preprocessor">#使用本地时间戳  </span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.useLocalTimeStamp</span>=true
+
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.batchSize</span>=<span class="hljs-number">1000</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.fileType</span>=DataStream
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.writeFormat</span>=Text
+
+<span class="hljs-preprocessor">#设置解决文件过多过小问题</span>
+<span class="hljs-preprocessor">#每600秒生成一个文件</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.rollInterval</span>=<span class="hljs-number">600</span>
+<span class="hljs-preprocessor">#当达到128000000bytes时，创建新文件 127*1024*1024</span>
+<span class="hljs-preprocessor">#实际环境中如果按照128M回顾文件,那么这里设置一般设置成127M</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.rollSize</span>=<span class="hljs-number">128000000</span>
+<span class="hljs-preprocessor">#设置文件的生成不和events数相关</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.rollCount</span>=<span class="hljs-number">0</span>
+<span class="hljs-preprocessor">#设置成1，否则当有副本复制时就重新生成文件，上面三条则没有效果</span>
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.minBlockReplicas</span>=<span class="hljs-number">1</span>
+
+<span class="hljs-preprocessor"># bind the sources and sinks to the channels</span>
+a3<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.channels</span> = c3
+a3<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>3<span class="hljs-preprocessor">.channel</span> = c3</code></pre>
+
+<p>执行以下命令 <br>
+bin/flume-ng agent –conf conf/ –name a3 –conf-file conf/flume-dir.conf -Dflume.root.logger=INFO,console</p>
+
+<p>测试：</p>
+
+<p>浏览器访问网页 <br>
+<a href="http://bigdata-hive/index.html" rel="nofollow">http://bigdata-hive/index.html</a> <br>
+tail -f /var/log/httpd/access_log</p>
+
+
+
+<h3 id="同一个服务器启动三个agent">同一个服务器启动三个agent</h3>
+
+<p>agent1：用于实时监控 /var/log/httpd/access_log</p>
+
+
+
+<h3 id="flume-的load-balance">flume 的load-balance</h3>
+
+<p>负载均衡是用于解决一台机器无法解决所有请求而产生的一种算法 <br>
+agent1是一个路由节点，负责将channel暂存的event均衡到对应的多个sink组件上，而每个sink组件分别连接到一个独立的agent上， <br>
+agent1的sink type 是下一级的source type</p>
+
+
+
+<h3 id="flume-的failover">flume 的failover</h3>
+
+<p>failover sink processor 维护一个优先级sink组件列表，只要有一个sink组件可用。event就会被传递到下一个组件。故障转移机制的作用是将失败的sink降级到一个池。sink具有与之相关的优先级，数量越大，优先级越高</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,120 @@
+---
+layout:     post
+title:      深刻理解HDFS工作原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/xiangzhihong8/article/details/54345137				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="概述">概述</h1>
+
+<p>HDFS（Hadoop Distributed File System ）Hadoop分布式文件系统的简称。HDFS被设计成适合运行在通用硬件(commodity hardware)上的分布式文件系统。DFS是一个高度容错性的系统，适合部署在廉价的机器上。HDFS能提供高吞吐量的数据访问，非常适合大规模数据集上的应用。HDFS放宽了一部分POSIX约束，来实现流式读取文件系统数据的目的。HDFS在最开始是作为Apache Nutch搜索引擎项目的基础架构而开发的。HDFS是Apache Hadoop Core项目的一部分。 <br>
+本篇首先对HDFS的重要特性和使用场景做一个简要说明，之后对HDFS的数据读写、元数据管理以及NameNode、SecondaryNamenode的工作机制进行深入分析。</p>
+
+
+
+<h1 id="hdfs工作原理简介">HDFS工作原理简介</h1>
+
+<h2 id="hdfs的重要特性">HDFS的重要特性</h2>
+
+<p>HDFS是一个文件系统，用于存储和管理文件，通过统一的命名空间（类似于本地文件系统的目录树）。HDFS是分布式的系统，服务器集群中各个节点都有自己的角色和职责。理解HDFS，需要注意以下几个概念：</p>
+
+<ol>
+<li>HDFS中的文件在物理上是分块存储（block），块的大小可以通过配置参数( <br>
+dfs.blocksize)来规定，默认大小在hadoop2.x版本中是128M，之前的版本中是64M。</li>
+<li>HDFS文件系统会给客户端提供一个统一的抽象目录树，客户端通过路径来访问文件，形如：hdfs://namenode:port/dir-a/dir-b/dir-c/file.data</li>
+<li>目录结构及文件分块位置信息(元数据)的管理由namenode节点承担，namenode是HDFS集群主节点，负责维护整个hdfs文件系统的目录树，以及每一个路径（文件）所对应的数据块信息（blockid及所在的datanode服务器）</li>
+<li>文件的各个block的存储管理由datanode节点承担，datanode是HDFS集群从节点，每一个block都可以在多个datanode上存储多个副本（副本数量也可以通过参数设置dfs.replication，默认是3）</li>
+<li>Datanode会定期向Namenode汇报自身所保存的文件block信息，而namenode则会负责保持文件的副本数量，HDFS的内部工作机制对客户端保持透明，客户端请求访问HDFS都是通过向namenode申请来进行。</li>
+<li>HDFS是设计成适应一次写入，多次读出的场景，且不支持文件的修改。需要频繁的RPC交互，写入性能不好。</li>
+</ol>
+
+
+
+<h2 id="hdfs写数据分析">HDFS写数据分析</h2>
+
+<p>客户端要向HDFS写数据，首先要跟namenode通信以确认可以写文件并获得接收文件block的datanode，然后客户端按顺序将文件逐个block传递给相应datanode，并由接收到block的datanode负责向其他datanode复制block的副本。 <br>
+对于HDFS写数据的流程大概可以用以下的流程图表示： <br>
+<img src="https://img-blog.csdn.net/20170111162820809?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGlhbmd6aGlob25nOA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+ 7. 客户端向namenode发送上传文件请求，namenode对要上传目录和文件进行检查，判断是否可以上传，并向客户端返回检查结果。 <br>
+ 8. 客户端得到上传文件的允许后读取客户端配置，如果没有指定配置则会读取默认配置（例如副本数和块大小默认为3和128M，副本是由客户端决定的）。向namenode请求上传一个数据块。 <br>
+ 9. namenode会根据客户端的配置来查询datanode信息，如果使用默认配置，那么最终结果会返回同一个机架的两个datanode和另一个机架的datanode。这称为“机架感知”策略。 <br>
+ 10. 客户端在开始传输数据块之前会把数据缓存在本地，当缓存大小超过了一个数据块的大小，客户端就会从namenode获取要上传的datanode列表。之后会在客户端和第一个datanode建立连接开始流式的传输数据，这个datanode会一小部分一小部分（4K）的接收数据然后写入本地仓库，同时会把这些数据传输到第二个datanode，第二个datanode也同样一小部分一小部分的接收数据并写入本地仓库，同时传输给第三个datanode，依次类推。这样逐级调用和返回之后，待这个数据块传输完成客户端后告诉namenode数据块传输完成，这时候namenode才会更新元数据信息记录操作日志。 <br>
+ 11. 第一个数据块传输完成后会使用同样的方式传输下面的数据块直到整个文件上传完成。 <br>
+细节： <br>
+a.请求和应答是使用RPC的方式，客户端通过ClientProtocol与namenode通信，namenode和datanode之间使用DatanodeProtocol交互。在设计上，namenode不会主动发起RPC，而是响应来自客户端或 datanode 的RPC请求。客户端和datanode之间是使用socket进行数据传输，和namenode之间的交互采用nio封装的RPC。 <br>
+b.HDFS有自己的序列化协议。 <br>
+c.在数据块传输成功后但客户端没有告诉namenode之前如果namenode宕机那么这个数据块就会丢失。 <br>
+d.在流式复制时，逐级传输和响应采用响应队列来等待传输结果。队列响应完成后返回给客户端。 <br>
+c.在流式复制时如果有一台或两台（不是全部）没有复制成功，不影响最后结果，只不过datanode会定期向namenode汇报自身信息。如果发现异常namenode会指挥datanode删除残余数据和完善副本。如果副本数量少于某个最小值就会进入安全模式。</p>
+
+
+
+<h2 id="hdfs读数据分析">HDFS读数据分析</h2>
+
+<p>客户端将要读取的文件路径发送给namenode，namenode获取文件的元信息（主要是block的存放位置信息）返回给客户端，客户端根据返回的信息找到相应datanode逐个获取文件的block并在客户端本地进行数据追加合并从而获得整个文件。 <br>
+HDFS读数据步骤大概可以用以下的流程图表示： <br>
+<img src="https://img-blog.csdn.net/20170111163425093?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGlhbmd6aGlob25nOA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+ 12. 客户端向namenode发起RPC调用，请求读取文件数据。 <br>
+ 13. namenode检查文件是否存在，如果存在则获取文件的元信息（blockid以及对应的datanode列表）。 <br>
+ 14. 客户端收到元信息后选取一个网络距离最近的datanode，依次请求读取每个数据块。客户端首先要校检文件是否损坏，如果损坏，客户端会选取另外的datanode请求。 <br>
+ 15. datanode与客户端简历socket连接，传输对应的数据块，客户端收到数据缓存到本地，之后写入文件。 <br>
+依次传输剩下的数据块，直到整个文件合并完成。 <br>
+注：文件合并的问题从某个Datanode获取的数据块有可能是损坏的，损坏可能是由Datanode的存储设备错误、网络错误或者软件bug造成的。HDFS客户端软件实现了对HDFS文件内容的校验和(checksum)检查。当客户端创建一个新的HDFS文件，会计算这个文件每个数据块的校验和，并将校验和作为一个单独的隐藏文件保存在同一个HDFS名字空间下。当客户端获取文件内容后，它会检验从Datanode获取的数据跟相应的校验和文件中的校验和是否匹配，如果不匹配，客户端可以选择从其他Datanode获取该数据块的副本。</p>
+
+<h2 id="hdfs删除数据分析">HDFS删除数据分析</h2>
+
+<p>HDFS删除数据比较流程相对简单，只列出详细步骤: <br>
+ 16. 客户端向namenode发起RPC调用，请求删除文件。namenode检查合法性。 <br>
+ 17. namenode查询文件相关元信息，向存储文件数据块的datanode发出删除请求。 <br>
+ 18. datanode删除相关数据块。返回结果。 <br>
+ 19. namenode返回结果给客户端。 <br>
+ 注：当用户或应用程序删除某个文件时，这个文件并没有立刻从HDFS中删除。实际上，HDFS会将这个文件重命名转移到/trash目录。只要文件还在/trash目录中，该文件就可以被迅速地恢复。文件在/trash中保存的时间是可配置的，当超过这个时间时，Namenode就会将该文件从名字空间中删除。删除文件会使得该文件相关的数据块被释放。注意，从用户删除文件到HDFS空闲空间的增加之间会有一定时间的延迟。只要被删除的文件还在/trash目录中，用户就可以恢复这个文件。如果用户想恢复被删除的文件，他/她可以浏览/trash目录找回该文件。/trash目录仅仅保存被删除文件的最后副本。/trash目录与其他的目录没有什么区别，除了一点：在该目录上HDFS会应用一个特殊策略来自动删除文件。目前的默认策略是删除/trash中保留时间超过6小时的文件。将来，这个策略可以通过一个被良好定义的接口配置。 <br>
+当一个文件的副本系数被减小后，Namenode会选择过剩的副本删除。下次心跳检测时会将该信息传递给Datanode。Datanode遂即移除相应的数据块，集群中的空闲空间加大。同样，在调用setReplication API结束和集群中空闲空间增加间会有一定的延迟。</p>
+
+
+
+<h2 id="namenode元数据管理原理分析">NameNode元数据管理原理分析</h2>
+
+<p>首先明确namenode的职责：响应客户端请求、管理元数据。 <br>
+namenode对元数据有三种存储方式：内存元数据(NameSystem)、磁盘元数据镜像文件、数据操作日志文件（可通过日志运算出元数据） <br>
+细节：HDFS不适合存储小文件的原因，每个文件都会产生元信息，当小文件多了之后元信息也就多了，对namenode会造成压力。 <br>
+<strong>三种存储机制的解释</strong> <br>
+内存元数据就是当前namenode正在使用的元数据，是存储在内存中的。磁盘元数据镜像文件是内存元数据的镜像，保存在namenode工作目录中，它是一个准元数据，作用是在namenode宕机时能够快速较准确的恢复元数据。称为fsimage。数据操作日志文件是用来记录元数据操作的，在每次改动元数据时都会追加日志记录，如果有完整的日志就可以还原完整的元数据。主要作用是用来完善fsimage，减少fsimage和内存元数据的差距。称为editslog。 <br>
+<strong>checkpoint机制分析</strong> <br>
+因为namenode本身的任务就非常重要，为了不再给namenode压力，日志合并到fsimage就引入了另一个角色secondarynamenode。secondarynamenode负责定期把editslog合并到fsimage，“定期”是namenode向secondarynamenode发送RPC请求的，是按时间或者日志记录条数为“间隔”的，这样即不会浪费合并操作又不会造成fsimage和内存元数据有很大的差距。因为元数据的改变频率是不固定的。 <br>
+每隔一段时间，会由secondary namenode将namenode上积累的所有edits和一个最新的fsimage下载到本地，并加载到内存进行merge（这个过程称为checkpoint）。 <br>
+<img src="https://img-blog.csdn.net/20170111164220362?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGlhbmd6aGlob25nOA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+checkpoint步骤： <br>
+ 1. namenode向secondarynamenode发送RPC请求，请求合并editslog到fsimage。 <br>
+ 2. secondarynamenode收到请求后从namenode上读取（通过http服务）editslog（多个，滚动日志文件）和fsimage文件。 <br>
+ 3. secondarynamenode会根据拿到的editslog合并到fsimage。形成最新的fsimage文件。（中间有很多步骤，把文件加载到内存，还原成元数据结构，合并，再生成文件，新生成的文件名为fsimage.checkpoint）。 <br>
+ 4. secondarynamenode通过http服务把fsimage.checkpoint文件上传到namenode，并且通过RPC调用把文件改名为fsimage。 <br>
+namenode和secondary namenode的工作目录存储结构完全相同，所以，当namenode故障退出需要重新恢复时，可以从secondary namenode的工作目录中将fsimage拷贝到namenode的工作目录，以恢复namenode的元数据。 <br>
+关于checkpoint操作的配置：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.checkpoint</span><span class="hljs-preprocessor">.check</span><span class="hljs-preprocessor">.period</span>=<span class="hljs-number">60</span> <span class="hljs-preprocessor">#检查触发条件是否满足的频率，60秒</span>
+dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.checkpoint</span><span class="hljs-preprocessor">.dir</span>=file://${hadoop<span class="hljs-preprocessor">.tmp</span><span class="hljs-preprocessor">.dir</span>}/dfs/namesecondary
+<span class="hljs-preprocessor">#以上两个参数做checkpoint操作时，secondary namenode的本地工作目录</span>
+dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.checkpoint</span><span class="hljs-preprocessor">.edits</span><span class="hljs-preprocessor">.dir</span>=${dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.checkpoint</span><span class="hljs-preprocessor">.dir</span>}
+dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.checkpoint</span><span class="hljs-preprocessor">.max</span>-retries=<span class="hljs-number">3</span> <span class="hljs-preprocessor">#最大重试次数</span>
+dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.checkpoint</span><span class="hljs-preprocessor">.period</span>=<span class="hljs-number">3600</span> <span class="hljs-preprocessor">#两次checkpoint之间的时间间隔3600秒</span>
+dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.checkpoint</span><span class="hljs-preprocessor">.txns</span>=<span class="hljs-number">1000000</span> <span class="hljs-preprocessor">#两次checkpoint之间最大的操作记录</span></code></pre>
+
+<p>editslog和fsimage文件存储在$dfs.namenode.name.dir/current目录下，这个目录可以在hdfs-site.xml中配置的。目录结果如下： <br>
+<img src="https://img-blog.csdn.net/20170111164417128?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGlhbmd6aGlob25nOA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+包括edits日志文件（滚动的多个文件），有一个是edits_inprogress_*是当前正在写的日志。fsimage文件以及md5校检文件。seen_txid是记录当前滚动序号，代表seen_txid之前的日志都已经合并完成。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">$dfs<span class="hljs-preprocessor">.namenode</span><span class="hljs-preprocessor">.name</span><span class="hljs-preprocessor">.dir</span>/current/seen_txid非常重要，是存放transactionId的文件，format之后是<span class="hljs-number">0</span>，它代表的是namenode里面的edits_*文件的尾数，namenode重启的时候，会按照seen_txid的数字恢复。所以当你的hdfs发生异常重启的时候，一定要比对seen_txid内的数字是不是你edits最后的尾数，不然会发生重启namenode时metaData的资料有缺少，导致误删Datanode上多余Block的信息。</code></pre>
+
+<h2 id="其他概念">其他概念</h2>
+
+<p>安全模式：Namenode启动后会进入一个称为安全模式的特殊状态。处于安全模式的Namenode是不会进行数据块的复制的。Namenode从所有的 Datanode接收心跳信号和块状态报告。块状态报告包括了某个Datanode所有的数据块列表。每个数据块都有一个指定的最小副本数。当Namenode检测确认某个数据块的副本数目达到这个最小值，那么该数据块就会被认为是副本安全(safely replicated)的；在一定百分比（这个参数可配置）的数据块被Namenode检测确认是安全之后（加上一个额外的30秒等待时间），Namenode将退出安全模式状态。接下来它会确定还有哪些数据块的副本没有达到指定数目，并将这些数据块复制到其他Datanode上。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

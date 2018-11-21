@@ -1,0 +1,356 @@
+---
+layout:     post
+title:      CDH4.2 JobTracker HA
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>一、NameNode的HA</p>
+<p>1、 core-site.xml </p>
+<p>• For MRv1:<br>
+&lt;property&gt;<br>
+&lt;name&gt;fs.default.name/name&gt;<br>
+&lt;value&gt;hdfs://mycluster&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+• For YARN:<br>
+&lt;property&gt;<br>
+&lt;name&gt;fs.defaultFS&lt;/name&gt;<br>
+&lt;value&gt;hdfs://mycluster&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;ha.zookeeper.quorum&lt;/name&gt;<br>
+&lt;value&gt;zk1.example.com:2181,zk2.example.com:2181,zk3.example.com:2181&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p><br>
+ </p>
+<p>2、 hdfs-site.xml </p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.nameservices&lt;/name&gt;<br>
+&lt;value&gt;mycluster&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.ha.namenodes.mycluster&lt;/name&gt;<br>
+&lt;value&gt;nn1,nn2&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.namenode.rpc-address.mycluster.nn1&lt;/name&gt;<br>
+&lt;value&gt;machine1.example.com:8020&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;dfs.namenode.rpc-address.mycluster.nn2&lt;/name&gt;<br>
+&lt;value&gt;machine2.example.com:8020&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.namenode.http-address.mycluster.nn1&lt;/name&gt;<br>
+&lt;value&gt;machine1.example.com:50070&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;dfs.namenode.http-address.mycluster.nn2&lt;/name&gt;<br>
+&lt;value&gt;machine2.example.com:50070&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.namenode.shared.edits.dir&lt;/name&gt;<br>
+&lt;value&gt;qjournal://node1.example.com:8485;node2.example.com:8485;node3.example.com:8485/mycluster&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>===JournalNode===</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.journalnode.edits.dir&lt;/name&gt;<br>
+&lt;value&gt;/data/1/dfs/jn&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>===Client Failover Configuration===</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.client.failover.proxy.provider.mycluster&lt;/name&gt;<br>
+&lt;value&gt;org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>===Fencing Configuration===</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.ha.fencing.methods&lt;/name&gt;<br>
+&lt;value&gt;sshfence&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;dfs.ha.fencing.ssh.private-key-files&lt;/name&gt;<br>
+&lt;value&gt;/home/exampleuser/.ssh/id_rsa&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>==================</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;dfs.ha.automatic-failover.enabled&lt;/name&gt;<br>
+&lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>3、在NameNode的一个节点上执行初始化到ZK的HA状态信息的命令</p>
+<p>hdfs zkfc -formatZK</p>
+<p>4、格式化NameNode</p>
+<p>5、安装和启动JournalNode（要在NameNode之前启动）</p>
+<p> sudo yum install hadoop-hdfs-journalnode</p>
+<p> sudo service hadoop-hdfs-journalnode start</p>
+<p>6、启动NameNode</p>
+<p>(1)、Start the primary (formatted) NameNode:</p>
+<p>sudo -u hdfs hadoop namenode -format</p>
+<p>sudo service hadoop-hdfs-namenode start</p>
+<p>(2)、Start the standby NameNode:</p>
+<p>sudo -u hdfs hdfs namenode -bootstrapStandby<br>
+sudo service hadoop-hdfs-namenode start</p>
+<p>7、配置自动故障转移：在NameNode节点上安装和运行ZKFC</p>
+<p>sudo yum install hadoop-hdfs-zkfc</p>
+<p>sudo service hadoop-hdfs-zkfc start</p>
+<p>8、验证自动故障转移</p>
+<p>kill -9 &lt;pid of NN&gt;</p>
+<p>观察效果</p>
+<p> </p>
+<p>二、Jobtracker的HA</p>
+<p>1、在两个节点上安装HA Jobtracker包</p>
+<p>sudo yum install hadoop-0.20-mapreduce-jobtrackerha</p>
+<p>2、如果想主动故障恢复，就需要在两个HA jobtracker节点安装zkfc</p>
+<p>sudo yum install hadoop-0.20-mapreduce-zkfc</p>
+<p>3、配置HA jobtracker</p>
+<p>&lt;?xml version="1.0"?&gt;<br>
+&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;<br>
+&lt;!-- Put site-specific property overrides in this file. --&gt;<br>
+&lt;configuration&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker&lt;/name&gt;<br>
+&lt;value&gt;logicaljt&lt;/value&gt; <br>
+&lt;!-- host:port string is replaced with a logical name --&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.jobtrackers.logicaljt&lt;/name&gt;<br>
+&lt;value&gt;jt1,jt2&lt;/value&gt;<br>
+&lt;description&gt;Comma-separated list of JobTracker IDs.&lt;/description&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.jobtracker.rpc-address.logicaljt.jt1&lt;/name&gt; <br>
+&lt;!-- RPC address for jt1 --&gt;<br>
+&lt;value&gt;myjt1.myco.com:8021&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.jobtracker.rpc-address.logicaljt.jt2&lt;/name&gt; <br>
+&lt;!-- RPC address for jt2 --&gt;<br>
+&lt;value&gt;myjt2.myco.com:8022&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.http.address.logicaljt.jt1&lt;/name&gt; <br>
+&lt;!-- HTTP bind address for jt1 --&gt;<br>
+&lt;value&gt;0.0.0.0:50030&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.http.address.logicaljt.jt2&lt;/name&gt; <br>
+&lt;!-- HTTP bind address for jt2 --&gt;<br>
+&lt;value&gt;0.0.0.0:50031&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.jobtracker.rpc-address.logicaljt.jt1&lt;/name&gt; <br>
+&lt;!-- RPC address for jt1 HA daemon --&gt;<br>
+&lt;value&gt;myjt1.myco.com:8023&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.jobtracker.rpc-address.logicaljt.jt2&lt;/name&gt; <br>
+&lt;!-- RPC address for jt2 HA daemon --&gt;<br>
+&lt;value&gt;myjt2.myco.com:8024&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.jobtracker.http-redirect-address.logicaljt.jt1&lt;/name&gt; <br>
+&lt;!-- HTTP redirect address for jt1 --&gt;<br>
+&lt;value&gt;myjt1.myco.com:50030&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.jobtracker.http-redirect-address.logicaljt.jt2&lt;/name&gt; <br>
+&lt;!-- HTTP redirect address for jt2 --&gt;<br>
+&lt;value&gt;myjt2.myco.com:50031&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.jobtracker.restart.recover&lt;/name&gt;<br>
+&lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.persist.jobstatus.active&lt;/name&gt;<br>
+&lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.persist.jobstatus.hours&lt;/name&gt;<br>
+&lt;value&gt;1&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.persist.jobstatus.dir&lt;/name&gt;<br>
+&lt;value&gt;/jobtracker/jobsInfo&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.proxy.provider.logicaljt&lt;/name&gt;<br>
+&lt;value&gt;org.apache.hadoop.mapred.ConfiguredFailoverProxyProvider&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.max.attempts&lt;/name&gt;<br>
+&lt;value&gt;15&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.sleep.base.millis&lt;/name&gt;<br>
+&lt;value&gt;500&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.sleep.max.millis&lt;/name&gt;<br>
+&lt;value&gt;1500&lt;/value&gt; <br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.connection.retries&lt;/name&gt;<br>
+&lt;value&gt;0&lt;/value&gt; <br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.connection.retries.on.timeouts&lt;/name&gt;<br>
+&lt;value&gt;0&lt;/value&gt; <br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.fencing.methods&lt;/name&gt;<br>
+&lt;value&gt;shell(/bin/true)&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;/configuration&gt;</p>
+<p>4、启动HA jobtracker：在两个HA jobtracker上启动</p>
+<p>sudo service hadoop-0.20-mapreduce-jobtrackerha start</p>
+<p>如果没有配置主动故障恢复，两个启动的jobtracker都处于standby状态。</p>
+<p> </p>
+<p>可以根据sudo -u mapred hadoop mrhaadmin -getServiceState &lt;id&gt;获取jobtracker状态信息</p>
+<p>&lt;id&gt;是 mapred.jobtrackers.&lt;name&gt;里面的name，如上面配置的 jt1 or jt2。</p>
+<p>将一个jobtracker切换至Active状态：</p>
+<p>sudo -u mapred hadoop mrhaadmin -transitionToActive &lt;id&gt;<br>
+sudo -u mapred hadoop mrhaadmin -getServiceState &lt;id&gt;</p>
+<p>5、故障转移验证（手动故障转移）</p>
+<p>sudo -u mapred hadoop mrhaadmin -failover &lt;id_of_active_JobTracker&gt; &lt;id_of_inactive_JobTracker&gt;</p>
+<p>例如：将有故障的active的jt1转移到jt2，这个时候jt2变成active了</p>
+<p>sudo -u mapred hadoop mrhaadmin -failover jt1 jt2 </p>
+<p>如果转移成功，jt2状态将变成active，执行以下命令可以查看</p>
+<p>sudo -u mapred hadoop mrhaadmin -getServiceState jt2</p>
+<p>6、配置自动故障转移</p>
+<p>(1)、安装配置zookeeper集群(可以公用hdfs ha的zk)</p>
+<p>(2)、手动故障转移参数配置</p>
+<p>&lt;?xml version="1.0"?&gt;<br>
+&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;<br>
+&lt;!-- Put site-specific property overrides in this file. --&gt;<br>
+&lt;configuration&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker&lt;/name&gt;<br>
+&lt;value&gt;logicaljt&lt;/value&gt; <br>
+&lt;!-- host:port string is replaced with a logical name --&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.jobtrackers.logicaljt&lt;/name&gt;<br>
+&lt;value&gt;jt1,jt2&lt;/value&gt;<br>
+&lt;description&gt;Comma-separated list of JobTracker IDs.&lt;/description&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.jobtracker.rpc-address.logicaljt.jt1&lt;/name&gt; <br>
+&lt;!-- RPC address for jt1 --&gt;<br>
+&lt;value&gt;myjt1.myco.com:8021&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.jobtracker.rpc-address.logicaljt.jt2&lt;/name&gt; <br>
+&lt;!-- RPC address for jt2 --&gt;<br>
+&lt;value&gt;myjt2.myco.com:8022&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.http.address.logicaljt.jt1&lt;/name&gt; <br>
+&lt;!-- HTTP bind address for jt1 --&gt;<br>
+&lt;value&gt;0.0.0.0:50030&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.http.address.logicaljt.jt2&lt;/name&gt; <br>
+&lt;!-- HTTP bind address for jt2 --&gt;<br>
+&lt;value&gt;0.0.0.0:50031&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.jobtracker.rpc-address.logicaljt.jt1&lt;/name&gt; <br>
+&lt;!-- RPC address for jt1 HA daemon --&gt;<br>
+&lt;value&gt;myjt1.myco.com:8023&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.jobtracker.rpc-address.logicaljt.jt2&lt;/name&gt; <br>
+&lt;!-- RPC address for jt2 HA daemon --&gt;<br>
+&lt;value&gt;myjt2.myco.com:8024&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.jobtracker.http-redirect-address.logicaljt.jt1&lt;/name&gt; <br>
+&lt;!-- HTTP redirect address for jt1 --&gt;<br>
+&lt;value&gt;myjt1.myco.com:50030&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.jobtracker.http-redirect-address.logicaljt.jt2&lt;/name&gt; <br>
+&lt;!-- HTTP redirect address for jt2 --&gt;<br>
+&lt;value&gt;myjt2.myco.com:50031&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.jobtracker.restart.recover&lt;/name&gt;<br>
+&lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.persist.jobstatus.active&lt;/name&gt;<br>
+&lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.persist.jobstatus.hours&lt;/name&gt;<br>
+&lt;value&gt;1&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.job.tracker.persist.jobstatus.dir&lt;/name&gt;<br>
+&lt;value&gt;/jobtracker/jobsInfo&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.proxy.provider.logicaljt&lt;/name&gt;<br>
+&lt;value&gt;org.apache.hadoop.mapred.ConfiguredFailoverProxyProvider&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.max.attempts&lt;/name&gt;<br>
+&lt;value&gt;15&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.sleep.base.millis&lt;/name&gt;<br>
+&lt;value&gt;500&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.sleep.max.millis&lt;/name&gt;<br>
+&lt;value&gt;1500&lt;/value&gt; <br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.connection.retries&lt;/name&gt;<br>
+&lt;value&gt;0&lt;/value&gt; <br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.client.failover.connection.retries.on.timeouts&lt;/name&gt;<br>
+&lt;value&gt;0&lt;/value&gt; <br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.fencing.methods&lt;/name&gt;<br>
+&lt;value&gt;shell(/bin/true)&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;/configuration&gt;</p>
+<p>(3)、配置故障恢复控制参数</p>
+<p> mapred-site.xml:</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.automatic-failover.enabled&lt;/name&gt;<br>
+&lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+&lt;name&gt;mapred.ha.zkfc.port&lt;/name&gt;<br>
+&lt;value&gt;8018&lt;/value&gt; <br>
+&lt;!-- Pick a different port for each failover controller when running one machine-&gt;<br>
+&lt;/property&gt;</p>
+<p> </p>
+<p>core-site.xml:</p>
+<p>&lt;property&gt;<br>
+&lt;name&gt;ha.zookeeper.quorum&lt;/name&gt;<br>
+&lt;value&gt;zk1.example.com:2181,zk2.example.com:2181,zk3.example.com:2181 &lt;/value&gt; <br>
+&lt;!-- ZK ensemble addresses --&gt;<br>
+&lt;/property&gt;</p>
+<p>(4)、初始化在ZK中的HA的状态信息(在某一个jobtracker上面执行就行，在执行前，zk集群必须先启动起来)</p>
+<p>sudo service hadoop-0.20-mapreduce-zkfc init</p>
+<p>OR</p>
+<p>sudo -u mapred hadoop mrzkfc -formatZK</p>
+<p>(5)、启动自动故障恢复</p>
+<p>在每一个jobtracker节点上启动zkfc和jobtracker：</p>
+<p>sudo service hadoop-0.20-mapreduce-zkfc start<br>
+sudo service hadoop-0.20-mapreduce-jobtrackerha start</p>
+<p>(6)、验证自动故障恢复功能</p>
+<p>首先通过以下命令找到那个jt是处于active状态：</p>
+<p>sudo -u mapred hadoop mrhaadmin -getServiceState &lt;id&gt;</p>
+<p>然后执行kill命令杀死对应的jvm进程：</p>
+<p>kill -9 &lt;pid of JobTracker&gt;</p>
+<p>最后就看是否成功将active状态切换到另外一个节点上。</p>
+<p> </p>
+            </div>
+                </div>

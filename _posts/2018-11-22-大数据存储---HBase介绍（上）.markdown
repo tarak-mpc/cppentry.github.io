@@ -1,0 +1,261 @@
+---
+layout:     post
+title:      大数据存储---HBase介绍（上）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>本次主要介绍三部分：</p>
+<ul>
+<li>HBase简介</li>
+<li>HBase整体架构</li>
+<li>HBase安装和启动</li>
+<li>Hbase基本操作</li>
+</ul>
+<hr>
+<h2><a id="HBase_7"></a>HBase简介</h2>
+<p>hbase是bigtable的开源java版本，是建立在hdfs之上。 提供高可靠性、高性能、列存储、可伸缩、实时读写nosql的数据库系统。</p>
+<p>它介于nosql和关系型数据库之间，仅能通过主键(row key)和主键的range来检索数据，仅支持单行事务(可通过hive支持来实现多表join等复杂操作)。<br>
+主要用来存储结构化和半结构化的松散数据。</p>
+<ul>
+<li>Hbase查询数据功能很简单，不支持join等复杂操作，不支持复杂的事务（行级的事务）</li>
+<li>Bigtable 是一个稀疏的、分布式的、持久化存储的多维度排序Map。 Map 的索引是行关键字、列关键字以及时间戳； Map 中的每个 value 都是一个未经解析的 byte 数组。</li>
+<li>与hadoop一样，Hbase目标主要依靠横向扩展，通过不断增加廉价的商用服务器，来增加计算和存储能力。</li>
+</ul>
+<h4><a id="_15"></a>便存储数据的特点</h4>
+<ul>
+<li>大：一个表可以有上十亿行，上百万列</li>
+<li>面向列:面向列(族)的存储和权限控制，列(族)独立检索。</li>
+<li>稀疏:对于为空(null)的列，并不占用存储空间，因此，表可以设计的非常稀疏。</li>
+</ul>
+<h4><a id="_19"></a>与关系型数据库的区别</h4>
+<ul>
+<li>1、行式数据库在分析的时候，将id,name,age,sex,score;完整的信息读入内存，造成大量的内存和IO浪费。</li>
+<li>2、列式数据库的思维是把行式数据库全部拆开，按照列的方式重新组合存储，一列所有的行的数据存放在一起。带来的好处就是，要分析男女就直接访问所有的男女信息，要分析销售额，就直接访问消费额相关的数据。</li>
+<li><img src="https://img-blog.csdn.net/20181009101948186?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></li>
+</ul>
+<h4><a id="HBase_24"></a>HBase的表数据结构</h4>
+<p><img src="https://img-blog.csdn.net/20181009102025244?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<ul>
+<li>表(table)：用于存储管理数据，具有稀疏的、面向列的特点。HBase中的每一张表，就是所谓的大表(Bigtable)，可以有上亿行，上百万列。对于为值为空的列，并不占用存储空间，因此表可以设计的非常稀疏。</li>
+<li>行键(RowKey)：类似于MySQL中的主键，HBase根据行键来快速检索数据，一个行键对应一条记录。与MySQL主键不同的是，HBase的行键是天然固有的，每一行数据都存在行键。</li>
+<li>列族(ColumnFamily)：是列的集合。列族在表定义时需要指定，而列在插入数据时动态指定。列中的数据都是以二进制形式存在，没有数据类型。在物理存储结构上，每个表中的每个列族单独以一个文件存储。一个表可以有多个列簇。</li>
+<li>时间戳(TimeStamp)：是列的一个属性，是一个64位整数。由行键和列确定的单元格，可以存储多个数据，每个数据含有时间戳属性，数据具有版本特性。可根据版本(VERSIONS)或时间戳来指定查询历史版本数据，如果都不指定，则默认返回最新版本的数据。</li>
+<li>区域(Region)：HBase自动把表水平划分成的多个区域，划分的区域随着数据的增大而增多。</li>
+</ul>
+<hr>
+<h2><a id="HBase_32"></a>HBase整体架构</h2>
+<p><img src="https://img-blog.csdn.net/20181009102425877?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<ul>
+<li>
+<p><strong>Client</strong></p>
+<ul>
+<li>①使用HBase RPC机制与HMaster和HRegionServer进行通信；</li>
+<li>②Client与HMaster进行通信进行管理类操作；</li>
+<li>③Client与HRegionServer进行数据读写类操作。</li>
+</ul>
+</li>
+<li>
+<p><strong>Zookeeper</strong></p>
+<ul>
+<li>①保证任何时候，集群中只有一个running master，避免单点问题；</li>
+<li>②存贮所有Region的寻址入口，包括-ROOT-表地址、HMaster地址；</li>
+<li>③实时监控Region Server的状态，将Region server的上线和下线信息，实时通知给Master；</li>
+<li>④存储Hbase的schema，包括有哪些table，每个table有哪些column family。</li>
+</ul>
+</li>
+<li>
+<p><strong>HMaster</strong><br>
+可以启动多个HMaster，通过Zookeeper的Master Election机制保证总有一个Master运行。<br>
+角色功能：</p>
+<ul>
+<li>①为Region server分配region；</li>
+<li>②负责region server的负载均衡；</li>
+<li>③发现失效的region serve并重新分配其上的region；</li>
+<li>④GFS上的垃圾文件回收；</li>
+<li>⑤处理用户对标的增删改查操作。</li>
+</ul>
+</li>
+<li>
+<p><strong>HRegionServer</strong><br>
+HBase中最核心的模块，主要负责响应用户I/O请求，向HDFS文件系统中读写数据。作用：</p>
+<ul>
+<li>①维护Master分配给它的region，处理对这些region的IO请求；</li>
+<li>②负责切分在运行过程中变得过大的region。</li>
+<li>此外，HRegionServer管理一些列HRegion对象，每个HRegion对应Table中一个Region，HRegion由多个HStore组成，每个HStore对应Table中一个Column Family的存储，Column Family就是一个集中的存储单元，故将具有相同IO特性的Column放在一个Column Family会更高效。</li>
+</ul>
+</li>
+<li>
+<p><strong>HStore</strong><br>
+HBase存储的核心，由MemStore和StoreFile组成。<br>
+用户写入数据的流程为：client写入 -&gt; 存入MemStore，一直到MemStore满 -&gt; Flush成一个StoreFile，直至增长到一定阈值 -&gt; 触发Compact合并操作 -&gt; 多个StoreFile合并成一个StoreFile，同时进行版本合并和数据删除 -&gt; 当StoreFiles Compact后，逐步形成越来越大的StoreFile -&gt; 单个StoreFile大小超过一定阈值后，触发Split操作，把当前Region Split成2个Region，Region会下线，新Split出的2个孩子Region会被HMaster分配到相应的HRegionServer上，使得原先1个Region的压力得以分流到2个Region上，如图所示。<br>
+<img src="https://img-blog.csdn.net/20181009102750783?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+<strong>HRegion</strong><br>
+一个表最开始存储的时候，是一个region。<br>
+一个Region中会有个多个store，每个store用来存储一个列簇。如果只有一个column family，就只有一个store。<br>
+region会随着插入的数据越来越多，会进行拆分。默认大小是10G一个。</p>
+</li>
+<li>
+<p><strong>HLog</strong></p>
+<ul>
+<li>在分布式系统环境中，无法避免系统出错或者宕机，一旦HRegionServer意外退出，MemStore中的内存数据就会丢失，引入HLog就是防止这种情况。</li>
+<li>工作机制：<br>
+每个HRegionServer中都会有一个HLog对象，HLog是一个实现Write Ahead Log的类，每次用户操作写入Memstore的同时，也会写一份数据到HLog文件，HLog文件定期会滚动出新，并删除旧的文件(已持久化到StoreFile中的数据)。当HRegionServer意外终止后，HMaster会通过Zookeeper感知，HMaster首先处理遗留的HLog文件，将不同region的log数据拆分，分别放到相应region目录下，然后再将失效的region重新分配，领取到这些region的HRegionServer在Load Region的过程中，会发现有历史HLog需要处理，因此会Replay HLog中的数据到MemStore中，然后flush到StoreFiles，完成数据恢复。</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h2><a id="HBase_80"></a>HBase的安装和基本操作</h2>
+<h4><a id="HBase_81"></a>HBase的安装</h4>
+<ul>
+<li>下载安装</li>
+</ul>
+<pre><code>wget http://mirrors.hust.edu.cn/apache/hbase/1.3.1/hbase-1.3.1-bin.tar.gz
+tar -zxvf hbase-1.3.1-bin.tar.gz -C /export/servers/
+cd ../servers/
+mv hbase-1.3.1 hbase
+vi /etc/profile
+-
+export HBASE_HOME=/export/servers/hbase
+export PATH=${HBASE_HOME}/bin:$PATH
+-
+source /etc/profile
+</code></pre>
+<ul>
+<li>修改配置文件</li>
+</ul>
+<ol>
+<li>进入配置文件所在的目录<br>
+cd /export/servers/hbase/conf/</li>
+<li>修改第一个配置文件  regionservers</li>
+</ol>
+<pre><code>vi regionservers 
+-
+node02
+node03
+</code></pre>
+<ol start="3">
+<li>修改第二个配置文件 hbase-site.xml</li>
+</ol>
+<pre><code>注意：以下配置集成的是hadoop ha集群。
+如果您的集群没有配置ha，hbase.rootdir 配置项目需要修改：hdfs://master:9000/hbase
+vi hbase-site.xml 
+-
+&lt;configuration&gt;
+  &lt;property&gt;
+    &lt;name&gt;hbase.rootdir&lt;/name&gt;
+    &lt;value&gt;hdfs://ns1/hbase&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+     &lt;name&gt;hbase.cluster.distributed&lt;/name&gt;
+     &lt;value&gt;true&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+     &lt;name&gt;hbase.master.port&lt;/name&gt;
+     &lt;value&gt;16000&lt;/value&gt;
+  &lt;/property&gt;
+   &lt;property&gt;
+    &lt;name&gt;hbase.zookeeper.property.dataDir&lt;/name&gt;
+    &lt;value&gt;/export/data/zk/&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;hbase.zookeeper.quorum&lt;/name&gt;
+    &lt;value&gt;node01,node02,node03&lt;/value&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;hbase.zookeeper.property.clientPort&lt;/name&gt;
+    &lt;value&gt;2181&lt;/value&gt;
+  &lt;/property&gt;
+&lt;/configuration&gt;
+</code></pre>
+<ol start="4">
+<li>修改第三个配置文件 <a href="http://hbase-env.sh" rel="nofollow">hbase-env.sh</a></li>
+</ol>
+<pre><code>HBASE_MANAGES_ZK=false 表示，hbase和大家伙公用一个zookeeper集群，而不是自己管理集群。
+
+vi hbase-env.sh
+-
+export JAVA_HOME=/export/servers/jdk
+export HBASE_MANAGES_ZK=false
+</code></pre>
+<h4><a id="_151"></a>分发其他节点并启动</h4>
+<pre><code>分发配置文件
+scp -r /export/servers/hbase/ node02:/export/servers/
+scp -r /export/servers/hbase/ node03:/export/servers/
+
+启动集群
+startzk.sh
+start-dfs.sh
+start-hbase.sh
+</code></pre>
+<hr>
+<h2><a id="HBase_165"></a>HBase的基本操作</h2>
+<p>命令文件如下<br>
+<img src="https://img-blog.csdn.net/20181009125110867?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+可以通过HbaseUi界面查看表的信息</p>
+<p>端口60010打不开的情况，是因为hbase 1.0 以后的版本，需要自己手动配置，在文件 hbase-site</p>
+<pre><code>&lt;property&gt;  
+	&lt;name&gt;hbase.master.info.port&lt;/name&gt;  
+	&lt;value&gt;60010&lt;/value&gt;  
+&lt;/property&gt; 
+</code></pre>
+<h4><a id="_180"></a>连接集群</h4>
+<pre><code>hbase shell
+</code></pre>
+<h4><a id="_184"></a>创建表</h4>
+<pre><code>create 'user','base_info'
+</code></pre>
+<h4><a id="_188"></a>插入数据</h4>
+<pre><code>put 'user','rowkey_10','base_info:username','张三'
+put 'user','rowkey_10','base_info:birthday','2014-07-10'
+put 'user','rowkey_10','base_info:sex','1'
+put 'user','rowkey_10','base_info:address','北京市'
+
+put 'user','rowkey_16','base_info:username','张小明'
+put 'user','rowkey_16','base_info:birthday','2014-07-10'
+put 'user','rowkey_16','base_info:sex','1'
+put 'user','rowkey_16','base_info:address','北京'
+
+put 'user','rowkey_22','base_info:username','陈小明'
+put 'user','rowkey_22','base_info:birthday','2014-07-10'
+put 'user','rowkey_22','base_info:sex','1'
+put 'user','rowkey_22','base_info:address','上海'
+
+put 'user','rowkey_24','base_info:username','张三丰'
+put 'user','rowkey_24','base_info:birthday','2014-07-10'
+put 'user','rowkey_24','base_info:sex','1'
+put 'user','rowkey_24','base_info:address','河南'
+
+put 'user','rowkey_25','base_info:username','陈大明'
+put 'user','rowkey_25','base_info:birthday','2014-07-10'
+put 'user','rowkey_25','base_info:sex','1'
+put 'user','rowkey_25','base_info:address','西安'
+</code></pre>
+<h4><a id="_216"></a>查询数据</h4>
+<pre><code>//查询所有数据
+scan 'user'
+//查询某个列簇的数据
+get 'user','rowkey_16','base_info'
+get 'user','rowkey_16','base_info:username'
+get 'user', 'rowkey_16', {COLUMN =&gt; ['base_info:username','base_info:sex']}
+</code></pre>
+<h4><a id="_226"></a>删除表中的数据</h4>
+<pre><code>delete 'user', 'rowkey_16', 'base_info:username'
+</code></pre>
+<h4><a id="_231"></a>清空数据</h4>
+<pre><code>truncate 'user'
+</code></pre>
+<h4><a id="_236"></a>操作列簇</h4>
+<pre><code>alter 'user', NAME =&gt; 'f2'
+alter 'user', 'delete' =&gt; 'f2'
+</code></pre>
+<h4><a id="_240"></a>删除表</h4>
+<pre><code>disable 'user'
+drop 'user'
+</code></pre>
+<hr>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

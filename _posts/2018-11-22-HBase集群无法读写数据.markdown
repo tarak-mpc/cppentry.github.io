@@ -1,0 +1,35 @@
+---
+layout:     post
+title:      HBase集群无法读写数据
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，转载请注明：http://blog.csdn.net/oozie123					https://blog.csdn.net/Oozie123/article/details/49908899				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="1-问题现象">1 问题现象</h1>
+
+<p>HBase集群于11.17晚无法写入数据，所有的同步至HBase的服务都无法写入HBase库。</p>
+
+<h1 id="2-问题原因">2 问题原因</h1>
+
+<p>所有的写入服务都无法写入数据，排除应用本身的问题，考虑HBase集群本身出现问题。进入hbase shell，scan一下当中的表是否可以读取数据，结果命令卡住无法正常读取数据。重新启动HBase集群，查看 master节点日志，发现： <br>
+<img src="https://img-blog.csdn.net/20151118162208754" alt="这里写图片描述" title=""> <br>
+由此，可到看到hbase:meta所在region是下线的，故HBase集群当然不可读写数据。</p>
+
+<h1 id="3-解决方法">3 解决方法</h1>
+
+<p>HBase集群本身提供了数据修复的工具：hbase hbck ，尝试运用该工具进行相关修复工作，最终还是无法解决hbase:meta不一致的状况。为啥无法修复？我想原因是HMaster进程虽然启动成功了，但它的启动时是报了异常的，所以优先解决HMaster无异常启动。HBase集群也提供了离线修复jar包来应对HMaster无法启动的过程。先关闭HBase集群，运用以下命令： <br>
+hbase org.apache.hadoop.hbase.util.hbck.OfflineMetaRepair <br>
+修复完成后，可以看到hbase:meta也重新分配了region，再次重启HMaster，无异常正常启动。然后HMaster一直等待HRegionserver的汇报心跳，此时启动所有Hregionserver。所有启动正常后，再用hbase hbck工具检测不一致性，还有不一致就用此工具修复。最后验证HBase集群的读写情况。</p>
+
+<h1 id="4-小结">4 小结</h1>
+
+<p>HBase中表读写数据流程如下： <br>
+(1) HBase Client提交读写请求，首先与zookeeper交互，zookeeper中存储hbase:meta表region所在regionserver所在位置信息。 <br>
+(2) 找到hbase:meta所在位置后，HBase Client直接与对应的regionserver交互，读取region中的内容。 <br>
+(3) hbase:meta表中存储的内容为：每1行对应1个region，主要包含region名，起止rowkey，对应regionserver位置等。 <br>
+(4) 由上就可以找到特定表所在regionserver位置，并与之交互。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

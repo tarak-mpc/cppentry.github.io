@@ -1,0 +1,111 @@
+---
+layout:     post
+title:      HBase加密存储
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h1>思路</h1>
+
+<p>1、HBase的加密存储，最初的思路如下：由于HBase的存储落在hdfs上的原因，理论上可以利用hdfs的透明加密来实现HBase的加密存储，可以先把hbase在DFS上的路径做一个别名备份，然后清空原本的HBase路径(hdfs的透明加密区要求是空路径)，再为HBase原本的路径作为透明加密区，最后将一系列权限赋给hbase用户，将数据导入加密区。注：这只是一种实现思路，并没有去付诸实施。</p>
+
+<p>2、大数据这一类技术栈，还是需要多看看官网的文档的。HBase的官方文档对于加密的诠释见以下链接（63.4）：<a href="http://hbase.apache.org/book.html#_securing_access_to_your_data" rel="nofollow">http://hbase.apache.org/book.html#_securing_access_to_your_data</a> 本文属于半翻译半实践吧。</p>
+
+<h1>概述</h1>
+
+<p>HDFS的加密存储的原理可以看我的另一篇文章：<a href="https://blog.csdn.net/weixin_42348333/article/details/81951562" rel="nofollow">https://blog.csdn.net/weixin_42348333/article/details/81951562</a></p>
+
+<p>HBase的数据加密存储与HDFS的数据加密存储有非常多的相似点：</p>
+
+<p>1.都是双层密钥体系，都是具备master key与data key，HBase中的master key相当于HDFS中的EZ key，HBase中的data key相当于HDFS的DEK。不同的是HBase的data key是自动生成的，如果使用Ranger KMS，HDFS的EZ key也是自动生成的。</p>
+
+<p>2.HBase与HDFS都将对于的密钥信息（加密信息）写进了对应的元数据。</p>
+
+<h1>实现</h1>
+
+<h3>配置HBase加密</h3>
+
+<p>1.利用keytool生成key  （先生成密钥文件，再配置hbase）</p>
+
+<p>keytool本身就是一个功能强大的工具，与大数据组件无关，更多用法，包括避免交互式输入密码的命令见：<a href="https://blog.csdn.net/zlfing/article/details/77648430" rel="nofollow">https://blog.csdn.net/zlfing/article/details/77648430</a></p>
+
+<p>$ keytool -keystore /path/to/hbase/conf/hbase.jks \<br>
+  -storetype jceks -storepass **** \<br>
+  -genseckey -keyalg AES -keysize 128 \<br>
+  -alias &lt;alias&gt;</p>
+
+<p>2.设置密钥文件适当的权限(chown chgrp)，并将其分发（scp）给所有的HBase的服务器。</p>
+
+<p>上面的命令创建一个名为hbase.jks在HBase的CONF /目录。设置该文件的权限和所有权，使得只有HBase的服务帐户的用户可以读取该文件，并安全地分发密钥给所有HBase的服务器。（<span style="color:#f33b45;">这一步不可以跳过，如果跳过，在添加完对应的加密配置项后，重启HBase时会发生Regionserver无法启动的情况</span>。）</p>
+
+<p>3.配置HBase的守护进程。</p>
+
+<p>设置在下面的配置项在HBase-site.xml中的server端(在HDP集群中，由于我的环境将server和client端都配置在同一个节点上，直接在client改后台配置的话，前端的重启HBase操作会覆盖后台的配置项，所以我直接在server端(前端页面)的自定义hbase-site.xml增加了对应的配置项。)在下面的例子中，替换****的密码。</p>
+
+<p>&lt;property&gt;<br>
+  &lt;name&gt;hbase.crypto.keyprovider&lt;/name&gt;<br>
+  &lt;value&gt;org.apache.hadoop.hbase.io.crypto.KeyStoreKeyProvider&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+  &lt;name&gt;hbase.crypto.keyprovider.parameters&lt;/name&gt;<br>
+  &lt;value&gt;jceks:///path/to/hbase/conf/hbase.jks?password=****&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+默认情况下，HBase的服务帐户名称将用于定义集群master key。当然别名可以根据个人需要进行更改，设置以下属性为你所用的别名。</p>
+
+<p>&lt;property&gt;<br>
+  &lt;name&gt;hbase.crypto.master.key.name&lt;/name&gt;<br>
+  &lt;value&gt;my-alias&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+还需要确保HFiles使用HFILE V3，为了使用透明加密。这是HBase的1.0以后的默认配置。对于先前的版本，请在hbase-site.xml 文件配置对应属性。</p>
+
+<p>&lt;property&gt;<br>
+  &lt;name&gt;hfile.format.version&lt;/name&gt;<br>
+  &lt;value&gt;3&lt;/value&gt;<br>
+&lt;/property&gt;</p>
+
+<p>4.配置WAL加密。</p>
+
+<p>在每一个RegionServer的的配置WAL加密HBase的-site.xml中，通过设置以下属性。您可以包括这些在HMASTER的HBase的-site.xml中为好，但HMASTER没有WAL，并不会使用它们。</p>
+
+<p>&lt;property&gt;<br>
+  &lt;name&gt;hbase.regionserver.hlog.reader.impl&lt;/name&gt;<br>
+  &lt;value&gt;org.apache.hadoop.hbase.regionserver.wal.SecureProtobufLogReader&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+  &lt;name&gt;hbase.regionserver.hlog.writer.impl&lt;/name&gt;<br>
+  &lt;value&gt;org.apache.hadoop.hbase.regionserver.wal.SecureProtobufLogWriter&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+  &lt;name&gt;hbase.regionserver.wal.encryption&lt;/name&gt;<br>
+  &lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+5.配置hbase-site.xml的权限</p>
+
+<p>因为密钥库密码存储在hbase-site.xml中，你需要确保只有HBase的用户可以读取hbase-site.xml的文件，使用文件所有权和权限。</p>
+
+<p>6.重新启动集群。</p>
+
+<p>将新的配置文件分发到所有节点并重新启动集群。</p>
+
+<h3>创建表t2并设置CF加密</h3>
+
+<p>1.创建对应的表</p>
+
+<p># hbase shell<br>
+# create 't2', {NAME =&gt; 'f1', COMPRESSION =&gt; 'SNAPPY', ENCRYPTION =&gt; 'AES'}<br>
+# put 't2','r1','cf1:a','1000'<br>
+# flush 't2'<br><img alt="" class="has" height="218" src="https://img-blog.csdn.net/20180904093602608?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjM0ODMzMw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="670"></p>
+
+<p>2.读取HFile中内容，EncryptionKey=Present<br>
+# hbase hfile -f hdfs://node1:8020/apps/hbase/data/data/default/t2/759edcb0795e7c6b75a2f28ee971b371/cf1/45b3dcb31816411b9be12ad6ec99b921 -v -s -m</p>
+
+<p><img alt="" class="has" height="291" src="https://img-blog.csdn.net/20180904093751947?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjM0ODMzMw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="553"></p>
+
+<h1>加密读写性能对比</h1>
+
+<p>利用YCSB的读写基准测试，来进行明文和密文的读写性能对比。HBase单表单列族，写入和读取5000w条数据。</p>
+
+<p><img alt="" class="has" height="289" src="https://img-blog.csdn.net/2018090409541442?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjM0ODMzMw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="481"></p>
+
+<p><img alt="" class="has" height="289" src="https://img-blog.csdn.net/20180904095734292?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjM0ODMzMw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="481"></p>            </div>
+                </div>

@@ -1,0 +1,103 @@
+---
+layout:     post
+title:      回顾·网易HBase实践
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>本文根据网易杭州研究院技术专家范欣欣在中国HBase技术社区第3届 MeetUp 杭州站分享的《网易HBase实践》编辑整理而成。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7ibNcUvhRahiap2b2blLOr6iaWqWiaTbPOmuHqn7Yy2xuXRIyw6y2NicZrLQ/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p>今天主要从四个方面和大家分享HBase，HBase是整个Hadoop里面非常重要的组件，首先讲一下HBase在大数据领域的定位，第二个方面就是网易在HBase方面都有哪些应用场景，接下来讲一下HBase中经常会出现的RIT问题，以及用HBCK解决问题的套路。最后讲一下我们遇到HBase问题的一些排查思路，在遇到一些相似的问题应该应用哪种方式去解决。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_jpg/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7RTgT4AHrm4dRSia72M49gWBagRkcJ7VWN9cj3EKxROKibdfzmmzibibkIQ/640?wx_fmt=jpeg&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p>做Hadoop或者大数据经常会遇到一个问题就是在很多组件或者系统里面有没有一种系统能够解决所有问题呢，后续会继续探讨。HBase组件无所不能，是一个k-v数据库，通过K查v是没问题的，通过row-k去查一行数据也是没问题的。无论是小数据的scan，还是大数据的scan都能运行。那既然HBase啥都能干为啥还要NoSQL数据库等其他数据库，这就衍生出另一个问题HBase适合干啥。</p>
+
+<p>作为一个K-V数据库，本能就是通过K来查V；第二个就是根据rowKey去查一行的数据；第三个就是小规模的scan。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7ntLicYVA3q5fqXLXjtCf6HNgUv8fic37RY6J4e40dcic62WZ9KDw174fA/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p>接下来介绍下网易大数据体系整个系统架构。数据来源方面，业务数据来源于MYSQL这类关系型数据库，还有一个重要来源是日志系统，另外还有外部APP或者web直接产生的一些打点数据，最后一个数据来源就是sensor，如工业设备监控产生的数据、CPU或者IO的一些指标数据。这些数据经过数据采集器进入数据存储，数据采集器比如sqoop、datastream（采集日志数据），还有APP的一些sdk。</p>
+
+<p>这些数据采集器可以将数据取出来通过kafka、sparkstreaming、flink流到存储系统。存储系统有些是带计算功能有些是不带计算功能，最上面是离线存储系统，中间是在线存储、还有个时序存储系统。</p>
+
+<p>离线存储系统底层存储使用HDFS，基于HDFS之上的数据格式有很多种，比如ORC、Parquet、CarbonData等，在其之上可以跑hive、spark、impala。离线存储系统还有一个比较重要的存储成员Kudu。除此之外，GP是另一种支持离线存储计算的数仓系统。在线存储系统就只有HBase和Phoenix，HBase主要做存储功能，Phoenix可以做很多计算功能，其中比较重要的是SQL能力和倒排索引能力。另外，除过传统意义上的离线存储和在线存储之外，还有一类存储系统是时序数据库，这类系统比如OpenTSDB、Druid、InfluxDB等。当然，不同模式的存储系统适用于不同的业务场景，比如用离线数据做一些数仓报表、机器学习模型训练等，HBase主要做交易订单、商品优惠券、用户画像等，时序系统最重要就是监控、广告营销系统以及物联网等。因此可以看出HBase在大数据平台是一个很重要的组件，在在线存储平台占很重要的地位。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7uD36R3n0cibsibBFRl6LIDvrG0iawK0KWHdvkriasXXWMCCic6E38lbNu4A/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p>第二部分讲一下网易HBase主要的应用场景，HBase在网易应用时间很久远，有300+物理机，3PB数据量。应用的业务也非常多，有网易考拉、网易云音乐、网易新闻客户端，还包括很多云服务、大数据服务都是用HBASE做存储。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7vCLEXZQgoWHQNSdN1YzogbN2X35mib4je2YbA6HCcnmTj0g0W3icpKsQ/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p>我们通常有很多用户原始数据，用户点击行为、浏览信息等数据搜集会将其流入HDFS中，在结合MR和spark做一些机器学习的工作，训练一些模型，这些模型数据通过bulkload导入HBase的HDFS中，然后通过HBase提供在线服务。这类业务有新闻推荐，比如通过客户端看一条新闻，接下来往下看系统就会推荐很多其他相关的新闻，这种数据需要实时产生。实现原理是Hadoop通过前期特征模型训练将数据放到HBase里面，用户再打开新闻客户端时模型就会实时推荐出你想要的其他一些新闻。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7uX0MsLUqOrUicM7Uj1J9iaeFUdWeaSsxgxniaTmb1Oss0ddmYVUQUEn2A/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p> </p>
+
+<p>第二个应用场景就是内部哨兵系统，监控几万台服务器。监控系统是自研系统，其底层也是用HBase，为什么不用OpenTSDB？其一是它聚合能力比较差，只能做一些基本的聚合。还有一个就是OpenTSDB的数据采集能力比较弱，因此用HBASE做了哨兵系统。类似OpenTSDB的用法很多，如Kylin，其底层也是用HBase。还有很多图数据库底层也是用HBase，HBase在很多通用的查询底层系统应用很多。</p>
+
+<p>还有一些应用如电商订单，电商历史订单数据都是用HBase存储，内部消息系统历史信息也是存在HBase里面，云音乐的私信通知，以及网易新闻客户端APP Push通知都是存在HBase中。还有一些炫酷大屏，因为HBase延迟很小。货品上下架操作记录、搜索历史纪录、日志明细归档、cdn流量及带宽数据、信息安全用户轨迹等等。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7FEMhYKib7MPSGzNVofkus7Oey4GFMG9z621btpGRrQIo5zMIj35LqSw/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p> </p>
+
+<p>第三部分讲一下HBCK和RIT相关的知识，HBCK有两部分工作，第一部分工作是做数据表的检查，另一部分工作是表的修复。检查部分分为两部分，一部分是一致性的检查，第二部分是完整性的检查。HBCK修复方面有很多命令，一种是局部修复一种是高级修复。</p>
+
+<p>HBase Region一致性有两个含义，其一是说集群中所有region都被assign，而且deploy到唯一一台RegionServer上。其二是region的状态在内存中、hbase:meta表中以及zookeeper这三个地方需要保持一致。表的完整性就是一个rowkey只能存在于一个region里面。HBCK常见的检查命令就是./bin/hbase hbck、./bin/hbase hbck –details、./bin/hbase hbck TableFoo TableBar，建议做到表级别，如果集群级别的话，HBCK效率会比较低。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7Hg1ZMcOdF8qrCYh516wLJhN6HPdGxJv2Qj3RCB9QjneWpacIeIZxPg/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p>HBCK局部低危修复，80%问题都可以用-fixAssignments、-fixMeta修复。第一个主要修复没有assign、assign不正确或者同时assign到多台RegionServer的问题region。第二个是修复元数据，主要修复.regioninfo文件和hbase:meta元数据表的不一致。</p>
+
+<p>修复的原则是以HDFS文件为准：如果region在HDFS上存在，但在hbase.meta表中不存在，就会在hbase:meta表中添加一条记录。反之如果在HDFS上不存在，而在hbase:meta表中存在，就会将hbase:meta表中对应的记录删除。</p>
+
+<p>region区间overlap相关问题的修复属于高危修复操作，因为这类修复通常需要修改HDFS上的文件，有时甚至需要人工介入。对于这类高危修复操作，建议先执行hbck -details详细了解更多的问题细节，再执行相应的修复命令。但是现实中又很多-repair|、-fix命令导致的，如会导致一个rowkey存在多个region里面去，因此强烈不建议生产线使用。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ747biayFOtA3JbtqV0ia0iapiczTTZMtpd2rYicuiaS5wluz5BthVk3seJf3w/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p> </p>
+
+<p>有时集群会出现region没有deploy到任何regionserver上，出现这种情况不要慌，90%只要执行./hbase hbck –fixAssignments就可以解决。如果实在解决不了，再去看打印的信息。第二种就是region没有deploy到任何regionserver上且元数据表中对应记录为空，如果在HBCK输出的detail中看到“on HDFS，but not listed in hbase ：meta or deployed on region server”，可以用./hbase hbck –fixMeta –fixAssignments解决。同样看到“there is a hole in the region chain”这样的信息先不用处理，执行完上述修复命令再执行HBCK检查是否还有不一致现象。</p>
+
+<p>总结下有几个套路，第一个套路如果状态是pending_open（或pending_close）状态的region通常可以使用hbck命令修复，套路二如果是failed_open （或failed_close）状态的region通常无法使用hbck命令修复，这个时候应该去检查日志。套路三failed_open （或failed_close）状态的region需检查日志确认region无法打开关闭的具体原因，套路四：region处于RIT状态但hbck显示正常，把zk上的region-in-transaction节点相关region删除，重启master就解决了。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ7icyAficic4PxGicxhcJ0kx6UgiaYiaWx9IbG20mSdN1VfIibEkA4Uh7xycpUw/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p> </p>
+
+<p>最后介绍下HBase问题排查思路，出现问题先做指标监控分析，再做日志分析，实在不行而且又很紧急的去网络求助，如果不是很紧急的一定要通过源码分析，最后建议一定要将问题从头到尾复盘一遍。</p>
+
+<p>一旦业务读写响应变慢，写入阻塞，RS宕机…，第一反应都应该去看监控！ 就像发生一起交通事故，第一反应是去看摄像头。第二个监控做好了，几乎所有的异常都可以及时反映出来！资源使用情况，队列使用情况，业务相互干扰情况，Compaction情况，GC情况。</p>
+
+<p> </p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ74nzuHDDJSnTeYn0AVO4iaQNtJia0h2QS8JwJGxTSukpa9FaibfiaY2wmHQ/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p>监控的方面有很多方面，如环境的监控、机器的监控（CPU、IO、网卡、内存），这些基本监控能够大致告诉你大方向所在，如IO打满会导致读或者写延迟较高。具体是什么还要去排查下regionserver监控，如regionserver队列长度、rpc等情况，需要真正排查regionserver的状态。其状态能够告诉你regionserver是否工作正常，而前面是告诉你这台机器是否工作正常。有时一个regionserver会服务很多表，想知道问题到底是那个表产生的，这个时候就需要表级别的监控。如表级别的读写，GPS等，这种就知道是那种业务导致请求量上去，可以找对应业务方进行沟通。</p>
+
+<p><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPgPPQc9Dk6iao4MydejhicwJ73Ph70wFqdrqIXafKpG2ukTtwaYKKOLYy08WernTibVFK2vpvdj9stSw/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></p>
+
+<p> </p>
+
+<p>监控只会告诉你发生问题但是不能告诉你为什么。这时就需要日志分析，master日志负责DDL操作：表的分布式创建、删除、修改，balance操作：集群范围负载均衡，snapshot操作，分布式快照创建、删除等，集群宕机恢复调度。Regionserver日志，region打开关闭操作，用户读写请求记录，region flush操作等。如果实在解决不了就只能网络求助，通过搜索引擎，技术论坛群组或者社区邮件等。</p>
+
+<p>原文地址:  点击 <a href="https://mp.weixin.qq.com/s?__biz=MzU1NTMyOTI4Mw==&amp;mid=2247486139&amp;idx=1&amp;sn=f2ce610769781d6df0bb7471b2b97985&amp;chksm=fbd4b8d7cca331c1d220c0159358e44cf192ebf68c831fcf6d1969f83c1fa059ace44dfa239a&amp;mpshare=1&amp;scene=1&amp;srcid=0925eHpPMOgKUPM5qmLa0Vr7#rd" rel="nofollow">查看原文</a></p>
+
+<p><strong><strong>作者介绍：</strong></strong></p>
+
+<p>范欣欣，网易杭州研究院技术专家，就职于网易研究院后台技术中心数据库技术组，专注于HBase的开发运维，热衷于MySQL等相关数据库技术。</p>
+
+<p>——END——</p>
+
+<p><strong>再看看其他文章？</strong></p>
+
+<p><a href="http://mp.weixin.qq.com/s?__biz=MzU1NTMyOTI4Mw==&amp;mid=2247485900&amp;idx=1&amp;sn=768229b1fc8e6794b5de8491e81c66e8&amp;chksm=fbd4bba0cca332b6041b7cdc2a979d35d9d4e8fc35bce4ec4599f070ce080dbdfd599f2d0e3d&amp;scene=21#wechat_redirect" rel="nofollow"><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPguEPZib9nXDe9807Z6ibyibacUWCYn4uicbOVOG9ibQamIBkgicXIkWIfpJzOEbibbrhhfNV5O0r7MRrV3g/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></a></p>
+
+<p><a href="http://mp.weixin.qq.com/s?__biz=MzU1NTMyOTI4Mw==&amp;mid=2247486053&amp;idx=1&amp;sn=8c79ba01f9ade8a7f4f8bfb1c7dd6be8&amp;chksm=fbd4b809cca3311f86c91d0f21cd8a3d4a0708ce3fdb9758e883570886e21cfb47d1e8fefc18&amp;scene=21#wechat_redirect" rel="nofollow"><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPguEPZib9nXDe9807Z6ibyibacMpCaC5ic03fIoyz3Mv60Iicfl6PbhlE28lINUWOoN6UErNF6kicegJfHA/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></a></p>
+
+<p><a href="http://mp.weixin.qq.com/s?__biz=MzU1NTMyOTI4Mw==&amp;mid=2247485746&amp;idx=1&amp;sn=6e675b346151475a60d6c5e151ec6472&amp;chksm=fbd4bb5ecca3324804671e4378adeb301c63a14f54890a4b35771fccd34a945c71273104a0ea&amp;scene=21#wechat_redirect" rel="nofollow"><img alt="" class="has" src="https://mmbiz.qpic.cn/mmbiz_png/zHbzQPKIBPguEPZib9nXDe9807Z6ibyibac4ePnL2uBvzsQAnObmBAUsQe8x0zjxeibbPgWYl4RSe8NyPVsMkrFyEw/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1&amp;wx_co=1"></a></p>            </div>
+                </div>

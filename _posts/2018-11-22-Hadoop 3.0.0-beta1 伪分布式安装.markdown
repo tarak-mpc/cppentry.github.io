@@ -1,0 +1,130 @@
+---
+layout:     post
+title:      Hadoop 3.0.0-beta1 伪分布式安装
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u012554478/article/details/79082902				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h3 id="1使用环境">1.使用环境</h3>
+
+<p><code>Centos 7.4(内核3.10.0-693.2.2.el7.x86_64) JDK 1.8   Hadoop 3.0.0-beta1</code></p>
+
+
+
+<h3 id="2安装">2.安装</h3>
+
+<p>在linux中下载完Hadoop文件并解压之后，进入到解压的Hadoop根目录 <br>
+  1.在Hadoop根目录下更改etc/hadoop/hadoop-env.sh文件中的jdk目录 <br>
+  <code>export JAVA_HOME=本机的Jdk目录</code></p>
+
+<p>2.Hadoop根目录下修改etc/hadoop/core-site.xml: <br>
+  “` <br>
+   <br>
+       <br>
+          fs.defaultFS <br>
+           hdfs://localhost:9000 <br>
+       <br>
+  </p>
+
+<p>“` <br>
+  fs.defaultFS 主要用来设置Hadoop的默认文件系统,HDFS的守护程序通过该属性来确定HDFS namenode的主机以及端口号，从而使HDFS客户端能通过该地址连接到namenode</p>
+
+<p>3.hadoop 根目录下修改etc/hadoop/hdfs-site.xml: <br>
+  <code> <br>
+  &lt;configuration&gt; <br>
+      &lt;property&gt; <br>
+          &lt;name&gt;dfs.replication&lt;/name&gt; <br>
+           &lt;value&gt;1&lt;/value&gt; <br>
+      &lt;/property&gt; <br>
+  &lt;/configuration&gt; <br>
+</code> <br>
+  dfs.replication主要是用来设置文件系统的数据冗余分数设置，默认的设置是3个，但是由于处于伪分布式下，只有一个datanode，无法将文件系统的数据复制到3个datanode节点上，回持续报错，修改之后就不会报错</p>
+
+<p>4.检查本机是否可以免密码登录,如果不行则需要配置</p>
+
+<p><code>$ ssh-keygen -t rsa -P '' -f ~/.ssh/id_rsa</code> <br>
+  <code>$ cat ~/.ssh/id_rsa.pub &gt;&gt; ~/.ssh/authorized_keys</code> <br>
+  <code>$ chmod 0600 ~/.ssh/authorized_keys</code></p>
+
+<p>5.格式化HDFS并启动HDFS <br>
+  bin/hdfs namenode -format</p>
+
+<p>sbin/start-dfs.sh</p>
+
+<p>如果运行脚本报如下错误, <br>
+  <code> <br>
+  ERROR: Attempting to launch hdfs namenode as root <br>
+  ERROR: but there is no HDFS_NAMENODE_USER defined. Aborting launch. <br>
+  Starting datanodes <br>
+  ERROR: Attempting to launch hdfs datanode as root <br>
+  ERROR: but there is no HDFS_DATANODE_USER defined. Aborting launch. <br>
+  Starting secondary namenodes [localhost.localdomain] <br>
+  ERROR: Attempting to launch hdfs secondarynamenode as root <br>
+  ERROR: but there is no HDFS_SECONDARYNAMENODE_USER defined. Aborting launch. <br>
+</code> <br>
+  解决方法是因为缺少用户定义造成的，所以分别编辑开始和关闭脚本 <br>
+ <code>vim sbin/start-dfs.sh</code> <br>
+ <code>vim sbin/stop-dfs.sh</code> <br>
+ <code>HDFS_DATANODE_USER=root</code> <br>
+ <code>HADOOP_SECURE_DN_USER=hdfs</code> <br>
+ <code>HDFS_NAMENODE_USER=root</code> <br>
+ <code>HDFS_SECONDARYNAMENODE_USER=root</code> <br>
+  如果通过jps 查看datanode进程没有启动，可以进入Hadoop根目录下的logs目录下查看日志如果错误如下： <br>
+  <code> <br>
+  java.io.IOException: Incompatible clusterIDs in /tmp/hadoop-root/dfs/data: namenode clusterID = CID-ee997149-f4aa-4ffc-bbc5-a5385993d77f; datanode clusterID = CID-d1296511-b5fb-426d-b119-add1599c6bb1 <br>
+</code> <br>
+  可以看出datanode和namenode的clusterIDs不一致，解决办法： <br>
+  第一种办法.进入tmp目录下删除文件重新格式hdfs  <br>
+  第二种办法:将hadoop-root/dfs/data/current/VERSION中的clusterID与hadoop-root/dfs/name/current/VERSION clusterID 改为一样 <br>
+  重新启动hdfs即可</p>
+
+<p>6.创建hdfs的目录 <br>
+  <code> <br>
+  bin/hdfs dfs -mkdir /user <br>
+  bin/hdfs dfs -mkdir /user/hdfs用户目录 <br>
+</code></p>
+
+<p>7.修改etc/hadoop/mapred-site.xml:文件 <br>
+  <code> <br>
+  &lt;configuration&gt; <br>
+      &lt;property&gt; <br>
+          &lt;name&gt;mapreduce.framework.name&lt;/name&gt; <br>
+           &lt;value&gt;yarn&lt;/value&gt; <br>
+      &lt;/property&gt; <br>
+  &lt;/configuration&gt; <br>
+</code> <br>
+  修改 etc/hadoop/yarn-site.xml:文件 <br>
+  <code> <br>
+  &lt;configuration&gt; <br>
+      &lt;property&gt; <br>
+          &lt;name&gt;yarn.nodemanager.aux-services&lt;/name&gt; <br>
+           &lt;value&gt;mapreduce_shuffle&lt;/value&gt; <br>
+      &lt;/property&gt; <br>
+      &lt;property&gt; <br>
+          &lt;name&gt;yarn.nodemanager.env-whitelist&lt;/name&gt; <br>
+           &lt;value&gt;JAVA_HOME,HADOOP_COMMON_HOME,HADOOP_HDFS_HOME,HADOOP_CONF_DIR,CLASSPATH_PREPEND_DISTCACHE,HADOOP_YARN_HOME,HADOOP_MAPRED_HOME&lt;/value&gt; <br>
+      &lt;/property&gt; <br>
+  &lt;/configuration&gt; <br>
+</code> <br>
+  8.修改sbin/start-yarn.sh sbin/stop-yarn.sh文件添加: <br>
+  <code>YARN_RESOURCEMANAGER_USER=root</code> <br>
+  <code>HADOOP_SECURE_DN_USER=yarn</code>  <br>
+  <code>YARN_NODEMANAGER_USER=root</code> <br>
+  启动sbin/start-yarn.sh 即可</p>
+
+
+
+<h3 id="确认是否启动成功">确认是否启动成功</h3>
+
+<pre><code>1.使用jps命令查看是否有5个进程启动分别是:
+SecondaryNameNode
+NameNode
+NodeManager
+ResourceManager
+DataNode
+</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

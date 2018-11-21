@@ -1,0 +1,266 @@
+---
+layout:     post
+title:      hadoop 2.2.0 执行MapReduce程序
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p align="left"><span style="font-size:12px;"></span> </p>
+<p align="left"><span style="font-size:12px;">环境：</span></p>
+<p align="left"><span style="font-size:12px;">2台虚拟机搭建Hadoop环境</span></p>
+<p align="left"><span style="font-size:12px;">系统Fedora 10</span></p>
+<p align="left"><span style="font-size:12px;">Hadoop 2.2.0</span></p>
+<p align="left"><span style="font-size:12px;"></span> </p>
+<p align="left"><span style="font-size:12px;">准备工作：</span></p>
+<p align="left"><span style="font-size:12px;">1、Hadoop 2.2.0 环境配置运行</span></p>
+<p align="left"><span style="font-size:12px;">2、创建Hdfs的输入文件夹和输入文件：</span></p>
+<p align="left"><span style="font-size:12px;">hadoop fs -copyFromLocal test1.txt /input/</span></p>
+<p align="left"><span style="font-size:12px;">hadoop fs -copyFromLocal test2.txt /input/</span></p>
+<p align="left">确认hdfs中没有/output目录，如有hadoop fs -rm -r /output删除</p>
+<p align="left">执行：</p>
+<p align="left">cd ./hadoop-2.2.0/share/hadoop/mapreduce</p>
+<p align="left">shell上执行hadoop jar hadoop-mapreduce-examples-2.2.0.jar wordcount /input /output</p>
+<p align="left"> </p>
+<p align="left">或者是自己建立WordCount.java文件</p>
+<pre><code class="language-java">import java.io.IOException;
+import java.util.StringTokenizer;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.GenericOptionsParser;
+
+public class WordCount {
+
+  public static class TokenizerMapper
+       extends Mapper&lt;Object, Text, Text, IntWritable&gt;{
+
+    private final static IntWritable one = new IntWritable(1);
+    private Text word = new Text();
+
+    public void map(Object key, Text value, Context context
+                    ) throws IOException, InterruptedException {
+import java.io.IOException;
+import java.util.StringTokenizer;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.GenericOptionsParser;
+
+public class WordCount {
+
+  public static class TokenizerMapper
+       extends Mapper&lt;Object, Text, Text, IntWritable&gt;{
+
+    private final static IntWritable one = new IntWritable(1);
+    private Text word = new Text();
+
+    public void map(Object key, Text value, Context context
+                    ) throws IOException, InterruptedException {
+      StringTokenizer itr = new StringTokenizer(value.toString());
+      while (itr.hasMoreTokens()) {
+        word.set(itr.nextToken());
+        context.write(word, one);
+      }
+    }
+  }
+
+  public static class IntSumReducer
+       extends Reducer&lt;Text,IntWritable,Text,IntWritable&gt; {
+    private IntWritable result = new IntWritable();
+
+    public void reduce(Text key, Iterable&lt;IntWritable&gt; values,
+                       Context context
+                       ) throws IOException, InterruptedException {
+      int sum = 0;
+      for (IntWritable val : values) {
+        sum += val.get();
+      }
+      result.set(sum);
+      context.write(key, result);
+    }
+  }
+
+  public static void main(String[] args) throws Exception {
+    Configuration conf = new Configuration();
+    String[] otherArgs = new GenericOptionsParser(conf, args).getRemainingArgs();
+    if (otherArgs.length != 2) {
+      System.err.println("Usage: wordcount &lt;in&gt; &lt;out&gt;");
+      System.exit(2);
+    }
+    Job job = new Job(conf, "word count");
+    job.setJarByClass(WordCount.class);
+    job.setMapperClass(TokenizerMapper.class);
+    job.setCombinerClass(IntSumReducer.class);
+    job.setReducerClass(IntSumReducer.class);
+    job.setOutputKeyClass(Text.class);
+    job.setOutputValueClass(IntWritable.class);
+    FileInputFormat.addInputPath(job, new Path(otherArgs[0]));
+    FileOutputFormat.setOutputPath(job, new Path(otherArgs[1]));
+    System.exit(job.waitForCompletion(true) ? 0 : 1);
+  }
+}</code></pre>
+<p align="left">编译后创建wordcount.jar文件（参考我的另一篇博文：<a href="http://blog.csdn.net/wendll/article/details/19568097" rel="nofollow">http://blog.csdn.net/wendll/article/details/19568097</a>);</p>
+<p align="left">运行hadoop jar wordcount.jar /input /output<br></p>
+<p align="left"> </p>
+<p align="left">错误排查：</p>
+<p align="left">执行时有如下错误</p>
+<div align="left"><pre><code class="language-html">14/02/22 04:30:31 INFO client.RMProxy: Connecting to ResourceManager at cloud001/192.168.1.105:8032
+14/02/22 04:30:33 INFO input.FileInputFormat: Total input paths to process : 3
+14/02/22 04:30:33 INFO mapreduce.JobSubmitter: number of splits:3
+14/02/22 04:30:33 INFO Configuration.deprecation: user.name is deprecated. Instead, use mapreduce.job.user.name
+14/02/22 04:30:33 INFO Configuration.deprecation: mapred.jar is deprecated. Instead, use mapreduce.job.jar
+14/02/22 04:30:33 INFO Configuration.deprecation: mapred.output.value.class is deprecated. Instead, use mapreduce.job.output.value.class
+14/02/22 04:30:33 INFO Configuration.deprecation: mapreduce.combine.class is deprecated. Instead, use mapreduce.job.combine.class
+14/02/22 04:30:33 INFO Configuration.deprecation: mapreduce.map.class is deprecated. Instead, use mapreduce.job.map.class
+14/02/22 04:30:33 INFO Configuration.deprecation: mapred.job.name is deprecated. Instead, use mapreduce.job.name
+14/02/22 04:30:33 INFO Configuration.deprecation: mapreduce.reduce.class is deprecated. Instead, use mapreduce.job.reduce.class
+14/02/22 04:30:33 INFO Configuration.deprecation: mapred.input.dir is deprecated. Instead, use mapreduce.input.fileinputformat.inputdir
+14/02/22 04:30:33 INFO Configuration.deprecation: mapred.output.dir is deprecated. Instead, use mapreduce.output.fileoutputformat.outputdir
+14/02/22 04:30:33 INFO Configuration.deprecation: mapred.map.tasks is deprecated. Instead, use mapreduce.job.maps
+14/02/22 04:30:33 INFO Configuration.deprecation: mapred.output.key.class is deprecated. Instead, use mapreduce.job.output.key.class
+14/02/22 04:30:33 INFO Configuration.deprecation: mapred.working.dir is deprecated. Instead, use mapreduce.job.working.dir
+14/02/22 04:30:33 INFO mapreduce.JobSubmitter: Submitting tokens for job: job_1393055835807_0006
+14/02/22 04:30:33 INFO impl.YarnClientImpl: Submitted application application_1393055835807_0006 to ResourceManager at cloud001/192.168.1.105:8032
+14/02/22 04:30:33 INFO mapreduce.Job: The url to track the job: http://cloud001:8088/proxy/application_1393055835807_0006/
+14/02/22 04:30:33 INFO mapreduce.Job: Running job: job_1393055835807_0006
+14/02/22 04:30:54 INFO mapreduce.Job: Job job_1393055835807_0006 running in uber mode : false
+14/02/22 04:30:55 INFO mapreduce.Job:  map 0% reduce 0%
+14/02/22 04:30:55 INFO mapreduce.Job: Job job_1393055835807_0006 failed with state FAILED due to: Application application_1393055835807_0006 failed 2 times due to Error launching appattempt_1393055835807_0006_000002. Got exception: java.net.ConnectException: Call From localhost.localdomain/127.0.0.1 to localhost:58279 failed on connection exception: java.net.ConnectException: Connection refused; For more details see:  http://wiki.apache.org/hadoop/ConnectionRefused
+        at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)
+        at sun.reflect.NativeConstructorAccessorImpl.newInstance(NativeConstructorAccessorImpl.java:39)
+        at sun.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:27)
+        at java.lang.reflect.Constructor.newInstance(Constructor.java:513)
+        at org.apache.hadoop.net.NetUtils.wrapWithMessage(NetUtils.java:783)
+        at org.apache.hadoop.net.NetUtils.wrapException(NetUtils.java:730)
+        at org.apache.hadoop.ipc.Client.call(Client.java:1351)
+        at org.apache.hadoop.ipc.Client.call(Client.java:1300)
+        at org.apache.hadoop.ipc.ProtobufRpcEngine$Invoker.invoke(ProtobufRpcEngine.java:206)
+        at com.sun.proxy.$Proxy23.startContainers(Unknown Source)
+        at org.apache.hadoop.yarn.api.impl.pb.client.ContainerManagementProtocolPBClientImpl.startContainers(ContainerManagementProtocolPBClientImpl.java:96)
+        at org.apache.hadoop.yarn.server.resourcemanager.amlauncher.AMLauncher.launch(AMLauncher.java:118)
+        at org.apache.hadoop.yarn.server.resourcemanager.amlauncher.AMLauncher.run(AMLauncher.java:249)
+        at java.util.concurrent.ThreadPoolExecutor$Worker.runTask(ThreadPoolExecutor.java:895)
+        at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:918)
+        at java.lang.Thread.run(Thread.java:662)
+Caused by: java.net.ConnectException: Connection refused
+        at sun.nio.ch.SocketChannelImpl.checkConnect(Native Method)
+        at sun.nio.ch.SocketChannelImpl.finishConnect(SocketChannelImpl.java:599)
+        at org.apache.hadoop.net.SocketIOWithTimeout.connect(SocketIOWithTimeout.java:206)
+        at org.apache.hadoop.net.NetUtils.connect(NetUtils.java:529)
+        at org.apache.hadoop.net.NetUtils.connect(NetUtils.java:493)
+        at org.apache.hadoop.ipc.Client$Connection.setupConnection(Client.java:547)
+        at org.apache.hadoop.ipc.Client$Connection.setupIOstreams(Client.java:642)
+        at org.apache.hadoop.ipc.Client$Connection.access$2600(Client.java:314)
+        at org.apache.hadoop.ipc.Client.getConnection(Client.java:1399)
+        at org.apache.hadoop.ipc.Client.call(Client.java:1318)
+        ... 9 more
+. Failing the application.
+14/02/22 04:30:55 INFO mapreduce.Job: Counters: 0</code></pre></div>
+<p align="left"><br>
+排查时，</p>
+<p align="left">修改/etc/hosts文件 <br>
+127.0.0.1 localhost localhost.localdomain<br>
+192.168.1.105 cloud001 192.168.1.106 cloud002</p>
+<p align="left">为<br>
+#127.0.0.1 localhost localhost.localdomain<br>
+192.168.1.105 cloud001 localhost localhost.localdomain<br>
+192.168.1.106 cloud002<br>
+但是在运行过程中一直报连接不上的错误，但最后output中有正确结果。</p>
+<p align="left"> </p>
+<p align="left">后网上多方查找，发现是机子的hostname设置错误，hostname发现机子都是的hostname都为localhost.localdomain；</p>
+<p align="left">vim /etc/sysconfig/network中修改hostname为各自的主机名（如我配置的hadoop中namenode机器为cloud001,datanode为cloud002)，</p>
+<p align="left">重启系统后，启动hadoop，执行hadoop jar hadoop-mapreduce-examples-2.2.0.jar wordcount /input /output，程序运行正常：</p>
+<div align="left"><pre><code class="language-html">14/02/24 03:40:02 INFO client.RMProxy: Connecting to ResourceManager at cloud001/192.168.1.105:8080
+14/02/24 03:40:04 INFO input.FileInputFormat: Total input paths to process : 3
+14/02/24 03:40:04 INFO mapreduce.JobSubmitter: number of splits:3
+14/02/24 03:40:04 INFO Configuration.deprecation: user.name is deprecated. Instead, use mapreduce.job.user.name
+14/02/24 03:40:04 INFO Configuration.deprecation: mapred.jar is deprecated. Instead, use mapreduce.job.jar
+14/02/24 03:40:04 INFO Configuration.deprecation: mapred.output.value.class is deprecated. Instead, use mapreduce.job.output.value.class
+14/02/24 03:40:04 INFO Configuration.deprecation: mapreduce.combine.class is deprecated. Instead, use mapreduce.job.combine.class
+14/02/24 03:40:04 INFO Configuration.deprecation: mapreduce.map.class is deprecated. Instead, use mapreduce.job.map.class
+14/02/24 03:40:04 INFO Configuration.deprecation: mapred.job.name is deprecated. Instead, use mapreduce.job.name
+14/02/24 03:40:04 INFO Configuration.deprecation: mapreduce.reduce.class is deprecated. Instead, use mapreduce.job.reduce.class
+14/02/24 03:40:04 INFO Configuration.deprecation: mapred.input.dir is deprecated. Instead, use mapreduce.input.fileinputformat.inputdir
+14/02/24 03:40:04 INFO Configuration.deprecation: mapred.output.dir is deprecated. Instead, use mapreduce.output.fileoutputformat.outputdir
+14/02/24 03:40:04 INFO Configuration.deprecation: mapred.map.tasks is deprecated. Instead, use mapreduce.job.maps
+14/02/24 03:40:04 INFO Configuration.deprecation: mapred.output.key.class is deprecated. Instead, use mapreduce.job.output.key.class
+14/02/24 03:40:04 INFO Configuration.deprecation: mapred.working.dir is deprecated. Instead, use mapreduce.job.working.dir
+14/02/24 03:40:05 INFO mapreduce.JobSubmitter: Submitting tokens for job: job_1393241524473_0001
+14/02/24 03:40:05 INFO impl.YarnClientImpl: Submitted application application_1393241524473_0001 to ResourceManager at cloud001/192.168.1.105:8080
+14/02/24 03:40:05 INFO mapreduce.Job: The url to track the job: http://cloud001:8088/proxy/application_1393241524473_0001/
+14/02/24 03:40:05 INFO mapreduce.Job: Running job: job_1393241524473_0001
+14/02/24 03:40:22 INFO mapreduce.Job: Job job_1393241524473_0001 running in uber mode : false
+14/02/24 03:40:22 INFO mapreduce.Job:  map 0% reduce 0%
+14/02/24 03:44:28 INFO mapreduce.Job:  map 56% reduce 0%
+14/02/24 03:44:44 INFO mapreduce.Job:  map 100% reduce 0%
+14/02/24 03:45:08 INFO mapreduce.Job:  map 100% reduce 100%
+14/02/24 03:45:12 INFO mapreduce.Job: Job job_1393241524473_0001 completed successfully
+14/02/24 03:45:14 INFO mapreduce.Job: Counters: 43
+        File System Counters
+                FILE: Number of bytes read=4706
+                FILE: Number of bytes written=326601
+                FILE: Number of read operations=0
+                FILE: Number of large read operations=0
+                FILE: Number of write operations=0
+                HDFS: Number of bytes read=5112
+                HDFS: Number of bytes written=1909
+                HDFS: Number of read operations=12
+                HDFS: Number of large read operations=0
+                HDFS: Number of write operations=2
+        Job Counters 
+                Launched map tasks=3
+                Launched reduce tasks=1
+                Data-local map tasks=4
+                Total time spent by all maps in occupied slots (ms)=776280
+                Total time spent by all reduces in occupied slots (ms)=23900
+        Map-Reduce Framework
+                Map input records=136
+                Map output records=358
+                Map output bytes=5421
+                Map output materialized bytes=4718
+                Input split bytes=309
+                Combine input records=358
+                Combine output records=227
+                Reduce input groups=112
+                Reduce shuffle bytes=4718
+                Reduce input records=227
+                Reduce output records=112
+                Spilled Records=454
+                Shuffled Maps =3
+                Failed Shuffles=0
+                Merged Map outputs=3
+                GC time elapsed (ms)=11839
+                CPU time spent (ms)=7570
+                Physical memory (bytes) snapshot=336568320
+                Virtual memory (bytes) snapshot=1555247104
+                Total committed heap usage (bytes)=346697728
+        Shuffle Errors
+                BAD_ID=0
+                CONNECTION=0
+                IO_ERROR=0
+                WRONG_LENGTH=0
+                WRONG_MAP=0
+                WRONG_REDUCE=0
+        File Input Format Counters 
+                Bytes Read=4803
+        File Output Format Counters 
+                Bytes Written=1909</code></pre></div>
+<p><br></p>
+<p> </p>
+            </div>
+                </div>

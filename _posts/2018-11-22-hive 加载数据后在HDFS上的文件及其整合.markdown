@@ -1,0 +1,126 @@
+---
+layout:     post
+title:      hive 加载数据后在HDFS上的文件及其整合
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/jixianqiuxue/article/details/11134439				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<br><p><br></p>
+<p>建一个表，没有任何数据，在hdfs 上也没有对应的数据文件<br></p>
+<p><br>
+hive&gt; select * from product;<br>
+OK<br>
+id      name<br>
+Time taken: 0.104 seconds<br>
+hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/product;<br>
+hive&gt;<br></p>
+<p><br></p>
+<p>从本地加载一个文件到该表：</p>
+<p>hive&gt; load data local inpath 'product.txt' into table product;<br>
+Copying data from file:/root/product.txt<br>
+Copying file: file:/root/product.txt<br>
+Loading data to table psi.product<br>
+Table psi.product stats: [num_partitions: 0, num_files: 1, num_rows: 0, total_size: 25, raw_data_size: 0]<br>
+OK<br>
+Time taken: 0.398 seconds</p>
+<p><br></p>
+<p>查看数据：<br>
+hive&gt; select * from product;<br>
+OK<br>
+id      name<br>
+1       apple<br>
+2       samsung<br>
+3       moto<br>
+Time taken: 0.124 seconds, Fetched: 3 row(s)</p>
+<p><br></p>
+<p>查看HDFS，其实是吧文件从本地原原本本copy到hdfs下而已<br>
+hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/product;<br>
+Found 1 items<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:21 /user/hive/warehouse/psi.db/product/product.txt<br>
+hive&gt;<br></p>
+<p>那么在load一次：</p>
+<p>hive&gt; load data local inpath 'product.txt' into table product;<br>
+Copying data from file:/root/product.txt<br>
+Copying file: file:/root/product.txt<br>
+Loading data to table psi.product<br>
+Table psi.product stats: [num_partitions: 0, num_files: 2, num_rows: 0, total_size: 50, raw_data_size: 0]<br>
+OK<br>
+Time taken: 0.346 seconds<br>
+hive&gt;<br><br>
+再查看HDFS: 其实不是想象的把数据追加到原来的文件中而是又产生一个新文件product_copy_1.txt<br></p>
+<p>hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/product;<br>
+Found 2 items<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:21 /user/hive/warehouse/psi.db/product/product.txt<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:23 /user/hive/warehouse/psi.db/product/product_copy_1.txt<br>
+hive&gt;<br><br>
+把本地文件上传到HDFS再从HDFS加载试一下：</p>
+<p>hive&gt; dfs -put /root/product.txt  /usr;<br>
+hive&gt; load data inpath '/usr/product.txt' into table product;<br>
+Loading data to table psi.product<br>
+Table psi.product stats: [num_partitions: 0, num_files: 3, num_rows: 0, total_size: 75, raw_data_size: 0]<br>
+OK<br>
+Time taken: 0.337 seconds<br>
+hive&gt;<br></p>
+<p>再看下HDFS: 同样是吧文件拷贝到表的目录下而已<br></p>
+<p>hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/product;<br>
+Found 3 items<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:21 /user/hive/warehouse/psi.db/product/product.txt<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:23 /user/hive/warehouse/psi.db/product/product_copy_1.txt<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:27 /user/hive/warehouse/psi.db/product/product_copy_2.txt<br>
+hive&gt;<br></p>
+<p><br></p>
+<p>再来看用insert into <br>
+先复制一个表：</p>
+<p>hive&gt; create table product2 as select * from product;</p>
+<p>hive&gt; insert into table product select * from product2;<br><br>
+再来看HDFS: 多了一个000000_0的文件<br></p>
+<p>hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/product;<br>
+Found 4 items<br>
+-rw-r--r--   1 root supergroup         75 2013-09-05 02:30 /user/hive/warehouse/psi.db/product/000000_0<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:21 /user/hive/warehouse/psi.db/product/product.txt<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:23 /user/hive/warehouse/psi.db/product/product_copy_1.txt<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:27 /user/hive/warehouse/psi.db/product/product_copy_2.txt<br>
+hive&gt;<br><br>
+再执行一次：<br>
+hive&gt; insert into table product select * from product2;</p>
+<p><br>
+再来看HDFS: 又产生了一个新文件000000_0_copy_1<br></p>
+<p>hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/product;<br>
+Found 5 items<br>
+-rw-r--r--   1 root supergroup         75 2013-09-05 02:30 /user/hive/warehouse/psi.db/product/000000_0<br>
+-rw-r--r--   1 root supergroup         75 2013-09-05 02:31 /user/hive/warehouse/psi.db/product/000000_0_copy_1<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:21 /user/hive/warehouse/psi.db/product/product.txt<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:23 /user/hive/warehouse/psi.db/product/product_copy_1.txt<br>
+-rw-r--r--   1 root supergroup         25 2013-09-05 02:27 /user/hive/warehouse/psi.db/product/product_copy_2.txt<br></p>
+<p><br></p>
+<p>这就意味着hive的每次加载文件或者数据之后都会在hdfs上创立一个文件，然后把表指向这些文件而已；如果在做ETL很长时间之后，这些文件的量是可观的，对namenode的压力也是显而易见的，那么如何定期去整理这些文件整合整一个？可以新建一张表<br></p>
+<p>hive&gt; create table temp as select * from product;<br><br>
+查看该表在HDFS上的存储： 可以发现其实并不是把product表下的所有文具文件拷贝而是整合了，这样子就好办多了<br></p>
+<p>hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/temp;<br>
+Found 1 items<br>
+-rw-r--r--   1 root supergroup        225 2013-09-05 02:36 /user/hive/warehouse/psi.db/temp/000000_0<br><br>
+删除所有product的数据：</p>
+<p>hive&gt; truncate table product;<br>
+OK<br>
+Time taken: 1.24 seconds<br>
+hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/product;<br>
+hive&gt;<br><br>
+在hdfs上已经没有了数据文件，然后再把temp表的数据整合到product然后删除temp</p>
+<p>hive&gt; insert into table product select * from temp;<br>
+hive&gt; drop table temp;<br>
+OK<br>
+Time taken: 0.96 seconds<br>
+hive&gt;</p>
+<p>hive&gt; dfs  -ls  /user/hive/warehouse/psi.db/product;<br>
+Found 1 items<br>
+-rw-r--r--   1 root supergroup        225 2013-09-05 02:41 /user/hive/warehouse/psi.db/product/000000_0<br>
+hive&gt;<br><br></p>
+<p>这样就达到了整合的目的，当然如果原表有分区而且分区是规范的，比如说按照年份来分区则2012年的数据不会跑到2013年的文件中，这样子的话从temp表插灰原表的话自然就可以用自动分区的方式，但是如果由于其他的目的在原表中的数据在分区中已经混乱的话自然无法达到原来同样的混乱的数据<br><br><br>
+当然用hadoop的归档是一个很好的选择<br></p>
+<p><br></p>
+<p><br></p>
+            </div>
+                </div>

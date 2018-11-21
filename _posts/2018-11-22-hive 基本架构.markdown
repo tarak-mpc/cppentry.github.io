@@ -1,0 +1,121 @@
+---
+layout:     post
+title:      hive 基本架构
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u013595419/article/details/79632928				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hive基本架构">Hive基本架构</h1>
+
+<p>如下图所示，从逻辑上来看，Hive包含了3大部分。</p>
+
+<ul>
+<li>Hive Clients</li>
+<li>Hive Services</li>
+<li>Hive Storage and Computing</li>
+</ul>
+
+<p><img src="//img-blog.csdn.net/20180320215449990?watermark/2/text/Ly9ibG9nLmNzZG4ubmV0L3UwMTM1OTU0MTk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="hive_component" title=""></p>
+
+<p>用户操作Hive的接口主要有三个：CLI，Client 和 WUI。</p>
+
+<p>其中最常用的是CLI，Cli启动的时候，会同时启动一个Hive副本。</p>
+
+<p>Client是Hive的客户端，用户连接至Hive Server。在启动 Client模式的时候，需要指出Hive Server所在节点，并且在该节点启动Hive Server。而客户端则又可以分为三种<strong>Thrift Client</strong>，<strong>JDBC Client</strong>，<strong>ODBC Client</strong>。</p>
+
+<p>Web Interface是通过浏览器访问Hive。 </p>
+
+<ul>
+<li>Hive将元数据存储在数据库中，如mysql、derby。Hive中的元数据包括表的名字，表的列和分区及其属性，表的属性（是否为外部表等），表的数据所在目录等。 </li>
+<li>解释器、编译器、优化器完成HQL查询语句从词法分析、语法分析、编译、优化以及查询计划的生成。生成的查询计划存储在HDFS中，并在随后由MapReduce调用执行。 </li>
+<li>Hive的数据存储在HDFS中，大部分的查询、计算由MapReduce完成（注意，包含*的查询，比如select * from tbl不会生成MapRedcue任务）。</li>
+</ul>
+
+<p>上图中的Driver会处理从应用到metastore到filed system的所有请求，以进行后续操作。</p>
+
+<h1 id="hive组件">Hive组件</h1>
+
+
+
+<h2 id="driver">Driver</h2>
+
+<p>实现了session handler，在JDBC/ODBC接口上实现了执行和获取信息的API。</p>
+
+
+
+<h2 id="compiler">Compiler</h2>
+
+<p>该组件用于对不同的查询表达式做解析查询，语义分析，最终会根据从metastore中查询到的表和分区元数据生成一个execution plain。</p>
+
+
+
+<h2 id="execution-egine">Execution Egine</h2>
+
+<p>该组件会执行由compiler创建的execution。其中plan从数据结构上来看，是一个DAG，该组件会管理plan的不同stage与组件中执行这些plan之间的依赖。</p>
+
+
+
+<h2 id="metastore">Metastore</h2>
+
+<p>Hive的metastore组件是hive元数据集中存放地。该组件存储了包括变量表中列和列类型等结构化的信息以及数据仓库中的分区信息（包括列和列类型信息，读写数据时必要的序列化和反序列化信息，数据被存储在HDFS文件中的位置）。</p>
+
+<p>Metastore组件包括两个部分：metastore services和Meta storage database。</p>
+
+<ul>
+<li>Metastore database的介质就是关系数据库，例如hive默认的嵌入式磁盘数据库derby，还有mysql数据库。</li>
+<li>Metastore services是建立在后台数据存储介质(HDFS)之上，并且可以和hive services进行交互的服务组件。</li>
+</ul>
+
+<p>默认情况下，metastore services和hive services是安装在一起的，运行在同一个进程当中。也可以把metastore services从hive services里剥离出来，将metastore独立安装在一个集群里，hive远程调用metastore services。这样我们可以把元数据这一层放到防火墙之后，客户端访问hive服务，就可以连接到元数据这一层，从而提供了更好的管理性和安全保障。</p>
+
+<p>使用远程的metastore services，可以让metastore services和hive services运行在不同的进程里，这样也保证了hive的稳定性，提升了hive services的效率。</p>
+
+
+
+<h1 id="hive执行过程">Hive执行过程</h1>
+
+<p><img src="https://img-blog.csdn.net/20180324122238674?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTM1OTU0MTk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="system_architecture" title=""></p>
+
+<p>流程大致步骤为：</p>
+
+<ol>
+<li>用户提交查询等任务给Driver。</li>
+<li>Driver为查询操作创建一个session handler，接着dirver会发送查询操作到compiler去生成一个execute plan</li>
+<li>Compiler根据用户任务去MetaStore中获取需要的Hive的元数据信息。这些元数据在后续stage中用作抽象语法树的类型检测和修剪。</li>
+<li>Compiler得到元数据信息，对task进行编译，先将HiveQL转换为抽象语法树，然后将抽象语法树转换成查询块，将查询块转化为逻辑的查询plan，重写逻辑查询plan，将逻辑plan转化为物理的plan（MapReduce）, 最后选择最佳策略。</li>
+<li>将最终的plan提交给Driver。</li>
+<li>Driver将plan转交给ExecutionEngine去执行，将获取到的元数据信息，提交到JobTracker或者RsourceManager执行该task，任务会直接读取到HDFS中进行相应的操作。</li>
+<li>获取执行的结果。</li>
+<li>取得并返回执行结果。</li>
+</ol>
+
+
+
+<h2 id="创建表">创建表</h2>
+
+<p>解析用户提交的Hive语句-&gt;对其进行解析-&gt;分解为表、字段、分区等Hive对象</p>
+
+<p>根据解析到的信息构建对应的表、字段、分区等对象，从SEQUENCE_TABLE中获取构建对象的最新的ID，与构建对象信息（名称、类型等等）一同通过DAO方法写入元数据库的表中，成功后将SEQUENCE_TABLE中对应的最新ID+5。</p>
+
+<p>实际上常见的RDBMS都是通过这种方法进行组织的，其系统表中和Hive元数据一样显示了这些ID信息。通过这些元数据可以很容易的读取到数据。</p>
+
+
+
+<h2 id="优化器">优化器</h2>
+
+<p>优化器是一个不断更新的组件，大部分plan的转移都是通过优化器完成的。</p>
+
+<ul>
+<li>将多Multiple join 合并为一个Muti-way join</li>
+<li>对join、group-by和自定义的MapReduce操作重新进行划分。</li>
+<li>消减不必要的列。</li>
+<li>在表的扫描操作中推行使用断言。</li>
+<li>对于已分区的表，消减不必要的分区。</li>
+<li>在抽样查询中，消减不必要的桶。</li>
+<li>优化器还增加了局部聚合操作用于处理大分组聚合和增加再分区操作用于处理不对称的分组聚合。</li>
+</ul>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

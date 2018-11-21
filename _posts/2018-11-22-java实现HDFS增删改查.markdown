@@ -1,0 +1,284 @@
+---
+layout:     post
+title:      java实现HDFS增删改查
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：原创文章，欢迎一起学习交流！					https://blog.csdn.net/LCYong_/article/details/79911536				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>环境：Hadoop 2.7.3</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">import</span> org.apache.commons.lang.StringUtils;
+<span class="hljs-keyword">import</span> org.apache.hadoop.conf.Configuration;
+<span class="hljs-keyword">import</span> org.apache.hadoop.fs.*;
+<span class="hljs-keyword">import</span> org.apache.zookeeper.common.IOUtils;
+
+<span class="hljs-keyword">import</span> java.io.ByteArrayInputStream;
+<span class="hljs-keyword">import</span> java.io.IOException;
+<span class="hljs-keyword">import</span> java.io.InputStream;
+<span class="hljs-keyword">import</span> java.io.OutputStream;
+<span class="hljs-keyword">import</span> java.net.URI;
+<span class="hljs-keyword">import</span> java.util.ArrayList;
+<span class="hljs-keyword">import</span> java.util.List;
+
+<span class="hljs-javadoc">/**
+ * Created by LCY on 4/2/2018.
+ * 对HDFS执行上传文件、上传目录、查看文件、查看目录、删除文件等操作
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">HDFSUtils</span> {</span>
+    <span class="hljs-javadoc">/**
+     * 在HDFS创建新的目录
+     *
+     *<span class="hljs-javadoctag"> @param</span> uri HDFS地址，比如： 'hdfs://192.168.12.12'
+     *<span class="hljs-javadoctag"> @param</span> dir 路径，比如： '/tmp/testdir'
+     *<span class="hljs-javadoctag"> @return</span> boolean true-success, false-failed
+     *<span class="hljs-javadoctag"> @exception</span> IOException something wrong happends when operating files
+     */</span>
+    <span class="hljs-keyword">public</span>  <span class="hljs-keyword">boolean</span> <span class="hljs-title">mkdir</span>(String uri,String dir)  {
+        <span class="hljs-keyword">try</span> {
+            <span class="hljs-keyword">if</span> (StringUtils.isBlank(dir)) {
+                <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+            }
+            dir = uri + dir;
+            Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+            FileSystem fs = FileSystem.get(URI.create(dir), conf);
+            <span class="hljs-keyword">if</span> (!fs.exists(<span class="hljs-keyword">new</span> Path(dir))) {
+                fs.mkdirs(<span class="hljs-keyword">new</span> Path(dir));
+            }
+            fs.close();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+        } <span class="hljs-keyword">catch</span> (IOException e) {
+            System.err.println(<span class="hljs-string">"ERROR:IO"</span>);
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     * 在HDFS删除目录
+     *
+     *<span class="hljs-javadoctag"> @param</span> uri HDFS地址，比如： 'hdfs://192.168.12.12'
+     *<span class="hljs-javadoctag"> @param</span> dir 文件路径
+     *<span class="hljs-javadoctag"> @return</span> boolean true-success, false-failed
+     *<span class="hljs-javadoctag"> @exception</span> IOException 如果文件已经打开会跑出异常 FileNotFoundException
+     *
+     */</span>
+    <span class="hljs-keyword">public</span>  <span class="hljs-keyword">boolean</span> <span class="hljs-title">deleteDir</span>(String uri,String dir) <span class="hljs-keyword">throws</span> IOException {
+        <span class="hljs-keyword">if</span> (StringUtils.isBlank(dir)) {
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+        }
+        dir = uri + dir;
+        Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+        FileSystem fs = FileSystem.get(URI.create(dir), conf);
+        fs.delete(<span class="hljs-keyword">new</span> Path(dir), <span class="hljs-keyword">true</span>);
+        fs.close();
+        <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+    }
+
+    <span class="hljs-javadoc">/**
+     * 获取文件列表
+     *
+     *<span class="hljs-javadoctag"> @param</span> uri HDFS地址，比如： 'hdfs://192.168.12.12'
+     *<span class="hljs-javadoctag"> @param</span> dir 目录路径
+     *<span class="hljs-javadoctag"> @return</span> List&lt;String&gt; list of file names
+     *<span class="hljs-javadoctag"> @throws</span> IOException file io exception
+     */</span>
+    <span class="hljs-keyword">public</span>  List&lt;String&gt; <span class="hljs-title">listAll</span>(String uri,String dir) <span class="hljs-keyword">throws</span> IOException {
+        <span class="hljs-keyword">if</span> (StringUtils.isBlank(dir)) {
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">new</span> ArrayList&lt;String&gt;();
+        }
+        dir = uri + dir;
+        Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+        FileSystem fs = FileSystem.get(URI.create(dir), conf);
+        FileStatus[] stats = fs.listStatus(<span class="hljs-keyword">new</span> Path(dir));
+        List&lt;String&gt; names = <span class="hljs-keyword">new</span> ArrayList&lt;String&gt;();
+        <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i = <span class="hljs-number">0</span>; i &lt; stats.length; ++i) {
+            <span class="hljs-keyword">if</span> (stats[i].isFile()) {
+                <span class="hljs-comment">// regular file</span>
+                names.add(stats[i].getPath().toString());
+            } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (stats[i].isDirectory()) {
+                <span class="hljs-comment">// dir</span>
+                names.add(stats[i].getPath().toString());
+            } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (stats[i].isSymlink()) {
+                <span class="hljs-comment">// is s symlink in linux</span>
+                names.add(stats[i].getPath().toString());
+            }
+        }
+
+        fs.close();
+        <span class="hljs-keyword">return</span> names;
+    }
+
+    <span class="hljs-comment">/*
+     * 上传文件到HDFS
+     * 注意：路径为完整路径
+     * 如果本地文件不存在有异常 FileNotFoundException
+     *
+     * @param uri HDFS地址，比如： 'hdfs://192.168.12.12'
+     * @param localFile 本地文件路径例如F:/test.txt or /usr/local/test.txt
+     *
+     * @param hdfsFile hdfs路径例如： /tmp/dir
+     * @return boolean true-success, false-failed
+     *
+     * @throws IOException file io exception
+     */</span>
+    <span class="hljs-keyword">public</span>  <span class="hljs-keyword">boolean</span> <span class="hljs-title">uploadLocalFile2HDFS</span>(String uri,String localFile, String hdfsFile)  {
+        <span class="hljs-keyword">if</span> (StringUtils.isBlank(localFile) || StringUtils.isBlank(hdfsFile)) {
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+        }
+        <span class="hljs-keyword">try</span> {
+            hdfsFile = uri + hdfsFile;
+            Configuration config = <span class="hljs-keyword">new</span> Configuration();
+            FileSystem hdfs  = FileSystem.get(URI.create(uri), config);
+            Path src = <span class="hljs-keyword">new</span> Path(localFile);
+            Path dst = <span class="hljs-keyword">new</span> Path(hdfsFile);
+            hdfs.copyFromLocalFile(src, dst);
+            hdfs.close();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+        } <span class="hljs-keyword">catch</span> (IOException e) {
+            e.printStackTrace();
+        } <span class="hljs-keyword">catch</span> (Exception e){
+            e.printStackTrace();
+        }
+        <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+    }
+
+    <span class="hljs-comment">/*
+     * 在HDFS创建一个新的文件，并写入content数据
+     *
+     * @param uri HDFS地址，比如： 'hdfs://192.168.12.12'
+     * @param newFile 文件路径： '/tmp/test.txt'
+     * @param content 写入的内容
+     * @return boolean true-success, false-failed
+     * @throws IOException file io exception
+     */</span>
+    <span class="hljs-keyword">public</span>  <span class="hljs-keyword">boolean</span> <span class="hljs-title">createNewHDFSFile</span>(String uri,String newFile, String content) <span class="hljs-keyword">throws</span> IOException {
+        <span class="hljs-keyword">if</span> (StringUtils.isBlank(newFile) || <span class="hljs-keyword">null</span> == content) {
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+        }
+        newFile = uri + newFile;
+        Configuration config = <span class="hljs-keyword">new</span> Configuration();
+        FileSystem hdfs = FileSystem.get(URI.create(newFile), config);
+        FSDataOutputStream fsdos = hdfs.create(<span class="hljs-keyword">new</span> Path(newFile));
+        fsdos.write(content.getBytes(<span class="hljs-string">"UTF-8"</span>));
+        fsdos.close();
+        hdfs.close();
+        <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+    }
+    <span class="hljs-javadoc">/**
+     * 在HDFS删除文件
+     *
+     *<span class="hljs-javadoctag"> @param</span> uri HDFS地址，比如： 'hdfs://192.168.12.12'
+     *<span class="hljs-javadoctag"> @param</span> hdfsFile 完整的路径 '/tmp/test.txt'
+     *<span class="hljs-javadoctag"> @return</span> boolean true-success, false-failed
+     *<span class="hljs-javadoctag"> @throws</span> IOException file io exception
+     */</span>
+    <span class="hljs-keyword">public</span>  <span class="hljs-keyword">boolean</span> <span class="hljs-title">deleteHDFSFile</span>(String uri,String hdfsFile) <span class="hljs-keyword">throws</span> IOException {
+        <span class="hljs-keyword">if</span> (StringUtils.isBlank(hdfsFile)) {
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+        }
+        hdfsFile = uri + hdfsFile;
+        Configuration config = <span class="hljs-keyword">new</span> Configuration();
+        FileSystem hdfs = FileSystem.get(URI.create(hdfsFile), config);
+        Path path = <span class="hljs-keyword">new</span> Path(hdfsFile);
+        <span class="hljs-keyword">boolean</span> isDeleted = hdfs.delete(path, <span class="hljs-keyword">true</span>);
+        hdfs.close();
+        <span class="hljs-keyword">return</span> isDeleted;
+    }
+
+    <span class="hljs-javadoc">/**
+     * 读取文件内容
+     *
+     *<span class="hljs-javadoctag"> @param</span> uri HDFS地址，比如： 'hdfs://192.168.12.12'
+     *<span class="hljs-javadoctag"> @param</span> hdfsFile 完整的文件路径 '/tmp/test.txt'
+     *<span class="hljs-javadoctag"> @return</span> 文件的byte[]
+     *<span class="hljs-javadoctag"> @throws</span> IOException file io exception
+     */</span>
+    <span class="hljs-keyword">public</span>  <span class="hljs-keyword">byte</span>[] <span class="hljs-title">readHDFSFile</span>(String uri,String hdfsFile) <span class="hljs-keyword">throws</span> Exception {
+        <span class="hljs-keyword">if</span> (StringUtils.isBlank(hdfsFile)) {
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        }
+        hdfsFile = uri + hdfsFile;
+        Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+        FileSystem fs = FileSystem.get(URI.create(hdfsFile), conf);
+        <span class="hljs-comment">// check if the file exists</span>
+        Path path = <span class="hljs-keyword">new</span> Path(hdfsFile);
+        <span class="hljs-keyword">if</span> (fs.exists(path)) {
+            FSDataInputStream is = fs.open(path);
+            <span class="hljs-comment">// get the file info to create the buffer</span>
+            FileStatus stat = fs.getFileStatus(path);
+            <span class="hljs-comment">// create the buffer</span>
+            <span class="hljs-keyword">byte</span>[] buffer = <span class="hljs-keyword">new</span> <span class="hljs-keyword">byte</span>[Integer.parseInt(String.valueOf(stat.getLen()))];
+            is.readFully(<span class="hljs-number">0</span>, buffer);
+            is.close();
+            fs.close();
+            <span class="hljs-keyword">return</span> buffer;
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> Exception(<span class="hljs-string">"the file is not found ."</span>);
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     * 在文件中写入内容
+     *
+     *<span class="hljs-javadoctag"> @param</span> uri HDFS地址，比如： 'hdfs://192.168.12.12'
+     *<span class="hljs-javadoctag"> @param</span> hdfsFile 文件路径'/tmp/test.txt'
+     *<span class="hljs-javadoctag"> @param</span> content 写入的内容
+     *<span class="hljs-javadoctag"> @return</span> boolean true-success, false-failed
+     *<span class="hljs-javadoctag"> @throws</span> Exception something wrong
+     */</span>
+    <span class="hljs-keyword">public</span>  <span class="hljs-keyword">boolean</span> <span class="hljs-title">append</span>(String uri,String hdfsFile, String content) <span class="hljs-keyword">throws</span> Exception {
+        <span class="hljs-keyword">if</span> (StringUtils.isBlank(hdfsFile)) {
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+        }
+        <span class="hljs-keyword">if</span>(StringUtils.isEmpty(content)){
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+        }
+
+        hdfsFile = uri + hdfsFile;
+        Configuration conf = <span class="hljs-keyword">new</span> Configuration();
+        <span class="hljs-comment">// solve the problem when appending at single datanode hadoop env</span>
+        conf.set(<span class="hljs-string">"dfs.client.block.write.replace-datanode-on-failure.policy"</span>, <span class="hljs-string">"NEVER"</span>);
+        conf.set(<span class="hljs-string">"dfs.client.block.write.replace-datanode-on-failure.enable"</span>, <span class="hljs-string">"true"</span>);
+        FileSystem fs = FileSystem.get(URI.create(hdfsFile), conf);
+        <span class="hljs-comment">// check if the file exists</span>
+        Path path = <span class="hljs-keyword">new</span> Path(hdfsFile);
+        <span class="hljs-keyword">if</span> (fs.exists(path)) {
+            <span class="hljs-keyword">try</span> {
+                InputStream in = <span class="hljs-keyword">new</span> ByteArrayInputStream(content.getBytes());
+                OutputStream out = fs.append(<span class="hljs-keyword">new</span> Path(hdfsFile));
+                IOUtils.copyBytes(in, out, <span class="hljs-number">4096</span>, <span class="hljs-keyword">true</span>);
+                out.close();
+                in.close();
+                fs.close();
+            } <span class="hljs-keyword">catch</span> (Exception ex) {
+                fs.close();
+                <span class="hljs-keyword">throw</span> ex;
+            }
+        } <span class="hljs-keyword">else</span> {
+            createNewHDFSFile(uri,hdfsFile, content);
+        }
+        <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+    }
+}</code></pre>
+
+
+
+<h3 id="调用">调用：</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> test {
+    @Test
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">update</span>() {
+        String uri=<span class="hljs-string">"hdfs://172.16.0.108"</span>;
+        HDFSUtils hdfsUtils=<span class="hljs-keyword">new</span> HDFSUtils();
+      hdfsUtils.uploadLocalFile2HDFS(uri,<span class="hljs-string">"data/ITEM.txt"</span>,<span class="hljs-string">"/tmp/test"</span>);
+    }
+
+}</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

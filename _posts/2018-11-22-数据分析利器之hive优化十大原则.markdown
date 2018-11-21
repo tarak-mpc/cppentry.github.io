@@ -1,0 +1,365 @@
+---
+layout:     post
+title:      数据分析利器之hive优化十大原则
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>转载：<a href="https://mp.weixin.qq.com/s/ARSTcHDYQy4cKkbcJE6ZUw" rel="nofollow">https://mp.weixin.qq.com/s/ARSTcHDYQy4cKkbcJE6ZUw</a></p>
+
+<h2 id="activity-name">数据分析利器之hive优化十大原则</h2>
+
+<p><img alt="" class="has" src="http://mmbiz.qpic.cn/mmbiz_png/vQwldzYm05UO30icuiaofoXKRS2PXHmoX2rwZGD7pZHicEcXGNDLYUZiaPaVZydjEr2QCGeIeNt2ibpd0iaHNAyicyu6w/640?wx_fmt=png&amp;tp=webp&amp;wxfrom=5&amp;wx_lazy=1"></p>
+
+<p>hive之于数据民工，就如同锄头之于农民伯伯。hive用的好，才能从地里（数据库）里挖出更多的数据来。</p>
+
+<p>用过hive的朋友，我想或多或少都有类似的经历：一天下来，没跑几次hive，就到下班时间了。</p>
+
+<p>hive在极大数据或者数据不平衡等情况下，经常表现一般，因此也出现了presto、spark-sql等替代品。今天不谈其它，就来说说关于hive优化，个人的一点心得。</p>
+
+<p> </p>
+
+<p>一. 表连接优化 </p>
+
+<p> </p>
+
+<p>1.  将大表放后头</p>
+
+<p>Hive假定查询中最后的一个表是大表。它会将其它表缓存起来，然后扫描最后那个表。</p>
+
+<p>因此通常需要将小表放前面，或者标记哪张表是大表：/*streamtable(table_name) */</p>
+
+<p>2. 使用相同的连接键</p>
+
+<p>当对3个或者更多个表进行join连接时，如果每个on子句都使用相同的连接键的话，那么只会产生一个MapReduce job。</p>
+
+<p>3. 尽早地过滤数据</p>
+
+<p>减少每个阶段的数据量,对于分区表要加分区，同时只选择需要使用到的字段。</p>
+
+<p>4. 尽量原子化操作</p>
+
+<p>尽量避免一个SQL包含复杂逻辑，可以使用中间表来完成复杂的逻辑</p>
+
+<p> </p>
+
+<p>二. 用insert into替换union all</p>
+
+<p>如果union all的部分个数大于2，或者每个union部分数据量大，应该拆成多个insert into 语句，实际测试过程中，执行时间能提升50%</p>
+
+<p> </p>
+
+<p>如：</p>
+
+<blockquote>
+<p>insert overwite table tablename partition (dt= ....) 　</p>
+
+<p>select ..... from ( select ... from A </p>
+
+<p>union all 　</p>
+
+<p>select ... from B 　union all select ... from C ) R 　</p>
+
+<p>where ...;</p>
+</blockquote>
+
+<p>可以改写为：</p>
+
+<blockquote>
+<p>insert into table tablename partition (dt= ....) select .... from A WHERE ...; insert into table tablename partition (dt= ....) select .... from B 　WHERE ...; insert into table tablename partition (dt= ....) select .... from C WHERE ...;</p>
+</blockquote>
+
+<p> </p>
+
+<p>三. order by &amp;  sort by</p>
+
+<p> </p>
+
+<p>order by : 对查询结果进行全局排序，消耗时间长。需要 set hive.mapred.mode=nostrict</p>
+
+<p>sort by : 局部排序，并非全局有序，提高效率。</p>
+
+<p> </p>
+
+<p>四. transform+python</p>
+
+<p>一种嵌入在hive取数流程中的自定义函数，通过transform语句可以把在hive中不方便实现的功能在python中实现，然后写入hive表中。</p>
+
+<p>语法：</p>
+
+<p>select transform({column names1})</p>
+
+<p>using '**.py'</p>
+
+<p>as {column names2}</p>
+
+<p>from {table name}</p>
+
+<p>如果除python脚本外还有其它依赖资源，可以使用ADD ARVHIVE</p>
+
+<p> </p>
+
+<p>五. limit 语句更快出结果</p>
+
+<p>一般情况下，Limit语句还是需要执行整个查询语句，然后再返回部分结果。</p>
+
+<p>有一个配置属性可以开启，避免这种情况---对数据源进行抽样</p>
+
+<p>hive.limit.optimize.enable=true --- 开启对数据源进行采样的功能</p>
+
+<p>hive.limit.row.max.size --- 设置最小的采样容量</p>
+
+<p>hive.limit.optimize.limit.file --- 设置最大的采样样本数</p>
+
+<p>缺点：有可能部分数据永远不会被处理到</p>
+
+<p> </p>
+
+<p>六. 本地模式</p>
+
+<p>对于小数据集，为查询触发执行任务消耗的时间&gt;实际执行job的时间，因此可以通过本地模式，在单台机器上（或某些时候在单个进程上）处理所有的任务。</p>
+
+<blockquote>
+<p>set oldjobtracker=${hiveconf:mapred.job.tracker}; </p>
+
+<p>set mapred.job.tracker=local; 　</p>
+
+<p>set marped.tmp.dir=/home/edward/tmp; sql 语句 　set mapred.job.tracker=${oldjobtracker};</p>
+</blockquote>
+
+<p>-- 可以通过设置属性hive.exec.mode.local.auto的值为true，来让hve在适当的时候自动启动这个优化，也可以将这个配置写在$HOME/.hiverc文件中。</p>
+
+<p>-- 当一个job满足如下条件才能真正使用本地模式：</p>
+
+<p>1.job的输入数据大小必须小于参数：hive.exec.mode.local.auto.inputbytes.max(默认128MB)</p>
+
+<p>2.job的map数必须小于参数：hive.exec.mode.local.auto.tasks.max(默认4)</p>
+
+<p>3.job的reduce数必须为0或者1</p>
+
+<p>可用参数hive.mapred.local.mem(默认0)控制child jvm使用的最大内存数。</p>
+
+<p> </p>
+
+<p>七. 并行执行</p>
+
+<p>hive会将一个查询转化为一个或多个阶段，包括：MapReduce阶段、抽样阶段、合并阶段、limit阶段等。默认情况下，一次只执行一个阶段。 不过，如果某些阶段不是互相依赖，是可以并行执行的。</p>
+
+<p>set hive.exec.parallel=true,可以开启并发执行。</p>
+
+<p>set hive.exec.parallel.thread.number=16; //同一个sql允许最大并行度，默认为8。</p>
+
+<p>会比较耗系统资源。</p>
+
+<p> </p>
+
+<p>八. 调整mapper和reducer的个数</p>
+
+<p>1 Map阶段优化</p>
+
+<p>map个数的主要的决定因素有： input的文件总个数，input的文件大小，集群设置的文件块大小（默认128M，不可自定义）。</p>
+
+<p>举例：</p>
+
+<p>a) 假设input目录下有1个文件a,大小为780M,那么hadoop会将该文件a分隔成7个块（6个128m的块和1个12m的块），从而产生7个map数</p>
+
+<p>b) 假设input目录下有3个文件a,b,c,大小分别为10m，20m，130m，那么hadoop会分隔成4个块（10m,20m,128m,2m）,从而产生4个map数</p>
+
+<p>即，如果文件大于块大小(128m),那么会拆分，如果小于块大小，则把该文件当成一个块。</p>
+
+<p>map执行时间：map任务启动和初始化的时间+逻辑处理的时间。</p>
+
+<p>1）减少map数</p>
+
+<p>若有大量小文件（小于128M），会产生多个map，处理方法是：</p>
+
+<blockquote>
+<p>set mapred.max.split.size=100000000; </p>
+
+<p>set mapred.min.split.size.per.node=100000000;</p>
+
+<p>set mapred.min.split.size.per.rack=100000000;  </p>
+</blockquote>
+
+<p>-- 前面三个参数确定合并文件块的大小，大于文件块大小128m的，按照128m来分隔，小于128m,大于100m的，按照100m来分隔，把那些小于100m的（包括小文件和分隔大文件剩下的）进行合并</p>
+
+<blockquote>
+<p>set hive.input.format=org.apache.hadoop.hive.ql.io.CombineHiveInputFormat; -- 执行前进行小文件合并</p>
+</blockquote>
+
+<p>2）增加map数</p>
+
+<p>当input的文件都很大，任务逻辑复杂，map执行非常慢的时候，可以考虑增加Map数，来使得每个map处理的数据量减少，从而提高任务的执行效率。</p>
+
+<blockquote>
+<p>set mapred.reduce.tasks=?</p>
+</blockquote>
+
+<p> </p>
+
+<p>2 Reduce阶段优化</p>
+
+<p>调整方式：</p>
+
+<p>-- set mapred.reduce.tasks=?</p>
+
+<p>-- set hive.exec.reducers.bytes.per.reducer = ?</p>
+
+<p>一般根据输入文件的总大小,用它的estimation函数来自动计算reduce的个数：reduce个数 = InputFileSize / bytes per reducer</p>
+
+<p> </p>
+
+<p>九.严格模式</p>
+
+<p>set hive.marped.mode=strict ------ 防止用户执行那些可能意想不到的不好的影响的查询</p>
+
+<p>-- 分区表，必须选定分区范围</p>
+
+<p>-- 对于使用order by的查询，要求必须使用limit语句。因为order by为了执行排序过程会将所有的结果数据分发到同一个reducer中进行处理。</p>
+
+<p>-- 限制笛卡尔积查询：两张表join时必须有on语句</p>
+
+<p> </p>
+
+<p>十.数据倾斜</p>
+
+<p> </p>
+
+<p>表现：任务进度长时间维持在99%（或100%），查看任务监控页面，发现只有少量（1个或几个）reduce子任务未完成。因为其处理的数据量和其他reduce差异过大。</p>
+
+<p>单一reduce的记录数与平均记录数差异过大，通常可能达到3倍甚至更多。 最长时长远大于平均时长。</p>
+
+<p>原因</p>
+
+<p>1)、key分布不均匀</p>
+
+<p>2)、业务数据本身的特性</p>
+
+<p>3)、建表时考虑不周</p>
+
+<p>4)、某些SQL语句本身就有数据倾斜</p>
+
+<p> </p>
+
+<table><thead><tr><td>关键词</td>
+			<td>情形</td>
+			<td>后果</td>
+		</tr></thead><tbody><tr><td>
+			<p>join</p>
+			</td>
+			<td>
+			<p>其中一个表较小，但是key集中</p>
+			</td>
+			<td>
+			<p>分发到某一个或几个Reduce上的数据远高于平均值</p>
+			</td>
+		</tr><tr><td>
+			<p>join</p>
+			</td>
+			<td>
+			<p>大表与大表，但是分桶的判断字段0值或空值过多</p>
+			</td>
+			<td>
+			<p>这些空值都由一个reduce处理，灰常慢</p>
+			</td>
+		</tr><tr><td>
+			<p>group by</p>
+			</td>
+			<td>
+			<p>group by 维度过小，某值的数量过多</p>
+			</td>
+			<td>
+			<p>处理某值的reduce灰常耗时</p>
+			</td>
+		</tr><tr><td>
+			<p>count distinct</p>
+			</td>
+			<td>
+			<p>某特殊值过多</p>
+			</td>
+			<td>
+			<p>处理此特殊值reduce耗时</p>
+			</td>
+		</tr></tbody></table><p>解决方案：</p>
+
+<p>1. 参数调节</p>
+
+<blockquote>
+<p>hive.map.aggr=true</p>
+</blockquote>
+
+<p> </p>
+
+<p>Map 端部分聚合，相当于Combiner</p>
+
+<blockquote>
+<p><strong>hive.groupby.skewindata</strong><strong>=true</strong></p>
+</blockquote>
+
+<p>有数据倾斜的时候进行负载均衡，当选项设定为 true，生成的查询计划会有两个 MR Job。第一个 MR Job 中，Map 的输出结果集合会随机分布到 Reduce 中，每个 Reduce 做部分聚合操作，并输出结果，这样处理的结果是相同的 Group By Key 有可能被分发到不同的 Reduce 中，从而达到负载均衡的目的；第二个 MR Job 再根据预处理的数据结果按照 Group By Key 分布到 Reduce 中（这个过程可以保证相同的 Group By Key 被分布到同一个 Reduce 中），最后完成最终的聚合操作。</p>
+
+<p> </p>
+
+<p>2. SQL语句调节：</p>
+
+<p> </p>
+
+<p><strong>如何Join：</strong></p>
+
+<p>关于驱动表的选取，选用join key分布最均匀的表作为驱动表</p>
+
+<p>做好列裁剪和filter操作，以达到两表做join的时候，数据量相对变小的效果。</p>
+
+<p> </p>
+
+<p><strong>大小表Join：</strong></p>
+
+<p> </p>
+
+<p>使用map join让小的维度表（1000条以下的记录条数） 先进内存。在map端完成reduce.</p>
+
+<p> </p>
+
+<p><strong>大表Join大表：</strong></p>
+
+<p> </p>
+
+<p>把空值的key变成一个字符串加上随机数，把倾斜的数据分到不同的reduce上，由于null值关联不上，处理后并不影响最终结果。</p>
+
+<p> </p>
+
+<p><strong>count distinct大量相同特殊值</strong></p>
+
+<p> </p>
+
+<p>count distinct时，将值为空的情况单独处理，如果是计算count distinct，可以不用处理，直接过滤，在最后结果中加1。如果还有其他计算，需要进行group by，可以先将值为空的记录单独处理，再和其他计算结果进行union。</p>
+
+<p> </p>
+
+<p><strong>group by维度过小</strong></p>
+
+<p> </p>
+
+<p>采用sum() group by的方式来替换count(distinct)完成计算。</p>
+
+<p> </p>
+
+<p><strong>特殊情况特殊处理</strong></p>
+
+<p> </p>
+
+<p>在业务逻辑优化效果的不大情况下，有些时候是可以将倾斜的数据单独拿出来处理。最后union回去。</p>
+
+<p><br>
+ </p>
+
+<p> </p>
+
+<p> </p>
+
+<p>参考文献：</p>
+
+<p>1. 《hive编程指南》Edward Capriolo</p>
+
+<p>2.  http://www.cnblogs.com/ggjucheng/archive/2013/01/03/2842860.html</p>            </div>
+                </div>

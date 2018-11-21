@@ -1,0 +1,122 @@
+---
+layout:     post
+title:      Flume学习笔记（二）问题整理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/Lnho2015/article/details/52118552				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<blockquote>
+  <p>本文环境如下： <br>
+  操作系统：CentOS 7.2.1511 64位 <br>
+  Flume版本：1.6.0</p>
+</blockquote>
+
+
+
+<h2 id="1-当flume与hadoop不在同一服务器上">1. 当Flume与Hadoop不在同一服务器上</h2>
+
+<p>当Flume与Hadoop不在同一服务器上时，又配置了写HDFS，则Flume启动时会报找不到类的错误。 <br>
+需要添加Hadoop相关的包到flume的classpath配置中（或者直接拷贝到flume的lib文件夹中）。 <br>
+具体需要的包，我是在maven项目中配置：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">dependency</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">groupId</span>&gt;</span>org.apache.hadoop<span class="hljs-tag">&lt;/<span class="hljs-title">groupId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">artifactId</span>&gt;</span>hadoop-common<span class="hljs-tag">&lt;/<span class="hljs-title">artifactId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">version</span>&gt;</span>2.6.4<span class="hljs-tag">&lt;/<span class="hljs-title">version</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">dependency</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">dependency</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">groupId</span>&gt;</span>org.apache.hadoop<span class="hljs-tag">&lt;/<span class="hljs-title">groupId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">artifactId</span>&gt;</span>hadoop-hdfs<span class="hljs-tag">&lt;/<span class="hljs-title">artifactId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">version</span>&gt;</span>2.6.4<span class="hljs-tag">&lt;/<span class="hljs-title">version</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">dependency</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">dependency</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">groupId</span>&gt;</span>org.apache.hadoop<span class="hljs-tag">&lt;/<span class="hljs-title">groupId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">artifactId</span>&gt;</span>hadoop-client<span class="hljs-tag">&lt;/<span class="hljs-title">artifactId</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">version</span>&gt;</span>2.6.4<span class="hljs-tag">&lt;/<span class="hljs-title">version</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">dependency</span>&gt;</span></code></pre>
+
+<p>然后把所有依赖的包（共82个），都拷贝到flume的lib中（有些包会和lib中的重复）。实际情况应该有蛮多包是没有使用的，以后有时间再精简了。</p>
+
+
+
+<h2 id="2-写入配置了ha的hdfs中">2. 写入配置了HA的HDFS中</h2>
+
+<p>当你的Flume需要将数据写入HDFS中，而Hadoop服务器又配置了HA，我尝试了2种配置方案。</p>
+
+
+
+<h3 id="方案1">方案1</h3>
+
+<p>配置其中一个namenode，并添加到host。 <br>
+该方案能用，但是Hadoop的HA就起不了作用了。当你一个节点挂掉了，flume也要手动去修改配置，才能使用另外一个namenode。</p>
+
+
+
+<h3 id="方案2">方案2</h3>
+
+<p>直接把Hadoop的nameservices(假设为<code>xxfs</code>)配置到flume的<code>hdfs.path</code>属性中。 <br>
+这种方案将会报以下错：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-number">2016</span>-<span class="hljs-number">08</span>-<span class="hljs-number">04</span> <span class="hljs-number">13</span>:<span class="hljs-number">34</span>:<span class="hljs-number">55</span>,<span class="hljs-number">535</span> (SinkRunner-PollingRunner-DefaultSinkProcessor) [ERROR - org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.SinkRunner</span>$PollingRunner<span class="hljs-preprocessor">.run</span>(SinkRunner<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">160</span>)] Unable to deliver event. Exception follows.
+<span class="hljs-label">org.apache.flume.EventDeliveryException:</span> java<span class="hljs-preprocessor">.lang</span><span class="hljs-preprocessor">.IllegalArgumentException</span>: java<span class="hljs-preprocessor">.net</span><span class="hljs-preprocessor">.UnknownHostException</span>: xxfs
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.HDFSEventSink</span><span class="hljs-preprocessor">.process</span>(HDFSEventSink<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">463</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.DefaultSinkProcessor</span><span class="hljs-preprocessor">.process</span>(DefaultSinkProcessor<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">68</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.SinkRunner</span>$PollingRunner<span class="hljs-preprocessor">.run</span>(SinkRunner<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">147</span>)
+    at java<span class="hljs-preprocessor">.lang</span><span class="hljs-preprocessor">.Thread</span><span class="hljs-preprocessor">.run</span>(Thread<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">745</span>)
+Caused by: java<span class="hljs-preprocessor">.lang</span><span class="hljs-preprocessor">.IllegalArgumentException</span>: java<span class="hljs-preprocessor">.net</span><span class="hljs-preprocessor">.UnknownHostException</span>: xxfs
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.security</span><span class="hljs-preprocessor">.SecurityUtil</span><span class="hljs-preprocessor">.buildTokenService</span>(SecurityUtil<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">374</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.NameNodeProxies</span><span class="hljs-preprocessor">.createNonHAProxy</span>(NameNodeProxies<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">310</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.NameNodeProxies</span><span class="hljs-preprocessor">.createProxy</span>(NameNodeProxies<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">176</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.DFSClient</span>.&lt;init&gt;(DFSClient<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">668</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.DFSClient</span>.&lt;init&gt;(DFSClient<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">604</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.DistributedFileSystem</span><span class="hljs-preprocessor">.initialize</span>(DistributedFileSystem<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">148</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.fs</span><span class="hljs-preprocessor">.FileSystem</span><span class="hljs-preprocessor">.createFileSystem</span>(FileSystem<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">2596</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.fs</span><span class="hljs-preprocessor">.FileSystem</span><span class="hljs-preprocessor">.access</span>$200(FileSystem<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">91</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.fs</span><span class="hljs-preprocessor">.FileSystem</span>$Cache<span class="hljs-preprocessor">.getInternal</span>(FileSystem<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">2630</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.fs</span><span class="hljs-preprocessor">.FileSystem</span>$Cache<span class="hljs-preprocessor">.get</span>(FileSystem<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">2612</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.fs</span><span class="hljs-preprocessor">.FileSystem</span><span class="hljs-preprocessor">.get</span>(FileSystem<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">370</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.fs</span><span class="hljs-preprocessor">.Path</span><span class="hljs-preprocessor">.getFileSystem</span>(Path<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">296</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.BucketWriter</span>$1<span class="hljs-preprocessor">.call</span>(BucketWriter<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">243</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.BucketWriter</span>$1<span class="hljs-preprocessor">.call</span>(BucketWriter<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">235</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.BucketWriter</span>$9$1<span class="hljs-preprocessor">.run</span>(BucketWriter<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">679</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.auth</span><span class="hljs-preprocessor">.SimpleAuthenticator</span><span class="hljs-preprocessor">.execute</span>(SimpleAuthenticator<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">50</span>)
+    at org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.BucketWriter</span>$9<span class="hljs-preprocessor">.call</span>(BucketWriter<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">676</span>)
+    at java<span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.concurrent</span><span class="hljs-preprocessor">.FutureTask</span><span class="hljs-preprocessor">.run</span>(FutureTask<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">266</span>)
+    at java<span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.concurrent</span><span class="hljs-preprocessor">.ThreadPoolExecutor</span><span class="hljs-preprocessor">.runWorker</span>(ThreadPoolExecutor<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">1142</span>)
+    at java<span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.concurrent</span><span class="hljs-preprocessor">.ThreadPoolExecutor</span>$Worker<span class="hljs-preprocessor">.run</span>(ThreadPoolExecutor<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">617</span>)
+    ... <span class="hljs-number">1</span> more
+Caused by: java<span class="hljs-preprocessor">.net</span><span class="hljs-preprocessor">.UnknownHostException</span>: xxfs
+    ... <span class="hljs-number">21</span> more</code></pre>
+
+
+
+<h3 id="最终的方案">最终的方案</h3>
+
+<p>（1）将Hadoop的nameservices(假设为<code>xxfs</code>)配置到flume的<code>hdfs.path</code>属性中。例如：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">a1<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.userSink</span><span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.path</span> = hdfs://xxfs/flume</code></pre>
+
+<p>（2）将Hadoop服务器上配置好的core-site.xml、hdfs-site.xml拷贝到flume的conf文件夹下。 <br>
+再重新启动Flume将可以用了。 <br>
+（3）将Hadoop所使用的几台服务器做好host。</p>
+
+
+
+<h2 id="3-kafka-channel的parseasflumeevent">3. Kafka Channel的parseAsFlumeEvent</h2>
+
+<p>由于项目有需求要把Flume中的部分数据写Kafka，而我做过测试，通过Memory Channel+Kafka Sink的性能不如直接使用Kafka Channel，以上为背景。 <br>
+实际使用的过程中，发现parseAsFlumeEvent这个配置起不了作用。也就是无论parseAsFlumeEvent配置为true还是false，都会转为Flume Event。 <br>
+这样的话，造成的结果是，会始终都把Flume的headers中的信息混合着内容一起写入Kafka的消息中，这显然不是我所需要的，我只是需要把内容写入即可。 <br>
+后来我查询了一些资料，网络上也有人发现了这个bug，并且提交bugfix给Flume官方，但是要下一个版本（1.7）才能解决。 <br>
+无奈之下，只能先采用Memory Channel+Kafka Sink的方式作为代替了。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

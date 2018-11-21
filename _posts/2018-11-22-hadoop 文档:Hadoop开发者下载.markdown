@@ -1,0 +1,9 @@
+---
+layout:     post
+title:      hadoop 文档:Hadoop开发者下载
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                hadoop 文档:Hadoop开发者            </div>
+                </div>

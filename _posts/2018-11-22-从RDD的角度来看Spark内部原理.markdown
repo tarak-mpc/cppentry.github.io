@@ -1,0 +1,142 @@
+---
+layout:     post
+title:      从RDD的角度来看Spark内部原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<ol>
+<li>RDD为什么是Spark的核心概念</li>
+<li>通过一个wordCount例子来看一看RDD</li>
+<li>RDD的管理与操作（算子）</li>
+<li>常见的RDD操作有哪些（包括RDD的分类）</li>
+<li>RDD的依赖关系（DAG）</li>
+<li>RDD依赖关系的划分（stage）</li>
+</ol>
+
+<p><strong>RDD为什么是Spark的核心概念</strong> <br>
+Spark建立在统一抽象的RDD之上，使得Spark可以很容易扩展，比如 Spark Streaming、Spark SQL、Machine Learning、Graph都是在spark RDD上面进行的扩展（可以看见RDD的核心地位了吧） <br>
+RDD是什么呢？理解一下概念： <br>
+RDD(Resilient Distributed Dataset)：弹性分布式数据集。 <br>
+RDD是只读的，由多个partition组成 <br>
+Partition分区，和Block数据块是一一对应的 <br>
+<img src="https://img-blog.csdn.net/20170814100006512?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+通过一个wordCount例子来看一看RDD <br>
+上面只是RDD的概念，下面举个wordCount的例子来说明一下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">val file = sc<span class="hljs-preprocessor">.textFile</span>(<span class="hljs-string">"hdfs://data/test.txt"</span>)
+val data = file<span class="hljs-preprocessor">.flatMap</span>(_<span class="hljs-preprocessor">.split</span>(<span class="hljs-string">" "</span>))<span class="hljs-preprocessor">.map</span>((_,<span class="hljs-number">1</span>))<span class="hljs-preprocessor">.reduceByKey</span>(_ + _)</code></pre>
+
+<p><img src="https://img-blog.csdn.net/20170814100129170?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p><strong>Spark 程序具体的流程图</strong></p>
+
+<p><img src="https://img-blog.csdn.net/20170814100317295?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<blockquote>
+  <p>1.客户端提交任务，初始化sparkContext之后，sc.textFile(“hdfs://“)，去hdfs加载文件 <br>
+  2.加载的文件比如有300MB，在hdfs中就有3个block块，对应 RDD 里面的三个partition <br>
+  3.加载的这个过程其实就是RDD的创建（MapPartitionsRDD） <br>
+  4.数据被加载到不同的partition中，通过构建的stage（task set）然后提交到executor中去并行计算 <br>
+  5计算完成后输出结果</p>
+</blockquote>
+
+<p>在整个spark计算流程里面，RDD起到了一些什么作用？</p>
+
+<blockquote>
+  <p>作用当然大了！可以看出整个计算流程都是基于RDD在做计算,从数据加载，即RDD的创建,中途的计算（stage的划分，RDD的操作，shuffle）。到最后结果的输出，整个计算流程都是由RDD在贯穿</p>
+</blockquote>
+
+<p><strong>RDD的管理与操作（算子）</strong> <br>
+RDD管理 <br>
+RDD是一个分布式数据集，即数据分布存储在多台机器上。从上面也可以看到，每个RDD的数据都以Block的形式存储于多台机器上 <br>
+在Spark任务运行时 <br>
+Driver 节点的BlockManagerMaster保存Block的元数据，并且管理RDD与Block的关系。 <br>
+Executor 会启动一个BlockManagerSlave，管理Block数据并向BlockManagerMaster注册该Block <br>
+当RDD不再需要存储的时候，BlockManagerMaster将向BlockManagerSlave发送指令删除相应的Block。 <br>
+<img src="https://img-blog.csdn.net/20170814101052689?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p><strong>RDD操作</strong> <br>
+RDD还提供了一组丰富的操作来操作这些数据，这种操作叫做算子。比如map、flatMap、filter、join、groupBy、reduceByKey等 <br>
+RDD分类，分为创建算子、转换、缓存、执行 <br>
+Transformation：转换算子，这类转换并不触发提交作业，完成作业中间过程处理。 <br>
+Action：行动算子，这类算子会触发SparkContext提交Job作业。 <br>
+<img src="https://img-blog.csdn.net/20170814101254637?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p><strong>常见的RDD操作有哪些（包括RDD的分类）</strong> <br>
+常见的算子，如下图所示： <br>
+<img src="https://img-blog.csdn.net/20170814101514630?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+具体的来看一下，例如map算子示例如下： <br>
+<img src="https://img-blog.csdn.net/20170814101703135?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p><strong>RDD的依赖关系（DAG）</strong> <br>
+RDD的依赖关系有两种：窄依赖（narrow dependency）和宽依赖（wide dependency）</p>
+
+<blockquote>
+  <p>窄依赖：每一个parent RDD的Partition最多被子RDD的一个Partition使用 <br>
+  宽依赖：多个子RDD的Partition会依赖同一个parent RDD的Partition</p>
+</blockquote>
+
+<p><img src="https://img-blog.csdn.net/20170814101859540?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+依赖的具体实现，以及怎么去知道是窄依赖还是宽依赖？ <br>
+所有的依赖都要实现trait Dependency[T]</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-keyword">abstract</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Dependency</span>[<span class="hljs-title">T</span>] <span class="hljs-keyword">extends</span> <span class="hljs-title">Serializable</span> {</span>
+　　　　<span class="hljs-keyword">def</span> rdd: RDD[T]
+}</code></pre>
+
+<p>窄依赖是有两种具体实现 OneToOneDependency 和 RangeDependency</p>
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-keyword">abstract</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">NarrowDependencyT</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">Dependency</span>[<span class="hljs-title">T</span>] {</span>
+　　　　<span class="hljs-keyword">def</span> getParents(partitionId: Int): Seq[Int]
+　　　　<span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> rdd: RDD[T] = _rdd
+}
+
+<span class="hljs-comment">//OneToOneDependency</span>
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">OneToOneDependencyT</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">NarrowDependencyT</span> {</span>
+　　　　<span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> getParents(partitionId: Int) = List(partitionId)
+
+<span class="hljs-comment">//RangeDependency</span>
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">RangeDependencyT</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">NarrowDependencyT</span> {</span>
+
+　　<span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> getParents(partitionId: Int): List[Int] = {
+　　　　<span class="hljs-keyword">if</span> (partitionId &gt;= outStart &amp;&amp; partitionId &lt; outStart + length) {
+　　　　　　List(partitionId - outStart + inStart)
+　　　　} <span class="hljs-keyword">else</span> {
+　　　　　　Nil
+　　　　}
+　　}
+}</code></pre>
+
+<p>宽依赖的实现只有一种：ShuffleDependency</p>
+
+<pre class="prettyprint"><code class=" hljs php"><span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ShuffleDependency</span>[<span class="hljs-title">K</span>, <span class="hljs-title">V</span>, <span class="hljs-title">C</span>] <span class="hljs-keyword">extends</span> <span class="hljs-title">Dependency</span>[<span class="hljs-title">Product2</span>[<span class="hljs-title">K</span>, <span class="hljs-title">V</span>]] {</span> … }</code></pre>
+
+<p>窄依赖|宽依赖，可以通过dependencies方法来查看，以上面的wordCount为例，可以看到res4（reduceByKey）为宽依赖 <br>
+<img src="https://img-blog.csdn.net/20170814102111588?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p><strong>RDD依赖关系的划分（stage）</strong> <br>
+RDD依赖关系的划分，RDD怎么被划分到一个stage里面？</p>
+
+<blockquote>
+  <p>1.就是通过窄依赖和宽依赖来划分stage的 <br>
+  2.如果是窄依赖就他们放在一个Stage里面，遇到宽依赖就断开划分为另外一个stage <br>
+  3.如上面的workCount例子，就划分为了两个stage，在reduceByKey的时候断开了 <br>
+  4.如下图，遇到groupByKey断开，为一个stage1，map、union为窄依赖遇到join断开划分为stage2，其余划分为stage3</p>
+</blockquote>
+
+<p><img src="https://img-blog.csdn.net/20170814102230819?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveXNjb2Rlcg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>参考： <br>
+<a href="http://blog.csdn.net/wangxiaotongfan/article/details/51395769" rel="nofollow">http://blog.csdn.net/wangxiaotongfan/article/details/51395769</a> <br>
+<a href="http://www.cnblogs.com/zlslch/p/5723403.htm" rel="nofollow">http://www.cnblogs.com/zlslch/p/5723403.htm</a></p>
+
+<p>转载于 <br>
+ <a href="http://blog.xiaoxiaomo.com/2017/07/05/Spark-%E4%BB%8ERDD%E7%9A%84%E8%A7%92%E5%BA%A6%E6%9D%A5%E7%9C%8BSpark%E5%86%85%E9%83%A8%E5%8E%9F%E7%90%86/" rel="nofollow">http://blog.xiaoxiaomo.com/2017/07/05/Spark-%E4%BB%8ERDD%E7%9A%84%E8%A7%92%E5%BA%A6%E6%9D%A5%E7%9C%8BSpark%E5%86%85%E9%83%A8%E5%8E%9F%E7%90%86/</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

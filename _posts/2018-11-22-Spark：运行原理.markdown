@@ -1,0 +1,66 @@
+---
+layout:     post
+title:      Spark：运行原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>spark内核架构深度剖析：</p>
+
+<p><img alt="" class="has" height="768" src="https://img-blog.csdn.net/20180916210911514?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl8zODc1MDA4NA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1200"></p>
+
+<p> </p>
+
+<p> </p>
+
+<h3>spark运行流程图如下（Spark job运行原理）：</h3>
+
+<p><img alt="" class="has" src="http://images2015.cnblogs.com/blog/1004194/201608/1004194-20160830094200918-1846127221.png"></p>
+
+<h3><span>spark-submit提交Spark应用程序后，其执行流程如下：</span></h3>
+
+<ol><li>构建Spark Application的运行环境，启动SparkContext</li>
+	<li>SparkContext向资源管理器Clutser Manager（可以是Standalone，Mesos，Yarn）申请运行Executor资源，并启动StandaloneExecutorbackend，StandaloneExecutorBackend向SparkContext注册。</li>
+	<li>资源管理器在worker node上创建executor并分配资源（CPU、内存等)，后期excutor会定时向资源管理器发送心跳信息，Executor向SparkContext申请Task</li>
+	<li>SparkContext将Applicaiton代码发送给StandaloneExecutorBackend；并且SparkContext解析Applicaiton代码，构建DAG图，SparkContext启动DAGScheduler，将提交的作业(job）转换成若干Stage，各Stage构成DAG（Directed Acyclic Graph有向无环图），各个Stage包含若干相task，这些task的集合被称为TaskSet</li>
+	<li>SparkContext构建成DAG图，将DAG图分解成Stage、将Taskset发送给Task Scheduler，最后由Task Scheduler将Task发送给Executor运行，同时SparkContext将应用程序代码发送到Executor，从而启动任务的执行</li>
+	<li>Task在Executor上运行，运行完释放所有资源</li>
+</ol><h2 id="2spark-job运行原理"> </h2>
+
+<p> </p>
+
+<p><strong>常用术语:</strong></p>
+
+<hr><ul><li><strong>Application: </strong>Appliction都是指用户编写的Spark应用程序，其中包括一个Driver功能的代码和分布在集群中多个节点上运行的Executor代码</li>
+	<li><strong>Driver:  </strong>Spark中的Driver即运行上述Application的main函数并创建SparkContext，创建SparkContext的目的是为了准备Spark应用程序的运行环境，在Spark中有SparkContext负责与ClusterManager通信，<em>进行资源申请、任务的分配和监控</em>等，当Executor部分运行完毕后，Driver同时负责将SparkContext关闭，通常用SparkContext代表Driver</li>
+	<li><strong>Executor:</strong>  某个Application运行在worker节点上的一个进程，  该进程负责运行某些Task， 并且负责将数据存到内存或磁盘上，每个Application都有各自独立的一批Executor， 在Spark on Yarn模式下，其进程名称为CoarseGrainedExecutor Backend。一个CoarseGrainedExecutor Backend有且仅有一个Executor对象， 负责将Task包装成taskRunner,并从线程池中抽取一个空闲线程运行Task， 这个每一个oarseGrainedExecutor Backend能并行运行Task的数量取决与分配给它的cpu个数</li>
+	<li><strong>Cluter Manager：</strong>指的是在集群上获取资源的外部服务。目前有三种类型</li>
+</ul><ol><li>
+	<ol><li>Standalon : spark原生的资源管理，由Master负责资源的分配</li>
+		<li>Apache Mesos:与hadoop MR兼容性良好的一种资源调度框架</li>
+		<li>Hadoop Yarn: 主要是指Yarn中的ResourceManager</li>
+	</ol></li>
+</ol><ul><li><strong>Worker:</strong> 集群中任何可以运行Application代码的节点，在Standalone模式中指的是通过slave文件配置的Worker节点，在Spark on Yarn模式下就是NoteManager节点</li>
+	<li><strong>Task:</strong> 被送到某个Executor上的工作单元，但hadoopMR中的MapTask和ReduceTask概念一样，是运行Application的基本单位，多个Task组成一个Stage，而Task的调度和管理等是由TaskScheduler负责</li>
+	<li><strong>Job:</strong> 包含多个Task组成的并行计算，往往由Spark Action触发生成， 一个Application中往往会产生多个Job</li>
+	<li><strong>Stage:</strong> 每个Job会被拆分成多组Task， 作为一个TaskSet， 其名称为Stage，Stage的划分和调度是有DAGScheduler来负责的，Stage有非最终的Stage（Shuffle Map Stage）和最终的Stage（Result Stage）两种，Stage的边界就是发生shuffle的地方</li>
+	<li><strong>DAGScheduler: </strong>根据Job构建基于Stage的DAG（Directed Acyclic Graph有向无环图)，并提交Stage给TASkScheduler。 其划分Stage的依据是RDD之间的依赖的关系找出开销最小的调度方法，如下图</li>
+	<li><img alt="" class="has" src="http://images2015.cnblogs.com/blog/1004194/201608/1004194-20160830110240699-1379053598.png"></li>
+	<li><strong>TASKSedulter:</strong> 将TaskSET提交给worker运行，每个Executor运行什么Task就是在此处分配的. TaskScheduler维护所有TaskSet，当Executor向Driver发生心跳时，TaskScheduler会根据资源剩余情况分配相应的Task。另外TaskScheduler还维护着所有Task的运行标签，重试失败的Task。下图展示了TaskScheduler的作用</li>
+	<li><img alt="" class="has" src="http://images2015.cnblogs.com/blog/1004194/201608/1004194-20160830110703918-1499305788.png"></li>
+	<li>在不同运行模式中任务调度器具体为：</li>
+</ul><ol><li>
+	<ol><li>Spark on Standalone模式为TaskScheduler</li>
+		<li>YARN-Client模式为YarnClientClusterScheduler</li>
+		<li>YARN-Cluster模式为YarnClusterScheduler</li>
+	</ol></li>
+</ol><ul><li>将这些术语串起来的运行层次图如下：</li>
+	<li><img alt="" class="has" src="http://images2015.cnblogs.com/blog/1004194/201608/1004194-20160829182313371-1648664691.png"></li>
+	<li>Job=多个stage，Stage=多个同种task, Task分为ShuffleMapTask和ResultTask，Dependency分为ShuffleDependency和NarrowDependency</li>
+</ul><p><strong>Spark运行模式：</strong></p>
+
+<hr><ul><li>Spark的运行模式多种多样，灵活多变，部署在单机上时，既可以用本地模式运行，也可以用伪分布模式运行，而当以分布式集群的方式部署时，也有众多的运行模式可供选择，这取决于集群的实际情况，底层的资源调度即可以依赖外部资源调度框架，也可以使用Spark内建的Standalone模式。</li>
+	<li>对于外部资源调度框架的支持，目前的实现包括相对稳定的Mesos模式，以及hadoop YARN模式</li>
+	<li><strong>本地模式：</strong>常用于本地开发测试，本地还分别 local 和 local cluster</li>
+</ul><p> </p>            </div>
+                </div>

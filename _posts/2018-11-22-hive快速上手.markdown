@@ -1,0 +1,286 @@
+---
+layout:     post
+title:      hive快速上手
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/daguanjia11/article/details/78683560				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>本篇博客和大家一起在本地搭建一个hive环境，并进行一些简单的hive操作。</p>
+
+<p>加入了启动hiveserver2并使用beeline客户端连接的步骤，去掉了直接使用hive cli的部分。</p>
+
+<p>hive允许以类似SQL的语法来操作hadoop中的数据，简单来讲，hive的default数据库对应hadoop的<code>/user/hive/warehouse</code>目录，这个根目录下的每个文件夹分别对应hive的数据表，表中的数据对应文件夹内的文件中的数据。这些对应关系都作为hive的metadata保存在了hive的metastore中，一般情况下，hive使用mysql数据库作为metastore。</p>
+
+
+
+<h1 id="hive环境搭建">hive环境搭建</h1>
+
+<p>下面开始搭建一个hive环境。</p>
+
+
+
+<h3 id="hadoop环境">hadoop环境</h3>
+
+<p>hive依赖hadoop，所以你必须保证本地的hdfs的namenode和datanode都已经启动。关于hadoop环境搭建请参考<a href="http://blog.csdn.net/daguanjia11/article/details/77881475" rel="nofollow">hadoop环境搭建 </a>。</p>
+
+<p>另外，使用hive之前需要保证hdfs中存在<code>/tmp</code>和<code>/user/hive/warehouse</code>这两个目录，并具有GroupWrite权限。可以通过下面的命令来完成</p>
+
+<p>创建文件夹</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby"><span class="hljs-variable">$ </span>hadoop fs -mkdir /tmp
+<span class="hljs-variable">$ </span>hadoop fs -mkdir /user
+<span class="hljs-variable">$ </span>hadoop fs -mkdir /user/hive
+<span class="hljs-variable">$ </span>hadoop fs -mkdir /user/hive/warehouse</code></pre>
+
+<p>赋权限</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs perl">hadoop fs -<span class="hljs-keyword">chmod</span> g+w   /tmp
+hadoop fs -<span class="hljs-keyword">chmod</span> g+w   /user/hive/warehouse</code></pre>
+
+<p>hadoop的命令与linux命令极为相似，想详细了解linux权限的话可以参考<a href="http://blog.csdn.net/daguanjia11/article/details/78005620" rel="nofollow">linux中文件/文件夹的权限</a></p>
+
+
+
+<h3 id="mysql环境">mysql环境</h3>
+
+<p>hive需要使用mysql中的一个数据库作为metastore数据库，所以在mysql中新建一个空的数据库来备用，我本地新建的数据库名叫hive。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs oxygene">mysql&gt; <span class="hljs-keyword">create</span> database hive <span class="hljs-keyword">default</span> character <span class="hljs-keyword">set</span> utf8;
+mysql&gt; grant all <span class="hljs-keyword">to</span> hive.* <span class="hljs-keyword">to</span> hiveuser@<span class="hljs-string">'localhost'</span> identified <span class="hljs-keyword">by</span> hivepassword;</code></pre>
+
+
+
+<h3 id="hive环境">hive环境</h3>
+
+
+
+<h5 id="下载hive">下载hive</h5>
+
+<p>我本地使用的是hive2.1.1版本，下载地址是<a href="https://archive.apache.org/dist/hive/hive-2.1.1/apache-hive-2.1.1-bin.tar.gz" rel="nofollow">https://archive.apache.org/dist/hive/hive-2.1.1/apache-hive-2.1.1-bin.tar.gz</a>，如果你想下载其他版本，可以访问<a href="https://archive.apache.org/dist/hive/" rel="nofollow">https://archive.apache.org/dist/hive/</a>下载你想要的版本。</p>
+
+<p>下载完成后解压，然后进入hive的根目录，查看一下目录结构</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">$ ls <span class="hljs-attribute">-l</span>
+总用量 <span class="hljs-number">108</span>K
+drwxrwxr<span class="hljs-attribute">-x</span>  <span class="hljs-number">9</span> kite kite <span class="hljs-number">4.0</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">16</span>:<span class="hljs-number">49</span> <span class="hljs-built_in">.</span><span class="hljs-subst">/</span>
+drwxr<span class="hljs-attribute">-xr</span><span class="hljs-attribute">-x</span> <span class="hljs-number">18</span> kite kite <span class="hljs-number">4.0</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">17</span>:<span class="hljs-number">44</span> <span class="hljs-built_in">..</span><span class="hljs-subst">/</span>
+drwxrwxr<span class="hljs-attribute">-x</span>  <span class="hljs-number">3</span> kite kite <span class="hljs-number">4.0</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">16</span>:<span class="hljs-number">49</span> bin<span class="hljs-subst">/</span>
+drwxrwxr<span class="hljs-attribute">-x</span>  <span class="hljs-number">2</span> kite kite <span class="hljs-number">4.0</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">17</span>:<span class="hljs-number">41</span> conf<span class="hljs-subst">/</span>
+drwxrwxr<span class="hljs-attribute">-x</span>  <span class="hljs-number">4</span> kite kite <span class="hljs-number">4.0</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">16</span>:<span class="hljs-number">49</span> examples<span class="hljs-subst">/</span>
+drwxrwxr<span class="hljs-attribute">-x</span>  <span class="hljs-number">7</span> kite kite <span class="hljs-number">4.0</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">16</span>:<span class="hljs-number">49</span> hcatalog<span class="hljs-subst">/</span>
+drwxrwxr<span class="hljs-attribute">-x</span>  <span class="hljs-number">2</span> kite kite <span class="hljs-number">4.0</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">16</span>:<span class="hljs-number">49</span> jdbc<span class="hljs-subst">/</span>
+drwxrwxr<span class="hljs-attribute">-x</span>  <span class="hljs-number">4</span> kite kite  <span class="hljs-number">12</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">17</span>:<span class="hljs-number">55</span> lib<span class="hljs-subst">/</span>
+<span class="hljs-attribute">-rw</span><span class="hljs-attribute">-r</span><span class="hljs-subst">--</span>r<span class="hljs-subst">--</span>  <span class="hljs-number">1</span> kite kite  <span class="hljs-number">29</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">29</span>  <span class="hljs-number">2016</span> LICENSE
+<span class="hljs-attribute">-rw</span><span class="hljs-attribute">-r</span><span class="hljs-subst">--</span>r<span class="hljs-subst">--</span>  <span class="hljs-number">1</span> kite kite  <span class="hljs-number">578</span> <span class="hljs-number">11</span>月 <span class="hljs-number">29</span>  <span class="hljs-number">2016</span> NOTICE
+<span class="hljs-attribute">-rw</span><span class="hljs-attribute">-r</span><span class="hljs-subst">--</span>r<span class="hljs-subst">--</span>  <span class="hljs-number">1</span> kite kite <span class="hljs-number">4.1</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">29</span>  <span class="hljs-number">2016</span> README<span class="hljs-built_in">.</span>txt
+<span class="hljs-attribute">-rw</span><span class="hljs-attribute">-r</span><span class="hljs-subst">--</span>r<span class="hljs-subst">--</span>  <span class="hljs-number">1</span> kite kite  <span class="hljs-number">19</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span>  <span class="hljs-number">2016</span> RELEASE_NOTES<span class="hljs-built_in">.</span>txt
+drwxrwxr<span class="hljs-attribute">-x</span>  <span class="hljs-number">4</span> kite kite <span class="hljs-number">4.0</span>K <span class="hljs-number">11</span>月 <span class="hljs-number">30</span> <span class="hljs-number">16</span>:<span class="hljs-number">49</span> scripts<span class="hljs-subst">/</span></code></pre>
+
+
+
+<h5 id="配置环境变量">配置环境变量</h5>
+
+<p>为了方便操作，配置一下hive的环境变量</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">export HIVE_HOME<span class="hljs-subst">=</span>/usr/<span class="hljs-built_in">local</span>/bin/apache<span class="hljs-attribute">-hive</span><span class="hljs-subst">-</span><span class="hljs-number">2.1</span><span class="hljs-number">.1</span><span class="hljs-attribute">-bin</span>
+export PATH<span class="hljs-subst">=</span><span class="hljs-variable">$HIVE_HOME</span>/bin:<span class="hljs-variable">$PATH</span></code></pre>
+
+<p>将HIVE_HOME修改为你本机的目录。</p>
+
+
+
+<h5 id="加入mysql驱动">加入mysql驱动</h5>
+
+<p>从<a href="https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-java-5.1.45.tar.gz" rel="nofollow">https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-java-5.1.45.tar.gz</a>下载mysql的驱动，并放入$HIVE_HOME/lib目录下。</p>
+
+
+
+<h5 id="配置hive">配置hive</h5>
+
+<p>在$HIVE_HOME/conf目录下新建一个名叫hive-site.xml的文件，并加入以下配置</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-pi">&lt;?xml version="1.0" encoding="UTF-8" standalone="no"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionURL<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>jdbc:mysql://127.0.0.1:3306/hive<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionDriverName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>com.mysql.jdbc.Driver<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionUserName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hiveuser<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionPassword<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hivepassword<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>mapreduce.cluster.local.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/usr/local/bin/hadoop-2.8.1/tmp/mapred/local<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p>上面四个property是mysql metastore的连接配置，需要修改为你本地mysql的连接信息，最后一个运行mapreduce job时需要的，请修改为你本地的一个地址。</p>
+
+
+
+<h1 id="初始化hive">初始化hive</h1>
+
+<p>上面的信息配置好了以后，就可以初始化hive的metadata了。在初始化之前，mysql中的hive数据库还是空的。使用下面的命令来初始化hive</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">schematool <span class="hljs-attribute">-dbType</span> mysql <span class="hljs-attribute">-initSchema</span></code></pre>
+
+<p><code>schematool</code>是<code>$HIVE_HOME/bin</code>目录下的一个命令，由于该目录已经加入了<code>$PATH</code>中，所以可以直接使用。</p>
+
+
+
+<h1 id="启动hiveserver2">启动hiveserver2</h1>
+
+<p>直接使用hive cli的话，限制比较多，官方推荐使用hiveserver2+beeline的方式。hiveserver2在<code>$HIVE_HOME/bin</code>下面，直接运行此命令机能启动</p>
+
+
+
+<h1 id="配置并启动beeline">配置并启动beeline</h1>
+
+<p>在使用beeline连接hiveserver2时需要配置一下hadoop配置文件中的core-site.xml文件，加入以下内容</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hadoop.proxyuser.<span class="hljs-tag">&lt;<span class="hljs-title">username</span>&gt;</span>.groups<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>*<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hadoop.proxyuser.<span class="hljs-tag">&lt;<span class="hljs-title">username</span>&gt;</span>.hosts<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>*<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span></code></pre>
+
+<p>将上面的<code>&lt;username&gt;</code>替换成你当前linux用户的名字，在terminal中运行<code>whoami</code>可以查看你自己的名字。</p>
+
+<p>修改后，需要重启hdfs的namenode和datanode。</p>
+
+<p>然后，以上面的名字的身份运行beeline命令</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver"><span class="hljs-comment"># $HIVE_HOME/bin/beeline</span>
+Beeline <span class="hljs-built_in">version</span> <span class="hljs-number">2.3</span><span class="hljs-number">.2</span> <span class="hljs-keyword">by</span> Apache Hive
+beeline&gt; </code></pre>
+
+<p>此时进入了beeline的交互式shell中。然后使用<code>!connect</code>连接本地的hiveserver2</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs fsharp">beeline&gt; !connect jdbc:hive2:<span class="hljs-comment">//127.0.0.1:10000</span>
+Connecting <span class="hljs-keyword">to</span> jdbc:hive2:<span class="hljs-comment">//127.0.0.1:10000</span>
+Enter username <span class="hljs-keyword">for</span> jdbc:hive2:<span class="hljs-comment">//127.0.0.1:10000: </span>
+Enter password <span class="hljs-keyword">for</span> jdbc:hive2:<span class="hljs-comment">//127.0.0.1:10000: </span>
+......
+Connected <span class="hljs-keyword">to</span>: Apache Hive (version <span class="hljs-number">2.3</span><span class="hljs-number">.2</span>)
+Driver: Hive JDBC (version <span class="hljs-number">2.3</span><span class="hljs-number">.2</span>)
+Transaction isolation: TRANSACTION_REPEATABLE_READ
+<span class="hljs-number">0</span>: jdbc:hive2:<span class="hljs-comment">//127.0.0.1:10000&gt; </span></code></pre>
+
+<p>当提示输入用户名和密码时，直接回车即可。此时显示已经连接上了本地的hiveserver2。</p>
+
+
+
+<h1 id="新建表">新建表</h1>
+
+<p>使用下面的命令来新建一张表</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lua"><span class="hljs-number">0</span>: jdbc:hive2://<span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span>:<span class="hljs-number">10000</span>&gt; create <span class="hljs-built_in">table</span> testT1 (id int, name <span class="hljs-built_in">string</span>);</code></pre>
+
+<p>查看hive中的表</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs http"><span class="hljs-attribute">0</span>: <span class="hljs-string">jdbc:hive2://127.0.0.1:10000&gt; show tables;</span>
+<span class="hljs-attribute">testt1</span></code></pre>
+
+<p>查看hadoop中的对应文件夹</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">kite@kite<span class="hljs-attribute">-ThinkPad</span>:<span class="hljs-built_in">local</span>$ hadoop fs <span class="hljs-attribute">-ls</span> /user/hive/warehouse
+Found <span class="hljs-number">1</span> items
+drwxrwxr<span class="hljs-attribute">-x</span>   <span class="hljs-subst">-</span> kite supergroup          <span class="hljs-number">0</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">12</span><span class="hljs-subst">-</span><span class="hljs-number">01</span> <span class="hljs-number">10</span>:<span class="hljs-number">25</span> /user/hive/warehouse/testt1</code></pre>
+
+<p>可以看出来，在hdfs的<code>/user/hive/warehouse/</code>目录下多了一个同名的文件夹来表示这是一个表。</p>
+
+
+
+<h1 id="写入数据">写入数据</h1>
+
+<p>使用下面的命令来向hive写入3条数据</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lua"><span class="hljs-number">0</span>: jdbc:hive2://<span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span>:<span class="hljs-number">10000</span>&gt; insert into <span class="hljs-built_in">table</span> testT1 values (<span class="hljs-number">1</span>,<span class="hljs-string">'foo'</span>),(<span class="hljs-number">2</span>,<span class="hljs-string">'bar'</span>),(<span class="hljs-number">3</span>,<span class="hljs-string">'hello'</span>);</code></pre>
+
+
+
+<h1 id="查询数据">查询数据</h1>
+
+<p>写入数据之后，接下来使用select语句来查询一下刚刚写入的数据</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs asciidoc"><span class="hljs-header">0: jdbc:hive2://127.0.0.1:10000&gt; select * from testt1;
++------------+--------------+</span>
+<span class="hljs-header">| testt1.id  | testt1.name  |
++------------+--------------+</span>
+| 1          | foo          |
+| 2          | bar          |
+<span class="hljs-header">| 3          | hello        |
++------------+--------------+</span>
+3 rows selected (0.444 seconds)</code></pre>
+
+<p>查看hdfs中的存储</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">$ hadoop fs <span class="hljs-attribute">-ls</span> /user/hive/warehouse/testt1
+Found <span class="hljs-number">1</span> items
+<span class="hljs-attribute">-rwxrwxr</span><span class="hljs-attribute">-x</span>   <span class="hljs-number">1</span> kite supergroup         <span class="hljs-number">20</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">12</span><span class="hljs-subst">-</span><span class="hljs-number">01</span> <span class="hljs-number">10</span>:<span class="hljs-number">29</span> /user/hive/warehouse/testt1/<span class="hljs-number">000000</span>_0</code></pre>
+
+<p>hdfs中的<code>/user/hive/warehouse/testt1</code>目录中多了一个文件，下面看下文件中的内容</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby"><span class="hljs-variable">$ </span>hadoop fs -cat /user/hive/warehouse/testt1/<span class="hljs-number">000000_0</span>
+<span class="hljs-number">1</span>  foo
+<span class="hljs-number">2</span>  bar
+<span class="hljs-number">3</span>  hello</code></pre>
+
+<blockquote>
+  <p>hdfs中文件内容的分隔符并不是tab，我为了方便显示修改成了tab</p>
+</blockquote>
+
+<p>本篇博客的目的在于快速上手，关于hive的更多细节我会写在以后的博客中。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,171 @@
+---
+layout:     post
+title:      Spark1.3.0新特性概览
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div>﻿﻿</div>
+<p><span style="font-size:14px;">自2013年3月面世以来，Spark SQL已经成为除Spark Core以外最大的Spark组件。除了接过Shark的接力棒，继续为Spark用户提供高性能的SQL on Hadoop解决方案之外，它还为Spark带来了通用、高效、多元一体的结构化数据处理能力。在刚刚发布的1.3.0版中，Spark SQL的两大升级被诠释得淋漓尽致。</span></p>
+<p><span style="font-size:14px;"><br></span></p>
+<h1>DataFrame</h1>
+<p><span style="font-size:14px;">就易用性而言，对比传统的MapReduce API，说Spark的RDD API有了数量级的飞跃并不为过。然而，对于没有MapReduce和函数式编程经验的新手来说，RDD API仍然存在着一定的门槛。另一方面，数据科学家们所熟悉的R、Pandas等传统数据框架虽然提供了直观的API，却局限于单机处理，无法胜任大数据场景。为了解决这一矛盾，Spark SQL 1.3.0在原有SchemaRDD的基础上提供了与R和Pandas风格类似的DataFrame
+ API。新的DataFrame AP不仅可以大幅度降低普通开发者的学习门槛，同时还支持Scala、Java与Python三种语言。更重要的是，由于脱胎自SchemaRDD，DataFrame天然适用于分布式大数据场景。</span></p>
+<h2><span>DataFrame是什么？</span> </h2>
+<p><span style="font-size:14px;">在Spark中，DataFrame是一种以RDD为基础的分布式数据集，类似于传统数据库中的二维表格。DataFrame与RDD的主要区别在于，前者带有schema元信息，即DataFrame所表示的二维表数据集的每一列都带有名称和类型。这使得Spark SQL得以洞察更多的结构信息，从而对藏于DataFrame背后的数据源以及作用于DataFrame之上的变换进行了针对性的优化，最终达到大幅提升运行时效率的目标。反观RDD，由于无从得知所存数据元素的具体内部结构，Spark
+ Core只能在stage层面进行简单、通用的流水线优化。</span></p>
+<p><span style="font-size:14px;"><img alt="" src="https://img-blog.csdn.net/20150410142337737?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWhhbzIwMTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></span></p>
+<p><strong><span><span style="font-size:14px;"><br></span></span></strong></p>
+<h2><span>创建DataFrame</span> </h2>
+<p><span style="font-size:14px;">在Spark SQL中，开发者可以非常便捷地将各种内、外部的单机、分布式数据转换为DataFrame。以下Python示例代码充分体现了Spark SQL 1.3.0中DataFrame数据源的丰富多样和简单易用：</span></p>
+<pre><code class="language-python">&lt;span style="font-size:14px;"&gt;# 从Hive中的users表构造DataFrame
+users = sqlContext.table("users")
+
+# 加载S3上的JSON文件
+logs = sqlContext.load("s3n://path/to/data.json", "json")
+
+# 加载HDFS上的Parquet文件
+clicks = sqlContext.load("hdfs://path/to/data.parquet", "parquet")
+
+# 通过JDBC访问MySQL
+comments = sqlContext.jdbc("jdbc:mysql://localhost/comments", "user")
+
+# 将普通RDD转变为DataFrame
+rdd = sparkContext.textFile("article.txt") \
+                  .flatMap(lambda line: line.split()) \
+                  .map(lambda word: (word, 1)) \
+                  .reduceByKey(lambda a, b: a + b) \
+wordCounts = sqlContext.createDataFrame(rdd, ["word", "count"])
+
+# 将本地数据容器转变为DataFrame
+data = [("Alice", 21), ("Bob", 24)]
+people = sqlContext.createDataFrame(data, ["name", "age"])
+
+# 将Pandas DataFrame转变为Spark DataFrame（Python API特有功能）
+sparkDF = sqlContext.createDataFrame(pandasDF)&lt;/span&gt;</code></pre>
+<p><span style="font-size:14px;"><br></span></p>
+<p><span style="font-size:14px;">可见，从Hive表，到外部数据源API支持的各种数据源（JSON、Parquet、JDBC），再到RDD乃至各种本地数据集，都可以被方便快捷地加载、转换为DataFrame。这些功能也同样存在于Spark SQL的Scala API和Java API中。</span></p>
+<p><strong><span><span style="font-size:14px;"><br></span></span></strong></p>
+<h2><span>使用DataFrame</span> </h2>
+<p><span style="font-size:14px;">和R、Pandas类似，Spark DataFrame也提供了一整套用于操纵数据的DSL。这些DSL在语义上与SQL关系查询非常相近（这也是Spark SQL能够为DataFrame提供无缝支持的重要原因之一）。以下是一组用户数据分析示例：</span></p>
+<pre><code class="language-python">&lt;span style="font-size:14px;"&gt;# 创建一个只包含"年轻"用户的DataFrame
+young = users.filter(users.age &lt; 21)
+
+# 也可以使用Pandas风格的语法
+young = users[users.age &lt; 21]
+
+# 将所有人的年龄加1
+young.select(young.name, young.age + 1)
+
+# 统计年轻用户中各性别人数
+young.groupBy("gender").count()
+
+# 将所有年轻用户与另一个名为logs的DataFrame联接起来
+young.join(logs, logs.userId == users.userId, "left_outer")&lt;/span&gt;</code></pre>
+<p><br><span style="font-size:14px;">除DSL以外，我们当然也可以像以往一样，用SQL来处理DataFrame：</span></p>
+<pre><code class="language-python">&lt;span style="font-size:14px;"&gt;young.registerTempTable("young")
+sqlContext.sql("SELECT count(*) FROM young")&lt;/span&gt;</code></pre>
+<p><br><span style="font-size:14px;">最后，当数据分析逻辑编写完毕后，我们便可以将最终结果保存下来或展现出来：</span></p>
+<p></p><pre><code class="language-python">&lt;span style="font-size:14px;"&gt;# 追加至HDFS上的Parquet文件
+young.save(path="hdfs://path/to/data.parquet",
+           source="parquet",
+           mode="append")
+
+# 覆写S3上的JSON文件
+young.save(path="s3n://path/to/data.json",
+           source="json",
+           mode="append")
+
+# 保存为SQL表
+young.saveAsTable(tableName="young", source="parquet" mode="overwrite")
+
+# 转换为Pandas DataFrame（Python API特有功能）
+pandasDF = young.toPandas()
+
+# 以表格形式打印输出
+young.show()&lt;/span&gt;</code></pre><br><p></p>
+<h2><span>幕后英雄：Spark SQL查询优化器与代码生成</span></h2>
+<p><span style="font-size:14px;">正如RDD的各种变换实际上只是在构造RDD DAG，DataFrame的各种变换同样也是lazy的。它们并不直接求出计算结果，而是将各种变换组装成与RDD DAG类似的逻辑查询计划。如前所述，由于DataFrame带有schema元信息，Spark SQL的查询优化器得以洞察数据和计算的精细结构，从而施行具有很强针对性的优化。随后，经过优化的逻辑执行计划被翻译为物理执行计划，并最终落实为RDD DAG。</span></p>
+<p><span style="font-size:14px;"><img alt="" src="https://img-blog.csdn.net/20150410142830515?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWhhbzIwMTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></span></p>
+<p><span style="font-size:14px;"><strong>这样做的好处体现在几个方面：</strong> </span></p>
+<p><span style="font-size:14px;">1. 用户可以用更少的申明式代码阐明计算逻辑，物理执行路径则交由Spark SQL自行挑选。一方面降低了开发成本，一方面也降低了使用门槛——很多情况下，即便新手写出了较为低效的查询，Spark SQL也可以通过过滤条件下推、列剪枝等策略予以有效优化。这是RDD API所不具备的。</span></p>
+<p><span style="font-size:14px;">2. Spark SQL可以动态地为物理执行计划中的表达式生成JVM字节码，进一步实现归避虚函数调用开销、削减对象分配次数等底层优化，使得最终的查询执行性能可以与手写代码的性能相媲美。</span></p>
+<p><span style="font-size:14px;">3. 对于PySpark而言，采用DataFrame编程时只需要构造体积小巧的逻辑执行计划，物理执行全部由JVM端负责，Python解释器和JVM间大量不必要的跨进程通讯得以免除。如上图所示，一组简单的对一千万整数对做聚合的测试中，PySpark中DataFrame API的性能轻松胜出RDD API近五倍。此外，今后Spark SQL在Scala端对查询优化器的所有性能改进，PySpark都可以免费获益。</span></p>
+<p><span style="font-size:14px;"><br></span></p>
+<h1><span style="color:#000000;">外部数据源API增强</span></h1>
+<p><span style="font-size:14px;"><img alt="" src="https://img-blog.csdn.net/20150410142930528?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWhhbzIwMTQ=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></span></p>
+<p><span style="font-size:14px;">从前文中我们已经看到，Spark 1.3.0为DataFrame提供了丰富多样的数据源支持。其中的重头戏，便是自Spark 1.2.0引入的外部数据源API。在1.3.0中，我们对这套API做了进一步的增强。</span></p>
+<h2><span>数据写入支持</span></h2>
+<p><span style="font-size:14px;">在Spark 1.2.0中，外部数据源API只能将外部数据源中的数据读入Spark，而无法将计算结果写回数据源；同时，通过数据源引入并注册的表只能是临时表，相关元信息无法持久化。在1.3.0中，我们提供了完整的数据写入支持，从而补全了多数据源互操作的最后一块重要拼图。前文示例中Hive、Parquet、JSON、Pandas等多种数据源间的任意转换，正是这一增强的直接成果。</span></p>
+<p><span style="font-size:14px;">站在Spark SQL外部数据源开发者的角度，数据写入支持的API主要包括：</span></p>
+<h3>1. 数据源表元数据持久化 </h3>
+<p><span style="font-size:14px;">1.3.0引入了新的外部数据源DDL语法（SQL代码片段）</span></p>
+<p></p><pre><code class="language-sql">&lt;span style="font-size:14px;"&gt;CREATE [TEMPORARY] TABLE [IF NOT EXISTS] 
+  &lt;table-name&gt; [(col-name data-type [, ...)] 
+  USING &lt;source&gt; [OPTIONS ...] 
+  [AS &lt;select-query&gt;]&lt;/span&gt;</code></pre><br><p></p>
+<p><span style="font-size:14px;">由此，注册自外部数据的SQL表既可以是临时表，也可以被持久化至Hive metastore。需要持久化支持的外部数据源，除了需要继承原有的RelationProvider以外，还需继承CreatableRelationProvider。</span></p>
+<h3>2. InsertableRelation </h3>
+<p><span style="font-size:14px;">支持数据写入的外部数据源的relation类，还需继承trait InsertableRelation，并在insert方法中实现数据插入逻辑。</span></p>
+<p><span style="font-size:14px;">Spark 1.3.0中内置的JSON和Parquet数据源都已实现上述API，可以作为开发外部数据源的参考示例。</span></p>
+<h2><span>统一的load/save API</span></h2>
+<p><span style="font-size:14px;">在Spark 1.2.0中，要想将SchemaRDD中的结果保存下来，便捷的选择并不多。常用的一些包括：</span></p>
+<p><span style="font-size:14px;"></span></p>
+<ul><li><span style="font-size:14px;">rdd.saveAsParquetFile(...)</span></li><li><span style="font-size:14px;">rdd.saveAsTextFile(...)</span></li><li><span style="font-size:14px;">rdd.toJSON.saveAsTextFile(...)</span></li><li><span style="font-size:14px;">rdd.saveAsTable(...)</span></li><li><span style="font-size:14px;">....</span></li></ul><p><span style="font-size:14px;"></span></p>
+<p><span style="font-size:14px;">可见，不同的数据输出方式，采用的API也不尽相同。更令人头疼的是，我们缺乏一个灵活扩展新的数据写入格式的方式。</span></p>
+<p><span style="font-size:14px;">针对这一问题，1.3.0统一了load/save API，让用户按需自由选择外部数据源。这套API包括：</span></p>
+<p><span style="font-size:14px;"><strong>1.SQLContext.table</strong> </span></p>
+<p><span style="font-size:14px;">从SQL表中加载DataFrame。</span></p>
+<p><span style="font-size:14px;"><strong>2.SQLContext.load</strong> </span></p>
+<p><span style="font-size:14px;">从指定的外部数据源加载DataFrame。</span></p>
+<p><span style="font-size:14px;"><strong>3.SQLContext.createExternalTable</strong></span></p>
+<p><span style="font-size:14px;">将指定位置的数据保存为外部SQL表，元信息存入Hive metastore，并返回包含相应数据的DataFrame。</span></p>
+<p><span style="font-size:14px;"><strong>4.DataFrame.save</strong> </span></p>
+<p><span style="font-size:14px;">将DataFrame写入指定的外部数据源。</span></p>
+<p><span style="font-size:14px;"><strong>5.DataFrame.saveAsTable</strong> </span></p>
+<p><span style="font-size:14px;">将DataFrame保存为SQL表，元信息存入Hive metastore，同时将数据写入指定位置。</span></p>
+<h2><span>Parquet数据源增强</span></h2>
+<p><span style="font-size:14px;">Spark SQL从一开始便内置支持Parquet这一高效的列式存储格式。在开放外部数据源API之后，原有的Parquet支持也正在逐渐转向外部数据源。1.3.0中，Parquet外部数据源的能力得到了显著增强。主要包括schema合并和自动分区处理。</span></p>
+<h3>1.Schema合并 </h3>
+<p><span style="font-size:14px;">与ProtocolBuffer和Thrift类似，Parquet也允许用户在定义好schema之后随时间推移逐渐添加新的列，只要不修改原有列的元信息，新旧schema仍然可以兼容。这一特性使得用户可以随时按需添加新的数据列，而无需操心数据迁移。</span></p>
+<h3>2.分区信息发现 </h3>
+<p><span style="font-size:14px;">按目录对同一张表中的数据分区存储，是Hive等系统采用的一种常见的数据存储方式。新的Parquet数据源可以自动根据目录结构发现和推演分区信息。</span></p>
+<h3>3.分区剪枝 </h3>
+<p><span style="font-size:14px;">分区实际上提供了一种粗粒度的索引。当查询条件中仅涉及部分分区时，通过分区剪枝跳过不必要扫描的分区目录，可以大幅提升查询性能。</span></p>
+<p><span style="font-size:14px;">以下Scala代码示例统一展示了1.3.0中Parquet数据源的这几个能力（Scala代码片段）：</span></p>
+<p></p><pre><code class="language-plain">&lt;span style="font-size:14px;"&gt;// 创建两个简单的DataFrame，将之存入两个独立的分区目录
+val df1 = (1 to 5).map(i =&gt; (i, i * 2)).toDF("single", "double")
+df1.save("data/test_table/key=1", "parquet", SaveMode.Append)
+val df2 = (6 to 10).map(i =&gt; (i, i * 2)).toDF("single", "double")
+df2.save("data/test_table/key=2", "parquet", SaveMode.Append)
+// 在另一个DataFrame中引入一个新的列，并存入另一个分区目录
+val df3 = (11 to 15).map(i =&gt; (i, i * 3)).toDF("single", "triple")
+df3.save("data/test_table/key=3", "parquet", SaveMode.Append)
+// 一次性读入整个分区表的数据
+val df4 = sqlContext.load("data/test_table", "parquet")
+// 按分区进行查询，并展示结果
+val df5 = df4.filter($"key" &gt;= 2) df5.show() &lt;/span&gt;</code></pre><br><p></p>
+<p><span style="font-size:14px;">这段代码的执行结果为： </span></p>
+<p></p><pre><code class="language-plain">&lt;span style="font-size:14px;"&gt;6 12 null 2 
+7 14 null 2 
+8 16 null 2 
+9 18 null 2 
+10 20 null 2 
+11 null 33 3 
+12 null 36 3 
+13 null 39 3 
+14 null 42 3 
+15 null 45 3&lt;/span&gt;</code></pre><br><p></p>
+<p><span style="font-size:14px;">可见，Parquet数据源自动从文件路径中发现了key这个分区列，并且正确合并了两个不相同但相容的schema。值得注意的是，在最后的查询中查询条件跳过了key=1这个分区。Spark SQL的查询优化器会根据这个查询条件将该分区目录剪掉，完全不扫描该目录中的数据，从而提升查询性能。</span></p>
+<p><span style="font-size:14px;"><br></span></p>
+<h2><span style="font-size:24px;">小结</span></h2>
+<p><span style="font-size:14px;">DataFrame API的引入一改RDD API高冷的FP姿态，令Spark变得更加平易近人，使大数据分析的开发体验与传统单机数据分析的开发体验越来越接近。外部数据源API体现出的则是兼容并蓄。目前，除了内置的JSON、Parquet、JDBC以外，社区中已经涌现出了CSV、Avro、HBase等多种数据源，Spark SQL多元一体的结构化数据处理能力正在逐渐释放。</span></p>
+<p><span style="font-size:14px;">为开发者提供更多的扩展点，是Spark贯穿整个2015年的主题之一。我们希望通过这些扩展API，切实地引爆社区的能量，令Spark的生态更加丰满和多样。</span></p>
+<p><span style="font-size:14px;"><br></span></p>
+<p><span style="font-size:14px;">原文链接：<a href="http://www.csdn.net/article/2015-04-03/2824407" rel="nofollow">http://www.csdn.net/article/2015-04-03/2824407</a></span></p>
+<p><span style="font-size:14px;"> </span></p>
+<p><br></p>
+<div>﻿﻿</div>
+            </div>
+                </div>

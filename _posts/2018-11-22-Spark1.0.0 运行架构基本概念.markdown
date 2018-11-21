@@ -1,0 +1,62 @@
+---
+layout:     post
+title:      Spark1.0.0 运行架构基本概念
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div class="articalTitle" style="clear:both;line-height:20px;color:rgb(72,72,72);font-family:Verdana, '宋体', sans-serif;background-color:rgb(224,227,218);">
+<h2 id="t_4d1426660102v5u2" class="titName SG_txta" style="border:0px;list-style:none;color:rgb(143,20,22);font-size:18px;font-family:'微软雅黑', '黑体';font-weight:300;display:inline;">
+Spark1.0.0 运行架构基本概念</h2>
+</div>
+<div class="articalTag" id="sina_keyword_ad_area" style="width:690px;clear:both;line-height:20px;color:rgb(72,72,72);font-family:Verdana, '宋体', sans-serif;background-color:rgb(224,227,218);">
+<br></div>
+<div id="sina_keyword_ad_area2" class="articalContent newfont_family" style="width:690px;clear:both;font-size:14px;overflow:hidden;font-family:'Microsoft YaHei', 'Helvetica Neue', SimSun;line-height:21px;color:rgb(72,72,72);background-color:rgb(224,227,218);">
+<strong><span style="color:#FF0000;">1、Spark Application的运行架构有哪些组成？</span><br><span style="color:#FF0000;">2、Spark on YARN 的运行过程是什么？<br><br></span>前言</strong><br>
+Spark Application的运行架构由两部分组成：driver program（SparkContext）和executor。Spark Application一般都是在集群中运行，比如Spark Standalone、YARN、mesos，这些集群给Spark Applicaiton提供了计算资源和这些资源管理，这些资源既可以给executor运行，也可以给driver program 运行。根据Spark Application的driver program是否在资源集群中运行，Spark Application的运行方式又可以分为Cluster模式和Client模式。Spark1.0.0提供了一个Spark
+ Appliaction的部署<span><a href="http://cpro.baidu.com/cpro/ui/uijs.php?rs=1&amp;u=http://www.aboutyun.com/thread-8396-1-1.html&amp;p=baidu&amp;c=news&amp;n=10&amp;t=tpclicked3_hc&amp;q=92051019_cpr&amp;k=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;k0=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi0=8&amp;k1=spark&amp;kdi1=1&amp;k2=job&amp;kdi2=8&amp;k3=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi3=8&amp;k4=%EF%BF%BD%DC%B9%EF%BF%BD&amp;kdi4=8&amp;sid=985eb039a89d96b7&amp;ch=0&amp;tu=u1692056&amp;jk=d2e2605932e2a320&amp;cf=29&amp;fv=14&amp;stid=9&amp;urlid=0&amp;luki=4&amp;seller_id=1&amp;di=128" rel="nofollow" name="6_nwl" style="text-decoration:none;color:rgb(143,20,22);"><span style="color:rgb(0,0,255);">工具</span></a></span>bin/<span><a href="http://cpro.baidu.com/cpro/ui/uijs.php?rs=1&amp;u=http://www.aboutyun.com/thread-8396-1-1.html&amp;p=baidu&amp;c=news&amp;n=10&amp;t=tpclicked3_hc&amp;q=92051019_cpr&amp;k=spark&amp;k0=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi0=8&amp;k1=spark&amp;kdi1=1&amp;k2=job&amp;kdi2=8&amp;k3=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi3=8&amp;k4=%EF%BF%BD%DC%B9%EF%BF%BD&amp;kdi4=8&amp;sid=985eb039a89d96b7&amp;ch=0&amp;tu=u1692056&amp;jk=d2e2605932e2a320&amp;cf=29&amp;fv=14&amp;stid=9&amp;urlid=0&amp;luki=2&amp;seller_id=1&amp;di=128" rel="nofollow" name="7_nwl" style="text-decoration:none;color:rgb(143,20,22);"><span style="color:rgb(0,0,255);">spark</span></a></span>-sumbit，具体用法参见Spark1.0.0
+ 应用程序部署工具spark-submit。下面介绍一下Spark1.0.0 运行架构中的基本概念、Standalone中运行过程、YARN中运行过程。<br><br><br><strong>1：基本术语</strong><br>
+Application： 基于Spark的用户程序，包含了一个driver program 和 集群中多个的executor<br>
+Driver Program ：运行Application的main()函数并且创建SparkContext，通常用SparkContext代表Driver Program。<br>
+Cluster Manager： 在集群上获取资源的外部服务(例如：Standalone、Mesos、Yarn)<br>
+Worker Node： 集群中任何可以运行Application代码的节点<br>
+Executor： 是为某Application运行在worker node上的一个进程，该进程负责运行Task，并且负责将数据存在内存或者磁盘上。每个Application都有各自独立的executors。<br>
+Task： 被送到某个executor上的工作单元<br>
+Job： 包含多个Task组成的并行计算，往往由Spark action催生，该术语可以经常在日志中看到。<br>
+Stage： 每个Job会被拆分很多组task，每组任务被称为Stage，也可称TaskSet，该术语可以经常在日志中看到。<br>
+RDD：Spark的基本计算单元，可以通过一系列算子进行操作（主要有Transformation和Action操作），详情见RDD 细解、Spark1.0.0 <span><a href="http://cpro.baidu.com/cpro/ui/uijs.php?rs=1&amp;u=http://www.aboutyun.com/thread-8396-1-1.html&amp;p=baidu&amp;c=news&amp;n=10&amp;t=tpclicked3_hc&amp;q=92051019_cpr&amp;k=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;k0=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi0=8&amp;k1=spark&amp;kdi1=1&amp;k2=job&amp;kdi2=8&amp;k3=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi3=8&amp;k4=%EF%BF%BD%DC%B9%EF%BF%BD&amp;kdi4=8&amp;sid=985eb039a89d96b7&amp;ch=0&amp;tu=u1692056&amp;jk=d2e2605932e2a320&amp;cf=29&amp;fv=14&amp;stid=9&amp;urlid=0&amp;luki=1&amp;seller_id=1&amp;di=128" rel="nofollow" name="5_nwl" style="text-decoration:none;color:rgb(143,20,22);"><span style="color:rgb(0,0,255);">编程</span></a></span>模型。<br>
+DAG Scheduler：根据Job构建基于Stage的DAG，并提交Stage给TaskScheduler，详见DAG Scheduler 细解。<br>
+TaskScheduler：将Taskset提交给worker（集群）运行并回报结果，详见TaskScheduler 细解。<br>
+关于Application中的几个概念可如下图所示：<br><img src="http://www.aboutyun.com/data/attachment/forum/201407/10/091120tsuedy68xlnvxpld.jpg" width="600" name="aimg_5591" alt="Spark1.0.0 &lt;wbr&gt;运行架构基本概念" title="Spark1.0.0 &lt;wbr&gt;运行架构基本概念" style="border:0px;list-style:none;"><br><br><br><br><strong>2：Spark运行架构</strong><br>
+Spark运行<span><a href="http://cpro.baidu.com/cpro/ui/uijs.php?rs=1&amp;u=http://www.aboutyun.com/thread-8396-1-1.html&amp;p=baidu&amp;c=news&amp;n=10&amp;t=tpclicked3_hc&amp;q=92051019_cpr&amp;k=%EF%BF%BD%DC%B9%EF%BF%BD&amp;k0=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi0=8&amp;k1=spark&amp;kdi1=1&amp;k2=job&amp;kdi2=8&amp;k3=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi3=8&amp;k4=%EF%BF%BD%DC%B9%EF%BF%BD&amp;kdi4=8&amp;sid=985eb039a89d96b7&amp;ch=0&amp;tu=u1692056&amp;jk=d2e2605932e2a320&amp;cf=29&amp;fv=14&amp;stid=9&amp;urlid=0&amp;luki=5&amp;seller_id=1&amp;di=128" rel="nofollow" name="4_nwl" style="text-decoration:none;color:rgb(143,20,22);"><span style="color:rgb(0,0,255);">架构</span></a></span>参见下面示意图：<br>
+构建Spark Application的运行环境（启动SparkContext）<br>
+SparkContext向资源管理器（可以是Standalone、Mesos、Yarn）申请运行Executor资源，并启动StandaloneExecutorBackend，executor向SparkContext申请Task。<br>
+SparkContext将应用程序代码发放给executor<br>
+SparkContext构建成DAG图、将DAG图分解成Stage、将Taskset发送给Task Scheduler、最后由Task Scheduler将Task发放给Executor运行。<br>
+Task在Executor上运行，运行完毕释放所有资源。<br><img src="http://www.aboutyun.com/data/attachment/forum/201407/10/091140fjrpwsrxa45prauk.jpg" width="580" name="aimg_5592" alt="Spark1.0.0 &lt;wbr&gt;运行架构基本概念" title="Spark1.0.0 &lt;wbr&gt;运行架构基本概念" style="border:0px;list-style:none;"><br><br><br>
+下面简单的描述一下Spark on Standalone和Spark on YARN的运行过程，以后的篇幅中再具体描述。<br><br><br><strong>3：Spark on Standalone运行过程（client模式）</strong><br>
+SparkContext连接到Master，向Master注册并申请资源（CPU Core 和Memory）<br>
+Master根据SparkContext的资源申请要求和worker心跳周期内报告的信息决定在哪个worker上分配资源，然后在该worker上获取资源，然后启动StandaloneExecutorBackend。<br>
+StandaloneExecutorBackend向SparkContext注册<br>
+SparkContext将Applicaiton代码发送给StandaloneExecutorBackend；并且SparkContext解析 Applicaiton代码，构建DAG图，并提交给DAG Scheduler分解成Stage（当碰到Action操作时，就会催生Job；每个Job中含有1个或多个Stage，Stage一般在获取外部数据 和shu f f le之前产生），然后以Stage（或者称为TaskSet）提交给Task Scheduler，Task Scheduler负责将Task分配到相应的worker，最后提交给StandaloneExecutorBackend执行；<br>
+StandaloneExecutorBackend会建立executor 线程池，开始执行Task，并向SparkContext报告，直至Task完成。<br>
+所有Task完成后，SparkContext向Master注销，释放资源。<br>
+关于Spark on Standalone的更详细信息参见Spark1.0.0 on Standalone 运行<span><a href="http://cpro.baidu.com/cpro/ui/uijs.php?rs=1&amp;u=http://www.aboutyun.com/thread-8396-1-1.html&amp;p=baidu&amp;c=news&amp;n=10&amp;t=tpclicked3_hc&amp;q=92051019_cpr&amp;k=%EF%BF%BD%DC%B9%EF%BF%BD&amp;k0=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi0=8&amp;k1=spark&amp;kdi1=1&amp;k2=job&amp;kdi2=8&amp;k3=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi3=8&amp;k4=%EF%BF%BD%DC%B9%EF%BF%BD&amp;kdi4=8&amp;sid=985eb039a89d96b7&amp;ch=0&amp;tu=u1692056&amp;jk=d2e2605932e2a320&amp;cf=29&amp;fv=14&amp;stid=9&amp;urlid=0&amp;luki=5&amp;seller_id=1&amp;di=128" rel="nofollow" name="3_nwl" style="text-decoration:none;color:rgb(143,20,22);"><span style="color:rgb(0,0,255);">架构</span></a></span>实例解析<br>
+    <img src="http://www.aboutyun.com/data/attachment/forum/201407/10/091207vcc1ct61y66g9z8g.jpg" width="600" name="aimg_5593" alt="Spark1.0.0 &lt;wbr&gt;运行架构基本概念" title="Spark1.0.0 &lt;wbr&gt;运行架构基本概念" style="border:0px;list-style:none;"><br><br><strong>4：Spark on YARN 运行过程（cluster模式）</strong><br>
+用户通过bin/<span><a href="http://cpro.baidu.com/cpro/ui/uijs.php?rs=1&amp;u=http://www.aboutyun.com/thread-8396-1-1.html&amp;p=baidu&amp;c=news&amp;n=10&amp;t=tpclicked3_hc&amp;q=92051019_cpr&amp;k=spark&amp;k0=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi0=8&amp;k1=spark&amp;kdi1=1&amp;k2=job&amp;kdi2=8&amp;k3=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi3=8&amp;k4=%EF%BF%BD%DC%B9%EF%BF%BD&amp;kdi4=8&amp;sid=985eb039a89d96b7&amp;ch=0&amp;tu=u1692056&amp;jk=d2e2605932e2a320&amp;cf=29&amp;fv=14&amp;stid=9&amp;urlid=0&amp;luki=2&amp;seller_id=1&amp;di=128" rel="nofollow" name="1_nwl" style="text-decoration:none;color:rgb(143,20,22);"><span style="color:rgb(0,0,255);">spark</span></a></span>-submit（
+ Spark1.0.0 应用程序部署<span><a href="http://cpro.baidu.com/cpro/ui/uijs.php?rs=1&amp;u=http://www.aboutyun.com/thread-8396-1-1.html&amp;p=baidu&amp;c=news&amp;n=10&amp;t=tpclicked3_hc&amp;q=92051019_cpr&amp;k=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;k0=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi0=8&amp;k1=spark&amp;kdi1=1&amp;k2=job&amp;kdi2=8&amp;k3=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi3=8&amp;k4=%EF%BF%BD%DC%B9%EF%BF%BD&amp;kdi4=8&amp;sid=985eb039a89d96b7&amp;ch=0&amp;tu=u1692056&amp;jk=d2e2605932e2a320&amp;cf=29&amp;fv=14&amp;stid=9&amp;urlid=0&amp;luki=4&amp;seller_id=1&amp;di=128" rel="nofollow" name="2_nwl" style="text-decoration:none;color:rgb(143,20,22);"><span style="color:rgb(0,0,255);">工具</span></a></span>spark-submit）或
+ bin/spark-class 向YARN提交Application<br>
+RM为Application分配第一个container，并在指定节点的container上启动SparkContext。<br>
+SparkContext向RM申请资源以运行Executor<br>
+RM分配Container给SparkContext，SparkContext和相关的NM通讯，在获得的Container上启动 StandaloneExecutorBackend，StandaloneExecutorBackend启动后，开始向SparkContext注册 并申请Task<br>
+SparkContext分配Task给StandaloneExecutorBackend执行<br>
+StandaloneExecutorBackend执行Task并向SparkContext汇报运行状况<br>
+Task运行完毕，SparkContext归还资源给NM，并注销退出。<br>
+关于Spark on Standalone的更详细信息参见Spark1.0.0 on YARN 运行<span><a href="http://cpro.baidu.com/cpro/ui/uijs.php?rs=1&amp;u=http://www.aboutyun.com/thread-8396-1-1.html&amp;p=baidu&amp;c=news&amp;n=10&amp;t=tpclicked3_hc&amp;q=92051019_cpr&amp;k=%EF%BF%BD%DC%B9%EF%BF%BD&amp;k0=%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi0=8&amp;k1=spark&amp;kdi1=1&amp;k2=job&amp;kdi2=8&amp;k3=%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD&amp;kdi3=8&amp;k4=%EF%BF%BD%DC%B9%EF%BF%BD&amp;kdi4=8&amp;sid=985eb039a89d96b7&amp;ch=0&amp;tu=u1692056&amp;jk=d2e2605932e2a320&amp;cf=29&amp;fv=14&amp;stid=9&amp;urlid=0&amp;luki=5&amp;seller_id=1&amp;di=128" rel="nofollow" name="0_nwl" style="text-decoration:none;color:rgb(143,20,22);"><span style="color:rgb(0,0,255);">架构</span></a></span>实例解析<br><img src="http://www.aboutyun.com/data/attachment/forum/201407/10/091227wvz17a9ylh4dzz7l.jpg" width="600" name="image_operate_50391410311077543" alt="Spark1.0.0 &lt;wbr&gt;运行架构基本概念" title="Spark1.0.0 &lt;wbr&gt;运行架构基本概念" style="border:0px;list-style:none;"><br><br><br><br><strong>5：Spark运行架构的特点</strong><br>
+每个Application获取专属的executor进程，该进程在Application期间一直驻留，并以多线程方式运行tasks。这种 Application隔离机制有其优势的，无论是从调度角度看（每个Driver调度它自己的任务），还是从运行角度看（来自不同 Application的Task运行在不同的JVM中）。当然，这也意味着Spark Application不能跨应用程序共享数据，除非将数据写入到外部存储系统。<br>
+Spark与资源管理器无关，只要能够获取executor进程，并能保持相互通信就可以了。<br>
+提交SparkContext的Client应该靠近Worker节点（运行Executor的节点)，最好是在同一个Rack里，因为Spark Application运行过程中SparkContext和Executor之间有大量的信息交换；如果想在远程集群中运行，最好使用RPC将 SparkContext提交给集群，不要远离Worker运行SparkContext。<br>
+Task采用了数据本地性和推测执行的优化机制。详见TaskScheduler 细解。</div>
+            </div>
+                </div>

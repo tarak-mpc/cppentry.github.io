@@ -1,0 +1,162 @@
+---
+layout:     post
+title:      HDFS使用群体高可用性管理器（中文版）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>目的 <br>
+本指南概述HDFS的高可用性(HA)的特性,以及如何配置和管理HA HDFS集群,使用群体期刊管理器(QJM)特性。 <br>
+本文假设读者有一个大致了解通用组件和节点类型在一个HDFS集群。详情请参阅HDFS架构指南。 <br>
+注意:使用群体杂志经理或传统的共享存储 <br>
+本指南讨论了如何配置和使用HDFS HA使用群体期刊管理器(QJM)之间共享编辑日志活动和备用namenode。有关如何配置HDFS公顷的信息使用NFS共享存储,而不是QJM,请参阅这种另类的指导。 <br>
+背景 <br>
+Hadoop 2.0.0之前,NameNode是一个单点故障(SPOF)在一个HDFS集群。每个集群有一个NameNode,如果机器或过程变得不可用,集群作为一个整体将不可用,直到NameNode启动或一个单独的机器上长大的。 <br>
+这影响了总HDFS集群的可用性在两个主要方面: <br>
+•   计划外的事件,如机器崩溃,集群将不可用,直到操作员重新启动NameNode。 <br>
+•   计划维护活动,比如软件或硬件升级将导致NameNode机器上的窗户集群停机时间。 <br>
+HDFS高可用性特性解决上述问题,提供的选项运行两个冗余namenode在同一集群的主动/被动配置热备份。这允许快速故障转移到一个新的NameNode如果机器崩溃,或优雅administrator-initiated故障转移计划保养的目的。 <br>
+体系结构 <br>
+在一个典型的HA集群,两个单独的机器配置为namenode。在任何时候,一个namenode处于活跃的状态,和其他处于备用状态。活跃的NameNode负责集群中所有客户端操作,而备用只是作为一个奴隶,保持足够的状态在必要时提供一个快速的故障转移。 <br>
+为了保持其状态同步的备用节点活跃节点,两个节点与一组单独的守护进程称为“JournalNodes”(发展期)。当任何名称空间修改执行的活动节点,它经久地记录修改的记录大多数这些发展期。阅读的备用节点能够编辑的发展期,和经常看着他们修改编辑日志。作为备用节点将编辑,它适用于他们自己的名称空间。在发生故障,备用将确保它读过所有的编辑之前JounalNodes促进本身的活动状态。这可以确保名称空间故障发生前状态是完全同步的。 <br>
+为了提供一个快速的故障转移,这也是必要的备用节点有最新的信息关于集群中块的位置。为了实现这一目标,datanode的位置配置了两个namenode,并发送块位置信息和心跳。 <br>
+为正确的操作是至关重要的HA集群只有一个namenode是活跃的。否则,名称空间状态会很快两者之间的分歧,面临着丢失数据或其他不正确的结果。为了确保这个属性,防止所谓的”。这些场景中,“JournalNodes将只允许单个NameNode成为一名作家。故障转移期间,NameNode是成为活跃会接管JournalNodes写的角色,这将有效地防止其他NameNode持续处于活跃状态,允许新的活动安全进行故障转移。 <br>
+硬件资源 <br>
+为了部署一个HA集群,您应该准备以下: <br>
+•   NameNode机器,���器上运行活动和备用NameNode应该相互等价的硬件,和同等的硬件将用于non-HA集群。 <br>
+•   JournalNode机器,机器上运行JournalNodes。JournalNode守护进程相对较轻,所以这些守护进程可能会被合理配置机器上与其他Hadoop守护进程,例如namenode,JobTracker或纱线ResourceManager。注意:必须有至少3 JournalNode守护进程,因为编辑日志修改必须写入大多数发展期。这将允许系统容忍失败的一个单独的机器中。你也可以超过3 JournalNodes运行,但实际上是为了增加系统可以容忍失败,你应该运行一个奇数的发展期,(即:3、5、7,等等)。注意,当使用N JournalNodes,系统最多能忍受失败(N - 1)/ 2,继续正常运转。 <br>
+注意,在HA集群,备用NameNode还执行检查点的名称空间状态,因此没有必要运行一个二级NameNode,CheckpointNode时,或备份节点HA集群。事实上,这样做将是一个错误。这也使人重新配置non-HA-enabled HDFS集群是HA-enabled重用的硬件之前致力于二级NameNode。 <br>
+部署 <br>
+配置概述 <br>
+类似于联邦配置,HA配置是向后兼容的,并允许现有的单一NameNode配置没有变化。新的配置设计,使集群中的所有节点可能具有相同的配置不需要不同的配置文件部署到不同的机器上基于节点的类型。 <br>
+像HDFS联合会,HA集群重用nameservice ID来识别一个HDFS实例可能实际上包含多个HA namenode。此外,一个名为NameNode ID添加的新抽象公顷。集群中的每个不同的NameNode NameNode ID来区别不同。支持单个配置文件的所有NameNode,相关的配置参数是后缀为nameservice ID以及NameNode ID。 <br>
+配置细节 <br>
+配置HA namenode,您必须添加hdfs-site几个配置选项。xml配置文件。 <br>
+设置这些配置的顺序并不重要,但是你选择的值dfs.nameservices和dfs.ha.namenodes。[nameservice ID]将决定keys。因此,你应该决定这些值之前设置的其他配置选项。 <br>
+•   为这个新nameservice dfs.nameservices——逻辑名称 <br>
+为这个nameservice选择一个逻辑名,例如“mycluster”,用这个逻辑名称为该配置选项的值。您选择的名称是任意的。它将使用配置和绝对的权威组件HDFS集群中的路径。 <br>
+注意:如果你也使用HDFS联合会,这个配置设置的列表还应该包括其他nameservices, HA or otherwise,作为一个以逗号分隔的列表。 <br>
+ <br>
+  dfs.nameservices <br>
+  mycluster <br>
+ <br>
+•   dfs.ha.namenodes。[nameservice ID]——为每个NameNode nameservice的惟一标识符 <br>
+配置一个逗号分隔的NameNode id列表。这将是datanode用来确定集群中的所有namenode。例如,如果您使用“mycluster”nameservice ID之前,和你想使用“nn1”和“nn2”作为个人ID namenode,您将配置这是这样的: <br>
+ <br>
+  dfs.ha.namenodes.mycluster <br>
+  nn1,nn2 <br>
+ <br>
+注意:目前,只有最多两个namenode可能每nameservice配置。 <br>
+•   dfs.namenode.rpc-address。[nameservice ID]。(名称节点ID)——完全限定每个NameNode RPC地址监听 <br>
+对于之前配置的NameNode id,设置完整的地址和IPC NameNode港流程。注意,这个结果在两个不同的配置选项。例如: <br>
+ <br>
+  dfs.namenode.rpc-address.mycluster.nn1 <br>
+  machine1.example.com:8020 <br>
+ <br>
+ <br>
+  dfs.namenode.rpc-address.mycluster.nn2 <br>
+  machine2.example.com:8020 <br>
+ <br>
+注意:你可能同样配置“servicerpc-address”设置如果你愿望。 <br>
+•   dfs.namenode.http-address.[nameservice ID]。(名称节点ID)——完全限定每个NameNode监听HTTP地址 <br>
+类似于上面rpc地址,设置的地址namenode监听的HTTP服务器。例如: <br>
+ <br>
+  dfs.namenode.http-address.mycluster.nn1 <br>
+  machine1.example.com:50070 <br>
+ <br>
+ <br>
+  dfs.namenode.http-address.mycluster.nn2 <br>
+  machine2.example.com:50070 <br>
+ <br>
+注意:如果你启用了Hadoop的安全特性,您还应该设置为每个NameNode https-address类似。 <br>
+•   dfs.namenode.shared.edits.dir - URI标识的发展期,namenode将写/读编辑 <br>
+这就是一个配置的地址JournalNodes提供共享存储、编辑写的活跃nameNode和阅读的备用nameNode保持更新所有文件系统的变化活动nameNode。尽管你必须指定几个JournalNode地址,您应该只配置一个uri。表单的URI应该:“qjournal:/ / host1:端口1;host2:端口2;host3:端口3 / journalId”。《华尔街日报》为这个nameservice ID是一个独特的标识符,它允许一套JournalNodes提供存储多个联邦namesystems。虽然不是必需的,但它是一个好主意重用的nameservice ID标识符》杂志上。 <br>
+例如,如果JournalNodes这个集群运行的机器“node1.example.com”,“node2.example.com”和“node3.example.com”和nameservice ID“mycluster”,你会使用以下这个设置的值(JournalNode默认端口是8485): <br>
+ <br>
+  dfs.namenode.shared.edits.dir <br>
+qjournal://node1.example.com:8485;node2.example.com:8485;node3.example.com:8485/mycluster <br>
+ <br>
+•   dfs.client.failover.proxy.provider。[nameservice ID]——HDFS客户使用的Java类NameNode联系活跃 <br>
+配置的Java类的名称将使用DFS客户机,以确定哪些NameNode是当前活跃,因此,NameNode目前为客户端请求提供服务。目前唯一实现附带Hadoop ConfiguredFailoverProxyProvider,所以使用这个除非你使用一个自定义的一个。例如: <br>
+ <br>
+  dfs.client.failover.proxy.provider.mycluster <br>
+  org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider <br>
+ <br>
+•   dfs.ha.fencing。方法——脚本或Java类的列表将被用于栅栏活动NameNode故障转移期间 <br>
+的正确性是最理想的系统,只有一个NameNode活动状态在任何给定的时间。重要的是,当使用群体日报经理,然后只有一个会被允许写JournalNodes,所以没有可能损坏文件系统元数据从一个split - brain场景。然而,当发生故障转移时,它仍然是有可能的,前面的活跃NameNode可以读请求服务客户,这可能是过时的,直到NameNode试图写入JournalNodes时关闭。出于这个原因,它仍然需要配置一些击剑即使使用群体期刊管理器方法。然而,提高系统的可用性在击剑事件机制失败,建议配置一个击剑方法保证返回成功最后击剑方法在列表中。注意,如果您选择使用没有实际击剑方法,您还必须配置一些设置,例如“shell(/ bin /真正的)”。 <br>
+击剑方法在故障转移配置carriage-return-separated列表,将尝试直到有一表明击剑成功。有两种方法,使用Hadoop船:壳牌和sshfence。为实现自己的自定义信息击剑方法,看到org.apache.hadoop.ha。NodeFencer类。 <br>
+o   sshfence - SSH活跃NameNode和杀死进程 <br>
+sshfence选项ssh到目标节点,并使用fuser杀死进程监听服务的TCP端口。为了这击剑选择工作,它必须能够SSH到目标节点没有提供一个密码。因此,必须配置dfs.ha.fencing.ssh之一。私有密钥文件选项,这是一个以逗号分隔的SSH私有密钥文件。例如: <br>
+ <br>
+  dfs.ha.fencing.methods <br>
+  sshfence <br>
+</p>
+
+<dl>
+
+  dfs.ha.fencing.ssh.private-key-files
+  /home/exampleuser/.ssh/id_rsa
+
+可选地,可以配置一个标准的用户名或端口执行SSH。也可以配置一个超时,以毫秒为单位,为SSH,之后这个击剑方法将被认为失败了。它可能是配置如下:
+
+  dfs.ha.fencing.methods
+  sshfence([[username][:port]])
+
+
+  dfs.ha.fencing.ssh.connect-timeout
+  30000
+
+o   壳-运行任意shell命令NameNode栅栏的活跃
+壳牌击剑方法运行任意shell命令。它可能是配置如下:
+
+  dfs.ha.fencing.methods
+  shell(/path/to/my/script.sh arg1 arg2 …)
+
+“(”和“)”之间的字符串直接传递到bash shell,不得包含任何关闭括号。
+shell命令将运行的环境设置为包含所有当前的Hadoop配置变量,’ _ ‘字符替换任何“。在配置键的字符。已经使用的配置有namenode-specific配置提升他们的通用形式——例如dfs_namenode_rpc-address将包含目标的RPC地址节点,即使配置可能dfs.namenode.rpc-address.ns1.nn1指定变量。
+另外,以下变量指的是目标节点隔离也可以:
+target_host美元   节点的主机名是坚固
+target_port美元   IPC端口节点的防护
+target_address美元    上述两种,结合主持人:端口
+target_nameserviceid美元  的nameservice ID NN坚固
+target_namenodeid美元 namenode fenced ID的神经网络
+这些环境变量也可以使用shell命令本身的替换。例如:
+
+  dfs.ha.fencing.methods
+  shell(/path/to/my/script.sh –nameservice=<span class="MathJax_Preview" style="color: inherit; display: none;"></span><span class="MathJax" id="MathJax-Element-3-Frame" tabindex="0" data-mathml='&lt;math xmlns="http://www.w3.org/1998/Math/MathML"&gt;&lt;mi&gt;t&lt;/mi&gt;&lt;mi&gt;a&lt;/mi&gt;&lt;mi&gt;r&lt;/mi&gt;&lt;mi&gt;g&lt;/mi&gt;&lt;mi&gt;e&lt;/mi&gt;&lt;msub&gt;&lt;mi&gt;t&lt;/mi&gt;&lt;mi&gt;n&lt;/mi&gt;&lt;/msub&gt;&lt;mi&gt;a&lt;/mi&gt;&lt;mi&gt;m&lt;/mi&gt;&lt;mi&gt;e&lt;/mi&gt;&lt;mi&gt;s&lt;/mi&gt;&lt;mi&gt;e&lt;/mi&gt;&lt;mi&gt;r&lt;/mi&gt;&lt;mi&gt;v&lt;/mi&gt;&lt;mi&gt;i&lt;/mi&gt;&lt;mi&gt;c&lt;/mi&gt;&lt;mi&gt;e&lt;/mi&gt;&lt;mi&gt;i&lt;/mi&gt;&lt;mi&gt;d&lt;/mi&gt;&lt;/math&gt;' role="presentation" style="position: relative;"><nobr aria-hidden="true"><span class="math" id="MathJax-Span-44" style="width: 10.781em; display: inline-block;"><span style="display: inline-block; position: relative; width: 8.947em; height: 0px; font-size: 120%;"><span style="position: absolute; clip: rect(1.336em 1008.95em 2.558em -999.997em); top: -2.164em; left: 0em;"><span class="mrow" id="MathJax-Span-45"><span class="mi" id="MathJax-Span-46" style="font-family: MathJax_Math-italic;">t</span><span class="mi" id="MathJax-Span-47" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-48" style="font-family: MathJax_Math-italic;">r</span><span class="mi" id="MathJax-Span-49" style="font-family: MathJax_Math-italic;">g<span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="mi" id="MathJax-Span-50" style="font-family: MathJax_Math-italic;">e</span><span class="msubsup" id="MathJax-Span-51"><span style="display: inline-block; position: relative; width: 0.836em; height: 0px;"><span style="position: absolute; clip: rect(3.225em 1000.34em 4.169em -999.997em); top: -3.997em; left: 0em;"><span class="mi" id="MathJax-Span-52" style="font-family: MathJax_Math-italic;">t</span><span style="display: inline-block; width: 0px; height: 4.003em;"></span></span><span style="position: absolute; top: -3.831em; left: 0.336em;"><span class="mi" id="MathJax-Span-53" style="font-size: 70.7%; font-family: MathJax_Math-italic;">n</span><span style="display: inline-block; width: 0px; height: 4.003em;"></span></span></span></span><span class="mi" id="MathJax-Span-54" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-55" style="font-family: MathJax_Math-italic;">m</span><span class="mi" id="MathJax-Span-56" style="font-family: MathJax_Math-italic;">e</span><span class="mi" id="MathJax-Span-57" style="font-family: MathJax_Math-italic;">s</span><span class="mi" id="MathJax-Span-58" style="font-family: MathJax_Math-italic;">e</span><span class="mi" id="MathJax-Span-59" style="font-family: MathJax_Math-italic;">r</span><span class="mi" id="MathJax-Span-60" style="font-family: MathJax_Math-italic;">v</span><span class="mi" id="MathJax-Span-61" style="font-family: MathJax_Math-italic;">i</span><span class="mi" id="MathJax-Span-62" style="font-family: MathJax_Math-italic;">c</span><span class="mi" id="MathJax-Span-63" style="font-family: MathJax_Math-italic;">e</span><span class="mi" id="MathJax-Span-64" style="font-family: MathJax_Math-italic;">i</span><span class="mi" id="MathJax-Span-65" style="font-family: MathJax_Math-italic;">d<span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span></span><span style="display: inline-block; width: 0px; height: 2.169em;"></span></span></span><span style="display: inline-block; overflow: hidden; vertical-align: -0.33em; border-left: 0px solid; width: 0px; height: 1.203em;"></span></span></nobr><span class="MJX_Assistive_MathML" role="presentation"><math xmlns="http://www.w3.org/1998/Math/MathML"><mi>t</mi><mi>a</mi><mi>r</mi><mi>g</mi><mi>e</mi><msub><mi>t</mi><mi>n</mi></msub><mi>a</mi><mi>m</mi><mi>e</mi><mi>s</mi><mi>e</mi><mi>r</mi><mi>v</mi><mi>i</mi><mi>c</mi><mi>e</mi><mi>i</mi><mi>d</mi></math></span></span><script type="math/tex" id="MathJax-Element-3">target_nameserviceid </script>target_host:~Dtarget_port)
+
+如果shell命令返回一个0,退出代码击剑决心取得成功。如果返回其他退出代码,击剑并不成功,下一个击剑方法将试图在列表中。
+注意:这个击剑方法没有实现任何超时。如果超时是必要的,他们应该在shell脚本中实现本身(如通过分支子shell杀死母公司在某些的秒数)。
+•   fs.defaultFS——使用的默认路径前缀Hadoop FS客户时没有
+可选地,您现在可以配置默认路径为Hadoop客户使用新的HA-enabled逻辑URI。如果你用“mycluster”nameservice ID之前,这将是权威的价值你所有的HDFS路径的一部分。这可能是配置一样,在你的核心位点。xml文件:
+
+  fs.defaultFS
+  hdfs://mycluster
+
+•   dfs.journalnode.edits。dir - JournalNode守护进程的路径将其本地存储的状态
+这是绝对路径JournalNode机器上使用的编辑和其他本地状态存储发展期。你可以只使用一个单一的路径配置。冗余的数据是由多个单独的JournalNodes运行,或在本地连接的RAID阵列配置这个目录。例如:
+
+  dfs.journalnode.edits.dir
+  /path/to/journal/node/local/data
+
+部署细节
+毕竟必要的配置选项设置,您必须启动JournalNode守护进程组的机器将运行。这可以通过运行命令“hadoop-daemon.sh journalnode”开始,等待着守护进程开始在每个相关的机器。
+一旦JournalNodes已经开始,一个人必须最初同步两HA namenode磁盘上的元数据。
+•   如果你建立一个新的HDFS集群,您应该首先运行命令的格式(HDFS namenode格式)namenode之一。
+•   如果您已经格式化的NameNode,还是转换HA-enabled non-HA-enabled集群,您现在应该在NameNode元数据目录的内容复制到另一个,无格式NameNode通过运行命令“hdfs NameNode -bootstrapStandby“非格式化NameNode。运行此命令还将确保JournalNodes(由dfs.namenode.shared.edits.dir配置)包含足够的编辑事务能够namenode启动。
+•   如果你把non-HA NameNode是哈,你应该运行该命令“hdfs -initializeSharedEdits”,将初始化JournalNodes编辑数据从本地NameNode编辑目录。
+在这一点上你可以像平时一样开始两公顷NameNode启动NameNode。
+你可以访问每个namenode网页分别通过浏览他们的配置HTTP地址。你应该注意到旁边的地址将HA配置状态NameNode(“备用”或“活跃”)。每当HA NameNode启动时,它最初处于备用状态。
+管理命令
+现在你的HA配置namenode,开始,你将会获得一些额外的命令来管理你的HA HDFS集群。特别地,您应该熟悉所有的子命令“hdfs haadmin”命令。运行这个命令没有任何额外的参数将显示以下使用信息:
+Usage: DFSHAAdmin [-ns ]
+    [-transitionToActive ]
+    [-transitionToStandby ]
+    [-failover [–forcefence] [–forceactive]  ]
+    [-getServiceState ]
+    [-checkHealth ]
+    [-help ]
+本指南描述了高层每个子命令的使用。每个子命令的特定使用信息,你应该运行“hdfs haadmin - help &gt; </dl>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

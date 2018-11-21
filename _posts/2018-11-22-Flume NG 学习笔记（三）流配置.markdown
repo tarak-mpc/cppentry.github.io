@@ -1,0 +1,116 @@
+---
+layout:     post
+title:      Flume NG 学习笔记（三）流配置
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/looklook5/article/details/40393281				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><img src="https://img-blog.csdn.net/20141023104857062?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbG9va2xvb2s1/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p></p>
+<p>在通过flume采集日志数据的时候，一般都是通过flume 代理从日志源或者日志客户端采集数据到flume代理中，然后再由flume代理送到目标存储.上图中就是每个一级flume代理负责从webserv采集数据,然后再由一个二级flume代理进行日志汇总。</p>
+<img src="https://img-blog.csdn.net/20141023104929281?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbG9va2xvb2s1/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><p></p>
+<p>Flume支持从一个源发送事件到多个通道中，这被称为事件流的复用。这里需要在配置中定义事件流的复制/复用，选择1个或者多个通道进行数据流向。</p>
+<p>下面的内容主要介绍flume 流配置，这节比较水，因为都比较简单。</p>
+<h2>一、单一代理流配置</h2>
+<p>下面的配置例子是外部数据源通过avro客户端发送数据到HDFS上。下面无节操的直接拷官网</p>
+<p></p><pre><code class="language-html">agent_foo.sources= avro-AppSrv-source
+agent_foo.sinks= hdfs-Cluster1-sink
+agent_foo.channels= mem-channel-1
+ 
+# set channel for sources, sinks
+ 
+# properties of avro-AppSrv-source
+agent_foo.sources.avro-AppSrv-source.type= avro
+agent_foo.sources.avro-AppSrv-source.bind= localhost
+agent_foo.sources.avro-AppSrv-source.port= 10000
+ 
+# properties of mem-channel-1
+agent_foo.channels.mem-channel-1.type= memory
+agent_foo.channels.mem-channel-1.capacity= 1000
+agent_foo.channels.mem-channel-1.transactionCapacity= 100
+ 
+# properties of hdfs-Cluster1-sink
+agent_foo.sinks.hdfs-Cluster1-sink.type= hdfs
+agent_foo.sinks.hdfs-Cluster1-sink.hdfs.path= hdfs://namenode/flume/webdata</code></pre><br><h2>二、单代理多流配置</h2>
+<p>单代理多流配置是上面的加强版，相当于一个代理两个流，一个是从外部avro客户端到HDFS，另一个是linux命令（tail）的输出到Avro接受代理，2个做成配置。继续无节操的直接拷官网</p>
+<p></p><pre><code class="language-html"># list the sources, sinks and channelsin the agent
+agent_foo.sources= avro-AppSrv-source1 exec-tail-source2
+agent_foo.sinks= hdfs-Cluster1-sink1 avro-forward-sink2
+agent_foo.channels= mem-channel-1 file-channel-2
+ 
+# flow #1 configuration
+agent_foo.sources.avro-AppSrv-source1.channels= mem-channel-1
+agent_foo.sinks.hdfs-Cluster1-sink1.channel= mem-channel-1
+ 
+# flow #2 configuration
+agent_foo.sources.exec-tail-source2.channels= file-channel-2
+agent_foo.sinks.avro-forward-sink2.channel= file-channel-2</code></pre><br><br><h2>三、配置多代理流程</h2>
+<p>这个配置就是学习（二）的第二个例子，简单的讲就是数据源发送的事件由第一个Flume代理发送到下一个Flume代理中。下面是官网：</p>
+<p></p><pre><code class="language-html"># list sources, sinks and channels inthe agent
+agent_foo.sources= avro-AppSrv-source
+agent_foo.sinks= avro-forward-sink
+agent_foo.channels= file-channel
+ 
+# define the flow
+agent_foo.sources.avro-AppSrv-source.channels= file-channel
+agent_foo.sinks.avro-forward-sink.channel= file-channel
+ 
+# avro sink properties
+agent_foo.sources.avro-forward-sink.type= avro
+agent_foo.sources.avro-forward-sink.hostname= 10.1.1.100
+agent_foo.sources.avro-forward-sink.port= 10000
+ 
+# configure other pieces
+#...</code></pre><br><p>例子都不难理解</p>
+<h2>四、多路复用流</h2>
+<p>Flume支持从一个源到多个通道和sinks,叫做fan out。有两种模式的fan out，复制和复用。复制就是流的事件被发送到所有的配置通道去。</p>
+<p></p><pre><code class="language-html"># List the sources, sinks and channelsfor the agent
+&lt;Agent&gt;.sources= &lt;Source1&gt;
+&lt;Agent&gt;.sinks= &lt;Sink1&gt; &lt;Sink2&gt;
+&lt;Agent&gt;.channels= &lt;Channel1&gt; &lt;Channel2&gt;
+ 
+# set list of channels for source(separated by space)
+&lt;Agent&gt;.sources.&lt;Source1&gt;.channels= &lt;Channel1&gt; &lt;Channel2&gt;
+ 
+# set channel for sinks
+&lt;Agent&gt;.sinks.&lt;Sink1&gt;.channel= &lt;Channel1&gt;
+&lt;Agent&gt;.sinks.&lt;Sink2&gt;.channel= &lt;Channel2&gt;
+ 
+&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.type= replicating</code></pre>其中，&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.type= replicating 这个源的选择类型为复制。这个参数不指定一个选择的时候，<strong><span style="color:#FF0000;">默认情况下它复制</span></strong>
+<p>复用则是麻烦一下，流的事情是被筛选的发生到不同的渠道，需要指定源和扇出通道的规则，感觉与case when 类似。</p>
+<p>复用的参数为：&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.type = multiplexing</p>
+<p></p><pre><code class="language-html"># Mapping for multiplexing selector
+&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.type= multiplexing
+&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.header= &lt;someHeader&gt;
+&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.mapping.&lt;Value1&gt;= &lt;Channel1&gt;
+&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.mapping.&lt;Value2&gt;= &lt;Channel1&gt; &lt;Channel2&gt;
+&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.mapping.&lt;Value3&gt;= &lt;Channel2&gt;
+#...
+ 
+&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.default= &lt;Channel2&gt;</code></pre><br><p>官网中给出例子，可以看出流的事件要声明一个头部，然后我们检查头部对应的值，这里我们可以认为是事件属性，如果指定的值与设定的通道相匹配，那么就将该事件发送到被匹配到的通道中去。这个参数就是默认通道&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.default =&lt;Channel2&gt;</p>
+<p>下面是官网中复用的详细配置例子</p>
+<p></p><pre><code class="language-html"># list the sources, sinks and channelsin the agent
+agent_foo.sources= avro-AppSrv-source1
+agent_foo.sinks= hdfs-Cluster1-sink1 avro-forward-sink2
+agent_foo.channels= mem-channel-1 file-channel-2
+ 
+# set channels for source
+agent_foo.sources.avro-AppSrv-source1.channels= mem-channel-1 file-channel-2
+ 
+# set channel for sinks
+agent_foo.sinks.hdfs-Cluster1-sink1.channel= mem-channel-1
+agent_foo.sinks.avro-forward-sink2.channel= file-channel-2
+ 
+# channel selector configuration
+agent_foo.sources.avro-AppSrv-source1.selector.type= multiplexing
+agent_foo.sources.avro-AppSrv-source1.selector.header= State
+agent_foo.sources.avro-AppSrv-source1.selector.mapping.CA= mem-channel-1
+agent_foo.sources.avro-AppSrv-source1.selector.mapping.AZ= file-channel-2
+agent_foo.sources.avro-AppSrv-source1.selector.mapping.NY= mem-channel-1 file-channel-2
+agent_foo.sources.avro-AppSrv-source1.selector.default= mem-channel-1</code></pre><br><p>上面例子中，设置事件的头属性Header 为“State”作为的选择检查。剩下的就是与case when 基本一样。其中，例子中的配置</p>
+<p>agent_foo.sources.avro-AppSrv-source1.selector.mapping.NY= mem-channel-1 file-channel-2 从这里可以看出映射允许每个值通道可以重叠。默认值可以包含任意数量的通道。</p>
+<br>            </div>
+                </div>

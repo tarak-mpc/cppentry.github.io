@@ -1,0 +1,175 @@
+---
+layout:     post
+title:      分布式数据库HBase
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p id="main-toc"><strong>目录</strong></p>
+
+<p id="HBase%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B-toc" style="margin-left:0px;"><a href="#HBase%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B" rel="nofollow">HBase数据模型</a></p>
+
+<p id="HBase%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86-toc" style="margin-left:0px;"><a href="#HBase%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86" rel="nofollow">HBase的实现原理</a></p>
+
+<p id="Region%E7%9A%84%E5%AE%9A%E4%BD%8D-toc" style="margin-left:40px;"><a href="#Region%E7%9A%84%E5%AE%9A%E4%BD%8D" rel="nofollow">Region的定位</a></p>
+
+<p id="HBase%E8%BF%90%E8%A1%8C%E6%9C%BA%E5%88%B6-toc" style="margin-left:0px;"><a href="#HBase%E8%BF%90%E8%A1%8C%E6%9C%BA%E5%88%B6" rel="nofollow">HBase运行机制</a></p>
+
+<p id="HBase%E7%B3%BB%E7%BB%9F%E6%9E%B6%E6%9E%84-toc" style="margin-left:40px;"><a href="#HBase%E7%B3%BB%E7%BB%9F%E6%9E%B6%E6%9E%84" rel="nofollow">HBase系统架构</a></p>
+
+<p id="1.%20%E5%AE%A2%E6%88%B7%E7%AB%AF-toc" style="margin-left:80px;"><a href="#1.%20%E5%AE%A2%E6%88%B7%E7%AB%AF" rel="nofollow">1. 客户端</a></p>
+
+<p id="2.%20Zookeeper%E6%9C%8D%E5%8A%A1%E5%99%A8-toc" style="margin-left:80px;"><a href="#2.%20Zookeeper%E6%9C%8D%E5%8A%A1%E5%99%A8" rel="nofollow">2. Zookeeper服务器</a></p>
+
+<p id="3.%20Master-toc" style="margin-left:80px;"><a href="#3.%20Master" rel="nofollow">3. Master</a></p>
+
+<p id="4.%20Region%E6%9C%8D%E5%8A%A1%E5%99%A8-toc" style="margin-left:80px;"><a href="#4.%20Region%E6%9C%8D%E5%8A%A1%E5%99%A8" rel="nofollow">4. Region服务器</a></p>
+
+<p id="Region%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86-toc" style="margin-left:40px;"><a href="#Region%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86" rel="nofollow">Region服务器工作原理</a></p>
+
+<p id="Store%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86-toc" style="margin-left:40px;"><a href="#Store%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86" rel="nofollow">Store工作原理</a></p>
+
+<p id="HLog%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86-toc" style="margin-left:40px;"><a href="#HLog%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86" rel="nofollow">HLog工作原理</a></p>
+
+<hr id="hr-toc"><p> </p>
+
+<p><span><strong>关系数据库已经流行很多年，并且Hadoop已经有了HDFS和MapReduce，为什么需要HBase?</strong></span></p>
+
+<p><span>Hadoop可以很好地解决大规模数据的离线批量处理问题，但受限于Hadoop MapReduce编程框架的<strong>高延迟数据处理机制</strong>，使得Hadoop无法满足大规模数据实时处理应用的需求；</span></p>
+
+<p><span>HDFS面向批量访问模式，不是随机访问模式；</span></p>
+
+<p><span>传统的通用关系型数据库无法应对在数据规模剧增时导致的系统扩展性和性能问题（分库分表也不能很好解决）；</span></p>
+
+<p><span>传统关系数据库在数据结构变化时一般需要停机维护；空列浪费存储空间；</span></p>
+
+<p><span>因此，出现了一类面向半结构化数据存储和处理的高可扩展、低写入/查询延迟的系统，例如，键值数据库、文档数据库和列族数据库（如BigTable和HBase等），HBase已经成功应用于互联网服务领域和传统行业的众多在线式数据分析处理系统中。</span></p>
+
+<p> </p>
+
+<div style="text-align:center;">
+<figure class="image has"><img alt="" height="322" src="https://img-blog.csdn.net/20180806094431446?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L20wXzM4MDE3MDg0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="817"><figcaption>HBase与传统的关系数据库的区别</figcaption></figure></div>
+
+<p> </p>
+
+<div style="text-align:center;">
+<figure class="image has"><img alt="" height="314" src="https://img-blog.csdn.net/20180806095855911?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L20wXzM4MDE3MDg0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="548"><figcaption>HBase访问接口</figcaption></figure></div>
+
+<p> </p>
+
+<h1 id="HBase%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B"><span>HBase数据模型</span></h1>
+
+<p><span><strong>表</strong>：HBase采用表来组织数据，表由行和列组成，列划分为若干个列族</span></p>
+
+<p><span><strong>行</strong>：每个HBase表都由若干行组成，每个行由<strong>行键（row key）</strong>来标识。（访问表中的行只有3种方式：通过单个行键访问；通过一个行键的区间来访问；全表扫描。）</span></p>
+
+<p><span><strong>列族</strong>：一个HBase表被分组成许多“列族”（Column Family）的集合，它是基本的访问控制单元</span></p>
+
+<p><span><strong>列限定符</strong>：列族里的数据通过列限定符（或列）来定位</span></p>
+
+<p><span><strong>单元格</strong>：通过行、列族、列限定符、时间戳确定一个“单元格”（cell），单元格中存储的数据没有数据类型，总被视为字节数组byte[]</span></p>
+
+<p><span><strong>时间戳</strong>：每个单元格都保存着同一份数据的多个版本，这些版本采用时间戳进行索引</span></p>
+
+<div style="text-align:center;">
+<figure class="image has"><img alt="" src="https://img-blog.csdn.net/20180806101403595?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L20wXzM4MDE3MDg0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"><figcaption>HBase数据模型的一个实例</figcaption></figure></div>
+
+<p> </p>
+
+<h1 id="HBase%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86"><span>HBase的实现原理</span></h1>
+
+<p><span>HBase的实现包括三个主要的功能组件：<strong>库函数</strong>：链接到每个客户端；<strong>一个Master主服务器</strong>；<strong>许多个Region服务器</strong>。</span></p>
+
+<p><span><strong>主服务器Master</strong>负责管理和维护HBase表的分区信息，维护Region服务器列表，分配Region，负载均衡；处理模式变化（如表和列族的创建）</span></p>
+
+<p><span><strong>Region服务器</strong>负责存储和维护分配给自己的Region，处理来自客户端的读写请求</span></p>
+
+<p><span>客户端并不是直接从Master主服务器上读取数据，而是在获得Region的存储位置信息后，直接从Region服务器上读取数据；HBase客户端并不依赖Master，而是通过Zookeeper来获得Region位置信息，大多数客户端甚至从来不和Master通信，这使得Master负载很小。</span></p>
+
+<h2 id="Region%E7%9A%84%E5%AE%9A%E4%BD%8D"><span><strong>Region</strong>的定位</span></h2>
+
+<p><span>Region标识符：表名+开始主键+RegionId</span></p>
+
+<p><span><strong>元数据表</strong>(又名<strong>.META.表</strong>)，存储了Region和Region服务器的映射关系：Region标识符+Region服务器标识</span></p>
+
+<p><span>当HBase表很大时， .META.表会被分裂成多个Region</span></p>
+
+<p><span><strong>根数据表</strong>（又名<strong>-ROOT-表</strong>），记录所有元数据（即Region和Region服务器的映射关系）的具体位置。-ROOT-表只有唯一一个Region，名字在程序中被写死，Master主服务器永远知道它的位置。Zookeeper文件记录了-ROOT-表的位置。</span></p>
+
+<div style="text-align:center;">
+<figure class="image has"><img alt="" height="174" src="https://img-blog.csdn.net/20180806105125157?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L20wXzM4MDE3MDg0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="501"><figcaption>HBase的三层结构</figcaption></figure></div>
+
+<p> </p>
+
+<div style="text-align:center;">
+<figure class="image has"><img alt="" height="208" src="https://img-blog.csdn.net/20180806105309344?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L20wXzM4MDE3MDg0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="501"><figcaption>HBase的三层结构中各层次的名称和作用</figcaption></figure></div>
+
+<p><span>为了加快访问速度，.META.表的全部Region都会被保存在内存中。</span></p>
+
+<p><span>假设.META.表的每行（一个映射条目）在内存中大约占用1KB，并且每个Region限制为128MB，那么，上面的三层结构可以保存的用户数据表的Region数目是：</span></p>
+
+<p><strong><span>（-ROOT-表能够寻址的.META.表的Region个数）×（每个.META.表的 Region可以寻址的用户数据表的Region个数）</span></strong></p>
+
+<p><span>一个-ROOT-表最多只能有一个Region，也就是最多只能有128MB，按照每行（一个映射条目）占用1KB内存计算，128MB空间可以容纳128MB/1KB=<img alt="2^{17}" class="mathcode" src="https://private.codecogs.com/gif.latex?2%5E%7B17%7D">行，也就是说，一个-ROOT-表可以寻址<img alt="2^{17}" class="mathcode" src="https://private.codecogs.com/gif.latex?2%5E%7B17%7D">个.META.表的Region。同理，每个.META.表的 Region可以寻址的用户数据表的Region个数是128MB/1KB=<img alt="2^{17}" class="mathcode" src="https://private.codecogs.com/gif.latex?2%5E%7B17%7D">。最终，三层结构可以保存的Region数目是(128MB/1KB) × (128MB/1KB) = <img alt="2^{34}" class="mathcode" src="https://private.codecogs.com/gif.latex?2%5E%7B34%7D">个Region</span></p>
+
+<p> </p>
+
+<p><span>客户端访问数据时的“三级寻址”：为了加速寻址，客户端会缓存位置信息，同时，需要解决缓存失效问题；寻址过程客户端只需要询问Zookeeper服务器，不需要连接Master服务器。</span></p>
+
+<h1 id="HBase%E8%BF%90%E8%A1%8C%E6%9C%BA%E5%88%B6"><span>HBase运行机制</span></h1>
+
+<h2 id="HBase%E7%B3%BB%E7%BB%9F%E6%9E%B6%E6%9E%84"><span>HBase系统架构</span></h2>
+
+<div style="text-align:center;">
+<figure class="image has"><img alt="" height="315" src="https://img-blog.csdn.net/20180806113049922?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L20wXzM4MDE3MDg0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="593"><figcaption>HBase的系统架构</figcaption></figure></div>
+
+<h3 id="1.%20%E5%AE%A2%E6%88%B7%E7%AB%AF"><span>1. 客户端</span></h3>
+
+<p><span>客户端包含访问HBase的接口，同时在缓存中维护着已经访问过的Region位置信息，用来加快后续数据访问过程</span></p>
+
+<h3 id="2.%20Zookeeper%E6%9C%8D%E5%8A%A1%E5%99%A8"><span>2. Zookeeper服务器</span></h3>
+
+<p><span>Zookeeper可以帮助选举出一个Master作为集群的总管，并保证在任何时刻总有唯一一个Master在运行，这就避免了Master的“单点失效”问题。Zookeeper是一个很好的集群管理工具，被大量用于<strong>分布式计算</strong>，提供<strong>配置维护</strong>、<strong>域名服务</strong>、<strong>分布式同步</strong>、<strong>组服务</strong>等。</span></p>
+
+<p style="text-align:center;"><img alt="" class="has" height="200" src="https://img-blog.csdn.net/2018080614502334?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L20wXzM4MDE3MDg0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="632"></p>
+
+<h3 id="3.%20Master"><span>3. Master</span></h3>
+
+<p><span>主服务器Master主要负责表和Region的管理工作：管理用户对表的增加、删除、修改、查询等操作；实现不同Region服务器之间的负载均衡；在Region分裂或合并后，负责重新调整Region的分布；对发生故障失效的Region服务器上的Region进行迁移。</span></p>
+
+<h3 id="4.%20Region%E6%9C%8D%E5%8A%A1%E5%99%A8"><span>4. Region服务器</span></h3>
+
+<p><span>Region服务器是HBase中最<strong>核心</strong>的模块，负责维护分配给自己的Region，并响应用户的读写请求。</span></p>
+
+<h2 id="Region%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86"><span>Region服务器工作原理</span></h2>
+
+<p><span style="color:#000000;">1<strong>. </strong></span><span style="color:#000000;">用户读写数据过程</span></p>
+
+<p><span>用户写入数据时，被分配到相应Region服务器去执行；数据首先被写入到MemStore和Hlog中；只有当操作写入Hlog之后，commit()调用才会将其返回给客户端；当用户读取数据时，Region服务器会首先访问MemStore缓存，如果找不到，再去磁盘上面的StoreFile中寻找。</span></p>
+
+<p><span style="color:#000000;">2.<strong> </strong></span><span style="color:#000000;">缓存的刷新</span></p>
+
+<p><span>系统会周期性地调用Region.flushcache()把MemStore缓存里的内容写到磁盘的StoreFile文件中，清空缓存，并在HLog里面写入一个标记；每次刷新都生成一个新的StoreFile文件，因此，每个Store包含多个StoreFile文件。</span></p>
+
+<p><span>每个Region服务器都有一个自己的HLog 文件，每次启动都检查该文件，确认最近一次执行缓存刷新操作之后是否发生新的写入操作；如果发现更新，则先写入MemStore，再写入StoreFile，最后删除旧的HLog文件，开始为用户提供服务</span></p>
+
+<p><span>3.<strong> </strong>StoreFile的合并</span></p>
+
+<p><span>每次刷写都生成一个新的StoreFile，数量太多，影响查找速度；调用Store.compact()把多个合并成一个；合并操作比较耗费资源，只有数量达到一个阈值才启动合并。</span></p>
+
+<h2 id="Store%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86"><span>Store工作原理</span></h2>
+
+<p><span>Store是Region服务器的<strong>核心</strong>。多个StoreFile合并成一个；单个StoreFile过大时，又触发分裂操作，1个父Region被分裂成两个子Region。</span></p>
+
+<h2 id="HLog%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86"><span>HLog工作原理</span></h2>
+
+<p><span>Zookeeper会实时监测每个Region服务器的状态，当某个Region服务器发生故障时，Zookeeper会通知Master；</span></p>
+
+<p><span>Master首先会处理该故障Region服务器上面遗留的HLog文件，这个遗留的HLog文件中包含了来自多个Region对象的日志记录；</span></p>
+
+<p><span>系统会根据每条日志记录所属的Region对象对HLog数据进行拆分，分别放到相应Region对象的目录下，然后，再将失效的Region重新分配到可用的Region服务器中，并把与该Region对象相关的HLog日志记录也发送给相应的Region服务器；</span></p>
+
+<p><span>Region服务器领取到分配给自己的Region对象以及与之相关的HLog日志记录以后，会重新做一遍日志记录中的各种操作，把日志记录中的数据写入到MemStore缓存中，然后，刷新到磁盘的StoreFile文件中，完成数据恢复；</span></p>
+
+<p><span><strong>共用日志</strong>优点：提高对表的写操作性能；缺点：恢复时需要分拆日志。</span></p>            </div>
+                </div>

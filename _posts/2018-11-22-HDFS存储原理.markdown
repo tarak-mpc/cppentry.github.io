@@ -1,0 +1,32 @@
+---
+layout:     post
+title:      HDFS存储原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h3><a id="1__0"></a>1. 引言</h3>
+<p>在整个 hadoop 框架中，主要存在三个组件：HDFS、MapReduce 和 YARN，HDFS 主要负责数据的存储，MapReduce 则数据模型的运算，YARN 负责资源的调度。接下来的博文会对这几个组件进行一一介绍，这篇博文先聊一聊 HDFS 的存储原理。</p>
+<h3><a id="2_HDFS_4"></a>2. HDFS实现机制</h3>
+<p>HDFS 主要是为了应对海量数据的存储，由于数据量非常大，因此一台服务器是解决不能够应付的，需要一个集群来存储这些数据。在这个集群中，存在一个 <strong>NameNode</strong> 节点，该节点用于管理元数据，即用户上传的文件位于哪个服务器上，都多少个副本等信息。此外，还有多个 <strong>DataNode</strong> 节点，这些节点就是文件存储位置。文件存储到集群中需要考虑以下这几个问题：</p>
+<ol>
+<li>保证数据的安全性，即数据应该有足够多的副本</li>
+<li>能够适应高并发的访问</li>
+<li>因为这些数据是存储在多个服务器上的，因此需要保证每个服务器的负载均衡</li>
+</ol>
+<p>HDFS 的设计很巧妙，完美的解决了这几个问题。当用户上传一个文件时，会提供一个 <strong>虚拟路径</strong>，该路径是方便客户端对文件进行读写操作的，NameNode 中存在该路径和真实的存储物理路径的映射。NameNode 会先判断上传的文件是否存在，如果不存在，则允许用户继续上传。</p>
+<p>客户端收到服务器允许上传文件的响应之后，<strong>会将该文件分为一个个块（block）</strong>，每个块默认大小为 128MB，将每个块依次发送到 Datanode 中，由 NameNode 记录块的存储位置等信息存储在元数据中。为了保证数据有足够多的副本，这时服务器会进行一个异步的操作，将这个块再进行复制操作，随机存储到一个 DataNode 中（这里随机存储是为了保证服务器的负载均衡，避免多个客户端对同一个文件进行访问，这个文件和其副本都存储在同一个 DataNode 节点上的情况）。存储的大致过程如下：</p>
+<p><img src="http://pfuj0c9h3.bkt.clouddn.com/HDFS.png" alt="HDFS存储"></p>
+<h3><a id="3_NameNode__18"></a>3. NameNode 工作原理</h3>
+<p>上面讲述了 HDFS 的实现机制，不过这样存储实际上只解决了两个问题：数据的安全性和每个服务器的负载均衡，但是当多个客户端同时上传文件时，都需要访问 NameNode 节点，在这种高并发的情况下，NameNode 是如何应付的呢？</p>
+<p>上面说过，NameNode 是通过元数据来定位文件的存储路径的，如果元数据只是存储在磁盘文件中，当多个客户端同时访问时，响应速度就会受到限制。HDFS 是这样解决这个问题的：首先，会有一个 <strong>fsimage</strong> 文件，用于存储所有的元数据，fsimage 文件中的数据会 <strong>加载到内存中</strong>，这样就提高了读取文件的速度。除此之外，还有一个 <strong>edits log</strong> 文件用于存储最新上传文件的元数据，这个文件大小是有限制的，一般为 64MB。当 edits log 文件存储大小达到 64MB 时，就会将这些元数据添加到 fsimage 文件中。整个操作流程如下：</p>
+<p><img src="http://pfuj0c9h3.bkt.clouddn.com/NameNode%E5%AD%98%E5%82%A8%E6%9C%BA%E5%88%B61.png" alt="NameNode存储机制1"></p>
+<p>通过这样的设计，由于内存读取数据非常快，因此能够适应多个客户端同时访问的压力。而且当服务器碰到意外情况时，例如突然断电或者服务器崩溃等情况，虽然内存中的元数据会丢失，但由于 edits log 和 fsimage 存储着元数据，依然可以找到文件存储的真实路径，只是在服务器恢复之前不能够再进行上传和下载操作了。（不过有一个 HA 机制可以避免 NameNode 崩溃之后还可以继续提供服务，这个稍后再进行了解。）</p>
+<p>由于 edits log 是日志，其存储的格式与元 fsimage 存储的元数据格式不一样，在进行合并操作时，需要进行额外的逻辑运算，如果这些运算直接在 NameNode 中进行的话，无疑会增大 CPU 的负荷，HDFS 便将这些操作放在 Secondary Node 中进行，整个过程如下：</p>
+<p><img src="http://pfuj0c9h3.bkt.clouddn.com/SecondaryNode%E4%BD%9C%E7%94%A8.png" alt=""></p>
+<p><strong>注</strong>：这是我对 HDFS 存储机制的理解，由于刚开始接触 HDFS，因此文中可能会有错误，欢迎指正。</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

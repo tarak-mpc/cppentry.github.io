@@ -1,0 +1,943 @@
+---
+layout:     post
+title:      hadooo 源代码分析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/changtao381/article/details/7771058				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1>HDFS</h1>
+<h1>HDFS client 分析</h1>
+<p>客户端的功能</p>
+<p>今天开始分析HDFS源代码，首先从HDFS的client端分析。对于分布式文件系统，Client端的功能，就是接收用户的请求，通过网络，与 NameNode 和 DataNode交互。</p>
+<p>首先确定的是，client端是一个hdfs提供的lib库，用户的应用程序需要包含该库，调用该库提供的函数来访问NameNode和DataNode</p>
+<p>HDFS提供了一个shell程序，通过shell程序，可以通过一下命令比较简洁的访问HDFS</p>
+<h2>HDFS的文件系统抽象层</h2>
+<p>抽象类FileSystem提供了一个文件系统的抽象层，它包括了分布式文件系统和local文件系统的一个统一的抽象接口。它囊括了所有的文件系统的操作接口，包括元数据和数据接口。对于HDFS，实现该接口的类为DistributedFileSystem.</p>
+<p>DirstrubtedFileSystem类是DFSClient 的wrap类。其主要的功能由DFSClient完成。</p>
+<p><strong>客户端shell程序的启动</strong></p>
+<p>Client 的的shell程序的main函数在类<a name="OLE_LINK2"></a><a name="OLE_LINK1">org.apache.hadoop.fs.FsShell</a>类中。我们顺着main函数执行的流程，来逐步分析整个client端代码。</p>
+<p>我们先看一些interface，我们知道，interface没有具体的实现，只是规定一些操作的规范给其实现的类,这样就可以实现要做什么（interface）和实际实现者的功能上的分离。</p>
+<p>Interface  Configurable  实现了两个操作，就是</p>
+<p>public interface Configurable {</p>
+<p>   voidsetConf(Configuration conf);</p>
+<p>    ConfigurationgetConf();</p>
+<p>}</p>
+<p>然后是接口 Tool，实现了执行命令的接口。</p>
+<p>public interface Tool extends Configurable {</p>
+<p>  int run(String []args) throws Exception;</p>
+<p>}</p>
+<p> </p>
+<p>我们看到，具体实现以上两个接口的，就是FsShell类。</p>
+<p>public class FsShell extends Configured implements Tool {</p>
+<p>}</p>
+<p>下面正式看一下类org.apache.hadoop.fs.FsShell的main函数来的运行过程。</p>
+<p>其主要的过程如下： 分析命令行参数，调用FsShell 的run函数来处理相关的命令。</p>
+<p>我们再看一下FsShell里的run函数，其就是匹配各种命令，调用FsShell里相关的处理函数。其对于的处理命令被最终由FileSystem处理。在FsShell类的init函数里，通过从配置文件获取具体的文件系统类（FileSystem）的实现，当client端起来后，其处理相关的命令的功能交给DistributedFileSystem类来实现。</p>
+<h2>Client 元数据的操作</h2>
+<h2>Client的数据操作</h2>
+<p>我们重点关注一下读写出错时的错误处理，这是分布式系统的关键。</p>
+<p>我们看到数据操作，无论数据操作，无论是写，还是读，在客户端都没有缓存，都是在写或者读的系统调用返回后，对于写，数据都flush都DataNode上，对于read，客户端的系统里是没有数据缓存的。</p>
+<p>我们先一下block，packet，chunk之间的区别。</p>
+<p>Packet类，一个Packet就是数据发送的基本单位，一个Packet由多个chunk组成，一个数据块就是数据校验的单位，默认为512字节，也就是说一个512字节的数据块加一个checksum，checksum的长度一般为4字节。一个Block有多个packet组成。一个block为64M，一个packet默认为64k，</p>
+<p> </p>
+<h3>Client数据的读</h3>
+<p>我们先看client的读，其主要有DFSInputStream类来完成。</p>
+<p>首先看一下读操作的函数，其主要有三种方式：</p>
+<p>public synchronized int read(byte buf[], int off, int len) ，这个read中，给出了读的数据存放的buf，buf内的开始位置off，长度len，并没有给出文件的position的位置，默认的使用内部的pos变量。</p>
+<p>public synchronized int read(long position, byte[] buffer,int offset, int length)，这是给定了文件的偏移量position的读，它不改变内部的pos值</p>
+<p>public synchronized int read() ，默认从当前位置读一个字节，其值保持在int的最后一个字节中。</p>
+<p> </p>
+<p>下面我们主要介绍一下第一种方式的read，同时重点介绍一下其read的错误处理流程。</p>
+<p> </p>
+<p>首先看一下DFSInputStream的内部的全局的变量。</p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p><em>private String src;   //文件的路径</em></p>
+<p><em>private boolean closed = false;  //文件是否关闭</em></p>
+<p><em>private boolean verifyChecksum;  </em></p>
+<p><em>private long prefetchSize = 10 * defaultBlockSize;</em></p>
+<p><em>private LocatedBlocks locatedBlocks = null;</em></p>
+<p><em>private long pos = 0;</em></p>
+</td>
+</tr></tbody></table><p> </p>
+<p>这几个变量和文件级的全局变量，src为文件的路径，closed表面这个文件流是否关闭，verifyChecksum表面文件的读是否需要checksum的验证，prefetchSize是预取的元数据的块数目，默认设置的是10个block，这个怎么理解呢？我们是当读到一个block的时候，就到namenode上去取该block的元数据信息，也就是LocatedBlock信息，为了加速，我一次去取当前block连续的10个block相关的信息。LocatedBlocks保持当前文件块的信息。pos为文件当前读的位置。</p>
+<p><em>private Block currentBlock = null;</em></p>
+<p><em>   privateDatanodeInfo currentNode = null;</em></p>
+<p><em>    privateSocket s = null;</em></p>
+<p><em>    private BlockReader blockReader = null;</em></p>
+<p><em>    private long blockEnd = -1;</em></p>
+<p> </p>
+<p>这几个是和当前的block相关的信，currentBlock为当前block，currentNode为当前块所在的DataNode的相关信息，包括副本的所在的DataNode相关的信息。blockReader为和块相关的BlockReader类，主要处理block内的读。BlockEnd该block最后位置在文件中的偏移。</p>
+<p>BlockReader类负责一个block的读取操作。</p>
+<p>我们看一下其构造函数：</p>
+<p>public static BlockReader newBlockReader( Socket sock,String file,</p>
+<p>                                       longblockId, </p>
+<p>                                       longgenStamp,</p>
+<p>                                       long startOffset, </p>
+<p>long len,</p>
+<p>                                       intbufferSize, </p>
+<p> booleanverifyChecksum,</p>
+<p>                                       StringclientName)</p>
+<p>                                       throwsIOException ；</p>
+<p>其参数为sock为该block的Socket，file为文件的路径，blockId为块号，genStamp为该块的时间戳。startOffset为要读的数据的块内偏移量，len为长度，bufferSize为块大小，verifyChecksum为是否要checksum，ClientName客户端的名字。</p>
+<p> </p>
+<p>在该newBlockReader的构造函数里，其主要完成：</p>
+<p>  读请求的发送和接受，完成同步的请求。</p>
+<p>文件的打开</p>
+<p>Open函数</p>
+<p align="left"><strong><span style="color:#7F0055;">public</span></strong><span style="color:#000000;"> FSDataInputStream open(Path f,
+</span><strong><span style="color:#7F0055;">int</span></strong><span style="color:#000000;"> bufferSize)
+</span><strong><span style="color:#7F0055;">throws</span></strong><span style="color:#000000;"> IOException {</span></p>
+<p align="left"><span style="color:#000000;">    </span><strong><span style="color:#7F0055;">return</span><span style="color:#7F0055;">new</span></strong><span style="color:#000000;">
+<span style="background:#C0C0C0;">DFSClient.DFSDataInputStream</span>(</span></p>
+<p align="left"><span style="color:#000000;">          </span><span style="color:#0000C0;">dfs</span><span style="color:#000000;">.open(getPathName(f), bufferSize,
+</span><span style="color:#0000C0;">verifyChecksum</span><span style="color:#000000;">,
+</span><span style="color:#0000C0;">statistics</span><span style="color:#000000;">));</span></p>
+<p align="left"><span style="color:#000000;">  </span>}</p>
+<p>其构造了一个DFSDataInputStream类，通过dfs.open函数返回一个FSDataInputStream类，其特别的是，在其构造函数里调用了openInfo函数，去NameNode上预读了10个块的文件block信息。</p>
+<p>我们看一下数据读的具体过程：DFSClient 的read函数：</p>
+<p> </p>
+<p>public synchronized int read(byte buf[], int off, int len)throws IOException</p>
+<p>其流程如下：</p>
+<p>1）首先确保本输入流没有关闭，并且pos &lt; getFileLength()，也就是文件的pos小于文件的长度。否则直接返回-1</p>
+<p>2）blockEnd为当前block的末尾在文件中的偏移量。其初始化为-1，如何pos &gt; blockEnd, 则需要调用blockSeekTo定位到下一个数据块。其具体的作用我们下面回详细介绍。</p>
+<p>3）调用readBuffer去读数据。</p>
+<p>我们看一下blokcSeekTo函数</p>
+<p>  privatesynchronized DatanodeInfo blockSeekTo(long target) throws IOException</p>
+<p>1）首先检查blockReader和 s 是否为空，如果不为空，则关闭，清空。</p>
+<p>2）调用getBlockat获取当前偏移对已的block信息。</p>
+<p>3）调用<span style="color:#000000;background:#C0C0C0;">chooseDataNode</span><span style="color:#000000;">在</span><span style="color:#000000;">block</span><span style="color:#000000;">的副本中选择一个</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">信息。</span></p>
+<p>4）<span style="color:#000000;">构建一个</span><span style="color:#000000;">blockReader</span><span style="color:#000000;">类，其构成函数里，已经发出了读请求。</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p> </p>
+<p> </p>
+<p>1）首先调用blockSeekTo函数来获取该block所有的Datanode</p>
+<h3>Client数据的写</h3>
+<p>当create一个文件后，其返回DFSDataStream类，我们通过这个类来完成读写。</p>
+<p> </p>
+<p>DFSDataStream类并没实现自己的write接口，而是继承了FSOutSummer接口的write操作。FSOutSummer主要完成计算chunk的checksum操作。</p>
+<p> </p>
+<p>我们看一下FSOutSummer的write操作接口。</p>
+<p align="left"><strong><span style="color:#7F0055;">public</span><span style="color:#7F0055;">synchronized</span><span style="color:#7F0055;">vo</span></strong><span style="color:#000000;">id
+<a name="OLE_LINK4"></a><a name="OLE_LINK3">write</a></span>(byte b[], <strong><span style="color:#7F0055;">int</span></strong><span style="color:#000000;"> off,
+</span><strong><span style="color:#7F0055;">int</span></strong><span style="color:#000000;"> len)</span></p>
+<p><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">throws</span></strong><span style="color:#000000;"> IOException;</span></p>
+<p> </p>
+<p>其首先对参数检查后，循环调用write1操作接口</p>
+<p> </p>
+<p align="left"><span style="color:#000000;">private int write1(byte b[],int off, int len) throws IOException</span></p>
+<p align="left"><span style="color:#000000;">在这个函数里以每次写一个</span><span style="color:#000000;">chunk</span><span style="color:#000000;">，计算一个</span><span style="color:#000000;">chunk</span><span style="color:#000000;">的</span><span style="color:#000000;">checksum</span><span style="color:#000000;">，调用</span><span style="color:#000000;">writeChecksumChunk</span><span style="color:#000000;">函数。</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">其首先查看一个</span><span style="color:#000000;">len
+</span><span style="color:#000000;">是否够</span><span style="color:#000000;">buf.length,</span><span style="color:#000000;">也就是一个</span><span style="color:#000000;">chunk</span><span style="color:#000000;">的长度，如果够，就直接调用</span><span style="color:#000000;">writeChecksumChunk</span><span style="color:#000000;">函数，如果不够一个</span><span style="color:#000000;">chunk</span><span style="color:#000000;">，就保存在</span><span style="color:#000000;">buf</span><span style="color:#000000;">中，当</span><span style="color:#000000;">buf</span><span style="color:#000000;">满后，调用</span><span style="color:#000000;">flushBuffer</span><span style="color:#000000;">函数发送出去。如果最后没有满一个</span><span style="color:#000000;">chunk</span><span style="color:#000000;">，该如何处理？</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">我们看一下</span><span style="color:#000000;">DFSOutputStream</span><span style="color:#000000;">类的</span><span style="color:#000000;">writeChunk</span><span style="color:#000000;">函数</span></p>
+<p align="left"><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">synchronized</span><span style="color:#7F0055;">void</span></strong><span style="color:#000000;">
+<span style="background:#C0C0C0;">writeChunk</span>(</span><strong><span style="color:#7F0055;">byte</span></strong><span style="color:#000000;">[] b,
+</span><strong><span style="color:#7F0055;">int</span></strong><span style="color:#000000;"> offset,
+</span><strong><span style="color:#7F0055;">int</span></strong><span style="color:#000000;"> len,
+</span><strong><span style="color:#7F0055;">byte</span></strong><span style="color:#000000;">[] checksum)
+</span><strong><span style="color:#7F0055;">throws</span></strong><span style="color:#000000;"> IOException</span><span style="color:#000000;">；</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">writeChunk</span><span style="color:#000000;">函数就比较简单，其主要就是把当前的</span><span style="color:#000000;">chunk</span><span style="color:#000000;">添加的</span><span style="color:#000000;">currentPacke</span><span style="color:#000000;">中，如果</span><span style="color:#000000;">packet</span><span style="color:#000000;">满，就是把该</span><span style="color:#000000;">packet</span><span style="color:#000000;">添加到</span><span style="color:#000000;">dataQueue</span><span style="color:#000000;">链表中。</span></p>
+<p align="left"><span style="color:#000000;">接下了我们看</span><span style="color:#000000;">DataStream</span><span style="color:#000000;">类，其为一个独立的线程。其在创建文件完成之后，构造</span><span style="color:#000000;">DFSOutputStream</span><span style="color:#000000;">时启动。其完成把</span><span style="color:#000000;">dataQueue</span><span style="color:#000000;">中的</span><span style="color:#000000;">packe</span><span style="color:#000000;">取出并发送给相应的</span><span style="color:#000000;">dataNode</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">下面介绍</span><span style="color:#000000;">DataStreamer</span><span style="color:#000000;">类和</span><span style="color:#000000;">ResponserProcessor</span><span style="color:#000000;">类，其分别为两个线程，一个处理发送请求，和一个处理响应的</span><span style="color:#000000;">ack</span><span style="color:#000000;">。</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">我们看到</span><span style="color:#000000;">DataStreamer</span><span style="color:#000000;">类里最重要的函数为</span><span style="color:#000000;">run</span><span style="color:#000000;">方法。其主要功能分析如下：</span></p>
+<p align="left"><span style="color:#000000;">1)  </span><span style="color:#000000;">首先从</span><span style="color:#000000;">dataQueue</span><span style="color:#000000;">中获取一个</span><span style="color:#000000;">packet</span></p>
+<p align="left"><span style="color:#000000;">2)  </span><span style="color:#000000;">当</span><span style="color:#000000;">blockStream</span><span style="color:#000000;">为</span><span style="color:#000000;">Null</span><span style="color:#000000;">时，就要建立和该</span><span style="color:#000000;">block</span><span style="color:#000000;">所在的</span><span style="color:#000000;">datanode</span><span style="color:#000000;">建立</span><span style="color:#000000;">socket</span><span style="color:#000000;">的链接，其调用</span><span style="color:#000000;">nextBlockOutputStream</span><span style="color:#000000;">函数来实现，其产生的两个</span><span style="color:#000000;">socket</span><span style="color:#000000;">相关的</span><span style="color:#000000;">stream</span><span style="color:#000000;">保存在</span><span style="color:#000000;">blockStream</span><span style="color:#000000;">和</span><span style="color:#000000;">blockReplyStream</span><span style="color:#000000;">，同时启动</span><span style="color:#000000;">ResponserProcessor</span></p>
+<p align="left"><span style="color:#000000;">3)  </span><span style="color:#000000;">从</span><span style="color:#000000;">dataQueue</span><span style="color:#000000;">中把该</span><span style="color:#000000;">packet</span><span style="color:#000000;">删除，添加到</span><span style="color:#000000;">ackQueue</span><span style="color:#000000;">中</span></p>
+<p align="left"><span style="color:#000000;">4)  </span><span style="color:#000000;">调用</span><span style="color:#000000;">BlockStream</span><span style="color:#000000;">发送该</span><span style="color:#000000;">packet</span></p>
+<p align="left"><span style="color:#000000;">5)  </span><span style="color:#000000;">如果是最好一个</span><span style="color:#000000;">packet</span><span style="color:#000000;">，写一个空</span><span style="color:#000000;">packet</span><span style="color:#000000;">为结束标志</span></p>
+<p align="left"><span style="color:#000000;">6)  </span><span style="color:#000000;">如果是最后一个</span><span style="color:#000000;">packet</span><span style="color:#000000;">，一直等到</span><span style="color:#000000;">ackQueue</span><span style="color:#000000;">队列空时候，关闭</span><span style="color:#000000;">response</span><span style="color:#000000;">，关闭</span><span style="color:#000000;">blockStream</span><span style="color:#000000;">流等。</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">我们看一下</span><span style="color:#000000;">nextBlockOutputStream</span><span style="color:#000000;">函数</span></p>
+<p align="left"><span style="color:#000000;">private DatanodeInfo[]nextBlockOutputStream(String client) throws IOException</span><span style="color:#000000;">；</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">1） </span><span style="color:#000000;">首先调用</span><span style="color:#000000;background:#C0C0C0;">locateFollowingBlock</span><span style="color:#000000;">函数获取最新的</span><span style="color:#000000;">block</span><span style="color:#000000;">的信息，其直接调用</span><span style="color:#000000;">nameNode</span><span style="color:#000000;">的</span><span style="color:#000000;">addBlock</span><span style="color:#000000;">函数来完成。该函数里处理了各种异常情况，其主要的策略就是</span><span style="color:#000000;">retry</span><span style="color:#000000;">多次。</span></p>
+<p align="left"><span style="color:#000000;">2） </span><span style="color:#000000;">调用</span><span style="color:#000000;background:#C0C0C0;">createBlockOutputStream</span><span style="color:#000000;">函数来建立该</span><span style="color:#000000;">block</span><span style="color:#000000;">上</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">的链接，并发送了一个包测试该</span><span style="color:#000000;">pipeline</span><span style="color:#000000;">是否通。</span></p>
+<p align="left"><span style="color:#000000;">3） </span><span style="color:#000000;">如果链接建立不成功，就调用</span><span style="color:#000000;background:#C0C0C0;">namenode.abandonBlock</span><span style="color:#000000;">函数来放弃分配的</span><span style="color:#000000;">block</span><span style="color:#000000;">，重新分配</span><span style="color:#000000;">block</span><span style="color:#000000;">。</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">在函数</span><span style="color:#000000;background:#C0C0C0;">createBlockOutputStream</span><span style="color:#000000;">里，建立和各个</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">的</span><span style="color:#000000;">pipeline</span><span style="color:#000000;">。并把</span><span style="color:#000000;">blockheader</span><span style="color:#000000;">发送出去。</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">接下来我们看一下</span><span style="color:#000000;background:#C0C0C0;">ResponseProcessor</span><span style="color:#000000;">类，其处理</span><span style="color:#000000;">ack</span><span style="color:#000000;">应答。它也是一个独立的线程处理。其主要的处理流程就在</span><span style="color:#000000;">run</span><span style="color:#000000;">函数中：</span></p>
+<p align="left"><span style="color:#000000;">首先从</span><span style="color:#000000;">BlockReplyStream</span><span style="color:#000000;">中读取</span><span style="color:#000000;">ack</span><span style="color:#000000;">应答消息，其格式比较简单：</span></p>
+<p align="left"><span style="color:#000000;">|seqno(long)|short|short|short|</span></p>
+<p>开始一个seqno开始，后面分别为该packet的副本的应答消息，成功是，其都为<span style="color:#000000;">Data</span>TransferProtocol.OP_STATUS_SUCCESS</p>
+<p> </p>
+<p>我们看一下具体流程：</p>
+<p>1） 首先从ack.ReadFileds来读取该ack字段</p>
+<p>2） 根据seqno判断，如果是hearbeat应答，我们忽略，如何使-2，则该packet出错，则我们也忽略。</p>
+<p>3） 否则，从ack队列中取出一个packet，比较seqno是否正确。（这里的疑问是，ack都是顺序回来的吗？）</p>
+<p>4） 检查所有ack返回的所有datanode的状态，如果都是DataTransferProtocol.OP_STATUS_SUCCESS，则成功，否则抛出异常。</p>
+<p>5） 从ack队列中删除该packet，并调用ackQueue.notifyAll()通知。</p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<h2>client错误处理</h2>
+<p>对于client，我们主要考察一下read和write的错误处理的情况。</p>
+<p> </p>
+<p>Write操作可以说分成三步骤：</p>
+<p>1）  write操作中，把数据打包为packet，添加到dataQueue中，这都是本地操作，产生的异常都是IOException，其自己抛出的异常。</p>
+<p>2）   </p>
+<h1>DataNode</h1>
+<p>我们先看一下</p>
+<h2>DataNode介绍</h2>
+<p> </p>
+<p>DataNode作为文件系统的数据服务器，对外提供数据服务的功能。其主要的功能如下：</p>
+<p>1）  提供客户端数据的读写功能</p>
+<p>2）  提供其他datanode的数据拷贝功能</p>
+<p>3）  给NameNode上报其相关的数据。</p>
+<p> </p>
+<h2>DataNode的本地磁盘结构</h2>
+<p> </p>
+<h3>本地存储目录结构</h3>
+<p>Datanode把数据保存在data server的本地磁盘结构中。系统可以有多个存储目录，其存储目录可以通过配置文件<span style="color:#000000;background:#FFFFFF;">conf/hdfs-site.xml</span><span style="color:#000000;background:#FFFFFF;">文件的配置项</span><span style="color:#000000;background:#FFFFFF;">dfs.data.dir
+</span><span style="color:#000000;background:#FFFFFF;">保存了其放置数据块</span><span style="color:#000000;background:#FFFFFF;">block</span><span style="color:#000000;background:#FFFFFF;">的目录，用“，”隔开，可以设置多项。每一项称为存储目录，在</span><span style="color:#000000;background:#FFFFFF;">Datanode</span><span style="color:#000000;background:#FFFFFF;">上，其对应的空间为一个</span><span style="color:#000000;background:#FFFFFF;">Volume</span><span style="color:#000000;background:#FFFFFF;">，用</span><span style="color:#000000;background:#FFFFFF;">FSVolume</span><span style="color:#000000;background:#FFFFFF;">来管理。所有的存储目录用</span><span style="color:#000000;background:#FFFFFF;">FSVolumeSet</span><span style="color:#000000;background:#FFFFFF;">来管理。</span></p>
+<p><span style="color:#000000;background:#FFFFFF;"> </span></p>
+<p><span style="color:#000000;background:#FFFFFF;">例如</span><span style="color:#000000;background:#FFFFFF;">配置了两个目录</span><span style="color:#000000;background:#FFFFFF;"> /dfs/data1
+</span><span style="color:#000000;background:#FFFFFF;">和</span><span style="color:#000000;background:#FFFFFF;"> /dfs/data2</span></p>
+<p>|  &lt;property&gt;</p>
+<p>         &lt;name&gt;dfs.data.dir&lt;/name&gt;</p>
+<p>         &lt;value&gt;/dfs/data1,/dfs/data2&lt;/value&gt;</p>
+<p>&lt;/property&gt;</p>
+<p> </p>
+<p>其目录结构如下图：</p>
+<p></p>
+<p>以dfs/data1为例：</p>
+<p>其下有三个目录分别为current目录，其下存放数据block数据，例如blk_-2248160896468466026 就是一个数据块文件，blk_-2248160896468466026_1002.meta为其对应的数据块验证文件。detach目录存储snapshort信息，本版本中没有实现。tmp目录保存临时文件的地方。还有in_use.lock为本存储目录的锁，实现对本存储目录的加锁操作，其在后面我们会详细介绍。Storage为一个文件，保存了一下版本验证信息。</p>
+<p>再次强调一下比较容易混淆的概念，一个存储目录是指 完整的本地存储结构：例如/data1， 其下面的空间对应一个FSVolume，多个存储目录由FSVolumeSet管理，一个存储目录其目录信息保存在StroageDir类中。</p>
+<p>对于存储目录下的current目录，是真正存储数据块的地方，其对于的数据块的管理有FSDir类来管理。</p>
+<p>知道上述基本的结构后，我们就可以轻松的看一下Datanode是如何管理本地数据块的。其基本的类为DataStorage 和 类FSDataset,类FSDataSet包括了三个我们提到过的子类FSDir， FSVolume， FSVolumeSet，已经类ActiveFile共同完成管理工作。</p>
+<h3>数据块的管理 FSdataSet</h3>
+<p>下面我们具体逐个类来介绍：</p>
+<p>FSDir来完成current目录下block的管理工作。我们看一下其数据成员：</p>
+<p align="left"><em><span style="color:#000000;">File dir;  </span>//<span style="color:#000000;">存储目录，这里就是</span><span style="color:#000000;">current</span><span style="color:#000000;">对于的文件结构</span></em></p>
+<p align="left"><em><span style="color:#000000;">    </span></em><strong><em><span style="color:#7F0055;">int</span></em></strong><em><span style="color:#0000C0;">num</span><span style="color:#000000;">Blocks = 0; //current</span><span style="color:#000000;">目录下存放的数据块，不包括子目录下存放的数据块</span></em></p>
+<p align="left"><em><span style="color:#000000;">    </span>FSDirchildren[];   //<span style="color:#000000;">子目录</span></em></p>
+<p align="left"><em><span style="color:#000000;">int lastChildIdx =0;  </span>//<span style="color:#000000;">最后一次存储数据块的子目录</span></em></p>
+<p>首先我们要知道，所有的数据块文件（block文件）并不是都直接存储在current目录下，当存储的block文件达到一定的数目的限制后，需要保存在子目录中，这就是children数据成员用来保存该子目录。为什么要限制一个目录存储的文件数目，我们知道，对于不同的local文件系统，例如ext2，ext3，其目录下的文件达到一定的数目后，性能会急剧下降。</p>
+<p>下面我们分析一下其重要的函数：</p>
+<p>private FileaddBlock(Block b, File src, boolean createOk, </p>
+<p>                          boolean resetIdx) throws IOException</p>
+<p>这个在存储目录下添加一个block。这里需要注意是src参数一般传入的是和current在同一存储目录下的temp目录，我们在创建blokc时，首先在temp中创建，当其写数据的操作完成后，我们在mv到current目录下。其主要工作流程如下：</p>
+<p>1）如果numBlocks 小于 <a name="OLE_LINK23"></a><a name="OLE_LINK22">maxBlocksPerDir</a>，既没有达到目录的上限，就在current目录创建。</p>
+<p>2）创建remame 有点问题?</p>
+<p>3）如果numBlocks&gt;= maxBlocksPerDir, 那么就需要创建子目录来保存，如果子目录满，则继续在子目录中创建新的子目录保存。</p>
+<p> </p>
+<p>public voidgetBlockInfo(TreeSet&lt;Block&gt; blockSet)该函数递归的扫描整个存储目录，获取所有的block信息，block对应的信息包括blockId，genStamp，numBytes都可以从block文件名和文件获取。</p>
+<p> </p>
+<p>下面我们看一下FSVolume类：其基本上没有太多的东西，添加了磁盘空间的统计信息。其他和数据块相关的操作直接调用FSDir的操作。FSVolumeSet的也没有太多的东西，这里就不详细讲述了。</p>
+<p>ActiveFile类表示一个block正在创建的过程中。</p>
+<h4>FSDataSet</h4>
+<p align="left">下面我们看一下FSDataSet类</p>
+<p align="left"> </p>
+<p align="left"><span style="color:#000000;">FSVolumeSet </span><span style="color:#0000C0;background:#FFFF00;">volumes</span><span style="color:#000000;">;</span></p>
+<p align="left"><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> HashMap&lt;Block,ActiveFile&gt;
+</span><span style="color:#0000C0;">ongoingCreates</span><span style="color:#000000;"> =
+</span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> HashMap&lt;Block,ActiveFile&gt;();</span></p>
+<p align="left"><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">int</span></strong><span style="color:#0000C0;">maxBlocksPerDir</span><span style="color:#000000;"> = 0;</span></p>
+<p align="left"><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;">
+<a name="OLE_LINK25"></a><a name="OLE_LINK24">HashMap&lt;Block,DatanodeBlockInfo&gt; </a>
+</span><span style="color:#0000C0;">volumeMap</span><span style="color:#000000;"> = </span>
+<strong><span style="color:#7F0055;">null</span></strong><span style="color:#000000;">;</span></p>
+<p><strong><span style="color:#7F0055;">static</span></strong><span style="color:#000000;"> 
+</span>Random <em><span style="color:#0000C0;">random</span></em><span style="color:#000000;"> =
+</span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;">Random();</span></p>
+<p>其重要的数据结构保存了 volumeMap，保存了block-&gt;DatanodeBlockInfo的映射关系。DatanodeBlockInfo的结构为：FSVolume信息和File结构，也就是说，在内存中保存了block 和该block文件打开的句柄，相对于缓存了所有的block的文件打开句柄？</p>
+<p>有了上述信息后，我们看到，FSDataset就可以完成了block-&gt;block file的任何的关联操作。</p>
+<p>Block getStoredBlock(longblkid) 通过blkid获取block，</p>
+<p>已经其他从block可以获取block 文件的输入或者输出流，已经block 的metafile的输入和输出流。</p>
+<p>这个函数比较重要</p>
+<p>public BlockWriteStreamswriteToBlock(Block b, boolean isRecovery) throws IOException ;</p>
+<p>当一个要写数据块的时候，在/tmp ，目录下创建一个临时的块文件。并返回读写流。</p>
+<p>public synchronized voidfinalizeBlock(Block b) throws IOException;</p>
+<p>当完成一个数据块时，调用本函数，其主要是完成数据块文件从temp文件mv到current目录中。</p>
+<h4>DataStorage 状态的管理–数据升级</h4>
+<p>类Storage中保存的数据为：</p>
+<p align="left"><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> NodeType
+</span><span style="color:#0000C0;">storageType</span><span style="color:#000000;">;   
+</span><span style="color:#3F7F5F;">// Type of the node using this storage </span>
+</p>
+<p align="left"><strong><span style="color:#7F0055;">protected</span></strong><span style="color:#000000;">
+<a name="OLE_LINK21"></a><a name="OLE_LINK20">List&lt;StorageDirectory&gt;</a></span> <span style="color:#0000C0;background:#FFFF00;">
+storageDirs</span><span style="color:#000000;"> = </span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> ArrayList&lt;StorageDirectory&gt;();</span></p>
+<p><span style="color:#000000;">一个是</span><span style="color:#000000;">NoteType</span><span style="color:#000000;">其为</span><span style="color:#000000;">NAME_NODE</span><span style="color:#000000;">，</span><span style="color:#000000;">DATA_NODE</span><span style="color:#000000;">两种，我们后面看到</span><span style="color:#000000;">namenode</span><span style="color:#000000;">中也会用到该类。其次就是</span><span style="color:#000000;">保存</span><span style="color:#000000;">StorageDirectory</span><span style="color:#000000;">的一个列表。类</span><span style="color:#000000;">StorageDirectory</span><span style="color:#000000;">保存了数据存储的目录信息：</span><span style="color:#000000;">根目录</span><span style="color:#0000C0;">root</span><span style="color:#0000C0;">，文件锁</span><span style="color:#0000C0;">FileLock</span><span style="color:#0000C0;">，</span><span style="color:#0000C0;">存储类型的接口</span><span style="color:#0000C0;">dirType</span><span style="color:#0000C0;">。</span></p>
+<p align="left">Storage的主要的功能，就是管理这些StorageDirectory，这里不在详细讲述了。</p>
+<p align="left"> </p>
+<p align="left">DataStorage 主要完成了一些文件系统的升级，回滚，提交的操作。 </p>
+<p align="left">软件的升级是软件生命周期的重要的组成部分。软件的升级，只要指软件从低版本向高版本升级的过程。这个过程可能伴随着内存数据结构的变换，磁盘数据结构的变换，版本信息的变化，这些都需要从老的版本中迁移到新的版本中，需要保证在数据比丢失的情况下，迁移正常完成。</p>
+<p align="left">对于HDFS这样的大型分布式系统，升级可能成功，也可能不成功，在不成功的情况下，需要rollback到就的版本中，如果升级后，在一定的时间内运行良好，我们就提交Finalize这次升级。</p>
+<p align="left"> </p>
+<p align="left">DataStorage主要完成这样的升级的功能。其doUpgrade， doRollBack，doFinallize来完成上述功能。</p>
+<p align="left">其主要流程在函数recoverTransitionRead</p>
+<h2>DataNode的 启动过程</h2>
+<p>我们主要看一下Namenode的main函数的启动过程：</p>
+<p>1) 首先调用startupShutdownMessage函数，其基本没有做什么工作，在启动时打印一条日志信息，其通过添加addShutdownHook函数，在数据服务器退出时，打印相应的退出日志信息。</p>
+<p>2) 调用createDataNode函数，其调用instatiateDataNode来初始化一个Datanode，之后调用runDatanodeDaemon来启动器Dameno线程。</p>
+<p>3) <span style="color:#000000;background:#C0C0C0;">函数</span><span style="color:#000000;background:#C0C0C0;">instantiateDataNode</span><span style="color:#000000;">里的基本工作，就是产生一个</span><span style="color:#000000;">conf</span><span style="color:#000000;">对象来获取配置文件相关信息，同时调用</span><span style="color:#000000;">parseArgument</span><span style="color:#000000;">函数分析命令行参数</span><span style="color:#000000;">args</span><span style="color:#000000;">，从配置文件里获取</span><span style="color:#000000;">dataDirs</span><span style="color:#000000;">，也就是数据存储的目录。调用</span><span style="color:#000000;">makeInstance</span><span style="color:#000000;">函数。</span></p>
+<p>4) <span style="color:#000000;">makeInstance </span><span style="color:#000000;">对数据存储目录做了</span><span style="color:#000000;">check</span><span style="color:#000000;">之后，调用</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">的构成函数返回一个</span><span style="color:#000000;">DataNode</span><span style="color:#000000;">的对象。</span></p>
+<p>5) <span style="color:#000000;">Datanode</span><span style="color:#000000;">的构成函数直接调用</span><span style="color:#000000;">startDataNode</span><span style="color:#000000;">来初始化</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">，这个函数比较复杂，我们来重点介绍。</span></p>
+<p>6) <span style="color:#000000;">StartDataNode</span><span style="color:#000000;">函数里，其首先获取相关的配置参数，依次为：</span>machineName本DataNode的机器名，调用NameNode的静态函数，获取getAddress获取namenode的nameNodeaddr，获取建立socket的超时时间socketTimeout，获取socket写数据的超时时间socketWriteTimeout，获取该Datanode是否允许transfer数据的配置，获取写数据的packet的大小writePacketSize，获取本datanode的address.</p>
+<p>7) 其次，该函数创建了一个DataStorage对象storage，以及<span style="color:#000000;background:#C0C0C0;">DatanodeRegistration</span><span style="color:#000000;">对象。最重要的是建立了</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">的连接，并通过</span><span style="color:#000000;">handshake</span><span style="color:#000000;">函数调用了</span><span style="color:#000000;">namenode.versionRequest()</span><span style="color:#000000;">操作获取了</span><span style="color:#000000;">namespaceInfo</span></p>
+<p>8) <span style="color:#000000;">之后，调用</span><span style="color:#000000;">storage</span><span style="color:#000000;">的</span><span style="color:#000000;background:#C0C0C0;">recoverTransitionRead</span><span style="color:#000000;">完成</span><span style="color:#000000;">DataStorage</span><span style="color:#000000;">的初始化工作。初始化了</span><span style="color:#000000;">FSDataset</span><span style="color:#000000;">对象。</span></p>
+<p>9) <span style="color:#000000;">最后，建立</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">端的监听</span><span style="color:#000000;">socket</span><span style="color:#000000;">，</span><span style="color:#000000;">启动线程组，设置相关的参数。启动</span><span style="color:#000000;">serverlet</span><span style="color:#000000;">服务。</span></p>
+<p>当在NameNode的过程中，其东了DataXeciverServer类，其run函数的主要的工作就是监听socket，如果有新的socket，就启动Deamon一个线程，运行DataXceiver的run函数来处理该请求。</p>
+<p align="left"><strong><span style="color:#7F0055;">try</span></strong><span style="color:#000000;"> {</span></p>
+<p align="left"><span style="color:#000000;">        </span>Socket s = <span style="color:#0000C0;">
+ss</span><span style="color:#000000;">.accept();</span></p>
+<p align="left"><span style="color:#000000;">        </span>s.setTcpNoDelay(<strong><span style="color:#7F0055;">true</span></strong><span style="color:#000000;">);</span></p>
+<p align="left"><span style="color:#000000;">        </span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> Daemon(</span><span style="color:#0000C0;">datanode</span><span style="color:#000000;">.</span><span style="color:#0000C0;">threadGroup</span><span style="color:#000000;">,
+</span></p>
+<p align="left"><span style="color:#000000;">            </span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;">
+<span style="background:#C0C0C0;">DataXceiver</span>(s, </span><span style="color:#0000C0;">datanode</span><span style="color:#000000;">,
+</span><strong><span style="color:#7F0055;">this</span></strong><span style="color:#000000;">)).start();</span></p>
+<p><span style="color:#000000;">      </span>}<strong><span style="color:#7F0055;">catch</span></strong><span style="color:#000000;"> (SocketTimeoutException ignored)</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p><span style="color:#000000;">DataXceiver</span><span style="color:#000000;">来的</span><span style="color:#000000;">run</span><span style="color:#000000;">函数里，从</span><span style="color:#000000;">accpet</span><span style="color:#000000;">到的输入流里，获取版本号和</span><span style="color:#000000;">op</span><span style="color:#000000;">操作码，其根据操作码，分别调用相应的处理函数。</span></p>
+<p>其操作码和对应的操作如下：</p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p>操作码</p>
+</td>
+<td valign="top">
+<p>相应的 操作</p>
+</td>
+<td valign="top">
+<p align="left">备注：</p>
+</td>
+<td valign="top">
+<p align="left"> </p>
+</td>
+</tr><tr><td valign="top">
+<p>OP_READ_BLOCK</p>
+</td>
+<td valign="top">
+<p>readBlock</p>
+</td>
+<td valign="top">
+<p align="left">读一个数据块</p>
+</td>
+<td valign="top">
+<p align="left"> </p>
+</td>
+</tr><tr><td valign="top">
+<p>OP_WRITE_BLOCK</p>
+</td>
+<td valign="top">
+<p>writeBlock</p>
+</td>
+<td valign="top">
+<p align="left">写一个数据块</p>
+</td>
+<td valign="top">
+<p align="left"> </p>
+</td>
+</tr><tr><td valign="top">
+<p>OP_READ_METADATA</p>
+</td>
+<td valign="top">
+<p>readMetadata</p>
+</td>
+<td valign="top">
+<p>获取数据块的元数据</p>
+</td>
+<td valign="top">
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>OP_COPY_BLOCK</p>
+</td>
+<td valign="top">
+<p>copyBlock</p>
+</td>
+<td valign="top">
+<p>拷贝数据块</p>
+</td>
+<td valign="top">
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>OP_BLOCK_CHECKSUM</p>
+</td>
+<td valign="top">
+<p>getBlockChecksum</p>
+</td>
+<td valign="top">
+<p>获取block的checksum</p>
+</td>
+<td valign="top">
+<p> </p>
+</td>
+</tr></tbody></table><p align="left"> </p>
+<p align="left">接下来具体介绍各种操作。</p>
+<h2>数据块的读取</h2>
+<h3>readBlock</h3>
+<p>我们看一下读数据块的入户函数：DataXceiver里的readBlock方法，其就一个类型为DataInputStream的in参数。</p>
+<p>void readBlock(DataInputStream in)</p>
+<p> </p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p>|version（short）|  2 bytes             版本号</p>
+<p>|op (bytes)|        1 bytes             操作码</p>
+<p>|blockId (long)|    8 bytes             block的唯一ID</p>
+<p>|generationStamp (long)| 8 bytes        GeneratonStamp </p>
+<p>|startOffset (long)|    8 bytes         要读的block的开始偏移</p>
+<p>|length  (long)    |    8 bytes         要读的数据块的长度</p>
+<p>|clientName(String)|   int(len) + len   客户端的名字</p>
+<p>……data……</p>
+</td>
+</tr></tbody></table><p>                                数据块的block 头信息</p>
+<p>我们看一readBlock函数的主要工作：</p>
+<p>1）从输入流in中读取block的header信息，包括了要读取的Block的ID，GenerationStamp，开始偏移和读取的长度，最后是客户端的名字（只在写日志的时候用到了）其格式如上图所示。</p>
+<p>2）根据socket信息，构建输出流out，用于发送数据。</p>
+<p>3）根据block的header信息构建BlockSender</p>
+<p align="left"><span style="color:#000000;">blockSender = </span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> BlockSender(block, startOffset, length,</span></p>
+<p align="left"><span style="color:#000000;">           </span>true, true, false, datanode, clientTraceFmt);</p>
+<p>4）调用sendBlock发送数据。</p>
+<p> long read = blockSender.sendBlock(out,baseStream, null);</p>
+<p> </p>
+<h3>BlockSender</h3>
+<p>接下来我们就主要分析BlockSender类，BlockSender主要完成一个block的读请求。核心的就是上述用到的构成函数和sendBlock函数。</p>
+<p>我们先看一下一些成员变量</p>
+<p>private Block block; 这是一个对应要读的块，其三个数据成员保存该块的信息，分别为blockId，块内的字节数numBytes，以及一个stamp值：generationStamp</p>
+<p>private long offset; //要读的block的起始位置，主要这个是修正后的按照chunk对象的偏移</p>
+<p>private long length //要读的长度</p>
+<p>private long endOffset; // 要读的block的结束位置</p>
+<p> </p>
+<p>我们看一下blockSender的构造函数</p>
+<p>BlockSender(Block block, long startOffset, long length,</p>
+<p>              booleancorruptChecksumOk, boolean chunkOffsetOK,</p>
+<p>              booleanverifyChecksum, DataNode datanode, String clientTraceFmt)</p>
+<p> </p>
+<p>其主要的功能为：</p>
+<p>1）如果需要验证checksum，则读取该block的checksum</p>
+<p>2）计算offset 和 endOffset的值。 offset 和 startOffset的区别在于startOffset为原始的要读的数据在block的偏移量， 而offset是根据startOffset按照chunk的大小对齐后的偏移量。我们知道，发送数据是按照packet来发的，packet是按照chunk整数倍发送的。</p>
+<p>3）获取block对于的本地文件的输入流blockIn</p>
+<p>blockIn= datanode.data.getBlockInputStream(block, offset);</p>
+<p> </p>
+<p>下面我们看SendBlock函数</p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p> </p>
+</td>
+<td valign="top">
+<p>字段</p>
+</td>
+<td valign="top">
+<p>类型</p>
+</td>
+<td valign="top">
+<p>长度</p>
+</td>
+<td valign="top">
+<p>描述</p>
+</td>
+</tr><tr><td rowspan="4" valign="top">
+<p>Packet的头</p>
+</td>
+<td valign="top">
+<p>packetLen</p>
+</td>
+<td valign="top">
+<p>int</p>
+</td>
+<td valign="top">
+<p>4 bytes</p>
+</td>
+<td valign="top">
+<p>包的长度，包括（length，chucksum，data三个的总长度）</p>
+</td>
+</tr><tr><td valign="top">
+<p>Offset</p>
+</td>
+<td valign="top">
+<p>Long</p>
+</td>
+<td valign="top">
+<p>8 bytes</p>
+</td>
+<td valign="top">
+<p>该packet在block中的偏移量</p>
+</td>
+</tr><tr><td valign="top">
+<p>Seqno</p>
+</td>
+<td valign="top">
+<p>Long</p>
+</td>
+<td valign="top">
+<p>8 bytes</p>
+</td>
+<td valign="top">
+<p>Packet在block的序列号</p>
+</td>
+</tr><tr><td valign="top">
+<p>tail</p>
+</td>
+<td valign="top">
+<p>Byte</p>
+</td>
+<td valign="top">
+<p>1 byte</p>
+</td>
+<td valign="top">
+<p>是否是block中的最后一个包</p>
+</td>
+</tr><tr><td rowspan="3" valign="top">
+<p>Packet的数据</p>
+</td>
+<td valign="top">
+<p>length</p>
+</td>
+<td valign="top">
+<p>Int</p>
+</td>
+<td valign="top">
+<p>4 bytes</p>
+</td>
+<td valign="top">
+<p>数据的长度，注意着这一项表示下面data的长度</p>
+</td>
+</tr><tr><td valign="top">
+<p>Checksum</p>
+</td>
+<td width="342" colspan="3" valign="top">
+<p>一个512bytes一个checksum，16k就是</p>
+<p>32个checksum，一个checksum 4字节，总共 占32*4 个字节</p>
+</td>
+</tr><tr><td valign="top">
+<p>data</p>
+</td>
+<td width="342" colspan="3" valign="top">
+<p>一个packet一般16k</p>
+</td>
+</tr></tbody></table><p> 表1.Packet的结构</p>
+<p>SendBlock函数完成的工作为：</p>
+<p>1）向out发送block头信息：调用checksum.writeHeader写 type，和bytesPerChecksum两个字段。同时写offset。</p>
+<p>2）计算packet的长度pktSize</p>
+<p>int pktSize =DataNode.PKT_HEADER_LEN + SIZE_OF_INTEGER;</p>
+<p>其格式如表1.所示 </p>
+<p>如果transferToAllowed这个标志设置，则其其bufSize一次为MIN_BUFFER_WITH_TRANSFERTO 和BUFFER_SIZE 中最大的一个。这代表了一次从文件中读取的大小。</p>
+<p>3）不断调用send_chunks函数按发送</p>
+<p>4）最后要write一个0 表示该packet结束。</p>
+<p> </p>
+<p>SendChunks 函数的流程：</p>
+<p>1）  计算要读数据的长度len</p>
+<p>2）  就是numChunks 和 packetlen</p>
+<p><strong><span style="color:#7F0055;">int</span></strong><span style="color:#000000;"> numChunks = (len +
+</span><span style="color:#0000C0;">bytesPerChecksum</span><span style="color:#000000;"> - 1)/</span><span style="color:#0000C0;">bytesPerChecksum</span><span style="color:#000000;">;</span></p>
+<p><span style="color:#000000;">   </span><strong><span style="color:#7F0055;">int</span></strong><span style="color:#000000;"> packetLen = len +numChunks*</span><span style="color:#0000C0;">checksumSize</span><span style="color:#000000;"> + 4;</span></p>
+<p>3）  写packe 的头</p>
+<p>4）  读取checksum</p>
+<p><span style="color:#0000C0;">c</span><span style="color:#000000;">hecksumIn.readFully(buf, checksumOff, checksumLen);</span></p>
+<p>5）  读取data</p>
+<h3>DataCheckSum</h3>
+<p>DataCheckSum 类完成计算checksum的功能</p>
+<p>两种类型的checksum </p>
+<p>private final int type; chusm的类型</p>
+<p>  private final intsize;  checksum的大小</p>
+<p>  private finalChecksum summer;   </p>
+<p>  private final intbytesPerChecksum; 一个checksum对于的要校验的数据的长度</p>
+<p>  private int inSum =0; 实际数据的长度</p>
+<p>我们看到又两种构造的方法：CRC32 和 NULL两种。</p>
+<p> </p>
+<h2>写数据块</h2>
+<p>写数据要比读数据的不同之处在于，写要以流水线的方式写多个副本。客户端写一个block的过程如下：</p>
+<h3>writeBlock</h3>
+<p>写操作的入口函数为：</p>
+<p>private voidwriteBlock(DataInputStream in) throws IOException;</p>
+<p>其输入参数为：DataInputStream in</p>
+<p>1）从流in中获取block的头相关的信息。</p>
+<p>2） </p>
+<p>如上图所示：verson和操作码81已经在之前处理命令时consume掉了，结下了的就是block_id, generstionStamp, startOffset, length, clientName,hasSrcDataNode, srcDataNode, numTargets, targets等相关的信息的获取。</p>
+<p> </p>
+<p>2）接下来我们看到一些stream</p>
+<p align="left"><span style="color:#000000;">DataOutputStream mirrorOut = </span><strong><span style="color:#7F0055;">null</span></strong><span style="color:#000000;">; 
+</span><span style="color:#3F7F5F;">// stream to next target</span></p>
+<p align="left"><span style="color:#000000;">    </span>DataInputStream mirrorIn = <strong>
+<span style="color:#7F0055;">null</span></strong><span style="color:#000000;">;    </span>
+<span style="color:#3F7F5F;">// replyfrom next target</span></p>
+<p align="left"><span style="color:#000000;">    </span>DataOutputStream replyOut = <strong>
+<span style="color:#7F0055;">null</span></strong><span style="color:#000000;">;   </span>
+<span style="color:#3F7F5F;">// streamto <u>prev</u> target</span></p>
+<p align="left"><span style="color:#000000;">    </span>Socket mirrorSock = <strong>
+<span style="color:#7F0055;">null</span></strong><span style="color:#000000;">;          
+</span><span style="color:#3F7F5F;">// socket to next target</span></p>
+<p align="left"><span style="color:#000000;">    </span>BlockReceiver blockReceiver =
+<strong><span style="color:#7F0055;">null</span></strong><span style="color:#000000;">;
+</span><span style="color:#3F7F5F;">// responsible for data handling</span></p>
+<p align="left"><span style="color:#000000;">    </span>String mirrorNode = <strong>
+<span style="color:#7F0055;">null</span></strong><span style="color:#000000;">;          
+</span><span style="color:#3F7F5F;">// the name:port of next target</span></p>
+<p><span style="color:#000000;">   </span>String firstBadLink = <span style="color:#2A00FF;">
+""</span><span style="color:#000000;">;           </span><span style="color:#3F7F5F;">// first
+<u>datanode</u>that failed in connection setup</span></p>
+<p></p>
+<p>其流的创建过程如上图所示。</p>
+<p>3）看一下BlockReceiver的构造函数的功能：</p>
+<p align="left">  其处理初始化一写变量之外，最重要的功能是建立里两个流：out，checksumOut，其分别对应本地磁盘的输出流和本地磁盘的checksum文件，也就是是该block对应该Datanode磁盘上的block文件流和blcck的checksum流，用来写本地磁盘和本地checksum文件。</p>
+<p align="left"> </p>
+<p align="left">4） 建立replyOut流</p>
+<p align="left">5）如果targets.length&gt; 0，说明后面还有datanode，则建立mirrorOut 和 mirrorIn流。同时通过mirrorOut流把blcok的 header发送出去。</p>
+<p align="left">6）调用blockReceiver.receiveBlock(mirrorOut,mirrorIn, replyOut,</p>
+<p align="left">                                 mirrorAddr,null, targets.length);</p>
+<p align="left"> 函数，把该block的数据按照packet发送出去。后面我们回详细分析该函数。</p>
+<p align="left">7）如果是副本上的block，我们需要调用datanode.notifyNamenodeReceivedBlock向nameNode报告。并把它添加到datanode.blockScanner.addBlock(block);里面。</p>
+<p align="left"> </p>
+<p align="left"> </p>
+<p align="left">我们看一下receiveBlock函数的功能：</p>
+<p align="left"><span style="color:#000000;">1） </span>首先把bloc<span style="color:#000000;">k</span><span style="color:#000000;">的</span><span style="color:#000000;">header</span><span style="color:#000000;">写入磁盘中的</span><span style="color:#000000;">checksum</span><span style="color:#000000;">中。</span></p>
+<p align="left"><span style="color:#000000;">2） </span><span style="color:#000000;">创建了一个</span><span style="color:#000000;">Daemon</span><span style="color:#000000;">程序，对于的</span><span style="color:#000000;">PacketResponder</span><span style="color:#000000;">的类，其发出去的</span><span style="color:#000000;">packet</span><span style="color:#000000;">的</span><span style="color:#000000;">ack</span><span style="color:#000000;">应答。</span></p>
+<p align="left"><span style="color:#000000;">3） </span><span style="color:#000000;">通过</span><span style="color:#000000;">ReceivePacket</span><span style="color:#000000;">函数从流</span><span style="color:#000000;">in</span><span style="color:#000000;">，读出的</span><span style="color:#000000;">block</span><span style="color:#000000;">数据，其通过一次系统调用先把数据放在</span><span style="color:#000000;">ByteBuffer</span><span style="color:#000000;">中，后面不断的通过循环按照</span><span style="color:#000000;">packet</span><span style="color:#000000;">大小多次发送给下一个</span><span style="color:#000000;">datanode</span><span style="color:#000000;">，也就是通过流</span><span style="color:#000000;">
+ mirrorOut.write</span><span style="color:#000000;">来实现。</span><span style="color:#000000;">同时该函数还把数据写入本地磁盘中并</span><span style="color:#000000;">flush</span><span style="color:#000000;">到磁盘中。同时把该</span><span style="color:#000000;">packet</span><span style="color:#000000;">加入</span><span style="color:#000000;">ack</span><span style="color:#000000;">应答队列。</span></p>
+<p align="left"><span style="color:#000000;">4） </span><span style="color:#000000;">关闭相关的资源</span></p>
+<p align="left"><span style="color:#000000;">5） </span><span style="color:#000000;">Finalize block</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<h2>数据信息的的上报和命令的处理</h2>
+<p>DataNode定期向NameNode报告其block的信息。</p>
+<p>有两种信息：</p>
+<p>1）  <span style="color:#000000;background:#C0C0C0;">sendHeartbeat</span></p>
+<p><span style="color:#000000;">定期向</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">发送消息，附带</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">的容量信息，表面自己还活着。同时返回</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">给</span><span style="color:#000000;">DataNode</span><span style="color:#000000;">的一些命令。</span></p>
+<p>2）  <span style="color:#000000;background:#C0C0C0;">blockReport</span></p>
+<p><span style="color:#000000;">定期向</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">报告自己的所有的数据块信息</span></p>
+<p>3）  <span style="color:#000000;background:#C0C0C0;">blockReceived</span></p>
+<p><span style="color:#000000;">向</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">报告自己的最近写的块信息。</span></p>
+<p>4）  <span style="color:#000000;background:#C0C0C0;">errorReport</span></p>
+<p> </p>
+<p> </p>
+<p> </p>
+<p>我们看一下写数据异常情况下的处理：</p>
+<p> </p>
+<p> </p>
+<h2>DataBlockScanner</h2>
+<p> 实现了DataNode之间磁盘空间的负载均衡。</p>
+<h1>NameNode</h1>
+<p> </p>
+<p align="left"><span style="color:#000000;">我们知道，</span><span style="color:#000000;">namenode</span><span style="color:#000000;">的功能主要有两部分：</span><span style="color:#000000;">1</span><span style="color:#000000;">）对文件系统的目录进行管理</span><span style="color:#000000;"> 2</span><span style="color:#000000;">）对文件的数据块进行管理和映射。</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">我们先看一下基本的</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">的概念</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">熟悉</span><span style="color:#000000;">linux</span><span style="color:#000000;">下文件系统的人都知道，</span><span style="color:#000000;">inode
+</span><span style="color:#000000;">和</span><span style="color:#000000;"> dentry </span>
+<span style="color:#000000;">项是其基本的数据结构，在</span><span style="color:#000000;">HDFS</span><span style="color:#000000;">里面，并没有</span><span style="color:#000000;">dentry</span><span style="color:#000000;">项的概念。其</span><span style="color:#000000;">dentry</span><span style="color:#000000;">和</span><span style="color:#000000;">inode</span><span style="color:#000000;">一起保存在</span><span style="color:#000000;">INode</span><span style="color:#000000;">的结构中，所以</span><span style="color:#000000;">HDFS</span><span style="color:#000000;">不支持</span><span style="color:#000000;">link</span><span style="color:#000000;">的操作。</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">另外，</span><span style="color:#000000;">HDFS</span><span style="color:#000000;">的所有的元数据都保存在内存中，这就减少了许多磁盘的操作。</span><span style="color:#000000;">HDFS</span><span style="color:#000000;">增加了日志操作和定期的把</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">在内存中的</span><span style="color:#000000;">image</span><span style="color:#000000;">保存在磁盘中，用来当</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">意外崩溃时，可以从</span><span style="color:#000000;">image</span><span style="color:#000000;">和</span><span style="color:#000000;">journal</span><span style="color:#000000;">中恢复出</span><span style="color:#000000;">NameNode
+</span><span style="color:#000000;">的内存数据。</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">我们把</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">的实现主要分成分个模块来讲解。</span><span style="color:#000000;">1</span><span style="color:#000000;">）</span><span style="color:#000000;">Inode</span><span style="color:#000000;">的相关结构，这是所有</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">的基础结构。</span><span style="color:#000000;">2</span><span style="color:#000000;">）其次时以</span><span style="color:#000000;">FSDirectroy</span><span style="color:#000000;">为主的有关文件目录的相关的操作。</span><span style="color:#000000;">3</span><span style="color:#000000;">）之后是数文件数据块管理相关的操作，主要以</span><span style="color:#000000;">FSNamesytem</span><span style="color:#000000;">类为主。</span><span style="color:#000000;">4</span><span style="color:#000000;">）日志和</span><span style="color:#000000;">checkpoint</span><span style="color:#000000;">相关的操作。</span><span style="color:#000000;">5</span><span style="color:#000000;">）整个</span><span style="color:#000000;">NameNode</span><span style="color:#000000;">的启动和初始化。</span></p>
+<h3>Inode 文件和目录的基本结构</h3>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"></p>
+<p align="left"><span style="color:#000000;">                           </span><span style="color:#000000;">图</span><span style="color:#000000;">1 Inode</span><span style="color:#000000;">结构类图</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">我们先看一下</span><span style="color:#000000;">inode</span><span style="color:#000000;">的数据结构：</span><span style="color:#000000;">class Inode</span><span style="color:#000000;">是一个</span><span style="color:#000000;">abstractclass</span><span style="color:#000000;">，提供了所有</span><span style="color:#000000;">inode</span><span style="color:#000000;">的基本的数据成员</span><span style="color:#000000;">:</span></p>
+<p align="left"><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">byte</span></strong><span style="color:#000000;">[]
+</span><span style="color:#0000C0;">name</span><span style="color:#000000;">;  </span>
+// Name,<span style="color:#000000;">文件或目录的名字</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span></strong><span style="color:#000000;"> INodeDirectory
+</span><span style="color:#0000C0;">parent</span><span style="color:#000000;">;  </span>
+//<span style="color:#000000;">父母录的</span><span style="color:#000000;">inode</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">modificationTime</span><span style="color:#000000;">; 
+</span>//<span style="color:#000000;">最后修改时间修改时间</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">accessTime</span><span style="color:#000000;">;        
+</span>//<span style="color:#000000;">最后访问时间</span></p>
+<p align="left"><span style="color:#0000C0;">private long permission;     </span><span style="color:#000000;">//</span><span style="color:#000000;">访问权限</span><span style="color:#0000C0;">：</span><span style="color:#000000;">需要注意的是：权限为</span><span style="color:#000000;">long</span><span style="color:#000000;">类型的</span><span style="color:#000000;">64</span><span style="color:#000000;">位数据中：</span></p>
+<p align="left"><em><span style="color:#0000C0;">MODE</span></em><span style="color:#000000;">(0, 16),
+</span><span style="color:#000000;">前</span><span style="color:#000000;">16</span><span style="color:#000000;">为</span><span style="color:#000000;">mode</span></p>
+<p align="left"><span style="color:#000000;">    </span><em><span style="color:#0000C0;">GROUP</span></em><span style="color:#000000;">(</span><em><span style="color:#0000C0;">MODE</span></em><span style="color:#000000;">.</span><span style="color:#0000C0;">OFFSET</span><span style="color:#000000;">
+ + </span><em><span style="color:#0000C0;">MODE</span></em><span style="color:#000000;">.</span><span style="color:#0000C0;">LENGTH</span><span style="color:#000000;">, 25),
+</span><span style="color:#000000;">后面是</span><span style="color:#000000;">goupname</span><span style="color:#000000;">的一个</span><span style="color:#000000;">id</span><span style="color:#000000;">，对应该</span><span style="color:#000000;">id</span><span style="color:#000000;">，可以获得</span><span style="color:#000000;">groupname</span><span style="color:#000000;">，其映射关系保存在</span><span style="color:#000000;">
+ SerialManger</span><span style="color:#000000;">里面。</span></p>
+<p align="left"><em><span style="color:#0000C0;">USER</span></em><span style="color:#000000;">(</span><em><span style="color:#0000C0;">GROUP</span></em><span style="color:#000000;">.</span><span style="color:#0000C0;">OFFSET</span><span style="color:#000000;"> +
+</span><em><span style="color:#0000C0;">GROUP</span></em><span style="color:#000000;">.</span><span style="color:#0000C0;">LENGTH</span><span style="color:#000000;">, 23);
+</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p>下面我们看一下INodeFile类，其extend类INode，增加了如下的数据成员：</p>
+<p align="left"><strong><span style="color:#7F0055;">protected</span></strong><span style="color:#000000;"> BlockInfo
+</span><span style="color:#0000C0;">blocks</span><span style="color:#000000;">[] = </span>
+<strong><span style="color:#7F0055;">null</span></strong><span style="color:#000000;">; 
+</span>//<span style="color:#000000;">文件的</span><span style="color:#000000;">block</span><span style="color:#000000;">数组</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">short</span></strong><span style="color:#0000C0;">blockReplication</span><span style="color:#000000;">;     
+</span>//<span style="color:#000000;">该文件的副本数</span></p>
+<p><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">preferredBlockSize</span><span style="color:#000000;">;    
+</span>//<span style="color:#000000;">该文件的</span><span style="color:#000000;">blockSize</span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p><a name="OLE_LINK19"></a><a name="OLE_LINK18">INodeFileUnderConstruction</a>来表示该file正在被某一个client打开并正在进行操作。我们看一下其成员变量可能就比较清楚了。</p>
+<p align="left"><strong><span style="color:#7F0055;">final</span></strong><span style="color:#000000;"> String
+</span><span style="color:#0000C0;">clientName</span><span style="color:#000000;">;        
+</span><span style="color:#3F7F5F;">// lease holder </span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">final</span></strong><span style="color:#000000;"> String
+</span><span style="color:#0000C0;">clientMachine</span><span style="color:#000000;">;</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">final</span></strong><span style="color:#000000;"> DatanodeDescriptor
+</span><span style="color:#0000C0;">clientNode</span><span style="color:#000000;">; </span>
+<span style="color:#3F7F5F;">// if client is a cluster node too.</span></p>
+<p align="left"> </p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">int</span></strong><span style="color:#0000C0;">primaryNodeIndex</span><span style="color:#000000;"> = -1;
+</span><span style="color:#3F7F5F;">//the nodeworking on lease recovery</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> DatanodeDescriptor[]
+</span><span style="color:#0000C0;">targets</span><span style="color:#000000;"> = </span>
+<strong><span style="color:#7F0055;">null</span></strong><span style="color:#000000;">;  
+</span><span style="color:#3F7F5F;">//locations for last block</span></p>
+<p><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">lastRecoveryTime</span><span style="color:#000000;"> = 0;</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p><span style="color:#000000;">我们看到上面的成员变量为</span><span style="color:#000000;">clientName</span><span style="color:#000000;">为客户端的名字，也就是该文件锁的持有者</span><span style="color:#000000;">lease holder</span><span style="color:#000000;">，这用来查找其相关的</span><span style="color:#000000;">leaser</span><span style="color:#000000;">。</span><span style="color:#000000;">
+ ClientNode</span><span style="color:#000000;">为额外的</span><span style="color:#000000;">client</span><span style="color:#000000;">的信息。</span><span style="color:#0000C0;">primaryNodeIndex</span><span style="color:#0000C0;">是锁恢复使用，</span><span style="color:#0000C0;">targets</span><span style="color:#0000C0;">最后一个块所在的</span><span style="color:#0000C0;">Datanode</span><span style="color:#0000C0;">的信息。</span><span style="color:#0000C0;">我们看到</span>INodeFileUnderConstruction类和InodeFile的最大的不同之处，在于保存了lease这些动态的信息。这些都是一个open的文件需要保存的信息。</p>
+<p> </p>
+<p>INodeDirectory是目录的Inode信息，其extend了INode类， 再起基础之上，增加了</p>
+<p>privateList&lt;INode&gt; children; 其要保存该目录下的所以的文件和子目录的inode</p>
+<p> </p>
+<p>我们看一下该类比较重要的一个函数：</p>
+<p>INodegetNode(String path)</p>
+<p>其给定一个绝对路径path，来查找相应的INode结构。其主要流程如下：</p>
+<p>1）  首先调用父类的<span style="color:#000000;">getPathComponents</span><span style="color:#000000;">函数来获取路径的各个</span><span style="color:#000000;">component</span><span style="color:#000000;">，例如</span></p>
+<p>/root/test/file1  获得各个 bytes[][]={‘’,’root’,’test’,’file1’}</p>
+<p>2） 调用<span style="color:#000000;">getExistingPathINodes</span><span style="color:#000000;">来从当前目录获取相关的</span><span style="color:#000000;">inode</span></p>
+<p>3） <span style="color:#000000;">其首先检查当前目录的</span><span style="color:#000000;">name</span><span style="color:#000000;">和</span><span style="color:#000000;">component[0]</span><span style="color:#000000;">是一致的。</span></p>
+<p>4）  </p>
+<p> </p>
+<p> </p>
+<p>类INodeDirectoryWithQuota继承了InodeDirectory，添加了quota的控制，相对比较简单。</p>
+<p> </p>
+<p>至于类的函数，都是相关Inode的上的操作，大多都是set和get操作，一些比较复杂的操作我们在后面用到时，再详细讲述。</p>
+<h4>Permission权限管理</h4>
+<p>以上就是INode类的基本的数据成员。下面我们看一下比较重要的权限管理：</p>
+<p> </p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;"> </span></p>
+<h3>Lease</h3>
+<p>HDFS的lease锁实现的比较简单。通过lease，我们就能保证系统中只能有一个客户端对文件进行操作。当一个客户端需要写文件时，需要到NameNode上去申请lease锁，其它客户端需要等待该操作完成后获取该锁后才能执行。</p>
+<p> </p>
+<p>我们看到，这个锁分了两次映射：</p>
+<p> </p>
+<p>Lease  clientName -à path的映射</p>
+<p>       Path     à  lease 的映射</p>
+<p> </p>
+<p>我们先看一下lease的数据结构</p>
+<p align="left"><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">final</span></strong><span style="color:#000000;"> String
+</span><span style="color:#0000C0;background:#FFFF00;">holder</span><span style="color:#000000;">;</span></p>
+<p align="left"><span style="color:#000000;">    </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">lastUpdate</span><span style="color:#000000;">;</span></p>
+<p><span style="color:#000000;">    </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">final</span></strong><span style="color:#000000;">Collection&lt;String&gt;
+</span><span style="color:#0000C0;">paths</span><span style="color:#000000;"> = </span>
+<strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> TreeSet&lt;String&gt;();</span></p>
+<p>其三个数据成员为： holder，为客户端的clientName，最后一次更新时间lastUpdate，还有一个树实现的集合TreeSet，保存了该lease，也就是该clientName上已经获取的文件上的锁。其上面的操作都比较简单。比较重要的是renew操作，更新lastUpdate的时间。需要注意的是，整个一个客户端上的锁只有一个更新时间。</p>
+<p> </p>
+<p>下面我们看一下leaseManager</p>
+<p> </p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">softLimit</span><span style="color:#000000;"> = FSConstants.</span><em><span style="color:#0000C0;">LEASE_SOFTLIMIT_PERIOD</span></em><span style="color:#000000;">;</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">hardLimit</span><span style="color:#000000;"> = FSConstants.</span><em><span style="color:#0000C0;">LEASE_HARDLIMIT_PERIOD</span></em><span style="color:#000000;">;</span></p>
+<p align="left"> </p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">//</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">// Usedfor handling lock-leases</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">//Mapping: leaseHolder -&gt; Lease</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">//</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> SortedMap&lt;String, Lease&gt;
+</span><span style="color:#0000C0;">leases</span><span style="color:#000000;"> = </span>
+<strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> TreeMap&lt;String, Lease&gt;();</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">// Set of:Lease</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> SortedSet&lt;Lease&gt;
+</span><span style="color:#0000C0;">sortedLeases</span><span style="color:#000000;"> =
+</span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> TreeSet&lt;Lease&gt;();</span></p>
+<p align="left"> </p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">//
+</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">// Mappath names to leases. It is protected by the sortedLeases lock.</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">// The mapstores pathnames in lexicographical order.</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F7F5F;">//</span></p>
+<p><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;">SortedMap&lt;String, Lease&gt;
+</span><span style="color:#0000C0;">sortedLeasesByPath</span><span style="color:#000000;"> =
+</span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> TreeMap&lt;String, Lease&gt;();</span></p>
+<p> </p>
+<p>其主要保存了两个常量softlimit 和 hardlimit，其次是一个lease集合和两个map，一个是文件到leaseHolder –&gt;lease的map，一个是 path 到lease的 Map.</p>
+<p> </p>
+<h3>BlockMap的管理</h3>
+<p>Block为基本的信息，其数据成员包括3个：</p>
+<p align="left"><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">blockId</span><span style="color:#000000;">;</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">numBytes</span><span style="color:#000000;">;</span></p>
+<p><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">generationStamp</span><span style="color:#000000;">;</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p><span style="color:#000000;">BlockInfo</span><span style="color:#000000;">为</span><span style="color:#000000;"> extend</span><span style="color:#000000;">类</span><span style="color:#000000;">block</span><span style="color:#000000;">，同时增加了两个数据成员：</span></p>
+<p align="left"><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> INodeFile         </span><span style="color:#0000C0;">inode</span><span style="color:#000000;">; //
+</span><span style="color:#000000;">用来和该</span><span style="color:#000000;">block</span><span style="color:#000000;">对于的文件关联</span></p>
+<p align="left"><span style="color:#0000C0;">private Object[3*replication]triplets;      
+</span>// <span style="color:#0000C0;">用来和</span><span style="color:#0000C0;">DataNode</span><span style="color:#0000C0;">关联</span></p>
+<p align="left"><span style="color:#0000C0;"> </span></p>
+<p align="left"><span style="color:#0000C0;">其实类似于：</span></p>
+<p align="left"><span style="color:#0000C0;"> </span></p>
+<p align="left"><span style="color:#0000C0;">Struct{</span></p>
+<p align="left"><span style="color:#0000C0;">   </span>DatanodeDescriptor dn;</p>
+<p align="left"><span style="color:#0000C0;">   </span>BlockInfo pre;   <span style="color:#0000C0;">
+其保存了一个该</span><span style="color:#0000C0;">Datanode</span><span style="color:#0000C0;">上所有</span><span style="color:#0000C0;">blockInfo</span><span style="color:#0000C0;">组成的双向链表</span></p>
+<p align="left"><span style="color:#0000C0;">   </span>BlockInfo next;</p>
+<p align="left"><span style="color:#0000C0;">}Triplesp[replication];   </span></p>
+<p align="left"><span style="color:#0000C0;"> </span></p>
+<p align="left"><span style="color:#0000C0;">其实</span><span style="color:#0000C0;"> triplets</span><span style="color:#0000C0;">可以更简单的定义为一下数组：</span></p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top">
+<p align="left"><span style="color:#0000C0;">0</span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;">1</span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;">2</span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+</tr><tr><td valign="top">
+<p align="left"><span style="color:#0000C0;">BlockInfo pre</span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;">DatanodeDescriptor</span></p>
+<p align="left"><span style="color:#0000C0;">dn</span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;">BlockInfo</span></p>
+<p align="left"><span style="color:#0000C0;">next</span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+<td valign="top">
+<p align="left"><span style="color:#0000C0;"> </span></p>
+</td>
+</tr></tbody></table><p> </p>
+<p>其blockInfo链表的头保存在DatanodeDescriptor的</p>
+<p>privatevolatile BlockInfo blockList = null;</p>
+<p>该DatanodeDescriptor的所以的BlockInfo都连接在blocklist链表中。</p>
+<p> </p>
+<p>我们看到BlockInfo保存了完整的该block的信息，获得一个block的blockInfo信息，就可以获取该block所在的文件的INode，同时获取该bloc所有的副本的DataNodeDescription信息。</p>
+<p> </p>
+<p>其比较重要的函数就是 numNodes 返回该block对于的Datanode的数量，也就是副本的数量。</p>
+<p> </p>
+<p>BlocksMap类里数据成员为：</p>
+<p>privateMap&lt;BlockInfo, BlockInfo&gt; map; 需要注意的其，其定义为BlockInfo-&gt;BlockInfo的map关系，但实际上是Block-&gt;BlockInfo的映射关系。</p>
+<p> </p>
+<p>其为全局的映射，其初始化为一个HashMap.  我们在INodeFile里保存文件所在的block信息，知道了block，我们就可以在上述的map中获得BlockInfo信息，获取BlockInfo信息，我们就可以获得其相关的DataNode的信息。</p>
+<p> </p>
+<p>我们看到了整个NameNode的数据块保存了两层映射：</p>
+<p>InodeFile 保存了  file(offset, length)  à block 的映射</p>
+<p> BlocksMap保存了 block àBlockInfo (DataNode)的映射</p>
+<p> </p>
+<p>前者会保存在磁盘上，以NameNode的image的形式，定期checkpoint到磁盘上。当问及Namenode启动或恢复是，从image和editlog中获得。后者的映射关系仅保存在内存中，其启动或恢复时，各个Datanode需要把其映射关系上报给Namenode.</p>
+<p> </p>
+<p>我们看一下DataNodeDescription</p>
+<p> </p>
+<p>DatanodeID定义了如下的信息：</p>
+<p align="left"><strong><span style="color:#7F0055;">public</span></strong><span style="color:#000000;"> String
+</span><span style="color:#0000C0;">name</span><span style="color:#000000;">;      </span>
+<span style="color:#3F7F5F;">/// hostname:portNumber</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">public</span></strong><span style="color:#000000;"> String
+</span><span style="color:#0000C0;">storageID</span><span style="color:#000000;">; </span>
+<span style="color:#3F7F5F;">/// unique percluster storageID</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">int</span></strong><span style="color:#0000C0;">infoPort</span><span style="color:#000000;">;    
+</span><span style="color:#3F7F5F;">/// the port where the <u>infoserver</u> is running</span></p>
+<p><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">public</span><span style="color:#7F0055;">int</span></strong><span style="color:#0000C0;">ipcPort</span><span style="color:#000000;">;    
+</span></p>
+<p> </p>
+<p>DatanodeInfo定义了如下信息：</p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">capacity</span><span style="color:#000000;">;</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">dfsUsed</span><span style="color:#000000;">;</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">remaining</span><span style="color:#000000;">;</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">long</span></strong><span style="color:#0000C0;">lastUpdate</span><span style="color:#000000;">;</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span><span style="color:#7F0055;">int</span></strong><span style="color:#0000C0;">xceiverCount</span><span style="color:#000000;">;</span></p>
+<p><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">protected</span></strong><span style="color:#000000;"> String
+</span><span style="color:#0000C0;">location</span><span style="color:#000000;"> = NetworkTopology.</span><em><span style="color:#0000C0;">DEFAULT_RACK</span></em><span style="color:#000000;">;</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p><span style="color:#000000;">下面我们看一下</span><span style="color:#000000;">DatanodeDescriptor</span><span style="color:#000000;">类：</span></p>
+<p><span style="color:#000000;">DatanodeDescription</span><span style="color:#000000;">类里面定义了该</span><span style="color:#000000;">Datanode</span><span style="color:#000000;">上的</span><span style="color:#000000;">block</span><span style="color:#000000;">的一下集合和操作。</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p align="left"><strong><span style="color:#7F0055;">private</span><span style="color:#7F0055;">volatile</span></strong><span style="color:#000000;"> BlockInfo
+</span><span style="color:#0000C0;">blockList</span><span style="color:#000000;"> = </span>
+<strong><span style="color:#7F0055;">null</span></strong><span style="color:#000000;">; //</span><span style="color:#000000;">这个该</span><span style="color:#000000;">DataNode</span><span style="color:#000000;">上的所有的</span><span style="color:#000000;">BlockInfo</span><span style="color:#000000;">组成的链表的头</span></p>
+<p align="left"> </p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F5FBF;">/**</span><span style="color:#3F5FBF;">A</span><span style="color:#3F5FBF;">queue</span><span style="color:#3F5FBF;">of</span><span style="color:#3F5FBF;">blocks</span><span style="color:#3F5FBF;">to</span><span style="color:#3F5FBF;">be</span><span style="color:#3F5FBF;">replicated</span><span style="color:#3F5FBF;">by</span><span style="color:#3F5FBF;">this</span><u><span style="color:#3F5FBF;">datanode</span></u><span style="color:#3F5FBF;">*/</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> BlockQueue
+</span><span style="color:#0000C0;background:#FFFF00;">replicateBlocks</span><span style="color:#000000;"> =
+</span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> BlockQueue();</span></p>
+<p align="left"><span style="color:#000000;">需要复制的块</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F5FBF;">/**</span><span style="color:#3F5FBF;">A</span><span style="color:#3F5FBF;">queue</span><span style="color:#3F5FBF;">of</span><span style="color:#3F5FBF;">blocks</span><span style="color:#3F5FBF;">to</span><span style="color:#3F5FBF;">be</span><span style="color:#3F5FBF;">recovered</span><span style="color:#3F5FBF;">by</span><span style="color:#3F5FBF;">this</span><u><span style="color:#3F5FBF;">datanode</span></u><span style="color:#3F5FBF;">*/</span></p>
+<p align="left"><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> BlockQueue
+</span><span style="color:#0000C0;">recoverBlocks</span><span style="color:#000000;"> =
+</span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> BlockQueue();</span></p>
+<p align="left"><span style="color:#000000;">需要回复的块</span></p>
+<p align="left"><span style="color:#000000;">  </span><span style="color:#3F5FBF;">/**</span><span style="color:#3F5FBF;">A</span><span style="color:#3F5FBF;">set</span><span style="color:#3F5FBF;">of</span><span style="color:#3F5FBF;">blocks</span><span style="color:#3F5FBF;">to</span><span style="color:#3F5FBF;">be</span><span style="color:#3F5FBF;">invalidated</span><span style="color:#3F5FBF;">by</span><span style="color:#3F5FBF;">this</span><u><span style="color:#3F5FBF;">datanode</span></u><span style="color:#3F5FBF;">*/</span></p>
+<p><span style="color:#000000;">  </span><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> Set&lt;Block&gt;
+</span><span style="color:#0000C0;">invalidateBlocks</span><span style="color:#000000;"> =
+</span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;">TreeSet&lt;Block&gt;();</span></p>
+<p><span style="color:#000000;">无效的块的集合</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p><span style="color:#000000;">在</span><span style="color:#000000;">FSNameSystem</span><span style="color:#000000;">里面定义了一些管理结构：</span></p>
+<p align="left"><span style="color:#000000;"> </span><strong><span style="color:#7F0055;">private</span></strong><span style="color:#000000;"> Map&lt;String, Collection&lt;Block&gt;&gt;
+</span><span style="color:#0000C0;background:#FFFF00;">recentInvalidateSets</span><span style="color:#000000;"> =
+</span></p>
+<p align="left"><span style="color:#000000;">    </span><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> TreeMap&lt;String,Collection&lt;Block&gt;&gt;();</span></p>
+<p><span style="color:#000000;"> </span><span style="color:#000000;">最近无效的块的集合</span><span style="color:#000000;"> </span>storageID-&gt;Collection&lt;Block&gt;
+<span style="color:#000000;">的集合</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p align="left"><span style="color:#000000;">Map&lt;String,Collection&lt;Block&gt;&gt; </span><span style="color:#0000C0;">excessReplicateMap</span><span style="color:#000000;"> =
+</span></p>
+<p><strong><span style="color:#7F0055;">new</span></strong><span style="color:#000000;"> TreeMap&lt;String,Collection&lt;Block&gt;&gt;();</span></p>
+<p><span style="color:#000000;">多余的块的集合</span></p>
+<p><span style="color:#000000;"> </span></p>
+<p>Datanode 和 NameNode的通信有三种：</p>
+<p> </p>
+<p><span style="color:#000000;"> </span></p>
+<p><span style="color:#000000;">blockReport</span></p>
+<h3>FSDirectory</h3>
+<h3>FSEdit</h3>
+<h3>FSNamesystem</h3>
+<p><strong>ReplicationTarget</strong></p>
+<p>我们看一下FSNameSystem的成员变量</p>
+<p> </p>
+<p> </p>
+<p> </p>
+<h3>NameNode</h3>
+<p>NameNode 上对文件的基本操作。</p>
+<p>我们看一下NameNode实现ClientProtocol上的接口。</p>
+<p align="left"><strong><span style="color:#7F0055;">public</span></strong><span style="color:#000000;"> LocatedBlocks 
+</span><span style="background:#C0C0C0;">getBlockLocations</span>(Stringsrc,</p>
+<p align="left"><span style="color:#000000;">                                         
+</span><strong><span style="color:#7F0055;">long</span></strong><span style="color:#000000;"> offset,</span></p>
+<p align="left"><span style="color:#000000;">                                         
+</span><strong><span style="color:#7F0055;">long</span></strong><span style="color:#000000;"> length)
+</span><strong><span style="color:#7F0055;">throws</span></strong><span style="color:#000000;"> IOException;</span></p>
+<p>这是获取LocatedBlocks上的操作。</p>
+<p> </p>
+<p>我们看一下这个操作，其用户获取一个文件的 offset开始的length长度的数据块信息。</p>
+<p> </p>
+<p>BlockInfo map&lt;block, blockInfo&gt;</p>
+<p>DataNodeDescription dn;</p>
+<p> </p>
+<p>FsName</p>
+            </div>
+                </div>

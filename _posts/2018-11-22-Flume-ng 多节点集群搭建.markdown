@@ -1,0 +1,126 @@
+---
+layout:     post
+title:      Flume-ng 多节点集群搭建
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u010695420/article/details/44978079				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>Flume NG是一个分布式、可靠、可用的系统，它能够将不同数据源的海量日志数据进行高效收集、聚合，最后存储到一个中心化数据存储系统中,方便进行数据分析。事实上flume也可以收集其他信息，不仅限于日志。由原来的Flume OG到现在的Flume NG，进行了架构重构，并且现在NG版本完全不兼容原来的OG版本。相比较而言，flume NG更简单更易于管理操作。 <br>
+Flume OG:Flume original generation 即Flume 0.9.x版本 <br>
+Flume NG:Flume next generation ，即Flume 1.x版本。 <br>
+Flume NG用户参考手册：<a href="http://flume.apache.org/FlumeUserGuide.html#" rel="nofollow">http://flume.apache.org/FlumeUserGuide.html#</a> <br>
+Flume1.5.2下载地址： <br>
+<a href="http://www.apache.org/dyn/closer.cgi/flume/1.5.2/apache-flume-1.5.2-bin.tar.gz" rel="nofollow">http://www.apache.org/dyn/closer.cgi/flume/1.5.2/apache-flume-1.5.2-bin.tar.gz</a> <br>
+简单比较一下两者的区别： <br>
+OG有三个组件agent、collector、master，agent主要负责收集各个日志服务器上的日志，将日志聚合到collector，可设置多个collector，master主要负责管理agent和collector，最后由collector把收集的日志写的HDFS中，当然也可以写到本地、给storm、给Hbase。 <br>
+<img src="https://img-blog.csdn.net/20150410130913739" alt="这里写图片描述" title=""> <br>
+NG最大的改动就是不再有分工角色设置，所有的都是agent，可以彼此之间相连，多个agent连到一个agent，此agent也就相当于collector了，NG也支持负载均衡，具体参见<a href="http://shiyanjun.cn/archives/915.html" rel="nofollow">http://shiyanjun.cn/archives/915.html</a>。 <br>
+<img src="https://img-blog.csdn.net/20150410130854118" alt="这里写图片描述" title=""> <br>
+现在我们准备了三台机器（虚拟机也可以，但出现的问题也会很多，比如内存空间不足，网络连接问题，此处已哭晕）。 <br>
+操作系统：CentOS 6.6 <br>
+Flume版本：1.5.2 <br>
+设置三台机器的IP地址分别为192.168.1.105,192.168.1.106,192.168.1.107,记得关闭防火墙： <br>
+命令service iptables stop <br>
+环境准备好之后，在flume/conf/下新建agent.conf文件，105和106配置一样，如下：</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor">#Agent</span>
+flumeAgent<span class="hljs-preprocessor">.channels</span> = c1
+flumeAgent<span class="hljs-preprocessor">.sources</span>  = s1
+flumeAgent<span class="hljs-preprocessor">.sinks</span>    = k1 
+<span class="hljs-preprocessor">#flumeAgent Spooling Directory Source</span>
+<span class="hljs-preprocessor">#注(1)</span>
+flumeAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = spooldir
+flumeAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.spoolDir</span>  =/usr/logs/
+flumeAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.fileHeader</span> = true
+flumeAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.deletePolicy</span> =immediate
+flumeAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.batchSize</span> =<span class="hljs-number">1000</span>
+flumeAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> =c1
+flumeAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.deserializer</span><span class="hljs-preprocessor">.maxLineLength</span> =<span class="hljs-number">1048576</span>
+<span class="hljs-preprocessor">#flumeAgent FileChannel</span>
+<span class="hljs-preprocessor">#注(2)</span>
+flumeAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = file
+flumeAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.checkpointDir</span> = /var/flume/spool/checkpoint
+flumeAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.dataDirs</span> = /var/flume/spool/data
+flumeAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">200000000</span>
+flumeAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.keep</span>-alive = <span class="hljs-number">30</span>
+flumeAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.write</span>-timeout = <span class="hljs-number">30</span>
+flumeAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.checkpoint</span>-timeout=<span class="hljs-number">600</span>
+<span class="hljs-preprocessor"># flumeAgent Sinks</span>
+<span class="hljs-preprocessor">#注(3)</span>
+flumeAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.channel</span> = c1
+flumeAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.type</span> = avro
+<span class="hljs-preprocessor"># connect to CollectorMainAgent</span>
+flumeAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.hostname</span> = <span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.107</span>
+flumeAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">44444</span></code></pre>
+
+<p>我们设置107机器为汇聚节点，105和106的日志文件都将集中到这里，在flume/conf/下新建consolidatio.conf文件，配置如下：</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor">#flumeConsolidationAgent</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.channels</span> = c1
+flumeConsolidationAgent<span class="hljs-preprocessor">.sources</span>  = s1
+flumeConsolidationAgent<span class="hljs-preprocessor">.sinks</span>    = k1 
+
+<span class="hljs-preprocessor">#flumeConsolidationAgent Avro Source</span>
+<span class="hljs-preprocessor">#注(4)</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = avro
+flumeConsolidationAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+flumeConsolidationAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = <span class="hljs-number">192.168</span><span class="hljs-number">.1</span><span class="hljs-number">.107</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">44444</span>
+
+<span class="hljs-preprocessor">#flumeConsolidationAgent FileChannel</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = file
+flumeConsolidationAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.checkpointDir</span> = /var/flume/spool/checkpoint
+flumeConsolidationAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.dataDirs</span> = /var/flume/spool/data
+flumeConsolidationAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">200000000</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.keep</span>-alive = <span class="hljs-number">30</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.write</span>-timeout = <span class="hljs-number">30</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.checkpoint</span>-timeout=<span class="hljs-number">600</span>
+
+<span class="hljs-preprocessor">##flumeConsolidationAgent Memory Channel</span>
+<span class="hljs-preprocessor">#flumeConsolidationAgent.channels.c1.type = memory</span>
+<span class="hljs-preprocessor">#flumeConsolidationAgent.channels.c1.capacity = 10000</span>
+<span class="hljs-preprocessor">#flumeConsolidationAgent.channels.c1.transactionCapacity = 10000</span>
+<span class="hljs-preprocessor">#flumeConsolidationAgent.channels.c1.byteCapacityBufferPercentage = 20</span>
+<span class="hljs-preprocessor">#flumeConsolidationAgent.channels.c1.byteCapacity = 800000</span>
+
+<span class="hljs-preprocessor">#flumeConsolidationAgent Sinks</span>
+<span class="hljs-preprocessor">#注(5)</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.channel</span>= c1
+flumeConsolidationAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.type</span> = file_roll
+flumeConsolidationAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.directory</span> = /var/tmp
+flumeConsolidationAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.rollInterval</span> = <span class="hljs-number">3600</span>
+flumeConsolidationAgent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.k</span>1<span class="hljs-preprocessor">.batchSize</span> = <span class="hljs-number">10000</span></code></pre>
+
+<p>配置完成后，先启动107，命令行：</p>
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-comment">bin/flume</span><span class="hljs-literal">-</span><span class="hljs-comment">ng</span> <span class="hljs-comment">agent</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">conf</span> <span class="hljs-comment">conf</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">conf</span><span class="hljs-literal">-</span><span class="hljs-comment">file</span> <span class="hljs-comment">conf/consolidatio</span><span class="hljs-string">.</span><span class="hljs-comment">conf</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">name</span> <span class="hljs-comment">flumeConsolidationAgent</span> <span class="hljs-literal">-</span><span class="hljs-comment">Dflume</span><span class="hljs-string">.</span><span class="hljs-comment">root</span><span class="hljs-string">.</span><span class="hljs-comment">logger=DEBUG</span><span class="hljs-string">,</span><span class="hljs-comment">console</span></code></pre>
+
+<p>再启动105和106，命令行：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-comment">bin/flume</span><span class="hljs-literal">-</span><span class="hljs-comment">ng</span> <span class="hljs-comment">agent</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">conf</span> <span class="hljs-comment">conf</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">conf</span><span class="hljs-literal">-</span><span class="hljs-comment">file</span> <span class="hljs-comment">conf/agent</span><span class="hljs-string">.</span><span class="hljs-comment">conf</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">name</span> <span class="hljs-comment">flumeAgent</span> <span class="hljs-literal">-</span><span class="hljs-comment">Dflume</span><span class="hljs-string">.</span><span class="hljs-comment">root</span><span class="hljs-string">.</span><span class="hljs-comment">logger=DEBUG</span><span class="hljs-string">,</span><span class="hljs-comment">console</span></code></pre>
+
+<p>此处有三种模式运行：INFO、DEBUG、ERROR，以次容错度升高。 <br>
+<strong>注(1)</strong>：sources类型为spooldir，监控某一目录下的文件，一旦有文件进入，则收割。被收割的文件不能再打开编辑，此处设置收割完毕后直接删除文件，这儿我出现的一个问题是，直接手动往该目录下拷贝文件一旦文件大小高于20M左右就宕机，提前拷入则正常，后来查到原因是拷贝的的速度远远小于收割的速度，有种文件被操作的感觉，所以出错。 <br>
+<strong>注(2)</strong>：channel类型为file。 <br>
+MemoryChannel: 所有的events被保存在内存中。优点是高吞吐。缺点是容量有限并且Agent死掉时会丢失内存中的数据。 <br>
+FileChannel: 所有的events被保存在文件中。优点是容量较大且死掉时数据可恢复。缺点是速度较慢。 <br>
+<strong>注(3)</strong>：sink类型为avro，hostname都要指向的consolidation的IP，端口号可以任意设置，只要不冲突就行，这样也会出现问题，当107的flumeConsolidationAgent重新启动后会出现“地址已被占用的”错误，要么修改端口号，要么杀死该进程。 <br>
+<strong>注(4)</strong>：consolidation要绑定本机的IP，端口号也要与105和106一致。 <br>
+<strong>注(5)</strong>：此处我们将收集的文件存入本地，并没有写入HDFS，因为还要装Hadoop。这里要千万注意所有sinks的channel，比如x.sinks.k1.channel = c1中的channel一定不加s。 <br>
+成功后，我们将看到如下信息： <br>
+<img src="https://img-blog.csdn.net/20150410131106983" alt="这里写图片描述" title=""></p>
+
+<p>但是单独使用flume意义不大，需要结合其他工具一起组成大数据架构。 <br>
+大数据架构：flume-ng+Kafka+Storm+HDFS 实时系统组合： <br>
+<a href="http://www.aboutyun.com/thread-6855-1-1.html" rel="nofollow">http://www.aboutyun.com/thread-6855-1-1.html</a>(出处: about云开发) <br>
+Flume+Kafka+Strom基于分布式环境的结合使用： <br>
+<a href="http://www.aboutyun.com/thread-8915-1-1.html" rel="nofollow">http://www.aboutyun.com/thread-8915-1-1.html</a>(出处: about云开发)</p>
+
+<p>欢迎批评指正！</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

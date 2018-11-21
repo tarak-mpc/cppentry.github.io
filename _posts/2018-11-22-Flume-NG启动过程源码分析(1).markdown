@@ -1,0 +1,60 @@
+---
+layout:     post
+title:      Flume-NG启动过程源码分析(1)
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>原文地址：<a href="http://www.myexception.cn/software-architecture-design/1692533.html" rel="nofollow">http://www.myexception.cn/software-architecture-design/1692533.html</a><br></p>
+<p>从bin/flume 这个shell脚本可以看到Flume的起始于org.apache.flume.node.Application类，这是flume的main函数所在。</p>
+<p>　　main方法首先会先解析shell命令，如果指定的配置文件不存在就甩出异常。</p>
+<p>　　根据命令中含有"no-reload-conf"参数，决定采用那种加载配置文件方式：一、没有此参数，会动态加载配置文件，默认每30秒加载一次配置文件，因此可以动态修改配置文件；二、有此参数，则只在启动时加载一次配置文件。实现动态加载功能采用了发布订阅模式，使用guava中的EventBus实现。</p>
+<p></p><pre><code class="language-java">EventBus eventBus = new EventBus(agentName + "-event-bus");
+        PollingPropertiesFileConfigurationProvider configurationProvider =
+            new PollingPropertiesFileConfigurationProvider(agentName,
+                configurationFile, eventBus, 30); //这里是发布事件的类，这里的30则是动态加载配置文件时间间隔，单位是s
+        components.add(configurationProvider);
+        application = new Application(components);
+        eventBus.register(application);    //将订阅类注册到Bus中</code></pre>
+<p>　　订阅类是<span style="list-style:none outside;line-height:1.5;">application </span>= <span style="list-style:none outside;line-height:1.5;">new</span><span style="list-style:none outside;line-height:1.5;"> Application(components)；发布代码在<span style="list-style:none outside;line-height:1.5;">PollingPropertiesFileConfigurationProvider</span>中的FileWatcherRunnable.run方法中。在这只是先构建一个<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">PollingPropertiesFileConfigurationProvider</span></span>对象，PollingPropertiesFileConfigurationProvider
+ extends  PropertiesFileConfigurationProvider implements LifecycleAware，继续跟踪PropertiesFileConfigurationProvider extends AbstractConfigurationProvider，再跟踪AbstractConfigurationProvider implements  ConfigurationProvider可以看到这些类的构造方法都是初始化，<span style="list-style:none outside;line-height:1.5;">AbstractConfigurationProvid的构造方法初始化了sink、channel、source的工厂类。</span></span></p>
+<p><span style="list-style:none outside;line-height:1.5;">　　<span style="list-style:none outside;line-height:1.5;">Application</span>.handleConfigurationEvent(MaterializedConfiguration
+ conf)有@Subscribe注解，是订阅方法，当eventBus.post<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">(MaterializedConfiguration
+ conf)</span></span>执行时，会触发执行<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">handleConfigurationEvent</span></span>方法。</span></p>
+<p><span style="list-style:none outside;line-height:1.5;">　　<span style="list-style:none outside;line-height:1.5;">new</span><span style="list-style:none outside;line-height:1.5;"> Application(components)</span>时，会构建一个对象supervisor
+ = new LifecycleSupervisor()会启动10个线程用来执行配置文件中的各个组件，并监控组件的整个运行过程。</span></p>
+<p><span style="list-style:none outside;line-height:1.5;">　　application.start()方法会启动配置文件的加载过程supervisor.supervise(component, new SupervisorPolicy.AlwaysRestartPolicy(), LifecycleState.START);
+ //LifecycleState.START开始运行，在这的<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">component</span></span>就是上面的<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">PollingPropertiesFileConfigurationProvider</span></span>对象。<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">supervise</span></span>方法会对<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">component</span></span>创建一个<span style="list-style:none outside;line-height:1.5;">MonitorRunnable</span>进程，并放入默认有10个线程的<span style="list-style:none outside;line-height:1.5;">monitorService</span>去执行</span></p>
+<p> </p><pre><code class="language-java"> Supervisoree process = new Supervisoree();
+    process.status = new Status();
+
+    process.policy = policy;
+    process.status.desiredState = desiredState;
+    process.status.error = false;
+
+    MonitorRunnable monitorRunnable = new MonitorRunnable();
+    monitorRunnable.lifecycleAware = lifecycleAware;//组件
+    monitorRunnable.supervisoree = process;
+    monitorRunnable.monitorService = monitorService;
+
+    supervisedProcesses.put(lifecycleAware, process);
+    //创建并执行一个在给定初始延迟后首次启用的定期操作，随后，在每一次执行终止和下一次执行开始之间都存在给定的延迟。如果任务的任一执行遇到异常，就会取消后续执行。
+    ScheduledFuture&lt;?&gt; future = monitorService.scheduleWithFixedDelay(
+        monitorRunnable, 0, 3, TimeUnit.SECONDS);  //启动MonitorRunnable,结束之后3秒再重新启动，可以用于重试
+    monitorFutures.put(lifecycleAware, future);</code></pre>
+<p> </p>
+<p>　　看<span style="list-style:none outside;line-height:1.5;">MonitorRunnable</span>类，其run方法主要是根据supervisoree.status.desiredState的值执行对应的操作。这里的lifecycleAware就是上面<span style="list-style:none outside;line-height:1.5;">supervise方法中的<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">component</span></span>，</span>lifecycleAware在构造之初将lifecycleState=IDLE，<span style="list-style:none outside;line-height:1.5;">application.start()方法通过supervisor.supervise方法将supervisoree.status.desiredState=START。所以在run方法中会执行lifecycleAware.start()，也就是<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">PollingPropertiesFileConfigurationProvider</span></span>.start()方法。</span></p>
+<p><span style="list-style:none outside;line-height:1.5;">　　<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">PollingPropertiesFileConfigurationProvider</span></span></span></span>.start()方法会启动一个单线程FileWatcherRunnable每隔30s去加载一次配置文件(如果配置文件有修改)：eventBus.post(getConfiguration())。<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">getConfiguration()</span></span>是AbstractConfigurationProvider.<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">getConfiguration()</span></span>这个方法解析了配置文件获取了所有组件及其配置属性。这个方法较为复杂，放在后续再讲解。</span></p>
+<p><span style="list-style:none outside;line-height:1.5;">　　待<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">eventBus.post(getConfiguration())</span></span>之后会触发<span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;"><span style="list-style:none outside;line-height:1.5;">Application</span></span></span>.handleConfigurationEvent方法：</span></p>
+<p><span style="list-style:none outside;line-height:1.5;"></span></p><pre><code class="language-java"> @Subscribe
+  public synchronized void handleConfigurationEvent(MaterializedConfiguration conf) {
+    stopAllComponents();
+    startAllComponents(conf);
+  }</code></pre>
+<br><p>　　<span style="list-style:none outside;line-height:1.5;">stopAllComponents()</span>方法会依次stop各个组件的运行，顺序是：source、sink、channel。之所以有顺序是因为：一、source是不停的读数据放入channel的；二、sink是不停的从channel拿数据的，channel两头都在使用应该最后停止，停止向channel发送数据后sink停止才不会丢数据。stop是通过supervisor.unsupervise方法来完成的。</p>
+<p>　　<span style="list-style:none outside;line-height:1.5;">startAllComponents(conf)</span>是启动各个组件的，顺序正好和<span style="list-style:none outside;line-height:1.5;">stopAllComponents()</span>停止顺序相反，相信大伙很容易理解。是通过supervisor.supervise启动组件的。另外需要注意的是启动channel组件后需要等待一定时间，是为了让所有channel全部启动。</p>
+<p>　　另外为什么要先stop再start呢？因为考虑到要动态加载配置文件啊，加载配置文件后就需要重新启动所有组件，所以先停止所有的，再重新启动所有的。</p>
+<p>　　main方法的最后还有一个钩子函数Runtime.getRuntime().addShutdownHook，主要是用来进行内存清理、对象销毁等操作。</p>
+            </div>
+                </div>

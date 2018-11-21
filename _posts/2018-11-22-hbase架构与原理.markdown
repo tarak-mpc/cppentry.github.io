@@ -1,0 +1,348 @@
+---
+layout:     post
+title:      hbase架构与原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div id="article_content" class="article_content" style="font-size:14px;line-height:26px;font-family:Arial;color:rgb(51,51,51);">
+<p align="left">HBase是Apache Hadoop中的一个子项目，Hbase依托于Hadoop的HDFS作为最基本存储基础单元，通过使用hadoop的DFS工具就可以看到这些这些数据存储文件夹的结构,还可以通过Map/Reduce的框架(算法)对HBase进行操作</p>
+<p align="left">一、   hbase架构</p>
+<p align="left"><strong> 1.概述。</strong></p>
+<p align="left">HBase是Apache Hadoop的数据库，能够对大型数据提供随机、实时的读写访问。HBase的目标是存储并处理大型的数据。HBase是一个开源的，分布式的，多版本的，面向列的存储模型。它存储的是松散型数据。</p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152418494?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"></p>
+<p align="left">上图是hadoop的生态系统描述，hadoop所有应用都是构建于hdfs（它提供高可靠的底层存储支持，几乎已经成为分布式文件存储系统事实上的工业标准）之上的分布式列存储系统，主要用于海量结构化数据存储。</p>
+<p align="left">HBase是一种NoSQL数据库. NoSQL是一个通用词表示数据库不是RDBMS ，后者支持 SQL 作为主要访问手段。有许多种 NoSQL 数据库: BerkeleyDB 是本地 NoSQL 数据库例子, 而 HBase 是大型分布式数据库。 技术上来说, HBase 更像是"数据存储(Data Store)" 多于 "数据库(Data Base)"。因为缺少很多RDBMS特性, 如列类型，第二索引，触发器，高级查询语言等</p>
+<p align="left">然而, HBase 有许多特征同时支持线性化和模块化扩充。 HBase 集群通过增加RegionServers进行扩充。 它可以放在普通的服务器中。例如，如果集群从10个扩充到20个RegionServer，存储空间和处理容量都同时翻倍。 RDBMS 也能很好扩充， 但仅对一个点 - 特别是对一个单独数据库服务器的大小 - 同时，为了更好的性能，需要特殊的硬件和存储设备。Hbase特性：</p>
+<p align="left">强一致性读写: HBase 不是 "最终一致性(eventually consistent)" 数据存储. 这让它很适合高速计数聚合类任务。</p>
+<p align="left">自动分片(Automatic sharding):HBase 表通过region分布在集群中。数据增长时，region会自动分割并重新分布。</p>
+<p align="left">RegionServer 自动故障转移</p>
+<p align="left">Hadoop/HDFS 集成: HBase 支持本机外HDFS 作为它的分布式文件系统。</p>
+<p align="left">MapReduce: HBase 通过MapReduce支持大并发处理， HBase 可以同时做源和目标.</p>
+<p align="left">Java 客户端 API: HBase 支持易于使用的 Java API 进行编程访问.</p>
+<p align="left">Thrift/REST API:HBase 也支持Thrift和 REST 作为非Java 前端.</p>
+<p align="left">Block Cache 和 Bloom Filters: 对于大容量查询优化， HBase支持 Block Cache 和 Bloom Filters。</p>
+<p align="left">运维管理: HBase提供内置网页用于运维视角和JMX 度量.</p>
+<p align="left">前文提到Hbase是一个列式存储的数据库，那么什么是列式存储，它与传统的RDBMS采用的行式存储又有什么区别？列存储不同于传统的关系型数据库，其数据在表中是按行存储的，列方式所带来的重要好处之一就是，由于查询中的选择规则是通过列来定义的，因此整个数据库是自动索引化的。按列存储每个字段的数据聚集存储，在查询只需要少数几个字段的时候，能大大减少读取的数据量，一个字段的数据聚集存储，那就更容易为这种聚集存储设计更好的压缩/解压算法。这张图讲述了传统的行存储和列存储的区别：</p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152459289?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"></p>
+<p align="left"><strong> 2.hbase架构</strong></p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152532587?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"><strong></strong></p>
+<p align="left">注：准确的说位于上图下半部分的组建应该是hdfs而非hadoop，hbase并不依赖于hadoop，但是它构建于hdfs之上。</p>
+<p align="left"><strong><span style="color:rgb(75,75,75);">Zookeeper</span><span style="color:rgb(75,75,75);">：</span></strong><span style="color:rgb(75,75,75);"><br></span>Zookeeper Quorum存储-ROOT-表地址、HMaster地址<br>
+HRegionServer把自己以Ephedral方式注册到Zookeeper中，HMaster随时感知各个HRegionServer的健康状况<br>
+Zookeeper避免HMaster单点问题<span style="color:rgb(75,75,75);"><br><strong>HMaster</strong></span><strong><span style="color:rgb(75,75,75);">：</span></strong><span style="color:rgb(75,75,75);"><br></span>HMaster没有单点问题，HBase中可以启动多个HMaster，通过Zookeeper的MasterElection机制保证总有一个Master在运行<br>
+主要负责Table和Region的管理工作：<br>
+1 管理用户对表的增删改查操作<br>
+2 管理HRegionServer的负载均衡，调整Region分布<br>
+3 Region Split后，负责新Region的分布<br>
+4 在HRegionServer停机后，负责失效HRegionServer上Region迁移</p>
+<p align="left"><strong><span style="color:rgb(75,75,75);">HRegionServer</span><span style="color:rgb(75,75,75);">：</span></strong><span style="color:rgb(75,75,75);"><br></span>HBase中最核心的模块，主要负责响应用户I/O请求，向HDFS文件系统中读写数据</p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152614196?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"></p>
+<p align="left">HRegionServer管理一些列HRegion对象；<br>
+每个HRegion对应Table中一个Region，HRegion由多个HStore组成；<br>
+每个HStore对应Table中一个Column Family的存储；<br>
+Column Family就是一个集中的存储单元，故将具有相同IO特性的Column放在一个Column Family会更高效</p>
+<p align="left"><strong><span style="color:rgb(75,75,75);">HStore</span><span style="color:rgb(75,75,75);">：</span></strong><span style="color:rgb(75,75,75);"><br></span>HBase存储的核心。由MemStore和StoreFile组成。<br>
+MemStore是Sorted Memory Buffer。用户写入数据的流程：</p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152645247?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"></p>
+<p align="left">Client写入 -&gt; 存入MemStore，一直到MemStore满 -&gt; Flush成一个StoreFile，直至增长到一定阈值 -&gt; 出发Compact合并操作 -&gt; 多个StoreFile合并成一个StoreFile，同时进行版本合并和数据删除 -&gt; 当StoreFiles Compact后，逐步形成越来越大的StoreFile -&gt;单个StoreFile大小超过一定阈值后，触发Split操作，把当前Region Split成2个Region，Region会下线，新Split出的2个孩子Region会被HMaster分配到相应的HRegionServer
+ 上，使得原先1个Region的压力得以分流到2个Region上<br>
+由此过程可知，HBase只是增加数据，所有的更新和删除操作，都是在Compact阶段做的，所以，用户写操作只需要进入到内存即可立即返回，从而保证I/O高性能。</p>
+<p align="left"><strong><span style="color:rgb(75,75,75);">HLog</span></strong><span style="color:rgb(75,75,75);"><br></span>引入HLog原因：<br>
+在分布式系统环境中，无法避免系统出错或者宕机，一旦HRegionServer意外退出，MemStore中的内存数据就会丢失，引入HLog就是防止这种情况<br>
+工作机制：<br>
+每 个HRegionServer中都会有一个HLog对象，HLog是一个实现Write Ahead Log的类，每次用户操作写入Memstore的同时，也会写一份数据到HLog文件，HLog文件定期会滚动出新，并删除旧的文件(已持久化到 StoreFile中的数据)。当HRegionServer意外终止后，HMaster会通过Zookeeper感知，HMaster首先处理遗留的 HLog文件，将不同region的log数据拆分，分别放到相应region目录下，然后再将失效的region重新分配，领取到这些region的
+ HRegionServer在Load Region的过程中，会发现有历史HLog需要处理，因此会Replay HLog中的数据到MemStore中，然后flush到StoreFiles，完成数据恢复。</p>
+<p align="left"><strong><span style="color:rgb(75,75,75);">HBase</span><span style="color:rgb(75,75,75);">存储格式</span></strong><span style="color:rgb(75,75,75);"><br></span>HBase中的所有数据文件都存储在Hadoop HDFS文件系统上，格式主要有两种：<br>
+1 HFile HBase中KeyValue数据的存储格式，HFile是Hadoop的二进制格式文件，实际上StoreFile就是对HFile做了轻量级包装，即StoreFile底层就是HFile<br>
+2 HLog File，HBase中WAL（Write Ahead Log） 的存储格式，物理上是Hadoop的Sequence File</p>
+<p align="left"><strong><span style="color:rgb(75,75,75);">HFile</span></strong></p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152722853?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"></p>
+<p align="left">HFile文件不定长，长度固定的块只有两个：Trailer和FileInfo<br>
+Trailer中指针指向其他数据块的起始点<br>
+File Info中记录了文件的一些Meta信息，例如：AVG_KEY_LEN,AVG_VALUE_LEN, LAST_KEY, COMPARATOR, MAX_SEQ_ID_KEY等<br>
+Data Index和Meta Index块记录了每个Data块和Meta块的起始点<br>
+Data Block是HBase I/O的基本单元，为了提高效率，HRegionServer中有基于LRU的Block Cache机制<br>
+每个Data块的大小可以在创建一个Table的时候通过参数指定，大号的Block有利于顺序Scan，小号Block利于随机查询<br>
+每个Data块除了开头的Magic以外就是一个个KeyValue对拼接而成, Magic内容就是一些随机数字，目的是防止数据损坏</p>
+<p align="left">HFile里面的每个KeyValue对就是一个简单的byte数组。这个byte数组里面包含了很多项，并且有固定的结构。</p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152750635?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"></p>
+<p align="left">KeyLength和ValueLength：两个固定的长度，分别代表Key和Value的长度<br>
+Key部分：Row Length是固定长度的数值，表示RowKey的长度，Row 就是RowKey<br>
+Column Family Length是固定长度的数值，表示Family的长度<br>
+接着就是Column Family，再接着是Qualifier，然后是两个固定长度的数值，表示Time Stamp和Key Type（Put/Delete）<br>
+Value部分没有这么复杂的结构，就是纯粹的二进制数据</p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152815432?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"></p>
+<p align="left">HLog文件就是一个普通的Hadoop Sequence File，Sequence File 的Key是HLogKey对象，HLogKey中记录了写入数据的归属信息，除了table和region名字外，同时还包括 sequence number和timestamp，timestamp是“写入时间”，sequence number的起始值为0，或者是最近一次存入文件系统中sequence number。<br>
+HLog Sequece File的Value是HBase的KeyValue对象，即对应HFile中的KeyValue</p>
+<p align="left"><strong> 3.什么时候应该使用hbase</strong></p>
+<p align="left">在学习一门新技术的时候首先需要明白，我们到底应该在什么时候使用它，然后才是怎么去使用它，Hbase并不适合所有问题。</p>
+<p align="left">首先，确信有足够多数据，如果有上亿或上千亿行数据，HBase是很好的备选。如果只有上千或上百万行，则用传统的RDBMS可能是更好的选择。因为所有数据可以在一两个节点保存，集群其他节点可能闲置。</p>
+<p align="left">其次，确信可以不依赖所有RDBMS的额外特性 (e.g., 列数据类型, 第二索引,事物,高级查询语言等.) 一个建立在RDBMS上应用，如不能仅通过改变一个JDBC驱动移植到HBase。相对于移植， 需考虑从RDBMS 到 HBase是一次完全的重新设计。</p>
+<p align="left">第三， 确信你有足够硬件。甚至 HDFS 在小于5个数据节点时，干不好什么事情 (根据如HDFS 块复制具有缺省值 3), 还要加上一个NameNode.</p>
+<p align="left">HBase 能在单独的笔记本上运行良好。但这应仅当成开发配置。</p>
+<p align="left"><strong>4.目录表（.meta.和-root-）</strong></p>
+<p align="left">-ROOT- 保存 .META. 表存在哪里的踪迹. -ROOT- 表结构如下:</p>
+<p align="left">Key:</p>
+<p align="left">.META. region key (.META.,,1)</p>
+<p align="left">Values:</p>
+<p align="left">info:regioninfo (序列化.META.的 <a href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HRegionInfo.html" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"><span style="color:#000000;">HRegionInfo</span></a> 实例
+ )</p>
+<p align="left">info:server ( 保存 .META.的RegionServer的server:port)</p>
+<p align="left">info:serverstartcode ( 保存 .META.的RegionServer进程的启动时间)</p>
+<p align="left">.META. 保存系统中所有region列表。 .META.表结构如下:</p>
+<p align="left">Key:</p>
+<p align="left">Region key 格式 ([table],[region start key],[region id])</p>
+<p align="left">Values:</p>
+<p align="left">info:regioninfo (序列化.META.的 <a href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/HRegionInfo.html" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"><span style="color:#000000;">HRegionInfo</span></a> 实例
+ )</p>
+<p align="left">info:server ( 保存 .META.的RegionServer的server:port)</p>
+<p align="left">info:serverstartcode ( 保存 .META.的RegionServer进程的启动时间)</p>
+<p align="left">以上是官网文档对于.meta.和-root-的描述，简而言之，-root-中存储了.meta.的位置，而在.meta.中保存了具体数据（region）的存储位置。如图：</p>
+<p align="left"><img src="https://img-blog.csdn.net/20160715152841448?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt="" style="border:none;"></p>
+<p align="left">Zookeeper中记录了-ROOT-表的location<br>
+客户端访问数据的流程：<br>
+Client -&gt; Zookeeper -&gt; -ROOT- -&gt; .META.-&gt; 用户数据表<br>
+多次网络操作，不过client端有cache缓存</p>
+<p align="left">a.    启动时序</p>
+<p align="left">1.启动时主服务器调用AssignmentManager.</p>
+<p align="left">2.AssignmentManager 在META中查找已经存在的区域分配。</p>
+<p align="left">3.如果区域分配还有效(如 RegionServer 还在线)，那么分配继续保持。</p>
+<p align="left">4.如果区域分配失效，LoadBalancerFactory 被调用来分配区域。 DefaultLoadBalancer 将随机分配区域到RegionServer.</p>
+<p align="left">5.META 随RegionServer 分配更新(如果需要) ， RegionServer 启动区域开启代码(RegionServer 启动时进程)</p>
+<p align="left">b.故障转移</p>
+<p align="left">当regionServer故障退出时：</p>
+<p align="left">1.区域立即不可获取，因为区域服务器退出。</p>
+<p align="left">2.主服务器会检测到区域服务器退出。</p>
+<p align="left">3.区域分配会失效并被重新分配，如同启动时序。</p>
+<p align="left"><strong>5.预写日志（wal）</strong></p>
+<p align="left">每个RegionServer会将更新(Puts, Deletes)先记录到预写日志中(WAL)，然后将其更新在<a href="http://abloz.com/hbase/book.html#store" rel="nofollow" title="12.3.4. Store" style="color:rgb(51,102,153);text-decoration:none;"><span>Store</span></a>的<a href="http://abloz.com/hbase/book.html#store.memstore" rel="nofollow" title="12.3.4.1. MemStore" style="color:rgb(51,102,153);text-decoration:none;"><span>MemStore</span></a>里面。这样就保证了HBase的写的可靠性。如果没有WAL,当RegionServer宕掉的时候，MemStore还没有flush，StoreFile还没有保存，数据就会丢失。<a href="http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/regionserver/wal/HLog.html" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"><span>HLog</span></a> 是HBase的一个WAL实现，一个RegionServer有一个HLog实例。</p>
+<p align="left">WAL 保存在HDFS 的 /hbase/.logs/ 里面，每个region一个文件。</p>
+<p align="left">二、   数据模型</p>
+<p align="left"><strong>1.概念视图</strong></p>
+<p align="left">以bigTable论文中的例子来说明，有一个名为webtable的表，包含两个列族：contents和anchor.在这个例子里面，anchor有两个列 (anchor:cssnsi.com,anchor:my.look.ca)，contents仅有一列(contents:html)</p>
+<table border="1" cellpadding="0" summary="表 webtable"><thead><tr><td>
+<p align="left"><strong>Row Key</strong></p>
+</td>
+<td>
+<p align="left"><strong>Time Stamp</strong></p>
+</td>
+<td>
+<p align="left"><strong>ColumnFamily contents</strong></p>
+</td>
+<td>
+<p align="left"><strong>ColumnFamily anchor</strong></p>
+</td>
+</tr></thead><tbody><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t9</p>
+</td>
+<td>
+<p align="left"> </p>
+</td>
+<td>
+<p align="left">anchor:cnnsi.com = "CNN"</p>
+</td>
+</tr><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t8</p>
+</td>
+<td>
+<p align="left"> </p>
+</td>
+<td>
+<p align="left">anchor:my.look.ca = "CNN.com"</p>
+</td>
+</tr><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t6</p>
+</td>
+<td>
+<p align="left">contents:html = "&lt;html&gt;..."</p>
+</td>
+<td>
+<p align="left"> </p>
+</td>
+</tr><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t5</p>
+</td>
+<td>
+<p align="left">contents:html = "&lt;html&gt;..."</p>
+</td>
+<td>
+<p align="left"> </p>
+</td>
+</tr><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t3</p>
+</td>
+<td>
+<p align="left">contents:html = "&lt;html&gt;..."</p>
+</td>
+<td>
+<p align="left"> </p>
+</td>
+</tr></tbody></table><p align="left">RowKey：行键，是表中每条记录的“主键”，方便快速查找，Rowkey的设计非常重要。<br>
+Column Family：列族，拥有一个名称(string)，包含一个或者多个相关列<br>
+Column：属于某一个columnfamily，每条记录可动态添加<br>
+Version Number：类型为Long，默认值是系统时间戳，可由用户自定义<br>
+Value(Cell)：一个cell由familyName:columnName唯一定义</p>
+<p align="left"><strong>2.物理视图</strong></p>
+<p align="left">尽管在概念视图里，表可以被看成是一个稀疏的行的集合。但在物理上，它的是区分列族 存储的。新的columns可以不经过声明直接加入一个列族.</p>
+<table border="1" cellpadding="0" summary="ColumnFamily anchor"><thead><tr><td>
+<p align="left"><strong>Row Key</strong></p>
+</td>
+<td>
+<p align="left"><strong>Time Stamp</strong></p>
+</td>
+<td>
+<p align="left"><strong>Column Family anchor</strong></p>
+</td>
+</tr></thead><tbody><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t9</p>
+</td>
+<td>
+<p align="left">anchor:cnnsi.com = "CNN"</p>
+</td>
+</tr><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t8</p>
+</td>
+<td>
+<p align="left">anchor:my.look.ca = "CNN.com"</p>
+</td>
+</tr></tbody></table><p align="left"> </p>
+<table border="1" cellpadding="0" summary="ColumnFamily contents"><thead><tr><td>
+<p align="left"><strong>Row Key</strong></p>
+</td>
+<td>
+<p align="left"><strong>Time Stamp</strong></p>
+</td>
+<td>
+<p align="left"><strong>ColumnFamily "contents:"</strong></p>
+</td>
+</tr></thead><tbody><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t6</p>
+</td>
+<td>
+<p align="left">contents:html = "&lt;html&gt;..."</p>
+</td>
+</tr><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t5</p>
+</td>
+<td>
+<p align="left">contents:html = "&lt;html&gt;..."</p>
+</td>
+</tr><tr><td>
+<p align="left">"com.cnn.www"</p>
+</td>
+<td>
+<p align="left">t3</p>
+</td>
+<td>
+<p align="left">contents:html = "&lt;html&gt;..."</p>
+</td>
+</tr></tbody></table><p align="left">值得注意的是在上面的概念视图中空白cell在物理上是不存储的，因为根本没有必要存储。因此若一个请求为要获取t8时间的contents:html，他的结果就是空。相似的，若请求为获取t9时间的anchor:my.look.ca，结果也是空。但是，如果不指明时间，将会返回最新时间的行，每个最新的都会返回。例如，如果请求为获取行键为"com.cnn.www"，没有指明时间戳的话，活动的结果是t6下的contents:html，t9下的anchor:cnnsi.com和t8下anchor:my.look.ca。</p>
+<p align="left">对于hbase我一直有一个疑问，在hbase提供了修改和删除的接口，但是hdfs本身很难实现修改和删除（可以将文件块从hdfs中下载，进行修改再上传），那么hbase是如何实现快速的删除与修改呢？实际上在HBase中，修改和删除数据都是增加1个新版本的数据（时间戳为最新），旧版本的数据并没有发生变化，而实际上的修改和删除是在Hfile的合并阶段实现的。</p>
+<p align="left">三、   Hbase优化</p>
+<p align="left"><strong>1.    预先分区</strong></p>
+<p align="left">默认情况下，在创建 HBase 表的时候会自动创建一个 Region 分区，当导入数据的时候，所有的 HBase 客户端都向这一个 Region 写数据，直到这个 Region 足够大了才进行切分。一种可以加快批量写入速度的方法是通过预先创建一些空的 Regions，这样当数据写入 HBase 时，会按照 Region 分区情况，在集群内做数据的负载均衡。</p>
+<p align="left"><strong>2.    Rowkey优化</strong></p>
+<p align="left">HBase 中 Rowkey 是按照字典序存储，因此，设计 Rowkey 时，要充分利用排序特点，将经常一起读取的数据存储到一块，将最近可能会被访问的数据放在一块。</p>
+<p align="left">此外，Rowkey 若是递增的生成，建议不要使用正序直接写入 Rowkey，而是采用 reverse 的方式反转Rowkey，使得 Rowkey 大致均衡分布，这样设计有个好处是能将 RegionServer 的负载均衡，否则容易产生所有新数据都在一个 RegionServer 上堆积的现象，这一点还可以结合 table 的预切分一起设计。</p>
+<p align="left"><strong>3.    减少列族数量</strong></p>
+<p align="left">不要在一张表里定义太多的 ColumnFamily。目前 Hbase 并不能很好的处理超过 2~3 个 ColumnFamily 的表。因为某个 ColumnFamily 在 flush 的时候，它邻近的 ColumnFamily 也会因关联效应被触发 flush，最终导致系统产生更多的 I/O。</p>
+<p align="left"><strong>4.    缓存策略</strong></p>
+<p align="left">创建表的时候，可以通过 HColumnDescriptor.setInMemory(true) 将表放到 RegionServer 的缓存中，保证在读取的时候被 cache 命中。</p>
+<p align="left"><strong>5.    设置存储生命期</strong></p>
+<p align="left">创建表的时候，可以通过 HColumnDescriptor.setTimeToLive(int timeToLive) 设置表中数据的存储生命期，过期数据将自动被删除。</p>
+<p align="left"><strong>6.    硬盘配置</strong></p>
+<p align="left">每台 RegionServer 管理 10~1000 个 Regions，每个 Region 在 1~2G，则每台 Server 最少要 10G，最大要1000*2G=2TB，考虑 3 备份，则要 6TB。方案一是用 3 块 2TB 硬盘，二是用 12 块 500G 硬盘，带宽足够时，后者能提供更大的吞吐率，更细粒度的冗余备份，更快速的单盘故障恢复。</p>
+<p align="left"><strong>7.    分配合适的内存给RegionServer服务</strong></p>
+<p align="left">在不影响其他服务的情况下，越大越好。例如在 HBase 的 conf 目录下的 hbase-env.sh 的最后添加 export HBASE_REGIONSERVER_OPTS="-Xmx16000m$HBASE_REGIONSERVER_OPTS”</p>
+<p align="left">其中 16000m 为分配给 RegionServer 的内存大小。</p>
+<p align="left"><strong>8.    写数据的备份数</strong></p>
+<p align="left">备份数与读性能成正比，与写性能成反比，且备份数影响高可用性。有两种配置方式，一种是将 hdfs-site.xml拷贝到 hbase 的 conf 目录下，然后在其中添加或修改配置项 dfs.replication 的值为要设置的备份数，这种修改对所有的 HBase 用户表都生效，另外一种方式，是改写 HBase 代码，让 HBase 支持针对列族设置备份数，在创建表时，设置列族备份数，默认为 3，此种备份数只对设置的列族生效。</p>
+<p align="left"><strong>9.    WAL（预写日志）</strong></p>
+<p align="left">可设置开关，表示 HBase 在写数据前用不用先写日志，默认是打开，关掉会提高性能，但是如果系统出现故障(负责插入的 RegionServer 挂掉)，数据可能会丢失。配置 WAL 在调用 JavaAPI 写入时，设置 Put 实例的WAL，调用 Put.setWriteToWAL(boolean)。</p>
+<p align="left"><strong>10. 批量写</strong></p>
+<p align="left">HBase 的 Put 支持单条插入，也支持批量插入，一般来说批量写更快，节省来回的网络开销。在客户端调用JavaAPI 时，先将批量的 Put 放入一个 Put 列表，然后调用 HTable 的 Put(Put 列表) 函数来批量写。</p>
+<p align="left"><strong>11. 客户端一次从服务器拉取的数量</strong></p>
+<p align="left">通过配置一次拉去的较大的数据量可以减少客户端获取数据的时间，但是它会占用客户端内存。有三个地方可进行配置：</p>
+<p align="left">1）在 HBase 的 conf 配置文件中进行配置 hbase.client.scanner.caching；</p>
+<p align="left">2）通过调用 HTable.setScannerCaching(intscannerCaching) 进行配置；</p>
+<p align="left">3）通过调用 Scan.setCaching(intcaching) 进行配置。三者的优先级越来越高。</p>
+<p align="left"><strong>12. RegionServer的请求处理I/O线程数</strong></p>
+<p align="left">较少的 IO 线程适用于处理单次请求内存消耗较高的 Big Put 场景 (大容量单次 Put 或设置了较大 cache 的Scan，均属于 Big Put) 或 ReigonServer 的内存比较紧张的场景。</p>
+<p align="left">较多的 IO 线程，适用于单次请求内存消耗低，TPS 要求 (每秒事务处理量 (TransactionPerSecond)) 非常高的场景。设置该值的时候，以监控内存为主要参考。</p>
+<p align="left">在 hbase-site.xml 配置文件中配置项为 hbase.regionserver.handler.count。</p>
+<p align="left"><strong>13. Region的大小设置</strong></p>
+<p align="left">配置项为 hbase.hregion.max.filesize，所属配置文件为 hbase-site.xml.，默认大小 256M。</p>
+<p align="left">在当前 ReigonServer 上单个 Reigon 的最大存储空间，单个 Region 超过该值时，这个 Region 会被自动 split成更小的 Region。小 Region 对 split 和 compaction 友好，因为拆分 Region 或 compact 小 Region 里的StoreFile 速度很快，内存占用低。缺点是 split 和 compaction 会很频繁，特别是数量较多的小 Region 不停地split, compaction，会导致集群响应时间波动很大，Region 数量太多不仅给管理上带来麻烦，甚至会引发一些Hbase 的 bug。一般 512M 以下的都算小 Region。大 Region 则不太适合经常 split 和 compaction，因为做一次 compact 和 split 会产生较长时间的停顿，对应用的读写性能冲击非常大。</p>
+<p align="left">此外，大 Region 意味着较大的 StoreFile，compaction 时对内存也是一个挑战。如果你的应用场景中，某个时间点的访问量较低，那么在此时做 compact 和 split，既能顺利完成 split 和 compaction，又能保证绝大多数时间平稳的读写性能。compaction 是无法避免的，split 可以从自动调整为手动。只要通过将这个参数值调大到某个很难达到的值，比如 100G，就可以间接禁用自动 split(RegionServer 不会对未到达 100G 的 Region 做split)。再配合 RegionSplitter 这个工具，在需要 split 时，手动 split。手动 split 在灵活性和稳定性上比起自动split 要高很多，而且管理成本增加不多，比较推荐 online 实时系统使用。内存方面，小 Region 在设置memstore 的大小值上比较灵活，大 Region 则过大过小都不行，过大会导致 flush 时 app 的 IO
+ wait 增高，过小则因 StoreFile 过多影响读性能。</p>
+<p align="left"><strong>14. 操作系统参数</strong></p>
+<p align="left">Linux系统最大可打开文件数一般默认的参数值是1024,如果你不进行修改并发量上来的时候会出现“Too Many Open Files”的错误，导致整个HBase不可运行，你可以用ulimit -n 命令进行修改，或者修改/etc/security/limits.conf和/proc/sys/fs/file-max 的参数，具体如何修改可以去Google 关键字 “linux limits.conf ”</p>
+<p align="left"><strong>15. Jvm配置</strong></p>
+<p align="left">修改 hbase-env.sh 文件中的配置参数，根据你的机器硬件和当前操作系统的JVM(32/64位)配置适当的参数</p>
+<p align="left">HBASE_HEAPSIZE 4000 HBase使用的 JVM 堆的大小</p>
+<p align="left">HBASE_OPTS "‐server ‐XX:+UseConcMarkSweepGC"JVM GC 选项</p>
+<p align="left">HBASE_MANAGES_ZKfalse 是否使用Zookeeper进行分布式管理</p>
+<p align="left"><strong>16. 持久化</strong></p>
+<p align="left">重启操作系统后HBase中数据全无，你可以不做任何修改的情况下，创建一张表，写一条数据进行，然后将机器重启，重启后你再进入HBase的shell中使用 list 命令查看当前所存在的表，一个都没有了。是不是很杯具？没有关系你可以在hbase/conf/hbase-default.xml中设置hbase.rootdir的值，来设置文件的保存位置指定一个文件夹，例如：&lt;value&gt;file:///you/hbase-data/path&lt;/value&gt;，你建立的HBase中的表和数据就直接写到了你的磁盘上，同样你也可以指定你的分布式文件系统HDFS的路径例如:hdfs://NAMENODE_SERVER:PORT/HBASE_ROOTDIR，这样就写到了你的分布式文件系统上了。</p>
+<p align="left"><strong>17. 缓冲区大小</strong></p>
+<p align="left">hbase.client.write.buffer</p>
+<p align="left">这个参数可以设置写入数据缓冲区的大小，当客户端和服务器端传输数据，服务器为了提高系统运行性能开辟一个写的缓冲区来处理它，这个参数设置如果设置的大了，将会对系统的内存有一定的要求，直接影响系统的性能。</p>
+<p align="left"><strong>18. 扫描目录表</strong></p>
+<p align="left">hbase.master.meta.thread.rescanfrequency</p>
+<p align="left">定义多长时间HMaster对系统表 root 和 meta 扫描一次，这个参数可以设置的长一些，降低系统的能耗。</p>
+<p align="left"><strong>19. split/compaction时间间隔</strong></p>
+<p align="left">hbase.regionserver.thread.splitcompactcheckfrequency</p>
+<p align="left">这个参数是表示多久去RegionServer服务器运行一次split/compaction的时间间隔，当然split之前会先进行一个compact操作.这个compact操作可能是minorcompact也可能是major compact.compact后,会从所有的Store下的所有StoreFile文件最大的那个取midkey.这个midkey可能并不处于全部数据的mid中.一个row-key的下面的数据可能会跨不同的HRegion。</p>
+<p align="left"><strong>20. 缓存在JVM堆中分配的百分比</strong></p>
+<p align="left">hfile.block.cache.size</p>
+<p align="left">指定HFile/StoreFile 缓存在JVM堆中分配的百分比，默认值是0.2，意思就是20%，而如果你设置成0，就表示对该选项屏蔽。</p>
+<p align="left"><strong>21. ZooKeeper客户端同时访问的并发连接数</strong></p>
+<p align="left">hbase.zookeeper.property.maxClientCnxns</p>
+<p align="left">这项配置的选项就是从zookeeper中来的，表示ZooKeeper客户端同时访问的并发连接数，ZooKeeper对于HBase来说就是一个入口这个参数的值可以适当放大些。</p>
+<p align="left"><strong>22. memstores占用堆的大小参数配置</strong></p>
+<p align="left">hbase.regionserver.global.memstore.upperLimit</p>
+<p align="left">在RegionServer中所有memstores占用堆的大小参数配置，默认值是0.4，表示40%，如果设置为0，就是对选项进行屏蔽。</p>
+<p align="left"><strong>23. Memstore中缓存写入大小</strong></p>
+<p align="left">hbase.hregion.memstore.flush.size</p>
+<p align="left">Memstore中缓存的内容超过配置的范围后将会写到磁盘上，例如：删除操作是先写入MemStore里做个标记，指示那个value, column 或 family等下是要删除的，HBase会定期对存储文件做一个major compaction，在那时HBase会把MemStore刷入一个新的HFile存储文件中。如果在一定时间范围内没有做major compaction，而Memstore中超出的范围就写入磁盘上了。</p>
+<p align="left">原文地址：http://blog.csdn.net/yangjinming24/article/details/51918132</p>
+<p align="left"><br></p>
+</div>
+<div class="bdsharebuttonbox tracking-ad bdshare-button-style0-16" style="color:rgb(51,51,51);font-family:Arial, Console, Verdana, 'Courier New';">
+<a href="http://blog.csdn.net/yangjinming24/article/details/51918132#" rel="nofollow" class="bds_more" style="color:rgb(51,51,51);text-decoration:none;line-height:16px;"></a><a href="http://blog.csdn.net/yangjinming24/article/details/51918132#" rel="nofollow" class="bds_qzone" title="分享到QQ空间" style="color:rgb(51,102,153);text-decoration:none;line-height:16px;"></a><a href="http://blog.csdn.net/yangjinming24/article/details/51918132#" rel="nofollow" class="bds_tsina" title="分享到新浪微博" style="color:rgb(51,102,153);text-decoration:none;line-height:16px;"></a><a href="http://blog.csdn.net/yangjinming24/article/details/51918132#" rel="nofollow" class="bds_tqq" title="分享到腾讯微博" style="color:rgb(51,102,153);text-decoration:none;line-height:16px;"></a><a href="http://blog.csdn.net/yangjinming24/article/details/51918132#" rel="nofollow" class="bds_renren" title="分享到人人网" style="color:rgb(51,102,153);text-decoration:none;line-height:16px;"></a><a href="http://blog.csdn.net/yangjinming24/article/details/51918132#" rel="nofollow" class="bds_weixin" title="分享到微信" style="color:rgb(51,102,153);text-decoration:none;line-height:16px;"></a></div>
+<div id="digg" style="clear:both;width:182px;text-align:center;color:rgb(51,51,51);font-family:Arial, Console, Verdana, 'Courier New';">
+<dl id="btnDigg" class="digg digg_enable" style="display:inline-block;width:72px;overflow:hidden;background:rgb(255,121,0);"><dt style="color:rgb(255,255,255);font-size:27px;line-height:30px;font-family:'Microsoft YaHei';">
+顶</dt><dd style="color:rgb(255,255,255);line-height:22px;font-family:Arial;">
+0</dd></dl><dl id="btnBury" class="digg digg_enable" style="display:inline-block;width:72px;overflow:hidden;background:rgb(255,121,0);"><dt style="color:rgb(255,255,255);font-size:27px;line-height:30px;font-family:'Microsoft YaHei';">
+踩</dt></dl></div>
+            </div>
+                </div>

@@ -1,0 +1,133 @@
+---
+layout:     post
+title:      Centos7.2安装Hadoop2.6.0
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+一、安装三台Centos<br><br>
+实现三台机器网络互通<br>
+并使用root用户登录<br><br>
+master 192.168.1.2<br>
+slave1 192.168.1.3<br>
+slave2 192.168.1.4<br><br>
+二、分别创建用户和组<br>
+groupadd hadoop<br>
+useradd hadoop -g hadoop<br>
+passwd hadoop<br><br>
+id hadoop<br><br>
+三、规划安装路径<br><br>
+a.安装路径<br>
+/hadoop 根路径下放置子路径，比如hbase的安装路径是 /hadoop/hbase<br><br>
+b.临时目录<br>
+/hadoop/tmp 存放临时文件<br><br>
+c.所用软件目录<br>
+/software 放置常用的安装软件 <br><br>
+四、分别关闭防火墙和SELinux<br><br>
+1，关闭防火墙<br><br>
+查看centos 查看版本<br>
+cat /etc/redhat-release<br><br>
+centos 7：<br>
+systemctl stop firewalld.service #停止<br>
+systemctl disable firewalld.service #禁用<br><br>
+之前的版本：<br>
+service iptables stop #停止<br>
+chkconfig iptables off #禁用<br><br>
+2，关闭SELinux  <br>
+SElinux是Linux安全加强工具<br>
+修改配置文件<br>
+vi /etc/sysconfig/selinux<br>
+修改： SELINUX=disabled<br><br>
+五、修改主机名、主机名与IP映射<br><br>
+1.分别 vi /etc/hostname 改主机名<br><br>
+2.在vi /etc/hosts主分别同时加上下面三句<br>
+192.168.1.2   master<br>
+192.168.1.3   slave1<br>
+192.168.1.4   slave2<br><br>
+六、配置无密SSH登录<br>
+a. 如果没安装SSH，需提前安装<br><br>
+ssh -V  查看安装的版本<br><br>
+ssh 127.0.0.1<br><br>
+netstat -a | more看有没正常启动<br>
+如果出现：<br>
+tcp 0 0 *:ssh *:* LISTEN<br><br>
+b.生成密钥信息<br><br>
+在hadoop用户下的主目录<br>
+su hadoop<br>
+cd ~<br>
+ls -la<br><br>
+ssh-keygen -t rsa -N ""<br><br>
+ls -la<br><br>
+cd .ssh/<br>
+ls -la<br>
+发现两个文件 id_rsa  id_rsa.pub<br><br>
+cat id_rsa.pub &gt;&gt; authorized_keys<br><br>
+c.添加至其他结点<br>
+在其他结点，分别<br>
+su - hadoop<br>
+mkdir .ssh<br>
+cd .ssh/<br>
+vi authorized_keys<br>
+直接COPY密钥信息<br><br>
+用scp <br><br>
+d.测试主结点是否可以登录到从结点<br>
+ssh slave1<br>
+ssh slave2<br><br>
+七、安装Hadoop<br>
+a.在主结点上安装Hadoop<br><br>
+1.在主结点上解压文件<br>
+tar -zxf hadoop-2.6.0.tar.gz -C ../hadoop/<br><br>
+2.修改hadoop-2.6.0/etc/hadoop/hadoop-env.sh 获取JDK支持<br>
+export JAVA_HOME=/hadoop/jdk1.7.0_79<br><br>
+3.修改hadoop-2.6.0/etc/hadoop/core-site.xml 全局的配置文件<br><br>
+&lt;configuration&gt;<br>
+    &lt;property&gt;<br>
+        &lt;name&gt;hadoop.tmp.dir&lt;/name&gt;<br>
+        &lt;value&gt;/hadoop/tmp&lt;/value&gt;<br>
+        &lt;description&gt;A base for other temporary directories.&lt;/description&gt;<br>
+    &lt;/property&gt;<br>
+    &lt;property&gt;<br>
+        &lt;name&gt;fs.default.name&lt;/name&gt;<br>
+        &lt;value&gt;hdfs://192.168.1.2:9000&lt;/value&gt;<br>
+    &lt;/property&gt;<br>
+&lt;/configuration&gt;<br><br>
+4.修改hadoop-2.6.0/etc/hadoop/hdfs-site.xml<br><br>
+&lt;property&gt;<br>
+    &lt;name&gt;dfs.name.dir&lt;/name&gt;<br>
+    &lt;value&gt;/hadoop/hadoop-2.6.0/namenodedata&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+    &lt;name&gt;dfs.data.dir&lt;/name&gt;<br>
+    &lt;value&gt;/hadoop/hadoop-2.6.0/data&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+&lt;property&gt;<br>
+    &lt;name&gt;dfs.replication&lt;/name&gt;<br>
+    &lt;value&gt;2&lt;/value&gt;<br>
+&lt;/property&gt;<br><br><br>
+5.修改hadoop-2.6.0/etc/hadoop/mapred-site.xml  mapreduce<br><br>
+6.修改hadoop-2.6.0/etc/hadoop/slaves      指定从节点<br>
+slave1<br>
+slave2<br><br>
+b.需要分发到其他两个节点，同步文件内容<br>
+rsync -avz /hadoop/hadoop-2.6.0 slave1:/hadoop/<br>
+rsync -avz /hadoop/hadoop-2.6.0 slave2:/hadoop/<br><br>
+c.格式化HDFS<br>
+bin/hdfs namenode -format<br><br>
+d.启动hdfs<br>
+sbin/start-dfs.sh<br><br>
+e.测试<br><br>
+jps<br>
+或<br>
+http://master:50070/<br><br>
+f.停止hdfs<br><p>sbin/stop-dfs.sh</p>
+<p>JPS查看的效果</p>
+<p><img src="https://img-blog.csdn.net/20161123212709217?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p>Web浏览器查看的效果：</p>
+<p><img src="https://img-blog.csdn.net/20161123212957048?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p><br></p>
+<p><br></p>
+<p><br></p>
+<p><br></p>
+<br>            </div>
+                </div>

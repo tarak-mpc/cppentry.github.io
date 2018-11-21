@@ -1,0 +1,143 @@
+---
+layout:     post
+title:      hive脚本执行方式
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h4><a id="hive_0"></a>hive脚本的执行方式</h4>
+<p>hive脚本的执行方式大致有三种：</p>
+<ul>
+<li>hive控制台执行；</li>
+<li>hive -e "SQL"执行；</li>
+<li>hive -f SQL文件执行；<br>
+参考hive用法：</li>
+</ul>
+<pre><code>usage: hive
+ -d,--define &lt;key=value&gt;          Variable subsitution to apply to hive
+                                  commands. e.g. -d A=B or --define A=B
+    --database &lt;databasename&gt;     Specify the database to use
+ -e &lt;quoted-query-string&gt;         SQL from command line
+ -f &lt;filename&gt;                    SQL from files
+ -H,--help                        Print help information
+ -h &lt;hostname&gt;                    connecting to Hive Server on remote host
+    --hiveconf &lt;property=value&gt;   Use value for given property
+    --hivevar &lt;key=value&gt;         Variable subsitution to apply to hive
+                                  commands. e.g. --hivevar A=B
+ -i &lt;filename&gt;                    Initialization SQL file
+ -p &lt;port&gt;                        connecting to Hive Server on port number
+ -S,--silent                      Silent mode in interactive shell
+ -v,--verbose                     Verbose mode (echo executed SQL to the
+                                  console)
+</code></pre>
+<h5><a id="11_hive_26"></a>1.1. hive控制台执行</h5>
+<p>顾名思义，是进入hive控制台以后，执行sql脚本，例如：</p>
+<pre><code>hive&gt; set mapred.job.queue.name=pms;
+hive&gt; select page_name, tpa_name from pms.pms_exps_prepro limit 2;
+Total MapReduce jobs = 1
+Launching Job 1 out of 1
+...
+Job running in-process (local Hadoop)
+2015-10-23 10:06:47,756 null map = 100%,  reduce = 0%
+2015-10-23 10:06:48,863 null map = 23%,  reduce = 0%
+2015-10-23 10:06:49,946 null map = 38%,  reduce = 0%
+2015-10-23 10:06:51,051 null map = 72%,  reduce = 0%
+2015-10-23 10:06:52,129 null map = 100%,  reduce = 0%
+Ended Job = job_local1109193547_0001
+Execution completed successfully
+Mapred Local Task Succeeded . Convert the Join into MapJoin
+OK
+APP首页   APP首页_价格比京东低
+APP首页   APP首页_价格比京东低
+Time taken: 14.279 seconds
+hive&gt; 
+</code></pre>
+<h5><a id="12_hive_e_SQL_50"></a>1.2. hive -e "SQL"方式执行</h5>
+<p>利用hive -e "SQL"的方式进入hive控制台并直接执行sql脚本，例如：</p>
+<pre><code>hive -e "
+set mapred.job.queue.name=pms;
+set mapred.job.name=[HQL]exps_prepro_query;
+
+select page_name, tpa_name 
+from pms.pms_exps_prepro 
+limit 2;"
+</code></pre>
+<h5><a id="13_hive_f_SQL_62"></a>1.3. hive -f SQL文件方式执行</h5>
+<p>执行sql文件中的sql脚本，例如：</p>
+<p>pms_exps_prepro.sql文件内容如下：</p>
+<pre><code>set mapred.job.queue.name=pms;
+set hive.exec.reducers.max=48;
+set mapred.reduce.tasks=48;
+set mapred.job.name=[HQL]pms_exps_prepro;
+
+drop table if exists pms.pms_exps_prepro; 
+create table pms.pms_exps_prepro as 
+select 
+  a.provinceid,
+  a.cityid,
+  a.ieversion,
+  a.platform,
+  '${date}' as ds
+from track_exps a;
+</code></pre>
+<p>上述文件中的sql脚本接收一个日期，接收参数写法类似${date}，执行时如下执行：</p>
+<pre><code>date=2015-10-22
+hive -f pms_exps_prepro.sql --hivevar date=$date
+</code></pre>
+<h4><a id="2_hive_90"></a>2. hive转义字符的问题</h4>
+<p>下面以一个业务场景阐述关于hive转义字符的问题</p>
+<p>track_exps记录曝光数据，现在小A希望获取2015-10-20有效的曝光数据<br>
+其中有效的曝光记录是指，</p>
+<ul>
+<li>relatedinfo字段满足数字.数字.数字.数字.数字的格式，<br>
+例如4.4.5.1080100.1</li>
+</ul>
+<p>extfield1字段满足request-字符串,section-数字的格式，<br>
+例如request-b470805b620900ac492bb892ad7e955e,section-4<br>
+对于这个问题，小A写出了如下sql脚本：</p>
+<pre><code>select 
+    *
+from track_exps
+where ds = '2015-10-20'
+  and relatedinfo rlike '^4.\d+.\d+.\d+.\d+$' 
+  and extfield1 rlike '^request.+section-\d+$';
+</code></pre>
+<p>但是由于正则表达式是被包含在sql里面，所以里面的特殊字符需要转义</p>
+<h5><a id="21_hive_e_SQL_113"></a>2.1. hive -e "SQL"的方式执行</h5>
+<p>改动如下：</p>
+<pre><code>hive -e "
+set mapred.job.queue.name=pms;
+
+explain select 
+    cityid
+from track_exps
+where ds = '2015-10-20'
+  and relatedinfo rlike '\\^4\\.\\\d\\+\\.\\\d\\+\\.\\\d\\+\\.\\\d\\+\\$' 
+  and extfield1 rlike '\\^request\\.\\+section\\-\\\d\\+\\$';"
+</code></pre>
+<p>查看执行计划，可以确定正则表达式解析正确了：</p>
+<pre><code>...
+predicate:
+  expr: ((relatedinfo rlike '^4.\d+.\d+.\d+.\d+$') and (extfield1 rlike '^request.+section-\d+$'))
+  type: boolean
+...
+</code></pre>
+<p>分析如下：</p>
+<p>在hive -e “SQL"的执行方式中，”‘正则表达式’"，正则表达式先被一个单引号括起来，再被一个双引号括起来的，所以正则表达式里面，\^的第一个\用来解析第二个\，第二个\才真正起到了转义的作用</p>
+<h5><a id="22_hive_f_SQL_143"></a>2.2. hive -f SQL文件的方式执行</h5>
+<p>改动如下：</p>
+<p>pms_exps_prepro.sql文件内容如下：</p>
+<pre><code>select 
+    *
+from track_exps
+where ds = '2015-10-20'
+  and relatedinfo rlike '\^4\.\\d\+\.\\d\+\.\\d\+\.\\d\+\$' 
+  and extfield1 rlike '\^request\.\+section\-\\d\+\$';
+</code></pre>
+<p>分析如下：</p>
+<p>不同于hive -e "SQL"的执行方式，因为是sql文件，所以正则表达式只被一个单引号括起来而已，一个\就起到了转义的作用了</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

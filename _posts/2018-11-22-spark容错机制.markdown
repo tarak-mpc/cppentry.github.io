@@ -1,0 +1,111 @@
+---
+layout:     post
+title:      spark容错机制
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<div class="article">
+        <h1 class="title" id="sparkspark容错机制">【Spark】Spark容错机制</h1>
+
+        <!-- &#20316;&#32773;&#21306;&#22495; -->
+        <div class="author">
+          <a class="avatar" href="/u/2bd9b48f6ea8" rel="nofollow">
+            <img src="//upload.jianshu.io/users/upload_avatars/72634/b6912bf5869e.jpg?imageMogr2/auto-orient/strip%7CimageView2/1/w/96/h/96" alt="96">
+</a>          <div class="info">
+            <span class="name"><a href="/u/2bd9b48f6ea8" rel="nofollow">JasonDing</a></span>
+            <!-- &#20851;&#27880;&#29992;&#25143;&#25353;&#38062; -->
+            <a class="btn btn-success follow"><i class="iconfont ic-follow"></i><span>关注</span></a>
+            <!-- &#25991;&#31456;&#25968;&#25454;&#20449;&#24687; -->
+            <div class="meta">
+              <!-- &#22914;&#26524;&#25991;&#31456;&#26356;&#26032;&#26102;&#38388;&#22823;&#20110;&#21457;&#24067;&#26102;&#38388;&#65292;&#37027;&#20040;&#20351;&#29992; tooltip &#26174;&#31034;&#26356;&#26032;&#26102;&#38388; -->
+                <span class="publish-time" title="">2015.07.14 19:47*</span>
+              <span class="wordage">字数 2085</span>
+            <span class="views-count">阅读 6666</span><span class="comments-count">评论 0</span><span class="likes-count">喜欢 5</span></div>
+          </div>
+          <!-- &#22914;&#26524;&#26159;&#24403;&#21069;&#20316;&#32773;&#65292;&#21152;&#20837;&#32534;&#36753;&#25353;&#38062; -->
+        </div>
+
+
+        <!-- &#25991;&#31456;&#20869;&#23481; -->
+        <div class="show-content">
+          <div class="show-content-free">
+            <h2 id="引入">引入</h2>
+<p>一般来说，分布式数据集的容错性有两种方式：<strong>数据检查点和记录数据的更新</strong>。<br>
+面向大规模数据分析，数据检查点操作成本很高，需要通过数据中心的网络连接在机器之间复制庞大的数据集，而网络带宽往往比内存带宽低得多，同时还需要消耗更多的存储资源。<br>
+因此，Spark选择记录更新的方式。但是，如果更新粒度太细太多，那么记录更新成本也不低。因此，RDD只支持粗粒度转换，即只记录单个块上执行的单个操作，然后将创建RDD的一系列变换序列（每个RDD都包含了他是如何由其他RDD变换过来的以及如何重建某一块数据的信息。因此RDD的容错机制又称“血统(Lineage)”容错）记录下来，以便恢复丢失的分区。<br>
+Lineage本质上很类似于数据库中的重做日志（Redo Log），只不过这个重做日志粒度很大，是对全局数据做同样的重做进而恢复数据。</p>
+<h2 id="lineage机制">Lineage机制</h2>
+<h3 id="lineage简介">Lineage简介</h3>
+<p>相比其他系统的细颗粒度的内存数据更新级别的备份或者LOG机制，RDD的Lineage记录的是粗颗粒度的特定数据Transformation操作（如filter、map、join等）行为。当这个RDD的部分分区数据丢失时，它可以通过Lineage获取足够的信息来重新运算和恢复丢失的数据分区。因为这种粗颗粒的数据模型，限制了Spark的运用场合，所以Spark并不适用于所有高性能要求的场景，但同时相比细颗粒度的数据模型，也带来了性能的提升。</p>
+<h3 id="两种依赖关系">两种依赖关系</h3>
+<p>RDD在Lineage依赖方面分为两种：窄依赖(Narrow Dependencies)与宽依赖(Wide Dependencies,源码中称为Shuffle<br>
+Dependencies)，用来解决数据容错的高效性。</p>
+<blockquote>
+<ul>
+<li>窄依赖是指父RDD的每一个分区最多被一个子RDD的分区所用，表现为一个父RDD的分区对应于一个子RDD的分区<br>
+或多个父RDD的分区对应于一个子RDD的分区，也就是说一个父RDD的一个分区不可能对应一个子RDD的多个分区。<br>
+1个父RDD分区对应1个子RDD分区，这其中又分两种情况：1个子RDD分区对应1个父RDD分区（如map、filter等算子），1个子RDD分区对应N个父RDD分区（如co-paritioned（协同划分）过的Join）。</li>
+</ul>
+</blockquote>
+<ul>
+<li>
+<p>宽依赖是指子RDD的分区依赖于父RDD的多个分区或所有分区，即存在一个父RDD的一个分区对应一个子RDD的多个分区。<br>
+1个父RDD分区对应多个子RDD分区，这其中又分两种情况：1个父RDD对应所有子RDD分区（未经协同划分的Join）或者1个父RDD对应非全部的多个RDD分区（如groupByKey）。</p>
+<br>
+<div class="image-package">
+<img src="http://7nj1qk.com1.z0.glb.clouddn.com/@/spark/rdd/dependencies.jpg"><div class="image-caption"></div>
+</div>
+
+<p></p></li>
+</ul>
+
+<p><strong>本质理解：</strong>根据父RDD分区是对应1个还是多个子RDD分区来区分窄依赖（父分区对应一个子分区）和宽依赖（父分区对应多个子分<br>
+区）。如果对应多个，则当容错重算分区时，因为父分区数据只有一部分是需要重算子分区的，其余数据重算就造成了冗余计算。</p>
+
+<p>对于宽依赖，Stage计算的输入和输出在不同的节点上，对于输入节点完好，而输出节点死机的情况，通过重新计算恢复数据这种情况下，这种方法容错是有效的，否则无效，因为无法重试，需要向上追溯其祖先看是否可以重试（这就是lineage，血统的意思），窄依赖对于数据的重算开销要远小于宽依赖的数据重算开销。</p>
+
+<p>窄依赖和宽依赖的概念主要用在两个地方：一个是容错中相当于Redo日志的功能；另一个是在调度中构建DAG作为不同Stage的划分点。</p>
+
+<h3 id="依赖关系的特性">依赖关系的特性</h3>
+
+<p>第一，窄依赖可以在某个计算节点上直接通过计算父RDD的某块数据计算得到子RDD对应的某块数据；宽依赖则要等到父RDD所有数据都计算完成之后，并且父RDD的计算结果进行hash并传到对应节点上之后才能计算子RDD。<br>
+第二，数据丢失时，对于窄依赖只需要重新计算丢失的那一块数据来恢复；对于宽依赖则要将祖先RDD中的所有数据块全部重新计算来恢复。所以在长“血统”链特别是有宽依赖的时候，需要在适当的时机设置数据检查点。也是这两个特性要求对于不同依赖关系要采取不同的任务调度机制和容错恢复机制。</p>
+
+<h3 id="容错原理">容错原理</h3>
+
+<p>在容错机制中，如果一个节点死机了，而且运算窄依赖，则只要把丢失的父RDD分区重算即可，不依赖于其他节点。而宽依赖需要父RDD的所有分区都存在，重算就很昂贵了。可以这样理解开销的经济与否：在窄依赖中，在子RDD的分区丢失、重算父RDD分区时，父RDD相应分区的所有数据都是子RDD分区的数据，并不存在冗余计算。在宽依赖情况下，丢失一个子RDD分区重算的每个父RDD的每个分区的所有数据并不是都给丢失的子RDD分区用的，会有一部分数据相当于对应的是未丢失的子RDD分区中需要的数据，这样就会产生冗余计算开销，这也是宽依赖开销更大的原因。因此如果使用Checkpoint算子来做检查点，不仅要考虑Lineage是否足够长，也要考虑是否有宽依赖，对宽依赖加Checkpoint是最物有所值的。</p>
+
+<h2 id="checkpoint机制">Checkpoint机制</h2>
+
+<p>通过上述分析可以看出在以下两种情况下，RDD需要加检查点。</p>
+
+<blockquote>
+<ol>
+<li>DAG中的Lineage过长，如果重算，则开销太大（如在PageRank中）。</li>
+</ol>
+</blockquote>
+
+<ol start="2">
+<li>在宽依赖上做Checkpoint获得的收益更大。</li>
+</ol>
+
+<p>由于RDD是只读的，所以Spark的RDD计算中一致性不是主要关心的内容，内存相对容易管理，这也是设计者很有远见的地方，这样减少了框架的复杂性，提升了性能和可扩展性，为以后上层框架的丰富奠定了强有力的基础。<br>
+在RDD计算中，通过检查点机制进行容错，传统做检查点有两种方式：通过冗余数据和日志记录更新操作。在RDD中的doCheckPoint方法相当于通过冗余数据来缓存数据，而之前介绍的血统就是通过相当粗粒度的记录更新操作来实现容错的。</p>
+
+<p><strong>检查点（本质是通过将RDD写入Disk做检查点）是为了通过lineage做容错的辅助，lineage过长会造成容错成本过高，这样就不如在中间阶段做检查点容错，如果之后有节点出现问题而丢失分区，从做检查点的RDD开始重做Lineage，就会减少开销。</strong></p>
+
+<p><strong>转载请注明作者Jason Ding及其出处</strong><br>
+<a href="https://link.jianshu.com?t=http://jasonding1354.gitcafe.io/" rel="nofollow" target="_blank">GitCafe博客主页(http://jasonding1354.gitcafe.io/)</a><br>
+<a href="https://link.jianshu.com?t=http://jasonding1354.github.io/" rel="nofollow" target="_blank">Github博客主页(http://jasonding1354.github.io/)</a><br>
+<a href="https://link.jianshu.com?t=http://blog.csdn.net/jasonding1354" rel="nofollow" target="_blank">CSDN博客(http://blog.csdn.net/jasonding1354)</a><br>
+<a href="https://www.jianshu.com/users/2bd9b48f6ea8/latest_articles" rel="nofollow" target="_blank">简书主页(http://www.jianshu.com/users/2bd9b48f6ea8/latest_articles)</a><br>
+<strong>Google搜索jasonding1354进入我的博客主页</strong></p>
+
+<pre><code>      &lt;/div&gt;
+    &lt;/div&gt;
+&lt;/div&gt;
+</code></pre></div></div></div>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

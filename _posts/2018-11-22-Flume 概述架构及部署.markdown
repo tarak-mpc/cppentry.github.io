@@ -1,0 +1,183 @@
+---
+layout:     post
+title:      Flume 概述架构及部署
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/C_FuL/article/details/78405972				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="简介">简介</h2>
+
+<p>Flume是由 Cloudera 提供的一个<font color="red">分布式、高可靠、高可用</font>的服务，用于分布式的海量日志的<font color="red">高效收集、聚合、移动</font>系统。简单来说，Flume 就是一个针对日志数据进行采集和汇总的一个工具（把日志从A地方移动到B地方）</p>
+
+<p><a href="http://flume.apache.org/" rel="nofollow" target="_blank">Flume官网</a> <br>
+<a href="http://flume.apache.org/FlumeUserGuide.html" rel="nofollow" target="_blank">Flume官方文档</a></p>
+
+
+
+<h2 id="flume-特点">Flume 特点</h2>
+
+<ol>
+<li>可靠性：当节点出现故障时，日志能够被传送到其他节点上而不会丢失。Flume提供了三种级别的可靠性保障，从强到弱依次分别为： <br>
+<ul><li>end-to-end（收到数据agent首先将event写到磁盘上，当数据传送成功后，再删除；如果数据发送失败，可以重新发送。）；</li>
+<li>Store on failure（这也是scribe采用的策略，当数据接收方crash时，将数据写到本地，待恢复后，继续发送）</li>
+<li>Best effort（数据发送到接收方后，不会进行确认）</li></ul></li>
+<li>可扩展性：Flume采用了三层架构，分别为agent，collector和storage，每一层均可以水平扩展 <br>
+所有agent和collector由master统一管理，这使得系统容易监控和维护，且master允许有多个（使用ZooKeeper进行管理和负载均衡），这就避免了单点故障问题</li>
+<li>可管理性 <br>
+<ul><li>所有agent和colletor由master统一管理，这使得系统便于维护</li>
+<li>多master情况，Flume利用ZooKeeper和gossip，保证动态配置数据的一致性</li>
+<li>用户可以在master上查看各个数据源或者数据流执行情况，且可以对各个数据源配置和动态加载</li>
+<li>Flume提供了web 和shell script command两种形式对数据流进行管理</li></ul></li>
+<li>功能可扩展性 <br>
+<ul><li>用户可以根据需要添加自己的agent，collector或者storage</li>
+<li>Flume自带了很多组件，包括各种agent（file， syslog等），collector和storage（file，HDFS等）</li></ul></li>
+<li>文档丰富，社区活跃 <br>
+<ul><li>Flume 是Apache下的一个顶级项目，已经成为 Hadoop 生态系统的标配，它的文档比较丰富，社区比较活跃，方便我们学习</li></ul></li>
+</ol>
+
+
+
+<h2 id="flume架构">Flume架构</h2>
+
+<p><img src="https://img-blog.csdn.net/20171031171309814?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvQ19GdUw=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<blockquote>
+  <p>Flume 最简单的部署单元叫做Flume Agent，Agent 是一个Java 应用程序，接收或者生成数据并缓冲数据，直到最终写入到Agent或者存储或索引系统。 <br>
+  一个Flume Agent可以连接一个或多个其它的Agent，一个Agent也可以从一个或多个Agent接收数据，通过相互连接的多个Flume Agent，一个流作业被建立，这个Flume Agent链条可以用于将数据从一个位置移动到另一个位置——特别是，从生产数据的应用程序到HDFS、HBase等。 <br>
+  每个Flume Agent有三个组件：Source、Channel、Sink。 <br>
+  Source 专门用来收集数据，可以处理各种类型、各种格式的日志数据，比如avro、exec、HTTP、Kafka、Spooling Directory等 <br>
+  Channel 是一个存储Source已经接收到的数据的缓冲区，简单来说就是对Source采集到数据进行缓存，可以缓存在memory、file、jdbc、Kafka等。 <br>
+  Sink 用于把数据发送到目的地，目的地可以是：HDFS、Hive、HBase、ES、Kafka、Logger等</p>
+</blockquote>
+
+
+
+<h2 id="flume-运行机制">Flume 运行机制</h2>
+
+<blockquote>
+  <p>flume的核心就是一个agent，这个agent对外有两个进行交互的地方，一个是接受数据的输入——source，一个是数据的输出sink，sink负责将数据发送到外部指定的目的地。source接收到数据之后，将数据发送给channel，chanel作为一个数据缓冲区会临时存放这些数据，随后sink会将channel中的数据发送到指定的地方—-例如HDFS等，注意：只有在sink将channel中的数据成功发送出去之后，channel才会将临时数据进行删除，这种机制保证了数据传输的可靠性与安全性</p>
+</blockquote>
+
+
+
+<h2 id="flume-部署">Flume 部署</h2>
+
+<p>作者呢，安装的是Flume 1.6.0 虽然最新的是1.8.0 <br>
+但是1.6作为一个经典版本，一般在生产环境中使用的就是1.6，所以今天以1.6为例 部署一下Flume</p>
+
+
+
+<h3 id="安装准备">安装准备</h3>
+
+<ol>
+<li>JDK1.7+</li>
+<li>足够的内存</li>
+<li>足够的磁盘空间</li>
+<li>目录及文件要有读写权限</li>
+<li>Flume安装包 <br>
+<ul><li>可以从官网下载: <a href="http://archive.apache.org/dist/flume/" rel="nofollow" target="_blank">Flume官方下载地址</a> <br>
+同样可以通过wget获得Flume</li></ul></li>
+</ol>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">$ wget http://archive<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.org</span>/dist/flume/<span class="hljs-number">1.6</span><span class="hljs-number">.0</span>/apache-flume-<span class="hljs-number">1.6</span><span class="hljs-number">.0</span>-bin<span class="hljs-preprocessor">.tar</span><span class="hljs-preprocessor">.gz</span></code></pre>
+
+
+
+<h3 id="正式安装">正式安装</h3>
+
+<p>上面所需要的东西准备好之后. <br>
+将下载下来的Flume解压</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">$ tar <span class="hljs-attribute">-zxvf</span> apache<span class="hljs-attribute">-flume</span><span class="hljs-subst">-</span><span class="hljs-number">1.6</span><span class="hljs-number">.0</span><span class="hljs-attribute">-bin</span><span class="hljs-built_in">.</span>tar<span class="hljs-built_in">.</span>gz</code></pre>
+
+<p>解压出来的文件名太长了..所以我就把他修改了一下</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">$ mv apache<span class="hljs-attribute">-flume</span><span class="hljs-subst">-</span><span class="hljs-number">1.6</span><span class="hljs-number">.0</span><span class="hljs-attribute">-bin</span> flume</code></pre>
+
+<p><strong>Flume目录结构</strong> <br>
+<img src="https://img-blog.csdn.net/20171031173149835?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvQ19GdUw=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+<strong>配置Flume</strong> <br>
+进入flume的conf目录下，拷贝flume-env.sh.template然后重命名为flume-env.sh</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">$ sudo <span class="hljs-keyword">cp</span> flume-env<span class="hljs-preprocessor">.sh</span><span class="hljs-preprocessor">.template</span> flume-env<span class="hljs-preprocessor">.sh</span></code></pre>
+
+<p>在flume-env.sh中配置jdk</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-keyword">export</span> JAVA_HOME=/usr/java/jdk1.<span class="hljs-number">7.0</span></code></pre>
+
+<p><strong>配置环境变量</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-comment"># Flume Environment Variable</span>
+<span class="hljs-keyword">export</span> FLUME_HOME=/home/hadoop/flume
+<span class="hljs-keyword">export</span> PATH=<span class="hljs-variable">$PATH</span>:<span class="hljs-variable">$FLUME_HOME</span>/bin</code></pre>
+
+<p><strong>查看Flume 的命令帮助</strong></p>
+
+<pre class="prettyprint"><code class=" hljs haml">[hadoop@Master ~]$ flume-ng help
+Usage: /opt/flume/bin/flume-ng &lt;command&gt; [options]...
+commands:
+  help                      display this help text
+  agent                     run a Flume agent
+  avro-client               run an avro Flume client
+  version                   show Flume version info
+
+global options:
+  -<span class="ruby">-conf,-c &lt;conf&gt;          use configs <span class="hljs-keyword">in</span> &lt;conf&gt; directory
+</span>  -<span class="ruby">-classpath,-<span class="hljs-constant">C</span> &lt;cp&gt;       append to the classpath
+</span>  -<span class="ruby">-dryrun,-d               <span class="hljs-keyword">do</span> <span class="hljs-keyword">not</span> actually start <span class="hljs-constant">Flume</span>, just print the command
+</span>  -<span class="ruby">-plugins-path &lt;dirs&gt;     colon-separated list of plugins.d directories. <span class="hljs-constant">See</span> the
+</span>                            plugins.d section in the user guide for more details.
+                            Default: $FLUME_HOME/plugins.d
+  -<span class="ruby"><span class="hljs-constant">Dproperty</span>=value          sets a <span class="hljs-constant">Java</span> system property value
+</span>  -<span class="ruby"><span class="hljs-constant">Xproperty</span>=value          sets a <span class="hljs-constant">Java</span> -<span class="hljs-constant">X</span> option
+</span>
+agent options:
+  -<span class="ruby">-name,-n &lt;name&gt;          the name of this agent (required)
+</span>  -<span class="ruby">-conf-file,-f &lt;file&gt;     specify a config file (required <span class="hljs-keyword">if</span> -z missing)
+</span>  -<span class="ruby">-zkConnString,-z &lt;str&gt;   specify the <span class="hljs-constant">ZooKeeper</span> connection to use (required <span class="hljs-keyword">if</span> -f missing)
+</span>  -<span class="ruby">-zkBasePath,-p &lt;path&gt;    specify the base path <span class="hljs-keyword">in</span> <span class="hljs-constant">ZooKeeper</span> <span class="hljs-keyword">for</span> agent configs
+</span>  -<span class="ruby">-no-reload-conf          <span class="hljs-keyword">do</span> <span class="hljs-keyword">not</span> reload config file <span class="hljs-keyword">if</span> changed
+</span>  -<span class="ruby">-help,-h                 display help text
+</span>
+avro-client options:
+  -<span class="ruby">-rpcProps,-<span class="hljs-constant">P</span> &lt;file&gt;   <span class="hljs-constant">RPC</span> client properties file with server connection params
+</span>  -<span class="ruby">-host,-<span class="hljs-constant">H</span> &lt;host&gt;       hostname to which events will be sent
+</span>  -<span class="ruby">-port,-p &lt;port&gt;       port of the avro source
+</span>  -<span class="ruby">-dirname &lt;dir&gt;        directory to stream to avro source
+</span>  -<span class="ruby">-filename,-<span class="hljs-constant">F</span> &lt;file&gt;   text file to stream to avro source (<span class="hljs-function">default: </span>std input)
+</span>  -<span class="ruby">-headerFile,-<span class="hljs-constant">R</span> &lt;file&gt; <span class="hljs-constant">File</span> containing event headers as key/value pairs on each new line
+</span>  -<span class="ruby">-help,-h              display help text
+</span>
+  Either --rpcProps or both --host and --port must be specified.
+
+Note that if &lt;conf&gt; directory is specified, then it is always included first
+in the classpath.</code></pre>
+
+<p>最后检查是否配置成功.</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">$ flume-ng <span class="hljs-built_in">version</span>
+<span class="hljs-comment">#弹出以下信息即为成功</span>
+Flume <span class="hljs-number">1.6</span><span class="hljs-number">.0</span>
+Source code repository: <span class="hljs-keyword">https</span>://git-wip-us.apache.org/repos/asf/flume.git
+Revision: <span class="hljs-number">2561</span>a23240a71ba20bf288c7c2cda88f443c2080
+Compiled <span class="hljs-keyword">by</span> hshreedharan <span class="hljs-command"><span class="hljs-keyword">on</span> <span class="hljs-title">Mon</span> <span class="hljs-title">May</span> <span class="hljs-title">11</span> <span class="hljs-title">11</span>:<span class="hljs-title">15</span>:<span class="hljs-title">44</span> <span class="hljs-title">PDT</span> <span class="hljs-title">2015</span></span>
+From source <span class="hljs-operator">with</span> checksum b29e416802ce9ece3269d34233baf43f</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,63 @@
+---
+layout:     post
+title:      Hive表的数据载入方式
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，转载请附上原出处。					https://blog.csdn.net/Veechange/article/details/51045910				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>Hive是基于Hadoop分布式文件系统的数据仓库工具，Hive利用了Hadoop的高可扩展性特点，实现大数据量的数据存储和数据分析。由于Hive是一个数据仓库工具，因此不提供行级别的增、删、改的操作。也就意味着要向Hive的表中写入数据必须是通过大量的数据写入方式。Hive提供了一些方式可以让我们把数据写入到Hive表中。</p>
+<h1>Hive数据存储简介：</h1>
+<div>Hive数据库及数据库对象，都是以文件夹（命名空间）的形式存在于HDFS上的，而实际的表数据则是以文件的形式存在于表（或分区）目录下的。数据库及数据库对象与数据文件的映射关系（元数据），则存储在一个关系型数据库中，默认是Derby数据库，推荐使用MySql存储。也就是说，要向Hive数据库的表写数据，其实就是对HDFS上文件的数据写入。下面大概介绍一下向Hive表中写数据的方式。</div>
+<h1>通过Hive命令行工具（CLI）载入数据</h1>
+<div>通过Hive的CLI，可能通过命令，将本地文件系统中的文件或者HDFS中已经存在的文件，载入到Hive表中（其实就是让数据和Hive产生关系）。</div>
+<div>1、载入本地数据：</div>
+<div><pre><code class="language-sql">&lt;pre name="code" class="sql"&gt;load data local inpath   '${env:HOME}/t_person.txt' 
+overwrite into table t_person; </code></pre>
+<pre></pre>
+如果使用overwrite关键字，Hive会把employees表中原来的数据删除掉（外部表除外），再新增数据，overwrite是可选的。</div>
+<div>那么如果没有overwrite关键字，写入的文件如果已经存在了，那么怎么样呢？Hive会重命名新传入的文件，如下所示：</div>
+<div><pre><code class="language-sql">/user/hive/warehouse/t_person/t_person.txt
+/user/hive/warehouse/t_person/t_person2.txt
+/user/hive/warehouse/t_person/t_person2_copy_1.txt</code></pre>2、载入HDFS上的数据：</div>
+<div>其实就是把local参数去掉，其他与载入本地数据是一样的。<br><pre><code class="language-sql">load data  inpath   '${env:HOME}/t_person.txt' 
+overwrite into table t_person; </code></pre>3、通过select into 的方式载入数据：<br><pre><code class="language-sql">hive&gt; insert into table t_person
+    &gt; select * from t_person_temp where id=7;
+</code></pre>用select into 的方式有点奇怪，执行完上面的语句，在表的目录下会多出2个文件，主要是因为，调用了MR进行数据的写入，MR的output最少是2个文件。如下所示：</div>
+<div><pre><code class="language-sql">/user/hive/warehouse/t_person/000000_0
+/user/hive/warehouse/t_person/t_person.txt
+/user/hive/warehouse/t_person/t_person2.txt</code></pre>
+<h1>通过Hadoop命令行载入数据</h1>
+<div>通过Hadoop提供的命令，可以把本地文本或者HDFS上的文件写入到对应的目录，只要把文件把照Hive表的定义模式规则，放到对应的HDFS目录，那么Hive就可以知道如何去处理它。</div>
+<div><pre><code class="language-sql">**@Standalone14:~$ hdfs dfs -put 'Documents/hive/test1/test2/t_person4.txt' '/user/hive/warehouse/t_person'
+</code></pre>上传文件后，如下所示：</div>
+<div><pre><code class="language-sql">/user/hive/warehouse/t_person/000000_0
+/user/hive/warehouse/t_person/t_person.txt
+/user/hive/warehouse/t_person/t_person2.txt
+/user/hive/warehouse/t_person/t_person4.txt
+</code></pre>接下来，查询一下表，就可以看到写入的新数据了。<br><h1>通过Hadoop提供的API追加数据</h1>
+hadoop2.x之后的版本，支持对HDFS上的文件内容进行追加，可以追加文件有时候也比较方便，因为过多的小文件会占用大量的NameNode内存，所以对同类的数据，要么合并小文件，要么追加数据。Hadoop提供了一个API可以实现内容的追加。</div>
+<div>主要的代码如下：</div>
+<div><pre><code class="language-java">&lt;span style="white-space:pre"&gt;	&lt;/span&gt;/**
+	 * 追加文件
+	 * @param src	本地文件路径
+	 * @param dst	HDFS文件路径
+	 * @throws IllegalArgumentException
+	 * @throws IOException
+	 */
+	public void append(String src,String dst) throws IllegalArgumentException, IOException{
+		conf.setBoolean("dfs.support.append", true);
+		InputStream in = new BufferedInputStream(new FileInputStream(src));
+		OutputStream out = fs.append(new Path(dst));
+		IOUtils.copyBytes(in, out, 4096,true);
+		out.close();
+		System.out.println("文件追加成功！");
+	}</code></pre><br><br></div>
+<br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+            </div>
+                </div>

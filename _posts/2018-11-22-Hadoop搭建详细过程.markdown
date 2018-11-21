@@ -1,0 +1,705 @@
+---
+layout:     post
+title:      Hadoop搭建详细过程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p align="justify"><strong><span style="font-family:'宋体';">一、</span>hadoop环境安装</strong></p><p align="justify"><span style="font-family:'宋体';">【</span>1】创建hadoop用户并切换到hadoop用户</p><p>[root@server1 ~]# useradd  hadoop</p><p>[root@server1 ~]# id hadoop</p><p>uid=500(hadoop) gid=500(hadoop) groups=500(hadoop)</p><p>[root@server1 ~]# su - hadoop</p><p><span style="font-family:'宋体';">【</span>2】下载hadoop和jdk并解压</p><p><span style="color:rgb(255,0,0);"><span style="font-family:'宋体';">注：两个软件包都放到</span>hadoop家目录底下。</span></p><p>[hadoop@server1 ~]$ tar zxf hadoop-2.7.3.tar.gz </p><p>[hadoop@server1 ~]$ tar zxf jdk-7u79-linux-x64.tar.gz </p><p><span style="color:rgb(255,0,0);">注：为了方便这里做软连接，方便配置。</span></p><p>[hadoop@server1 ~]$ ln -s jdk1.7.0_79/ jdk</p><p>[hadoop@server1 ~]$ ln -s hadoop-2.7.3 hadoop</p><p></p><p><span style="font-family:'宋体';">【</span>3】配置hadoop环境变量</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ pwd
+/home/hadoop/hadoop/etc/hadoop
+[hadoop@server1 hadoop]$ vim hadoop-env.sh 
+ 24 # The java implementation to use.
+ 25 export JAVA_HOME=/home/hadoop/jdk
+[hadoop@server1 ~]$ cat /etc/hosts
+172.25.37.1  server1  
+注：必须有上面那一项，要不然运行会报错，IP为你hadoop服务器IP
+[hadoop@server1 ~]$ cat .bash_profile 
+# .bash_profile
+# Get the aliases and functions
+if [ -f ~/.bashrc ]; then
+	. ~/.bashrc
+fi
+# User specific environment and startup programs
+PATH=$PATH:$HOME/bin:/home/hadoop/jdk/bin
+export PATH</code></pre><p><span style="font-family:'宋体';">【</span>4】第一次启动hadoop</p><p>[hadoop@server1 hadoop]$ cd /home/hadoop/hadoop/bin/</p><p>[hadoop@server1 bin]$ ./hadoop         </p><p><span style="color:rgb(255,0,0);">注：执行脚本启动，类似与初始化，看是否报错。</span></p><p>[hadoop@server1 ~]$ cd hadoop</p><p>[hadoop@server1 hadoop]$ mkdir input</p><p>[hadoop@server1 hadoop]$ cp etc/hadoop/*.xml input/</p><p><span style="font-family:'宋体';">运行</span>hadoop自带的mapreduce Demo</p><p><span style="color:rgb(255,0,0);">注：</span><span style="color:rgb(255,0,0);">MapReduce是一种编程模型，用于大规模数据集（大于1TB）的并行运算</span><span style="color:rgb(255,0,0);">。</span></p><p>[hadoop@server1hadoop]$ bin/hadoop jar    \</p><p>share/hadoop/mapreduce/hadoop-mapreduce-examples-2.7.3.jar \ grep input output  'dfs[a-z.]+'</p><p>查看输出文件</p><p>[hadoop@server1 hadoop]$ cat output/*</p><p>1	dfsadmin</p><p>[hadoop@server1 hadoop]$ pwd</p><p>/home/hadoop/hadoop</p><p>[hadoop@server1 hadoop]$ ls</p><p>bin  etc  include  input  lib  libexec  LICENSE.txt  NOTICE.txt  output  README.txt  sbin  share</p><p><strong>二、伪分布式构建</strong></p><p><span style="font-family:'宋体';">【</span>1】配置core-site.xml文件</p><pre><code class="language-plain">[hadoop@server1 ~]$ cd hadoop/etc/hadoop/
+[hadoop@server1 hadoop]$ vim core-site.xml 
+ 17 &lt;!-- Put site-specific property overrides in this file. --&gt;
+ 18 
+ 19 &lt;configuration&gt;
+ 20         &lt;property&gt;
+ 21                 &lt;name&gt;fs.defaultFS&lt;/name&gt;
+ 22                 &lt;value&gt;hdfs://172.25.37.1:9000&lt;/value&gt;
+ 23         &lt;/property&gt; 
+ 24 &lt;/configuration&gt;
+<span style="color:#ff0000;">注：fs.defaultFS参数配置的是HDFS的地址</span></code></pre><p><span style="font-family:'宋体';">【</span>2】配置 hdfs-site.xml 文件</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ vim hdfs-site.xml 
+17 &lt;!-- Put site-specific property overrides in this file. --&gt;
+ 18 
+ 19 &lt;configuration&gt;
+ 20         &lt;property&gt;
+ 21                 &lt;name&gt;dfs.replication&lt;/name&gt;
+ 22                 &lt;value&gt;1&lt;/value&gt;
+ 23         &lt;/property&gt;
+ 24 &lt;/configuration&gt;
+<span style="color:#ff0000;">注：dfs.replication配置的是HDFS存储时的备份数量，因为这里是伪分布式环境只有一个节点，所以这里设置为1。</span></code></pre><p><span style="font-family:'宋体';">【</span>3】配置ssh免密</p><pre><code class="language-plain">ssh-keygen -t rsa -P '' -f ~/.ssh/id_rsa
+cat ~/.ssh/id_rsa.pub &gt;&gt; ~/.ssh/authorized_keys
+chmod 0600 ~/.ssh/authorized_keys
+将下面文件中的localhost改为本机IP
+[hadoop@server1 hadoop]$ vim slaves
+172.25.37.1</code></pre><p><span style="font-family:'宋体';">【</span>4】格式化文件系统</p><p>[hadoop@server1 hadoop]$ bin/hdfs namenode -format </p><p><span style="color:rgb(255,0,0);">注：</span><span style="color:rgb(255,0,0);"><span style="font-family:'宋体';">格式化是对</span>HDFS这个分布式文件系统中的DataNode进行分块，统计所有分块后的初始元数据的存储在NameNode中。</span></p><p><span style="font-family:'宋体';">【</span>5】启动HDFS</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ ./sbin/start-dfs.sh
+Starting namenodes on [server1]
+server1: namenode running as process 2496. Stop it first.
+172.25.37.1: datanode running as process 2164. Stop it first.
+Starting secondary namenodes [0.0.0.0]
+The authenticity of host '0.0.0.0 (0.0.0.0)' can't be established.
+RSA key fingerprint is 9b:19:24:43:5d:09:3a:12:97:94:99:f4:61:dc:3d:e2.
+Are you sure you want to continue connecting (yes/no)? yes
+0.0.0.0: Warning: Permanently added '0.0.0.0' (RSA) to the list of known hosts.
+0.0.0.0: starting secondarynamenode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-secondarynamenode-server1.out</code></pre><p><span style="font-family:'宋体';">【</span>6】查看进程，四个进程都启动表示成功</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ jps
+3151 Jps
+2164 DataNode
+3042 SecondaryNameNode
+2496 NameNode
+查看端口：
+[hadoop@server1 hadoop]$ netstat -antlp | grep 50070
+tcp        0      0 0.0.0.0:50070 </code></pre><p><span style="font-family:'宋体';">【</span>7】浏览器测试</p><p> <span style="font-family:'宋体';">输入：</span> 172.25.37.1:50070</p><p><img src="https://img-blog.csdn.net/20180607184057973?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p></p><p><span style="font-family:'宋体';">查看</span>datanode:</p><p><img src="https://img-blog.csdn.net/20180607184110635?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p></p><p>通过命令方式查看：</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ ./bin/hdfs dfsadmin -report
+Configured Capacity: 14309232640 (13.33 GB)
+Present Capacity: 11614142464 (10.82 GB)
+DFS Remaining: 11614113792 (10.82 GB)
+DFS Used: 28672 (28 KB)
+DFS Used%: 0.00%
+Under replicated blocks: 0
+Blocks with corrupt replicas: 0
+Missing blocks: 0
+Missing blocks (with replication factor 1): 0
+
+-------------------------------------------------
+Live datanodes (1):
+
+Name: 172.25.37.1:50010 (server1)
+Hostname: server1
+Decommission Status : Normal
+Configured Capacity: 14309232640 (13.33 GB)
+DFS Used: 28672 (28 KB)
+Non DFS Used: 2695090176 (2.51 GB)
+DFS Remaining: 11614113792 (10.82 GB)
+DFS Used%: 0.00%
+DFS Remaining%: 81.17%
+Configured Cache Capacity: 0 (0 B)
+Cache Used: 0 (0 B)
+Cache Remaining: 0 (0 B)
+Cache Used%: 100.00%
+Cache Remaining%: 0.00%
+Xceivers: 1
+Last contact: Thu May 31 22:22:11 CST 2018</code></pre><p>创建目录用于上传文件：</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ ./bin/hdfs dfs -mkdir /user
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -mkdir /user/hadoop
+[hadoop@server1 hadoop]$ bin/hdfs dfs -put  ./input  /user/hadoop/
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -ls 
+Found 1 items
+drwxr-xr-x   - hadoop supergroup          0 2018-05-31 22:24 input
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -ls input
+Found 29 items
+-rw-r--r--   1 hadoop supergroup       4436 2018-05-31 22:24 input/capacity-scheduler.xml
+-rw-r--r--   1 hadoop supergroup       1335 2018-05-31 22:24 input/configuration.xsl
+篇幅原因这里只列出两项
+删除input和output目录重新运行mapreduce
+[hadoop@server1 hadoop]$ rm -fr input/ output
+[hadoop@server1 hadoop]$ ./bin/hadoop    jar  \
+share/hadoop/mapreduce/hadoop-mapreduce-examples-2.7.3.jar wordcount input  output
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -ls
+Found 2 items
+drwxr-xr-x   - hadoop supergroup          0 2018-05-31 22:24 input
+drwxr-xr-x   - hadoop supergroup          0 2018-05-31 22:30 output</code></pre><p><span style="font-family:'宋体';">浏览器访问</span> http://172.25.20.1:50070/explorer.html，可以看到刚才创建的目录。</p><p><img src="https://img-blog.csdn.net/20180607184238997?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p></p><p><span style="font-family:'宋体';">【</span>8】<span style="font-family:'宋体';">读取</span>HDFS上的文件内容</p><p><span style="font-family:'宋体';">在</span>hadoop目录执行</p><p>./bin/hdfs   dfs  -cat  你要查看的文件绝对路径。</p><p><span style="font-family:'宋体';">【</span>9】<span style="font-family:'宋体';">从</span>HDFS上下载文件到本地</p><p><span style="font-family:'宋体';">在</span>hadoop目录执行</p><p>./bin/hdfs   dfs   -get   你要下载的文件目录。</p><p><span style="font-family:'宋体';">待补充</span><strong></strong></p><p><strong>三、完全分布式构建</strong></p><p>环境：</p><p><span style="font-family:'宋体';">物理机：</span>rhel7.3  172.25.37.250/24 用于时间同步</p><p>Server1:rhel6.5  172.25.37.1/24</p><p>Server2:rhel6.5  172.25.37.2/24</p><p>Server3:rhel6.5  172.25.37.3/24</p><p><span style="font-family:'宋体';">【</span>1】时间同步</p><p><span style="font-family:'宋体';">真机将同步源设为百度</span>IP</p><pre><code class="language-plain">[root@random etc]# vim /etc/chrony.conf
+# Please consider joining the pool (http://www.pool.ntp.org/join.html).
+注：这里写你的同步源
+server 119.75.213.61 iburst
+# Allow NTP client access from local network.
+注：这里写你允许172.25/16网段同步时间
+allow 172.25/16
+在三个虚拟都作下面配置：
+[root@server1 ~]# yum install -y ntp
+[root@server1 ~]# vim /etc/ntp.conf 
+# Please consider joining the pool (http://www.pool.ntp.org/join.html).
+注：将同步源设置为物理机
+server 172.25.37.250 iburst
+启动ntpd
+[root@server1 ~]# /etc/init.d/ntpd start
+设置开机自启动
+[root@server1 ~]# chkconfig  ntpd on</code></pre><p><span style="font-family:'宋体';">【</span>2】配置ssh免密</p><p>[root@server1  ~]# su - hadoop</p><p>[hadoop@server1 ~]$ cd .ssh/</p><p>[hadoop@server1 .ssh]$ ls</p><p>authorized_keys  id_rsa  id_rsa.pub  known_hosts</p><p>[hadoop@server1 .ssh]$ ssh-copy-id 172.25.37.2</p><p>[hadoop@server1 .ssh]$ ssh-copy-id 172.25.37.3</p><p><span style="font-family:'宋体';">测试时，在</span>server1上面执行下面的指令：</p><p>[hadoop@server1 ~]$ ssh  172.25.37.2</p><p>[hadoop@server1 ~]$ ssh  172.25.37.3</p><p><span style="color:rgb(255,0,0);"><span style="font-family:'宋体';">注：两次测试输入</span>yes后回车，不需要再输入密码表示成功。</span></p><p><span style="font-family:'宋体';">【</span>3】在三台虚拟机上面均创建hadoop用户并且要求id 完全一致。</p><pre><code class="language-plain">[hadoop@server1 ~]$ id hadoop
+uid=500(hadoop) gid=500(hadoop) groups=500(hadoop)
+[root@server2 ~]# useradd hadoop
+[root@server2 ~]# id hadoop
+uid=500(hadoop) gid=500(hadoop) groups=500(hadoop)
+[root@server3 ~]# useradd hadoop
+[root@server3 ~]# id hadoop
+uid=500(hadoop) gid=500(hadoop) groups=500(hadoop)</code></pre><p><span style="font-family:'宋体';">【</span>4】 nfs配置文件共享</p><p><span style="font-family:'宋体';">（</span>1）安装软件</p><p>[root@server1 ~]# yum  install -y exportfs</p><p><span style="font-family:'宋体';">（</span>2）配置共享目录</p><p>[root@server1 ~]# vim /etc/exports</p><p>/home/hadoop    *(rw,anonuid=500,anongid=500)</p><p><span style="font-family:'宋体';">（</span>3）查看共享目录信息</p><p>[root@server1 ~]# exportfs -rv</p><p>exporting *:/home/hadoop </p><p><span style="font-family:'宋体';">（</span>4）开启服务</p><pre><code class="language-plain">[root@server1 ~]# /etc/init.d/rpcbind start            ##先开 这个
+Starting rpcbind:                                          [  OK  ]
+[root@server1 ~]# /etc/init.d/nfs start
+Starting NFS services:                                     [  OK  ]
+Starting NFS mountd:                                       [  OK  ]
+Starting NFS daemon:                                       [  OK  ]
+Starting RPC idmapd:                                       [  OK  ]</code></pre><p><span style="font-family:'宋体';">（</span>5）在server2和server3上面安装软件，并挂载共享目录</p><pre><code class="language-plain">[root@server2 ~]# yum install -y exportfs
+[root@server2 ~]# /etc/init.d/rpcbind start
+Starting rpcbind:                                          [  OK  ]
+
+[root@server3 ~]# yum install -y exportfs
+[root@server3 ~]# /etc/init.d/rpcbind start
+Starting rpcbind:                                          [  OK  ]
+
+[root@server2 ~]# mount 172.25.37.1:/home/hadoop/  /home/hadoop/
+[root@server2 ~]# df
+Filesystem                   1K-blocks    Used Available Use% Mounted on
+/dev/mapper/VolGroup-lv_root  13973860  922768  12341256   7% /
+tmpfs                           510200       0    510200   0% /dev/shm
+/dev/vda1                       495844   33457    436787   8% /boot
+172.25.20.1:/home/hadoop/     13974016 1932544  11331584  15% /home/hadoop
+
+[root@server3 ~]# mount 172.25.37.1:/home/hadoop/  /home/hadoop/
+[root@server3 ~]# df
+Filesystem                   1K-blocks    Used Available Use% Mounted on
+/dev/mapper/VolGroup-lv_root  13973860  922768  12341256   7% /
+tmpfs                           510200       0    510200   0% /dev/shm
+/dev/vda1                       495844   33457    436787   8% /boot
+172.25.20.1:/home/hadoop/     13974016 1932544  11331584  15% /home/hadoop</code></pre><p><span style="font-family:'宋体';">【</span>4】在三台虚拟机上面的/etc/hosts解析要相同，我的文件内容如下：</p><pre><code class="language-plain">[hadoop@server2 hadoop]$ cat /etc/hosts
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+172.25.37.1 server1
+172.25.37.2 server2
+172.25.37.3 server3
+清空之前测试时的文件
+[root@server1 ~]# rm -fr /tmp/*
+[root@server2 ~]# rm -fr /tmp/*
+[root@server3 ~]# rm -fr /tmp/*
+
+[root@server1 ~]# su - hadoop
+[hadoop@server1 ~]$ cd hadoop
+[hadoop@server1 hadoop]$ ls
+bin  etc  include  input  lib  libexec  LICENSE.txt  logs  NOTICE.txt  README.txt  sbin  share
+注：如果之前测试时没有关闭hdfs服务，那么现在关闭。
+[hadoop@server1 hadoop]$ sbin/stop-dfs.sh  </code></pre><p><span style="font-family:'宋体';">【</span>5】配置分布式，同样需要修改两个文件</p><pre><code class="language-plain">[hadoop@server1 ~]$ cd hadoop/etc/hadoop/
+[hadoop@server1 hadoop]$ vim core-site.xml 
+&lt;configuration&gt;
+&lt;property&gt;
+        &lt;name&gt;fs.defaultFS&lt;/name&gt;
+        &lt;value&gt;hdfs://172.25.37.1:9000&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;
+这里将集群数量改为2
+[hadoop@server1 hadoop]$ vim hdfs-site.xml 
+&lt;configuration&gt;
+&lt;property&gt;
+        &lt;name&gt;dfs.replication&lt;/name&gt;
+        &lt;value&gt;2&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;
+将slaves文件做如下配置，现在的datanode为server2和server3
+[hadoop@server1 hadoop]$ vim slaves
+172.25.37.2
+172.25.37.3
+[hadoop@server1 hadoop]$ pwd
+/home/hadoop/hadoop</code></pre><p><span style="font-family:'宋体';">【</span>6】初始化并开启hdfs</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ bin/hdfs namenode -format
+[hadoop@server1 hadoop]$ sbin/start-dfs.sh
+Starting namenodes on [server1]
+server1: namenode running as process 3463. Stop it first.
+172.25.37.3: datanode running as process 1202. Stop it first.
+172.25.37.2: starting datanode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-datanode-server2.out
+Starting secondary namenodes [0.0.0.0]
+0.0.0.0: secondarynamenode running as process 3710. Stop it first.</code></pre><p><span style="font-family:'宋体';">【</span>7】浏览器测试</p><p><span style="font-family:'宋体';">你可以看到两个</span>datanode</p><p><img src="https://img-blog.csdn.net/20180607184720442?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><pre><code class="language-plain">查看进程
+[hadoop@server1 ~]$ jps
+3463 NameNode
+3710 SecondaryNameNode
+4515 Jps
+
+[root@server2 hadoop]# su - hadoop
+[hadoop@server2 ~]$ jps
+1255 DataNode
+1415 Jps
+
+[root@server3 ~]# su - hadoop
+[hadoop@server3 ~]$ jps
+1202 DataNode
+1464 Jps</code></pre><p><span style="font-family:'宋体';">【</span>8】扩容与缩容</p><p><span style="font-family:'宋体';">通过更改配置文件</span>hdfs-site.xml中value键值对中的数字以及values文件中的IP，</p><p>[hadoop@server1 hadoop]$ ./bin/hdfs  dfsadmin   -refreshNodes</p><p><span style="font-family:'宋体';">【</span>9】配置yarn</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ cp mapred-site.xml.template mapred-site.xml
+[hadoop@server1 hadoop]$ pwd
+/home/hadoop/hadoop/etc/hadoop
+[hadoop@server1 hadoop]$ vim mapred-site.xml
+&lt;configuration&gt;
+&lt;property&gt;
+&lt;name&gt;mapreduce.framework.name&lt;/name&gt;
+&lt;value&gt;yarn&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;
+[hadoop@server1 hadoop]$ vim yarn-site.xml 
+&lt;configuration&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.nodemanager.aux-services&lt;/name&gt;
+    &lt;value&gt;mapreduce_shuffle&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;
+[hadoop@server1 hadoop]$ pwd
+/home/hadoop/hadoop
+启动yarn:
+[hadoop@server1 hadoop]$ ./sbin/start-yarn.sh 
+starting yarn daemons
+starting resourcemanager, logging to /home/hadoop/hadoop-2.7.3/logs/yarn-hadoop-resourcemanager-server1.out
+172.25.37.2: starting nodemanager, logging to /home/hadoop/hadoop-2.7.3/logs/yarn-hadoop-nodemanager-server2.out
+172.25.37.3: starting nodemanager, logging to /home/hadoop/hadoop-2.7.3/logs/yarn-hadoop-nodemanager-server3.out
+查看进程：
+[hadoop@server1 hadoop]$ jps
+3129 SecondaryNameNode
+3375 ResourceManager
+2939 NameNode
+3632 Jps
+[hadoop@server2 hadoop]$ jps
+1687 DataNode
+1832 NodeManager
+1930 Jps
+[hadoop@server3 hadoop]$ jps
+1806 NodeManager
+1904 Jps
+1648 DataNode
+注：如果server2和server3上面没有显示NodeManager，你可以在对应虚拟机上面执行：
+[hadoop@server2 hadoop]$ ./sbin/yarn-daemon.sh start nodemanager
+
+创建hadoop存档：
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -mkdir /user
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -mkdir /user/hadoop
+[hadoop@server1 hadoop]$ mkdir input
+[hadoop@server1 hadoop]$ cp etc/hadoop/*.xml input/
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -put  input 
+[hadoop@server1 hadoop]$ ./bin/hadoop archive -archiveName test.har -p /user/hadoop/ input/*  input/
+18/06/01 21:23:07 INFO client.RMProxy: Connecting to ResourceManager at /0.0.0.0:8032
+18/06/01 21:23:08 INFO client.RMProxy: Connecting to ResourceManager at /0.0.0.0:8032
+18/06/01 21:23:08 INFO client.RMProxy: Connecting to ResourceManager at /0.0.0.0:8032
+18/06/01 21:23:09 INFO mapreduce.JobSubmitter: number of splits:1</code></pre><p><span style="font-family:'宋体';">在浏览器上访问</span>172.25.37.1:8088/cluster</p><p><img src="https://img-blog.csdn.net/20180607184855196?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p></p><p><strong>四、<span style="font-family:'宋体';">用</span>zookeeper实现hadoop高可用</strong></p><p>环境：</p><p>rhel6.5   iptables stop &amp;&amp; selinux disabled</p><p>Server1 :172.25.37.1/24</p><p>Server2 :172.25.37.2/24</p><p>Server3 :172.25.37.3/24</p><p>Server4 :172.25.37.4/24</p><p>Server5 :172.25.37.5/24</p><p> </p><p>server1  &amp;&amp; server5 --&gt; HA</p><p>server 2、3、4 存储节点</p><p><span style="font-family:'宋体';">【</span>1】在虚拟机server4、server5上面配置免密登陆并添加hadoop用户</p><pre><code class="language-plain">[root@server4 ~]# useradd hadoop
+[root@server4 ~]# passwd hadoop   
+
+[root@server4 ~]# id hadoop
+uid=500(hadoop) gid=500(hadoop) groups=500(hadoop)s
+
+[root@server5 ~]# useradd hadoop
+[root@server5 ~]# passwd hadoop      
+
+[root@server5 ~]# id hadoop
+uid=500(hadoop) gid=500(hadoop) groups=500(hadoop)
+
+[hadoop@server1 ~]$ cd .ssh/
+[hadoop@server1 .ssh]$ ls
+authorized_keys  id_rsa  id_rsa.pub  known_hosts
+[hadoop@server1 .ssh]$ ssh-copy-id 172.25.37.4    
+[hadoop@server1 .ssh]$ ssh-copy-id 172.25.37.5    </code></pre><p><span style="font-family:'宋体';">【</span>2】在server4、server5上面做时间同步 </p><pre><code class="language-plain">[root@server4 ~]# yum install -y ntp
+[root@server4 ~]# vim /etc/ntp.conf
+server 172.25.37.250 iburst
+[root@server4 ~]# /etc/init.d/ntpd start
+Starting ntpd:                                             [  OK  ]
+
+[root@server5 ~]# yum install -y ntp
+[root@server5 ~]# vim /etc/ntp.conf
+server 172.25.37.250 iburst
+[root@server5 ~]# /etc/init.d/ntpd start
+Starting ntpd:                                             [  OK  ]</code></pre><p><span style="font-family:'宋体';">【</span>3】在server4、server5上面通过nfs共享hadoop配置</p><pre><code class="language-plain">[root@server4 ~]# yum install -y exportfs
+[root@server4 ~]# /etc/init.d/rpcbind status
+rpcbind (pid  1092) is running...
+[root@server4 ~]# mount 172.25.37.1:/home/hadoop/  /home/hadoop/
+[root@server4 ~]# df
+Filesystem                   1K-blocks    Used Available Use% Mounted on
+/dev/mapper/VolGroup-lv_root  13973860  922772  12341252   7% /
+tmpfs                           510200       0    510200   0% /dev/shm
+/dev/vda1                       495844   33457    436787   8% /boot
+172.25.37.1:/home/hadoop/     13974016 1954560  11309568  15% /home/hadoop
+
+[root@server5 ~]# yum install -y exportfs
+[root@server5 ~]# /etc/init.d/rpcbind status
+rpcbind (pid  1092) is running...
+[root@server5 ~]# mount 172.25.37.1:/home/hadoop/  /home/hadoop/
+[root@server5 ~]# df
+Filesystem                   1K-blocks    Used Available Use% Mounted on
+/dev/mapper/VolGroup-lv_root  13973860  922760  12341264   7% /
+tmpfs                           510200       0    510200   0% /dev/shm
+/dev/vda1                       495844   33457    436787   8% /boot
+172.25.20.1:/home/hadoop/     13974016 1954560  11309568  15% /home/hadoop</code></pre><p><span style="font-family:'宋体';">【</span>4】在所有虚拟机上面做如下解析：</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ cat /etc/hosts
+
+172.25.37.1 server1
+
+172.25.37.2 server2
+
+172.25.37.3 server3
+
+172.25.37.4 server4
+
+172.25.37.5 server5</code></pre><p><span style="font-family:'宋体';">【</span>5】清除之前实验产生的数据</p><pre><code class="language-plain">[hadoop@server1 ~]$ cd hadoop
+[hadoop@server1 hadoop]$ sbin/stop-yarn.sh 
+stopping yarn daemons
+no resourcemanager to stop
+172.25.37.3: no nodemanager to stop
+172.25.37.2: no nodemanager to stop
+no proxyserver to stop
+
+[hadoop@server1 hadoop]$ sbin/stop-dfs.sh 
+Stopping namenodes on [server1]
+server1: stopping namenode
+172.25.37.3: stopping datanode
+172.25.37.2: stopping datanode
+Stopping secondary namenodes [0.0.0.0]
+0.0.0.0: stopping secondarynamenode
+[hadoop@server1 hadoop]$
+
+[hadoop@server1 ~]$ rm -fr /tmp/*
+[hadoop@server2 ~]$ rm -fr /tmp/*
+[hadoop@server3 ~]$ rm -fr /tmp/*
+[hadoop@server4 ~]$ rm -fr /tmp/*
+[hadoop@server5 ~]$ rm -fr /tmp/*</code></pre><p><span style="font-family:'宋体';">【</span>5】将datanode数量改为3</p><pre><code class="language-plain">[hadoop@server1 ~]$ cd hadoop/etc/hadoop/
+[hadoop@server1 hadoop]$ vim hdfs-site.xml 
+&lt;configuration&gt;
+&lt;property&gt;
+        &lt;name&gt;dfs.replication&lt;/name&gt;
+                &lt;value&gt;3&lt;/value&gt;
+                    &lt;/property&gt;
+&lt;/configuration&gt;
+
+[hadoop@server1 hadoop]$ vim slaves
+172.25.37.2
+172.25.37.3
+172.25.37.4</code></pre><p><span style="font-family:'宋体';">【</span>6】配置zookeeper 集群</p><p><span style="font-family:'宋体';">（</span>1）解压文件</p><p>[hadoop@server1 ~]$ tar zxf zookeeper-3.4.9.tar.gz </p><p>[hadoop@server1 ~]$ cd zookeeper-3.4.9</p><p>[hadoop@server1 zookeeper-3.4.9]$ cd conf/</p><p>[hadoop@server1 conf]$ ls</p><p>configuration.xsl  log4j.properties  zoo_sample.cfg</p><p><span style="font-family:'宋体';">（</span>2）复制配置文件：</p><p>[hadoop@server1 conf]$ cp zoo_sample.cfg zoo.cfg </p><p><span style="font-family:'宋体';">（</span>3）主要做如下配置：</p><pre><code class="language-plain">[hadoop@server1 conf]$ vim zoo.cfg
+tickTime=2000
+initLimit=10
+syncLimit=5
+dataDir=/tmp/zookeeper
+clientPort=2181
+server.1=172.25.37.2:2888:3888
+server.2=172.25.37.3:2888:3888
+server.3=172.25.37.4:2888:3888
+各节点配置文件相同,并且需要在/tmp/zookeeper 目录中创建 myid 文件,写入
+一个唯一的数字,取值范围在 1-255。比如:172.25.37.2 节点的 myid 文件写入数
+字“1”,此数字与配置文件中的定义保持一致,(server.1=172.25.37.2:2888:3888
+)其它节点依次类推。
+配置参数详解:
+clientPort
+客户端连接 server 的端口,即对外服务端口,一般设置为 2181 吧。
+dataDir
+存储快照文件 snapshot 的目录。默认情况下,事务日志也会存储在这里。建议同时配置参
+数 dataLogDir, 事务日志的写性能直接影响 zk 性能。
+tickTime
+ZK 中的一个时间单元。ZK 中所有时间都是以这个时间单元为基础,以毫秒计,用来调节
+心跳和超时。例如,session 的最小超时时间是 2*tickTime。
+dataLogDir
+事务日志输出目录。尽量给事务日志的输出配置单独的磁盘或是挂载点,这将极大的提升
+ZK 性能。
+[hadoop@server2 ~]$ mkdir /tmp/zookeeper
+[hadoop@server2 ~]$ echo 1 &gt; /tmp/zookeeper/myid
+
+[hadoop@server3 ~]$ mkdir /tmp/zookeeper
+[hadoop@server3 ~]$ echo 2 &gt; /tmp/zookeeper/myid
+
+[hadoop@server4 ~]$ mkdir /tmp/zookeeper
+[hadoop@server4 ~]$ echo 3 &gt; /tmp/zookeeper/myid</code></pre><p><span style="font-family:'宋体';">（</span>4）开启服务</p><pre><code class="language-plain">[hadoop@server2 ~]$ cd zookeeper-3.4.9
+[hadoop@server2 zookeeper-3.4.9]$ cd bin/
+[hadoop@server2 bin]$ ./zkServer.sh start
+ZooKeeper JMX enabled by default
+Using config: /home/hadoop/zookeeper-3.4.9/bin/../conf/zoo.cfg
+Starting zookeeper ... STARTED
+[hadoop@server2 bin]$
+
+[hadoop@server3 ~]$ cd zookeeper-3.4.9
+[hadoop@server3 zookeeper-3.4.9]$ cd bin/
+[hadoop@server3 bin]$ ./
+README.txt    zkCli.cmd     zkEnv.cmd     zkServer.cmd  
+zkCleanup.sh  zkCli.sh      zkEnv.sh      zkServer.sh   
+[hadoop@server3 bin]$ ./zkServer.sh start
+ZooKeeper JMX enabled by default
+Using config: /home/hadoop/zookeeper-3.4.9/bin/../conf/zoo.cfg
+Starting zookeeper ... STARTED
+[hadoop@server3 bin]$ 
+
+[hadoop@server4 ~]$ cd zookeeper-3.4.9
+[hadoop@server4 zookeeper-3.4.9]$ cd bin/
+[hadoop@server4 bin]$ ./zkServer.sh start
+ZooKeeper JMX enabled by default
+Using config: /home/hadoop/zookeeper-3.4.9/bin/../conf/zoo.cfg
+Starting zookeeper ... STARTED
+[hadoop@server4 bin]$</code></pre><p><span style="font-family:'宋体';">（</span>4）查看各节点看状态</p><pre><code class="language-plain">[hadoop@server2 bin]$ ./zkServer.sh status
+ZooKeeper JMX enabled by default
+Using config: /home/hadoop/zookeeper-3.4.9/bin/../conf/zoo.cfg
+Mode: follower
+[hadoop@server2 bin]$
+
+[hadoop@server3 bin]$ ./zkServer.sh status
+ZooKeeper JMX enabled by default
+Using config: /home/hadoop/zookeeper-3.4.9/bin/../conf/zoo.cfg
+Mode: leader
+[hadoop@server3 bin]$
+
+[hadoop@server4 bin]$ ./zkServer.sh status
+ZooKeeper JMX enabled by default
+Using config: /home/hadoop/zookeeper-3.4.9/bin/../conf/zoo.cfg
+Mode: follower
+[hadoop@server4 bin]$ 
+你可以看到server3被选举为leader</code></pre><p><span style="font-family:'宋体';">（</span>5）查看进程</p><pre><code class="language-plain">[hadoop@server2 bin]$ jps
+1658 QuorumPeerMain
+1803 Jps
+
+[hadoop@server3 bin]$ jps
+1766 Jps
+1704 QuorumPeerMain
+
+[hadoop@server4 bin]$ jps
+1245 QuorumPeerMain
+1319 Jps</code></pre><p><span style="font-family:'宋体';">（</span>6）zookeeper的交互式界面</p><p>[hadoop@server2 bin]$ pwd</p><p>/home/hadoop/zookeeper-3.4.9/bin</p><p>[hadoop@server2 bin]$ ls</p><p>README.txt    zkCli.cmd  zkEnv.cmd  zkServer.cmd  zookeeper.out</p><p>zkCleanup.sh  zkCli.sh   zkEnv.sh   zkServer.sh</p><p>执行脚本进入交互式界面</p><pre><code class="language-plain">[hadoop@server2 bin]$ ./zkCli.sh
+
+WATCHER::
+
+WatchedEvent state:SyncConnected type:None path:null 
+
+[zk: localhost:2181(CONNECTED) 0]
+[zk: localhost:2181(CONNECTED) 1] ls /zookeeper
+[quota]
+[zk: localhost:2181(CONNECTED) 2] ls /zookeeper/quota
+[]
+[zk: localhost:2181(CONNECTED) 3] get /zookeeper/quota
+
+cZxid = 0x0
+ctime = Thu Jan 01 08:00:00 CST 1970
+mZxid = 0x0
+mtime = Thu Jan 01 08:00:00 CST 1970
+pZxid = 0x0
+cversion = 0
+dataVersion = 0
+aclVersion = 0
+ephemeralOwner = 0x0
+dataLength = 0
+numChildren = 0
+[zk: localhost:2181(CONNECTED) 4] quit
+Quitting...
+2018-03-10 16:18:19,399 [myid:] - INFO  [main:ZooKeeper@684] - Session: 0x1620ef562a30002 closed
+2018-03-10 16:18:19,400 [myid:] - INFO  [main-EventThread:ClientCnxn$EventThread@519] - EventThread shut down for session: 0x1620ef562a30002</code></pre><p><span style="font-family:'宋体';">【</span>7】部署高可用 </p><p>[hadoop@server1 ~]$ cd hadoop/etc/hadoop/</p><p>[hadoop@server1 hadoop]$ pwd</p><p>/home/hadoop/hadoop/etc/hadoop</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ vim core-site.xml
+&lt;configuration&gt;
+&lt;!-- 指定 hdfs 的 namenode 为 masters (名称可自定义)--&gt;
+&lt;property&gt;
+&lt;name&gt;fs.defaultFS&lt;/name&gt;
+&lt;value&gt;hdfs://masters&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 zookeeper 集群主机地址 --&gt;
+&lt;property&gt;
+&lt;name&gt;ha.zookeeper.quorum&lt;/name&gt;
+&lt;value&gt;172.25.37.2:2181,172.25.37.3:2181,172.25.37.4:2181&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;
+配置文件hdfs-site.xml：
+[hadoop@server1 hadoop]$ vim hdfs-site.xml
+&lt;configuration&gt;
+&lt;!-- 指定 hdfs 的 nameservices 为 masters,和 core-site.xml 文件中的设置保持一致 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.nameservices&lt;/name&gt;
+&lt;value&gt;masters&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- masters 下面有两个 namenode 节点,分别是 h1 和 h2 (名称可自定义)
+--&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.ha.namenodes.masters&lt;/name&gt;
+&lt;value&gt;h1,h2&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 h1 节点的 rpc 通信地址 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.namenode.rpc-address.masters.h1&lt;/name&gt;
+&lt;value&gt;172.25.37.1:9000&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 h1 节点的 http 通信地址 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.namenode.http-address.masters.h1&lt;/name&gt;
+&lt;value&gt;172.25.37.1:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 h2 节点的 rpc 通信地址 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.namenode.rpc-address.masters.h2&lt;/name&gt;
+&lt;value&gt;172.25.37.5:9000&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 h2 节点的 http 通信地址 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.namenode.http-address.masters.h2&lt;/name&gt;
+&lt;value&gt;172.25.37.5:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 NameNode 元数据在 JournalNode 上的存放位置 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.namenode.shared.edits.dir&lt;/name&gt;
+&lt;value&gt;qjournal://172.25.37.2:8485;172.25.37.3:8485;172.25.37.4:8485/masters&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 JournalNode 在本地磁盘存放数据的位置 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.journalnode.edits.dir&lt;/name&gt;
+&lt;value&gt;/tmp/journaldata&lt;/value&gt;&lt;/property&gt;
+&lt;!-- 开启 NameNode 失败自动切换 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.ha.automatic-failover.enabled&lt;/name&gt;
+&lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 配置失败自动切换实现方式 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.client.failover.proxy.provider.masters&lt;/name&gt;
+&lt;value&gt;org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvid
+er&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 配置隔离机制方法,每个机制占用一行--&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.ha.fencing.methods&lt;/name&gt;
+&lt;value&gt;
+sshfence
+shell(/bin/true)
+&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 使用 sshfence 隔离机制时需要 ssh 免密码 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.ha.fencing.ssh.private-key-files&lt;/name&gt;
+&lt;value&gt;/home/hadoop/.ssh/id_rsa&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 配置 sshfence 隔离机制超时时间 --&gt;
+&lt;property&gt;
+&lt;name&gt;dfs.ha.fencing.ssh.connect-timeout&lt;/name&gt;
+&lt;value&gt;30000&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;</code></pre><p><span style="font-family:'宋体';">【</span>8】在三个 DN 上依次启动 journalnode(第一次启动 hdfs 必须先启动 journalnode)</p><pre><code class="language-plain">[hadoop@server2 hadoop]$ pwd
+/home/hadoop/hadoop
+[hadoop@server2 hadoop]$ sbin/hadoop-daemon.sh start journalnode
+starting journalnode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-journalnode-server2.out
+[hadoop@server2 hadoop]$ jps
+1658 QuorumPeerMain
+1877 Jps
+1827 JournalNode
+
+[hadoop@server3 ~]$ cd hadoop
+[hadoop@server3 hadoop]$ sbin/hadoop-daemon.sh start journalnode
+starting journalnode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-journalnode-server3.out
+[hadoop@server3 hadoop]$ jps
+1790 JournalNode
+1840 Jps
+1704 QuorumPeerMain
+[hadoop@server3 hadoop]$
+
+[hadoop@server4 ~]$ cd hadoop
+[hadoop@server4 hadoop]$ sbin/hadoop-daemon.sh start journalnode
+starting journalnode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-journalnode-server4.out
+[hadoop@server4 hadoop]$ jps
+1245 QuorumPeerMain
+1344 JournalNode
+1394 Jps
+[hadoop@server4 hadoop]$</code></pre><p><span style="font-family:'宋体';">【</span>9】格式化 HDFS 集群</p><p>[hadoop@server1 hadoop]$ bin/hdfs namenode -format</p><p><span style="font-family:'宋体';">【</span>10】将/tmp/hadoop-hadoop目录发送到server5</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ scp -r /tmp/hadoop-hadoop 172.25.37.5:/tmp
+seen_txid                                                                 100%    2     0.0KB/s   00:00    
+VERSION                                                                   100%  202     0.2KB/s   00:00    
+fsimage_0000000000000000000.md5                                           100%   62     0.1KB/s   00:00    
+fsimage_0000000000000000000                                               100%  352     0.3KB/s   00:00  </code></pre><p><span style="font-family:'宋体';">【</span>11】格式化 zookeeper </p><p>[hadoop@server1 hadoop]$ bin/hdfs zkfc -formatZK</p><p><span style="font-family:'宋体';">【</span>12】创建目录用于测试</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ ./bin/hdfs dfs -mkdir /user
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -mkdir /user/hadoop
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -put etc/hadoop/ /user/hadoop/input
+[hadoop@server1 hadoop]$ ./bin/hdfs dfs -ls
+Found 1 items
+drwxr-xr-x   - hadoop supergroup          0 2018-06-02 14:13 input</code></pre><p><span style="font-family:'宋体';">【</span>13】启动 hdfs 集群</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ sbin/start-dfs.sh    
+Starting namenodes on [server1 server5]
+server1: starting namenode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-namenode-server1.out
+server5: starting namenode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-namenode-server5.out
+172.25.37.3: starting datanode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-datanode-server3.out
+172.25.37.2: starting datanode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-datanode-server2.out
+172.25.37.4: starting datanode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-datanode-server4.out
+Starting journal nodes [172.25.37.2 172.25.37.3 172.25.37.4]
+172.25.37.4: starting journalnode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-journalnode-server4.out
+172.25.37.3: starting journalnode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-journalnode-server3.out
+172.25.37.2: starting journalnode, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-journalnode-server2.out
+Starting ZK Failover Controllers on NN hosts [server1 server5]
+server1: starting zkfc, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-zkfc-server1.out
+server5: starting zkfc, logging to /home/hadoop/hadoop-2.7.3/logs/hadoop-hadoop-zkfc-server5.out
+查看进程
+[hadoop@server1 hadoop]$ jps
+6209 Jps
+5847 NameNode
+6141 DFSZKFailoverController
+[hadoop@server5 ~]$ jps
+1548 Jps
+1416 DFSZKFailoverController
+1319 NameNode
+[hadoop@server2 hadoop]$ jps
+1661 JournalNode
+1726 Jps
+1224 QuorumPeerMain
+1568 DataNode
+[hadoop@server3 hadoop]$ jps
+1776 Jps
+1616 DataNode
+1709 JournalNode
+1213 QuorumPeerMain
+[hadoop@server4 hadoop]$ jps
+1204 QuorumPeerMain
+1562 DataNode
+1655 JournalNode
+1723 Jps</code></pre><p><span style="font-family:'宋体';">【</span>14】浏览器测试</p><p><span style="font-family:'宋体';">你可以看到</span>server1状态为active，server5状态处于standby。</p><p> <img src="https://img-blog.csdn.net/20180607185722738?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p><span style="font-family:'宋体';"><br></span></p><p><span style="font-family:'宋体';"><img src="https://img-blog.csdn.net/2018060718573665?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></span></p><p><span style="font-family:'宋体';"><img src="https://img-blog.csdn.net/20180607185743812?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></span></p><p><span style="font-family:'宋体';">【</span>5】高可用测试测试：</p><p><span style="font-family:'宋体';">关闭状态处于</span>active的namenode，我的是server1:</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ jps
+2611 DFSZKFailoverController
+2314 NameNode
+3671 Jps
+[hadoop@server1 hadoop]$ kill -9 2314
+在浏览器中可以看到server5状态变为active，server1状态变为standby。</code></pre><p><img src="https://img-blog.csdn.net/20180607185817860?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p><img src="https://img-blog.csdn.net/20180607185824515?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p></p><p>[hadoop@server1 hadoop]$ ./sbin/hadoop-daemon.sh start namenode</p><p><img src="https://img-blog.csdn.net/2018060718584477?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p></p><p><strong><span style="font-family:'宋体';">五、配置</span>yarn高可用</strong></p><p>同样是两个配置文件：</p><p><span style="font-family:'宋体';">【</span>1】编辑 mapred-site.xml 文件</p><pre><code class="language-plain">&lt;configuration&gt;
+&lt;!-- 指定 yarn 为 MapReduce 的框架 --&gt;
+&lt;property&gt;
+&lt;name&gt;mapreduce.framework.name&lt;/name&gt;
+&lt;value&gt;yarn&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;</code></pre><p><span style="font-family:'宋体';">【</span>2】编辑 yarn-site.xml 文件</p><pre><code class="language-plain">&lt;configuration&gt;
+&lt;!-- 配置可以在 nodemanager 上运行 mapreduce 程序 --&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.nodemanager.aux-services&lt;/name&gt;
+&lt;value&gt;mapreduce_shuffle&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 激活 RM 高可用 --&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.resourcemanager.ha.enabled&lt;/name&gt;
+&lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;&lt;!-- 指定 RM 的集群 id --&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.resourcemanager.cluster-id&lt;/name&gt;
+&lt;value&gt;RM_CLUSTER&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 定义 RM 的节点--&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.resourcemanager.ha.rm-ids&lt;/name&gt;
+&lt;value&gt;rm1,rm2&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 RM1 的地址 --&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.resourcemanager.hostname.rm1&lt;/name&gt;
+&lt;value&gt;172.25.37.1&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 指定 RM2 的地址 --&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.resourcemanager.hostname.rm2&lt;/name&gt;
+&lt;value&gt;172.25.37.5&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 激活 RM 自动恢复 --&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.resourcemanager.recovery.enabled&lt;/name&gt;
+&lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;!-- 配置 RM 状态信息存储方式,有 MemStore 和 ZKStore--&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.resourcemanager.store.class&lt;/name&gt;
+&lt;value&gt;org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore&lt;/
+value&gt;
+&lt;/property&gt;
+&lt;!-- 配置为 zookeeper 存储时,指定 zookeeper 集群的地址 --&gt;
+&lt;property&gt;
+&lt;name&gt;yarn.resourcemanager.zk-address&lt;/name&gt;
+&lt;value&gt;172.25.37.2:2181,172.25.37.3:2181,172.25.37.4:2181&lt;/value&gt;
+&lt;/property&gt;
+&lt;/configuration&gt;</code></pre><p><span style="font-family:'宋体';">【</span>3】启动 yarn 服务</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ ./sbin/start-yarn.sh
+[hadoop@server1 hadoop]$ jps
+6559 Jps
+2163 NameNode
+1739 DFSZKFailoverController
+5127 ResourceManager
+RM2 上需要手动启动
+$ sbin/yarn-daemon.sh start resourcemanager
+[hadoop@server5 hadoop]$ jps
+1191 NameNode
+3298 Jps
+1293 DFSZKFailoverController
+2757 ResourceManager
+最好是把 RM 与 NN 分离运行,这样可以更好的保证程序的运行性能。</code></pre><p><span style="font-family:'宋体';">【</span>5】浏览器测试</p><p><span style="font-family:'宋体';">你可以看到</span>server5的状态为standby，server1的状态为active。</p><p><img src="https://img-blog.csdn.net/20180607190110774?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p><img src="https://img-blog.csdn.net/20180607190118113?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p></p><p><span style="font-family:'宋体';">【</span>4】测试 yarn 故障切换</p><pre><code class="language-plain">[hadoop@server1 hadoop]$ jps
+5918 Jps
+2163 NameNode
+1739 DFSZKFailoverController
+5127 ResourceManager
+[hadoop@server1 hadoop]$ kill -9 5127
+[hadoop@server1 hadoop]$ ./sbin/yarn-daemon.sh start resourcemanager</code></pre><p><span style="font-family:'宋体';">在浏览器截图中你可以发现</span>server1和server5的状态发生了改变。</p><p><img src="https://img-blog.csdn.net/20180607190210603?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p><p><img src="https://img-blog.csdn.net/20180607190219333?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3JhbmRvbV93/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><br><br>            </div>
+                </div>

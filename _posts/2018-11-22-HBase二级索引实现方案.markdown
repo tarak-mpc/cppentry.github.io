@@ -1,0 +1,458 @@
+---
+layout:     post
+title:      HBase二级索引实现方案
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/WYpersist/article/details/79830811				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <blockquote>
+<h1><strong>Hbase简介</strong></h1>
+</blockquote>
+
+<p>HBASE是在hadoop之上构建非关系型，面向列存储的开源分布式结构化数据存储系统。</p>
+
+<blockquote>
+<h2><strong>HBase表分区与索引管理</strong></h2>
+</blockquote>
+
+<p> <img alt="" class="has" src="https://img-blog.csdn.net/20180406054531901"></p>
+
+<p>•将Table中的数据根据rowKey字段划分为多个HRegion</p>
+
+<p>•HRegion分配给RegionServer管理</p>
+
+<blockquote>
+<h2><strong>HBase系统架构</strong></h2>
+</blockquote>
+
+<p> <img alt="" class="has" src="https://img-blog.csdn.net/20180406054540962"></p>
+
+<blockquote>
+<h2><strong>HBase的局限性</strong></h2>
+</blockquote>
+
+<p>HBase本身只提供基于行键和全表扫描的查询，而行键索引单一，对于多维度的查询困难。</p>
+
+<blockquote>
+<h1><strong>常见的二级索引方案</strong></h1>
+</blockquote>
+
+<p>HBase的一级索引就是rowkey，我们只能通过rowkey进行检索。如果我们相对hbase里面列族的列列进行一些组合查询，就需要采用HBase的二级索引方案来进行多条件的查询。 </p>
+
+<p>1. MapReduce方案 <br>
+2. ITHBASE（Indexed-Transanctional HBase）方案 <br>
+3. IHBASE（Index HBase）方案 <br>
+4. Hbase Coprocessor(协处理器)方案 <br>
+5. Solr+hbase方案</p>
+
+<p>6. CCIndex（complementalclustering index）方案</p>
+
+<blockquote>
+<h1><strong>HBase二级索引种类</strong></h1>
+</blockquote>
+
+<p>2.1创建单列索引</p>
+
+<p>2.2同时创建多个单列索引</p>
+
+<p>2.3创建联合索引（最多同时支持3个列）</p>
+
+<p>2.4只根据rowkey创建索引</p>
+
+<blockquote>
+<h2><strong>建立全局二级索引</strong></h2>
+</blockquote>
+
+<p><span style="color:#444444;">1. </span><strong><span style="color:#444444;">全局建立索引，可以修改hbase-site.xml文件</span></strong></p>
+
+<p>为所有table加载了一个cp class，可以用”,”分割加载多个class</p>
+
+<p>&lt;property&gt;</p>
+
+<p>&lt;name&gt;hbase.coprocessor.region.classes&lt;/name&gt;</p>
+
+<p>&lt;value&gt;org.apache.hadoop.hbase.coprocessor.AggregateImplementation&lt;/value&gt;</p>
+
+<p>&lt;/property&gt;</p>
+
+<blockquote>
+<h2><strong>单表建立二级索引</strong></h2>
+</blockquote>
+
+<p><span style="color:#444444;">2. </span><strong><span style="color:#444444;">单个表建立索引</span></strong></p>
+
+<p>1.首先disable ‘表名’<br>
+2.然后修改表</p>
+
+<p>alter 'LogTable',METHOD=&gt;'table_att','coprocessor'=&gt;'hdfs:///test.jar|www.aboutyun.com.hbase.HbaseCoprocessor|1001'</p>
+
+<p>3. enable '表名'</p>
+
+<blockquote>
+<h2><strong>卸载二级索引</strong></h2>
+</blockquote>
+
+<p><strong><span style="color:#444444;">3</span><span style="color:#444444;">.</span><span style="color:#444444;"> </span><span style="color:#444444;">卸载索引</span></strong></p>
+
+<p>alter 'LogTable', METHOD =&gt; 'table_att_unset', NAME =&gt; 'coprocessor$1‘</p>
+
+<blockquote>
+<h1><strong>二级索引的设计</strong></h1>
+</blockquote>
+
+<p>设计思路：</p>
+
+<p> <img alt="" class="has" src="https://img-blog.csdn.net/20180406054600285"></p>
+
+<p>图1</p>
+
+<p><strong><span style="color:#0000ff;">二级索引的本质就是建立各列值与行键之间的映射关系</span></strong></p>
+
+<p> </p>
+
+<p>如上图1，当要对F:C1这列建立索引时，只需要建立F:C1各列值到其对应行键的映射关系，如C11-&gt;RK1等，这样就完成了对F:C1列值的二级索引的构建，当要查询符合F:C1=C11对应的F:C2的列值时（即根据C1=C11来查询C2的值,图1青色部分）</p>
+
+<p>其查询步骤如下：</p>
+
+<p>1. 根据C1=C11到索引数据中查找其对应的RK，查询得到其对应的RK=RK1</p>
+
+<p>2. 得到RK1后就自然能根据RK1来查询C2的值了 这是构建二级索引大概思路，其他组合查询的联合索引的建立也类似。</p>
+
+<p><strong><span style="color:#ff0000;"> </span></strong></p>
+
+<blockquote>
+<h1><strong>MapReduce方式创建二级索引</strong></h1>
+</blockquote>
+
+<p>使用整合MapReduce的方式创建hbase索引。主要的流程如下：</p>
+
+<p>1.1扫描输入表，使用hbase继承类TableMapper</p>
+
+<p>1.2获取rowkey和指定字段名称和字段值</p>
+
+<p>1.3创建Put实例， value=rowkey, rowkey=columnName +"_" +columnValue</p>
+
+<p>1.4使用IdentityTableReducer将数据写入索引表</p>
+
+<blockquote>
+<h2><strong>继承TableMapper</strong></h2>
+</blockquote>
+
+<p>GenerateIndexMapper继承TableMapper类</p>
+
+<p>LoadIndexMapper类数据批量导入hbase</p>
+
+<p>SecondIndexMain是驱动类</p>
+
+<blockquote>
+<h2><strong>实例</strong></h2>
+</blockquote>
+
+<pre class="has">
+<code class="language-java">import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
+import org.apache.hadoop.hbase.mapreduce.MultiTableOutputFormat;
+import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
+import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
+import org.apache.hadoop.hbase.mapreduce.TableMapper;
+import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.util.GenericOptionsParser;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * @Description:Mapreduce构建hbase二级索引
+ */
+public class MyIndexBuilder {
+    private class MyIndexMapper extends TableMapper&lt;ImmutableBytesWritable, Put&gt; {
+
+        //create the  map object
+        private Map&lt;byte[], ImmutableBytesWritable&gt; indexes = new HashMap&lt;byte[], ImmutableBytesWritable&gt;();
+
+        //make  the  cloumnfamily
+        private String columnFamily;
+
+        /**
+         * Called once for each key/value pair in the input split. Most applications
+         * should override this, but the default is the identity function.
+         */
+        @Override
+        protected void map(ImmutableBytesWritable key, Result value, Context context) throws IOException, InterruptedException {
+            Set&lt;byte[]&gt; keys = indexes.keySet();
+
+            for (byte[] k : keys) {
+                ImmutableBytesWritable indexTableName = indexes.get(k);
+                byte[] val = value.getValue(Bytes.toBytes(columnFamily), k);
+
+                // 索引表的rowkey为原始表的值
+                Put put = new Put(val);
+
+                // 索引表的内容为原始表的rowkey
+                put.add(Bytes.toBytes("f1"), Bytes.toBytes("id"), key.get());
+                //context write
+                context.write(indexTableName, put);
+
+            }
+
+
+//            super.map(key, value, context);
+        }
+
+        /**
+         * Called once at the beginning of the task.
+         */
+        @Override
+        protected void setup(Context context) throws IOException, InterruptedException {
+            Configuration conf = context.getConfiguration();
+            String tableName = conf.get("tableName");
+            columnFamily = conf.get("columnFamily");
+            String[] qualifiers = conf.getStrings("qualifiers");
+            // indexes的key为列名，value为索引表名
+            for (String q : qualifiers) {
+                indexes.put(
+                        Bytes.toBytes(q),
+                        new ImmutableBytesWritable(Bytes.toBytes(tableName
+                                + "-" + q)));
+
+            }
+
+        }
+
+        //            super.setup(context);
+    }
+
+    public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException {
+        Configuration conf = HBaseConfiguration.create();
+        String[] otherargs = new GenericOptionsParser(conf, args)
+                .getRemainingArgs();// 去除掉没有用的命令行参数
+        // 输入参数：表名，列族名，列名
+        if (otherargs.length &lt; 3) {
+            System.exit(-1);
+        }
+        String tableName = otherargs[0];
+        String columnFamily = otherargs[1];
+
+        conf.set("tableName", tableName);
+        conf.set("columnFamily", columnFamily);
+
+        String[] qualifiers = new String[otherargs.length - 2];
+        for (int i = 0; i &lt; qualifiers.length; i++) {
+
+            qualifiers[i] = otherargs[i + 2];
+        }
+        conf.setStrings("qualifiers", qualifiers);
+        Job job = new Job(conf, tableName);
+        job.setJarByClass(MyIndexBuilder.class);
+        job.setMapperClass(MyIndexMapper.class);
+        job.setNumReduceTasks(0);
+        job.setInputFormatClass(TableInputFormat.class);
+        // 可以输出多张表
+        job.setOutputFormatClass(MultiTableOutputFormat.class);
+        Scan scan = new Scan();
+        scan.setCaching(1000);
+        TableMapReduceUtil.initTableMapperJob(tableName, scan, MyIndexMapper.class,
+                ImmutableBytesWritable.class, Put.class, job);
+        job.waitForCompletion(true);
+    }
+
+
+}</code></pre>
+
+<p> </p>
+
+<p> </p>
+
+<p> </p>
+
+<blockquote>
+<h1><strong>HBase 协处理器(coprocessor)实现二级索引</strong></h1>
+</blockquote>
+
+<p>HBase在0.92之后引入了coprocessors，提供了一系列的钩子，让我们能够轻易实现访问控制和二级索引的特性。</p>
+
+<blockquote>
+<h2><strong>HBase Coprocessor简介</strong></h2>
+</blockquote>
+
+<p>•HBase Coprocessor受启发于Google的Jeff Dean在LADIS’09 上的报告</p>
+
+<p><strong>–Google BigTable的Coprocessor特点</strong></p>
+
+<p>•在每个表服务器的任何tablet上均可执行用户代码</p>
+
+<p>•提供客户端调用接口 （coprocessor客户端lib将可定位每个row/range的位置；多行读写将自</p>
+
+<p>动分片为多个并行的RPC调用）</p>
+
+<p>•提供可构建分布式服务的灵活的编程模型</p>
+
+<p>•可以自动扩展，负载均衡等</p>
+
+<p><strong>–与Google Bigtable Coprocessor相比</strong></p>
+
+<p>•Bigtable coprocessor 以独立的进程执行，可以更好的控制CP计算所需资源</p>
+
+<p>•HBase coprocessor是一个在Master/RegionServer进程内的框架，通过在运行时执行用户的代码，在HBase内实现灵活的分布式数据处理功能</p>
+
+<p><strong>•HBase Coprocessor的主要应用场景</strong></p>
+
+<p>–secondary indexing</p>
+
+<p>–complex filtering</p>
+
+<p>–access control</p>
+
+<blockquote>
+<h2><strong>HBase Coprocessor 的实现类型</strong></h2>
+</blockquote>
+
+<p>•HBase Coprocessor的实现分为Observer和Endpoint两种</p>
+
+<p>–Observer类似于触发器，工作在服务器端。可以实现权限管理、监控等</p>
+
+<p>–Endpoint类似于存储过程，工作在服务器端和客户端。可以实现min/max等计算</p>
+
+<p>•Coprocessor的作用范围</p>
+
+<p>–System coprocessor: 对所有table的所有region</p>
+
+<p>–Table coprocessor：对某个table的所有region</p>
+
+<p><img alt="" class="has" src="https://img-blog.csdn.net/20180406054723153"></p>
+
+<p>•RegionObserver：提供表数据操作事件的钩子函数：Get、Put、Scan等的pre/post处理。</p>
+
+<p>•WALObserver：提供WAL相关操作钩子。</p>
+
+<p>•MasterObserver：提供DDL类型的操作钩子。如创建、删除、修改数据表等。</p>
+
+<p>Endpoint：只适用于RegionServer, 对应于每个table 的Region的处理。</p>
+
+<p>想要更详细的介绍请查阅:</p>
+
+<p><a href="https://blogs.apache.org/hbase/entry/coprocessor_introduction" rel="nofollow"><u><span style="color:#0000ff;">https://blogs.apache.org/hbase/entry/coprocessor_introduction</span></u></a></p>
+
+<p><span style="color:#555555;">observers分为三种：</span></p>
+
+<p>RegionObserver：提供数据操作事件钩子；</p>
+
+<p>WALObserver：提供WAL（write ahead log）相关操作事件钩子；</p>
+
+<p>MasterObserver：提供DDL操作事件钩子。</p>
+
+<blockquote>
+<h2><strong>实例</strong></h2>
+</blockquote>
+
+<p>该例子使用RegionObserver实现在写主表之前将索引数据先写到另外一个表</p>
+
+<pre class="has">
+<code class="language-java">import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.client.Durability;
+import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
+import org.apache.hadoop.hbase.coprocessor.ObserverContext;
+import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
+import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
+
+import java.io.IOException;
+import java.util.Iterator;
+import java.util.List;
+
+public class IndexHBaseCoprocessor extends BaseRegionObserver {
+
+    @Override
+    public void prePut(ObserverContext&lt;RegionCoprocessorEnvironment&gt; e, Put put, WALEdit edit, Durability durability) throws IOException {
+
+        //set configuration
+        Configuration conf = new Configuration();
+        //need conf.set...
+
+        HTable table = new HTable(conf, "indexTableName");
+
+        List&lt;Cell&gt; kv = put.get("familyName".getBytes(), "columnName".getBytes());
+        Iterator&lt;Cell&gt; kvItor = kv.iterator();
+        while (kvItor.hasNext()) {
+            Cell tmp = kvItor.next();
+            final byte[] value = tmp.getValue();
+            Put indexPut = new Put(value);
+
+            indexPut.add("familyName".getBytes(), "columnName".getBytes(), tmp.getRow());
+            table.put(indexPut);
+
+        }
+        table.close();
+//        super.prePut(e, put, edit, durability);
+    }
+}
+
+
+
+这是类之间的继承关系和实现里面的方法：
+
+
+public class IndexHBaseCoprocessor extends BaseRegionObserver {
+
+public class BaseRegionObserver implements RegionObserver {
+
+public interface RegionObserver extends Coprocessor {
+
+void prePut(ObserverContext&lt;RegionCoprocessorEnvironment&gt; var1, Put var2, WALEdit var3, Durability var4) throws IOException;
+
+}</code></pre>
+
+<p> </p>
+
+<p>写完后要加载到table里面去，先把该文件打包indexTest.jar并上传到hdfs的/hbase-test路径下，然后操作如下：</p>
+
+<p> </p>
+
+<p>进入hbase shell ，执行一下命令行：</p>
+
+<p><span style="color:#555555;"> <img alt="" class="has" src="https://img-blog.csdn.net/20180406054756296"></span></p>
+
+<p>1. disable ‘testTable’</p>
+
+<p>2.alter ‘testTable’,</p>
+
+<p>METHOD=&gt;’table_att’,’coprocessor’=&gt;’hdfs:///hbase-test/indexTest.jar|com.hbase</p>
+
+<p>.IndexHBaseCoprocessor|1001′</p>
+
+<p>enable ‘testTable’</p>
+
+<p>然后往testTable里面插数据就会自动往indexTableName写数据了。</p>
+
+<p>这就是用coprocessor实现二级索引的例子。</p>
+
+<p> </p>
+
+<blockquote>
+<h2>HBase  IndexBuilder.java源码</h2>
+</blockquote>
+
+<p>链接：<a href="https://pan.baidu.com/s/140ZTLE-pFJZXeMRo6QQuNg" rel="nofollow"><span style="color:#800080;">https://pan.baidu.com/s/140ZTLE-pFJZXeMRo6QQuNg</span></a>  密码：ql9d</p>
+
+<p> </p>
+
+<p><strong><span style="color:#444444;">参考博文：</span></strong></p>
+
+<p><strong><span style="color:#444444;">1.</span></strong><a href="http://www.aboutyun.com/forum.php?mod=viewthread&amp;tid=8857&amp;highlight=hbase%2B%B6%FE%BC%B6" rel="nofollow"><strong><u><span style="color:#800080;">http://www.aboutyun.com/forum.php?mod=viewthread&amp;tid=8857&amp;highlight=hbase%2B%B6%FE%BC%B6</span></u></strong></a></p>
+
+<p><strong><span style="color:#444444;">2.</span></strong><a href="https://www.cnblogs.com/MOBIN/p/5579088.html" rel="nofollow"><strong><u><span style="color:#0000ff;">https://www.cnblogs.com/MOBIN/p/5579088.html</span></u></strong></a></p>
+
+<p><strong><span style="color:#444444;"> </span></strong></p>            </div>
+                </div>

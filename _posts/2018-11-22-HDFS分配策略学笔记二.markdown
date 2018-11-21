@@ -1,0 +1,80 @@
+---
+layout:     post
+title:      HDFS分配策略学笔记二
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，欢迎诸位分享交流					https://blog.csdn.net/xiaoshunzi111/article/details/48153063				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1><span style="font-size:18px;">hadoop的HDFS文件存储</span></h1>
+<span style="font-size:18px;"></span>
+<div class="article_meta">
+<div class="source"><span style="font-size:18px;"><em>原文</em>  <a class="cut cut70" href="http://www.cnblogs.com/zhanghuijunjava/archive/2013/04/22/hadoop-block_hdfs.html?utm_source=tuicool" rel="nofollow" style="display:inline-block;">
+http://www.cnblogs.com/zhanghuijunjava/archive/2013/04/22/hadoop-block_hdfs.html</a></span></div>
+<div><span style="font-size:18px;"><span>主题</span> <a href="http://www.tuicool.com/topics/11030091" rel="nofollow">
+<span class="new-label">HDFS</span> </a><a href="http://www.tuicool.com/topics/11090049" rel="nofollow"><span class="new-label">Hadoop</span></a></span></div>
+</div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;"><strong>1：什么是HDFS?</strong></span> </div>
+<span style="font-size:18px;"></span>
+<div>
+<p><span style="font-size:18px;">HDFS适合做：</span></p>
+<ol><li><span style="font-size:18px;">存储大文件。上G、T甚至P。</span></li><li><span style="font-size:18px;">一次写入，多次读取。并且每次作业都要读取大部分的数据。</span></li><li><span style="font-size:18px;">搭建在普通商业机群上就可以了。虽然会经常宕机，但HDFS有良好的容错机制。</span></li></ol><p><span style="font-size:18px;">HDFS不适合做：</span></p>
+<ol><li><span style="font-size:18px;">实时数据获取。如果有这个需求可以用HBase。</span></li><li><span style="font-size:18px;">很多小文件。因为namenode要存储HDFS的metadata（比如目录的树状结构，每个文件的文件名、ACL、长度、owner、文件内容存放的位置等等信息），所以HDFS上文件的数目受到namenode内存的限制。</span></li><li><span style="font-size:18px;">并发环境下的写入和修改。</span></li></ol></div>
+<span style="font-size:18px;"></span>
+<p><span style="font-size:18px;"><span>hadoop中存储文件以HDFS形式存储,HDFS拥有自己的设计原则：</span></span></p>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">1：文件大小以block块的形式存储</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">2：每个块至少分配到三台DataNode（看集群情况而定）</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">3：通过副本机制提高可靠度和吞吐量</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">4：hadoop1.0使用单一的master（NameNode）来协调存储元数据（metadata）</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">5：最有意思的是hadoop设计者没有设置客户端缓存机制，因为我们对处理数据有足够的信心。</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">下图为HDFS的系统结构</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">         <a href="http://blog.photo.sina.com.cn/showpic.html#url=http://s7.sinaimg.cn/orignal/b92ab6cbgd8e75e11d566" rel="nofollow">
+<img src="http://img0.tuicool.com/baEfua.jpg" alt="" name="image_operate_45951364389864139" style="display:block;"></a></span></div>
+<div><span style="font-size:18px;">        NameNode:主要存储元数据：例如：文件名，拷贝几份，分别备份到哪里；</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">过程大概如下：</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">client要向集群中写入数据，首先询问Master（NameNode）,Master告知客户端向哪些DataNode</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">写入数据，在往DataNode写入数据的同时，DataNode与NameNode保持心跳，如果DataNode在执行</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">任务失败，NameNode会通过心跳机制得知DataNode死掉，将重新分配新的任务到其他的DataNode。</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;"><strong>2：Block之副本放置策略</strong></span> </div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">第一副本：放置在上传文件DataNode，如果是集群外提交，由NameNode选择一台磁盘不太满，</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">  CPU不太忙的节点。</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">第二副本：放置在于第一副本不同的机架的节点上</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">第三副本：与第二个副本相同集群的节点</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">第四副本   随机节点<br><br>
+总结: <br>
+第一个副本存放节点位置是随机不固定,只要保证三个副本节点不同时存放在同一个机架上即可<br>
+如bk1第一个副本副本在DN1<span style="font-size:18px;">(属于Back1)</span>,第二个在DN2<span style="font-size:18px;">(属于Back1)</span>中,而第三个在DN4(属于Back2)中.同样<br>
+bk5第一个副本在DN3(属于Back2)第二个副本在DN1(属于Back1)二第三个副本在DN2(属于Back1)...不难而至这些都符合上面的条件<br><br>
+如图:<br><img src="https://img-blog.csdn.net/20150901100106047?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br></span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">   </span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;"><strong>3：Block的存储形式</strong></span> </div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">1：Block默认大小64M，如果上传文件小于64M，那么仍然占用一个命名空间（NameNode metadata），</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">   但是物理存储不会占用64M空间；（这也是hadoop为什么不太适合处理小数据的原因之一）</span></div>
+<span style="font-size:18px;"></span>
+<div><span style="font-size:18px;">2：Block大小和副本数由Client端上传文件到HDFS时设置，其中副本数可以变更，Block是不可以再上    传后变更的</span></div>
+            </div>
+                </div>

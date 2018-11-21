@@ -1,0 +1,238 @@
+---
+layout:     post
+title:      HBase 总结（五）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p><a href="https://mp.weixin.qq.com/s/oH-cPaBkgZrqYTQs19_g1w" rel="nofollow">一条数据的HBase之旅，简明HBase入门教程-Write全流程</a></p>
+
+<p>一、HBase 是什么？</p>
+
+<ul>
+<li><p>可以简单地认为：HBase 是一个构建在HDFS 上的分布式列存储系统； <br>
+   HBase是一个高可靠、高性能、面向列、可伸缩的分布式数据库，是谷歌BigTable的开源实现，主要用来存储非结构化和半结构化的松散数据。</p>
+
+<p>hbase 与hadoop的关系： <br>
+<img src="https://img-blog.csdn.net/20170621234159902?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p></li>
+</ul>
+
+<h2 id="二hbase-主要用来解决什么问题及其应用场景">二、HBase 主要用来解决什么问题及其应用场景</h2>
+
+<ul>
+<li><p>HBase的目标是处理非常庞大的表，可以通过水平扩展的方式，利用廉价计算机集群处理由超过10亿行数据和数百万列元素组成的数据表。</p>
+
+<p>hbase的应用场景： <br>
+    1、数据是非结构化数据，且数据量非常大 <br>
+    2、数据使用场景为低延时 <br>
+    3、需要对数据进行更新与增量操作</p></li>
+</ul>
+
+
+
+<h2 id="三hbase-与关系数据库的区别">三、HBase 与关系数据库的区别</h2>
+
+<ul>
+<li><p>HBase与传统的关系数据库的区别主要体现在以下几个方面： <br>
+（1）数据类型：关系数据库采用关系模型，具有丰富的数据类型和存储方式， <br>
+    HBase则采用了更加简单的数据模型，它把数据存储为未经解释的字符串</p>
+
+<p>（2）数据操作：关系数据库中包含了丰富的操作，其中会涉及复杂的多表连接。 <br>
+    HBase操作则不存在复杂的表与表之间的关系，只有简单的插入、查询、 <br>
+    删除、清空等，因为HBase在设计上就避免了复杂的表和表之间的关系 </p>
+
+<p>（3）存储模式：关系数据库是基于行模式存储的。HBase是基于列存储的， <br>
+    每个列族都由几个文件保存，不同列族的文件是分离的 </p>
+
+<p>（4）数据索引：关系数据库通常可以针对不同列构建复杂的多个索引，以提高数据访问性能。HBase只有一个索引——行键，通过巧妙的设计， <br>
+HBase中的所有访问方法，或者通过行键访问，或者通过行键扫描，从而使得整个系统不会慢下来 </p>
+
+<p>（5）数据维护：在关系数据库中，更新操作会用最新的当前值去替换记录中原来的旧值，旧值被覆盖后就不会存在。而在HBase中执行更新操作时， <br>
+并不会删除数据旧的版本，而是生成一个新的版本，旧有的版本仍然保留  <br>
+相反，HBase和BigTable这些分布式数据库就是为了实现灵活的水平扩展而开发的，能够轻易地通过在集群中增加或者减少硬件数量来实现性能的伸缩</p></li>
+</ul>
+
+
+
+<h2 id="四hbase-的数据模型">四、HBase 的数据模型</h2>
+
+<p><img src="https://img-blog.csdn.net/20170621234514956?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<pre><code>上图一些基本概念的解说：
+
+RowKey：类似于关系型数据库里的主键，用来检索记录。在Hbase的内部，行键保存为字节数组，在存取时按字典序排序存储。
+
+Column Family：列族，相关列的集合。列的命名与其列族有关，一般以列簇作为前缀。
+
+Column：属于某一个column-family，familyName:columnName，每条记录可动态添加
+
+Version Number：类型为Long，默认值是系统时间戳，可由用户自定义
+
+Value(Cell)：在HBase表中，通过行键、列族和列限定符确定一个“单元格”（cell），
+单元格中存储的数据没有数据类型，总被视为字节数组byte[]；
+</code></pre>
+
+<p>为什么说Hbase可以算是一个Key/Value系统呢？</p>
+
+<pre><code>原因如下：
+HBase中需要根据行键、列族、列限定符和时间戳来确定一个单元格， 
+因此，可以视为一个“四维坐标”，即[行键, 列族, 列限定符, 时间戳] 这个为key,其所对应的为value;
+</code></pre>
+
+<p>eg :<img src="https://img-blog.csdn.net/20170621234604533?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> </p>
+
+
+
+<h2 id="五hbase-的主要功能组件">五、HBase 的主要功能组件</h2>
+
+<ul>
+<li><p>HBase的实现包括三个主要的功能组件：</p>
+
+<p>（1）库函数：链接到每个客户端 <br>
+  （2）一个Master主服务器 <br>
+  （3）许多个Region服务器</p>
+
+<p>主服务器Master负责管理和维护HBase表的分区信息，维护Region服务器列表，分配Region，负载均衡</p>
+
+<p>Region服务器负责存储和维护分配给自己的Region，处理来自客户端的读写请求</p>
+
+<p>客户端并不是直接从Master主服务器上读取数据，而是在获得Region的存储位置信息后，直接从Region服务器上读取数据</p>
+
+<p>客户端并不依赖Master，而是通过Zookeeper来获得Region位置信息，  <br>
+ 大多数客户端甚至从来不和Master通信，这种设计方式使得Master负载很小  </p></li>
+</ul>
+
+
+
+<h2 id="六表与region的关系">六、表与Region的关系</h2>
+
+<pre><code>  1、 开始只有一个Region，后来随着数据不断变多因而不断分裂成我个Region 
+</code></pre>
+
+<p><img src="https://img-blog.csdn.net/20170621234901780?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title="">  </p>
+
+<p>目前每个Region最佳大小建议1GB-2GB（2013年以后的硬件配置） <br>
+   同一个Region不会被分拆到多个Region服务器（这个设计跟region的定位有关系）  <br>
+<img src="https://img-blog.csdn.net/20170621235001296?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> </p>
+
+
+
+<h2 id="七-root-表和meta表结构详解">七、-ROOT-表和.META.表结构详解</h2>
+
+<p><a href="http://www.cnblogs.com/songlee/p/5738024.html" rel="nofollow">-ROOT-表和.META.表结构详解</a>  </p>
+
+
+
+<h2 id="八region的定位">八、Region的定位</h2>
+
+<ul>
+<li><p>主要运用的是三层定位数据</p>
+
+<p>元数据表，又名.META.表，存储了Region和Region服务器的映射关系 <br>
+当HBase表很大时， .META.表也会被分裂成多个Region</p>
+
+<p>根数据表，又名-ROOT-表，记录所有元数据的具体位置 <br>
+-ROOT-表只有唯一一个Region，名字是在程序中被写死的</p>
+
+<p>Zookeeper文件记录了-ROOT-表的位置</p>
+
+<p><img src="https://img-blog.csdn.net/20170621235242013?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title="">  </p></li>
+</ul>
+
+<p><img src="https://img-blog.csdn.net/20170621235401563?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title="">  </p>
+
+<p>定位详情可见下图： <br>
+<img src="https://img-blog.csdn.net/20170622094634922?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+<img src="https://img-blog.csdn.net/20170622094924804?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title="">  <br>
+<img src="https://img-blog.csdn.net/20170622094936366?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+
+
+<h2 id="九hbase运行机制">九、HBase运行机制</h2>
+
+<p>1、HBase系统架构 <br>
+<img src="https://img-blog.csdn.net/20170621235509633?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> </p>
+
+<ul>
+<li><p>图解说：</p>
+
+<ol><li><p>客户端 <br>
+客户端包含访问HBase的接口，同时在缓存中维护着已经访问过的Region位置信息，用来加快后续数据访问过程</p></li>
+<li><p>Zookeeper服务器 <br>
+Zookeeper可以帮助选举出一个Master作为集群的总管，并保证在任何时刻总有唯一一个Master在运行，这就避免了Master的“单点失效”问题</p></li>
+<li><p>Master <br>
+主服务器Master主要负责表和Region的管理工作： <br>
+管理用户对表的增加、删除、修改、查询等操作 <br>
+实现不同Region服务器之间的负载均衡 <br>
+在Region分裂或合并后，负责重新调整Region的分布</p></li>
+<li><p>Region服务器 <br>
+Region服务器是HBase中最核心的模块，负责维护分配给自己的Region，并响应用户的读写请求</p></li></ol></li>
+</ul>
+
+<p>2   Region服务器工作原理 </p>
+
+<p><img src="https://img-blog.csdn.net/20170621235657054?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> </p>
+
+<ul>
+<li><p>a、 用户读写数据过程 </p>
+
+<p>用户写入数据时，被分配到相应Region服务器去执行； <br>
+用户数据首先被写入到MemStore和Hlog中； <br>
+只有当操作写入Hlog之后，commit()调用才会将其返回给客户端； <br>
+当用户读取数据时，Region服务器会首先访问MemStore缓存，如果找不到，再去磁盘上面的StoreFile中寻找。</p></li>
+<li><p>b、缓存的刷新</p>
+
+<p>系统会周期性地把MemStore缓存里的内容刷写到磁盘的StoreFile文件中，清空缓存，并在Hlog里面写入一个标记； <br>
+每次刷写都生成一个新的StoreFile文件，因此，每个Store包含多个StoreFile文件；</p>
+
+<p>每个Region服务器都有一个自己的HLog 文件，每次启动都检查该文件，确认最近一次执行缓存刷新操作之后是否发生新的写入操作；  <br>
+如果发现更新，则先写入MemStore，再刷写到StoreFile，最后删除旧的Hlog文件，开始为用户提供服务。</p></li>
+<li><p>c、StoreFile的合并</p>
+
+<p>每次刷写都生成一个新的StoreFile，数量太多，影响查找速度。 <br>
+调用Store.compact()把多个合并成一个。 <br>
+合并操作比较耗费资源，只有数量达到一个阈值才启动合并 </p></li>
+</ul>
+
+<p>3、Store工作原理</p>
+
+<ul>
+<li> <br>
+Store是Region服务器的核心 <br>
+多个StoreFile合并成一个 <br>
+单个StoreFile过大时，又触发分裂操作，1个父Region被分裂成两个子Region</li>
+</ul>
+
+<p><img src="https://img-blog.csdn.net/20170622000105237?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> </p>
+
+<p>4、HLog工作原理</p>
+
+
+
+<ul>
+<li><p>分布式环境必须要考虑系统出错。HBase采用HLog保证系统恢复。 <br>
+HBase系统为每个Region服务器配置了一个HLog文件，它是一种预写式日志（Write Ahead Log）。 <br>
+用户更新数据必须首先写入日志后，才能写入MemStore缓存，  <br>
+并且，直到MemStore缓存内容对应的日志已经写入磁盘，该缓存内容才能被刷写到磁盘。</p>
+
+<p>Zookeeper会实时监测每个Region服务器的状态，当某个Region服务器发生故障时，Zookeeper会通知Master。 </p>
+
+<p>Master首先会处理该故障Region服务器上面遗留的HLog文件，这个遗留的HLog文件中包含了来自多个Region对象的日志记录。 </p>
+
+<p>系统会根据每条日志记录所属的Region对象对HLog数据进行拆分，分别放到相应Region对象的目录下，  <br>
+然后，再将失效的Region重新分配到可用的Region服务器中，并把与该Region对象相关的HLog日志记录也发送给相应的Region服务器。 </p>
+
+<p>Region服务器领取到分配给自己的Region对象以及与之相关的HLog日志记录以后，会重新做一遍日志记录中的各种操作，  <br>
+把日志记录中的数据写入到MemStore缓存中，然后，刷新到磁盘的StoreFile文件中，完成数据恢复。</p>
+
+<p>共用日志优点：提高对表的写操作性能；缺点：恢复时需要分拆日志。</p></li>
+</ul>
+
+<p>5、常用接口</p>
+
+<p><img src="https://img-blog.csdn.net/20170622001053728?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzg1MDI3Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>参考：<a href="http://songlee24.github.io/2015/07/24/hbase-introduction/" rel="nofollow">HBase技术简介</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

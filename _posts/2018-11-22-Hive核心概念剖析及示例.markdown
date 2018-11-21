@@ -1,0 +1,313 @@
+---
+layout:     post
+title:      Hive核心概念剖析及示例
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，转载请注明作者和出处！					https://blog.csdn.net/tterminator/article/details/73612476				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h3 id="一hive文件存储格式和记录格式">一、Hive文件存储格式和记录格式</h3>
+
+
+
+<h3 id="hive中的文件格式和记录格式">Hive中的文件格式和记录格式</h3>
+
+<p>Hive存储数据时底层一般使用的都是Hadoop的HDFS文件系统，Hive数据存在的形式为HDFS文件。 <br>
+我们可以使用Hive <code>load</code>命令和<code>insert ··· directory···select···from</code>SQL实现：</p>
+
+<ol>
+<li>把文件中的数据导入到Hive数据表；</li>
+<li>把Hive表中感兴趣的字段数据转储到指定的数据文件；</li>
+</ol>
+
+<p>那么在这些过程中hive是怎么操作的呢？</p>
+
+<blockquote>
+  <p>补充： <br>
+  1、load伪命令：load data local inpath ‘/yourDir’ overwrite into table ‘yourTable’ partion(column=’value’);</p>
+  
+  <p>2、insert 伪SQL：insert overwrite local directory ‘/yourDir’ select * from yourTable where yourCondition;</p>
+</blockquote>
+
+<p>首先，在Hive看来，Hive不会强制要求将数据转换成特定的<code>文件格式</code>后才能使用：</p>
+
+<p>（1）Hive利用Hadoop的inputStream api从不同的数据源中读取数据，例如：文本格式文件、sequence格式文件，甚至用户自定义格式文件； <br>
+（2）同样的，Hive利用Hadoop的outputFormat api也可以将数据保存为不同的格式文件。</p>
+
+<p>其次，在Hive看来，对于文件格式，只需要关注两个方面：</p>
+
+<p>（1）文件是怎么分割成行（记录）</p>
+
+<p>Hive默认使用文件文件保存数据，文本文件使用\n作为默认的行分隔符。</p>
+
+<p>当用户没有使用默认的文本文件格式时，用户需要告诉Hive使用的InputFormat和OutputFormat是什么。事实上，用户需要指定对于输入和输出格式实现的Java类的名称。InputFormat中定义了如何读取划分，以及如何将划分分割为记录；而OutputFormat中定义了将这些划分写回到文件或控制台输出中。</p>
+
+<blockquote>
+  <p>实际上，InputFormat和OutputFormat就是Hadoop io中用于读写文件的inputstream和outputstream。</p>
+</blockquote>
+
+<p>（2）行（记录）是怎么分割成字段（列）</p>
+
+<p>Hive使用^A作为文本文件中默认的字段分隔符。</p>
+
+<p>Hive使用SerDe（序列化/反序列化的缩写）作为对输入记录（反序列化）进行分割以及写记录（序列化）的模板。</p>
+
+<p>一个SerDe包含了将一条记录的非结构化字节转化成Hive可以使用的一条记录的过程。</p>
+
+<p>在Hive内部，Hive引擎使用定义的InputFormat来读取一行数据记录，这行记录之后被传递给SerDe.deserialize()方法进行处理。有些SerDe需要指定特定的属性才能完整的实例化某个对象。</p>
+
+<p>所有这些信息用户在创建表的时候都可以在表定义语句中进行制定。创建完成后，用户可以向平时一样查询表，而无需关心底层格式。</p>
+
+
+
+<h3 id="示例1">示例1</h3>
+
+<p>这里使用一个自定义的SerDe、输入格式和输出格式的完整例子做个示例：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> yourTable
+PARTITIONED <span class="hljs-keyword">BY</span>(ds string)
+<span class="hljs-keyword">ROW</span> FORMAT SERDE <span class="hljs-string">'com.linkedin.haivvreo.AvroSerDe'</span>
+<span class="hljs-keyword">WITH</span> SERDEPROPERTIES(<span class="hljs-string">'schema.url'</span> = ‘http://schema_provider/kst.avsc’)
+STORED <span class="hljs-keyword">AS</span> 
+INPUTFORMAT <span class="hljs-string">'com.linkedin.haivvreo.AvroInputFormat'</span>
+OUTPUTFORMAT <span class="hljs-string">'com.linkedin.haivvreo.AvroOutputFormat'</span></span></code></pre>
+
+<p>ROW FORMAT SERDE指定了使用的SerDe,Hive提供了WITH SERDEPROPERTIES功能，允许用户传递配置信息给SerDe，Hive本身并不知晓这些属性的含义，需要SerDe去决定这些属性所代表的含义。</p>
+
+<p>STORED AS INPUTFORMAT······ OUTPUTFORMAT······子句分别指定了用于输入格式和输出格式的Java类。</p>
+
+<blockquote>
+  <p>需要注意的是，用户必须同时对输入格式和输出格式都进行指定。</p>
+</blockquote>
+
+
+
+<h3 id="示例2">示例2</h3>
+
+<p>在Hive中，某些语法是其它语法的快捷语法，例如：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> yourtable
+STORED <span class="hljs-keyword">AS</span> TEXTFILE;</span></code></pre>
+
+<p>语法STORED AS的替代方式同时指定INPUTFORMAT和OUTPUTFORMAT：</p>
+
+<ol>
+<li>指定INPUTFORMAT为’org.apache.hadoop.mapred.TextInputFormat’；</li>
+<li>指定OUTPUTFORMAT为’org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat’；</li>
+</ol>
+
+
+
+<h3 id="示例3">示例3</h3>
+
+<p>创建表时指定记录格式，用户可以指定列分隔符及集合元素间的分隔符：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> yourtable（······）
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED
+FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\001'</span>
+COLLECTION ITEMS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\002'</span>
+MAP KEYS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\002'</span>
+LINES TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\n'</span>
+STORED <span class="hljs-keyword">AS</span> TEXTFILE;</span></code></pre>
+
+<p>定义完这些分隔符后，用户就可以读取保存特定记录格式的文本文件。</p>
+
+<p>这种强大的可定制功能使得可以很容易的使用Hive来处理那些由其它工具和程序产生的文件。</p>
+
+
+
+<h3 id="二hive与mapredece">二、Hive与MapRedece</h3>
+
+
+
+<h3 id="apache-hcatalog项目以hadoop-mapreduce的方式操作hive中海量数据">Apache HCatalog项目：以Hadoop MapReduce的方式操作Hive中海量数据</h3>
+
+<p><a href="https://cwiki.apache.org/confluence/display/Hive/HCatalog" rel="nofollow">HCatalog官方文档</a></p>
+
+<p>HCatalog提供了一个HCatInputFormat类来共MapReduce用户从Hive的数据仓库中读取数据。其允许用户只读取需要的表分区和字段，同时以一种方便的列表格式（HCatRecord）来使用记录，这样就不需要用户来进行划分了。</p>
+
+<p>HCatalog提供了一个HCatOutputFormat类来写数据到文件。当HCatOutputFormat写数据时，输出的键不重要，而值得类型必须是HCatRecord。</p>
+
+<blockquote>
+  <p>在执行MapReduce任务时，Hive本身是不会生成Java MapReduce算法程序的。相反，Hive通过一个表示“job执行计划”的XML文件驱动执行内置的，原生的mapper和reducer模块。换句话说，这些通用的模块函数类似于微型的语言翻译程序，而这个驱动计算的“语言”是以XML形式编码的。</p>
+  
+  <p>Hive通过和JobTracker通信来初始化MapReduce任务，而不必部署在JobTracker所在的管理节点上执行。</p>
+</blockquote>
+
+<p>这里是一个官网使用HCatalog进行读写的示例：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs axapta"><span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">GroupByAge</span> <span class="hljs-inheritance"><span class="hljs-keyword">extends</span></span> <span class="hljs-title">Configured</span> <span class="hljs-inheritance"><span class="hljs-keyword">implements</span></span> <span class="hljs-title">Tool</span> {</span>
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Map</span> <span class="hljs-inheritance"><span class="hljs-keyword">extends</span></span>
+            <span class="hljs-title">Mapper</span>&lt;<span class="hljs-title">WritableComparable</span>, <span class="hljs-title">HCatRecord</span>, <span class="hljs-title">IntWritable</span>, <span class="hljs-title">IntWritable</span>&gt; {</span>
+
+        <span class="hljs-keyword">int</span> age;
+
+        @Override
+        <span class="hljs-keyword">protected</span> <span class="hljs-keyword">void</span> map(
+                WritableComparable key,
+                HCatRecord value,
+                org.apache.hadoop.mapreduce.Mapper&lt;WritableComparable, HCatRecord,
+                        IntWritable, IntWritable&gt;.Context context)
+                throws IOException, InterruptedException {
+            age = (Integer) value.get(<span class="hljs-number">1</span>);
+            context.write(<span class="hljs-keyword">new</span> IntWritable(age), <span class="hljs-keyword">new</span> IntWritable(<span class="hljs-number">1</span>));
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Reduce</span> <span class="hljs-inheritance"><span class="hljs-keyword">extends</span></span> <span class="hljs-title">Reducer</span>&lt;<span class="hljs-title">IntWritable</span>, <span class="hljs-title">IntWritable</span>,
+    <span class="hljs-title">WritableComparable</span>, <span class="hljs-title">HCatRecord</span>&gt; {</span>
+
+
+      @Override
+      <span class="hljs-keyword">protected</span> <span class="hljs-keyword">void</span> reduce(
+              IntWritable key,
+              java.lang.Iterable&lt;IntWritable&gt; values,
+              org.apache.hadoop.mapreduce.Reducer&lt;IntWritable, IntWritable,
+                      WritableComparable, HCatRecord&gt;.Context context)
+              throws IOException, InterruptedException {
+          <span class="hljs-keyword">int</span> <span class="hljs-keyword">sum</span> = <span class="hljs-number">0</span>;
+          Iterator&lt;IntWritable&gt; iter = values.iterator();
+          <span class="hljs-keyword">while</span> (iter.hasNext()) {
+              <span class="hljs-keyword">sum</span>++;
+              iter.next();
+          }
+          HCatRecord record = <span class="hljs-keyword">new</span> DefaultHCatRecord(<span class="hljs-number">2</span>);
+          record.set(<span class="hljs-number">0</span>, key.get());
+          record.set(<span class="hljs-number">1</span>, <span class="hljs-keyword">sum</span>);
+
+          context.write(<span class="hljs-keyword">null</span>, record);
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">int</span> run(String[] args) throws Exception {
+        Configuration conf = getConf();
+        args = <span class="hljs-keyword">new</span> GenericOptionsParser(conf, args).getRemainingArgs();
+
+        String inputTableName = args[<span class="hljs-number">0</span>];
+        String outputTableName = args[<span class="hljs-number">1</span>];
+        String dbName = <span class="hljs-keyword">null</span>;
+
+        Job job = <span class="hljs-keyword">new</span> Job(conf, <span class="hljs-string">"GroupByAge"</span>);
+        HCatInputFormat.setInput(job, InputJobInfo.create(dbName,
+                inputTableName, <span class="hljs-keyword">null</span>));
+        <span class="hljs-comment">// initialize HCatOutputFormat</span>
+
+        job.setInputFormatClass(HCatInputFormat.class);
+        job.setJarByClass(GroupByAge.class);
+        job.setMapperClass(Map.class);
+        job.setReducerClass(Reduce.class);
+        job.setMapOutputKeyClass(IntWritable.class);
+        job.setMapOutputValueClass(IntWritable.class);
+        job.setOutputKeyClass(WritableComparable.class);
+        job.setOutputValueClass(DefaultHCatRecord.class);
+        HCatOutputFormat.setOutput(job, OutputJobInfo.create(dbName,
+                outputTableName, <span class="hljs-keyword">null</span>));
+        HCatSchema s = HCatOutputFormat.getTableSchema(job);
+        System.err.println(<span class="hljs-string">"INFO: output schema explicitly set for writing:"</span>
+                + s);
+        HCatOutputFormat.setSchema(job, s);
+        job.setOutputFormatClass(HCatOutputFormat.class);
+        <span class="hljs-keyword">return</span> (job.waitForCompletion(<span class="hljs-keyword">true</span>) ? <span class="hljs-number">0</span> : <span class="hljs-number">1</span>);
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> main(String[] args) throws Exception {
+        <span class="hljs-keyword">int</span> exitCode = ToolRunner.run(<span class="hljs-keyword">new</span> GroupByAge(), args);
+        System.exit(exitCode);
+    }
+}
+</code></pre>
+
+<p>HCatInputFormat通过和Hive的元数据存储进行通信来 获取要读取的表和分区的信息。这包括获取表的模式，也包括获取每个分区的模式。对于每个分区，还要确定对应的用于读取该分区数据的实际的InputFormat和SerDe。这些会被收集在一起，然后和所有的分区的数据划分一起，返回一个InputSplits对象列表。</p>
+
+<p>同样，对于每个底层的InputFormat都会有对应的RecordReader用于对划分进行解码。然后HCatRecordReader会通过和分区对应的SerDe将来自底层的RecordReader的值转化成HCatRecord。这个过程中包含有为每个分区补充对应缺少的列，或者过滤掉不需要的列。</p>
+
+<p>HCatOutputFormat也会和Hive元数据存储进行通信，以确定写入的文件格式和模式。</p>
+
+
+
+<h3 id="三hive与nosql">三、Hive与NoSQL</h3>
+
+
+
+<h3 id="把其它nosql类型的数据当作标准的hive数据表处理">把其它NoSQL类型的数据当作标准的Hive数据表处理</h3>
+
+<p>HiveStorageHandler是Hive用于连接如HBase、Cassandra等类似NoSQL存储的主要接口，检查下接口可以发现需要定义一个定制的InputFormat、一个OutputFormat以及SerDe。存储处理程序负责从底层存储子系统中读取或写入数据。这就转变成通过写select查询读取数据系统中的数据，以及通过如reports这样的操作将数据写入到数据系统。</p>
+
+<p>Hive中的抽象如表、类型、行格式以及其他元数据都用于Hive理解源数据。一旦Hive了解了源数据的描述信息，那么查询引擎就可以使用熟悉的HiveSQL操作符来处理数据。</p>
+
+<blockquote>
+  <p>在一个系统整体架构中将NoSQL数据库和Hadoop结合使用的一个通用技术就是使用NoSQL数据库集群来进行实时处理，而利用Hadoop集群进行非实时面向批处理的工作。如果NoSQL系统是主要数据存储，而其数据又需要通过Hadoop的批处理job进行查询的话，批量导出是一个将NoSQL数据导入到HDFS文件中的高效的方式。一旦HDFS中的文件通过导出生成后，就可以以最大效率执行批处理Hadoop job。 </p>
+</blockquote>
+
+
+
+<h3 id="四hive的thrift服务">四、Hive的Thrift服务</h3>
+
+
+
+<h3 id="以jdbcodbc编程方式访问hive表中的数据和管理hive的元数据">以JDBC/ODBC编程方式访问Hive表中的数据和管理Hive的元数据</h3>
+
+
+
+<h3 id="五hivesql">五、HiveSQL</h3>
+
+<ol>
+<li>Hive不支持行级别的增删改；</li>
+<li>和标准SQL一样，HiveSQL也可以分为三个部分：DDL、DML、DCL。 <br>
+其中，DCL又和Hive安全紧密相关(用户、组和角色;Grant 和 Revoke权限).</li>
+</ol>
+
+<blockquote>
+  <p>在使用HiveSQL时，经常会使用到分区，其实一个分区就对应着一个包含多个文件的文件夹。</p>
+</blockquote>
+
+
+
+<h3 id="六hive自定义函数udf">六、Hive自定义函数UDF</h3>
+
+
+
+<h4 id="hive-udf分为3类udfudafudtf">Hive UDF分为3类：UDF/UDAF/UDTF</h4>
+
+<p><a href="https://cwiki.apache.org/confluence/display/Hive/LanguageManual+UDF" rel="nofollow">UDF官方文档</a></p>
+
+
+
+<h4 id="udf">UDF</h4>
+
+<p><a href="https://cwiki.apache.org/confluence/display/Hive/HivePlugins#HivePlugins-CreatingCustomUDFs" rel="nofollow">官网UDF示例</a> <br>
+User Defined Scalar Function，通常也称之为UDF。用户自定义标量值函数(User Defined Scalar Function)通常也称之为UDF。其输入与输出是一对一的关系，即读入一行数据，写出一条输出值。</p>
+
+
+
+<h4 id="udaf">UDAF</h4>
+
+<p><a href="https://cwiki.apache.org/confluence/display/Hive/GenericUDAFCaseStudy#GenericUDAFCaseStudy-WritingGenericUDAFs:ATutorial" rel="nofollow">官网UDAF示例</a> <br>
+UDAF(User Defined Aggregation Function)，自定义聚合函数，其输入与输出是多对一的关系，即将多条输入记录聚合成一条输出值。可以与 SQL中的Group By语句联用。</p>
+
+
+
+<h4 id="udtf">UDTF</h4>
+
+<p><a href="https://cwiki.apache.org/confluence/display/Hive/DeveloperGuide+UDTF" rel="nofollow">官方UDTF示例</a> <br>
+UDTF(User Defined Table Valued Function)，自定义表值函数，是用来解决一次函数调用输出多行数据场景的，也是唯一能返回多个字段的自定义函数。而UDF只能一次计算输出一条返回值。</p>
+
+
+
+<h3 id="参考文献">参考文献</h3>
+
+<p>Hive编程指南  <br>
+<a href="https://cwiki.apache.org/confluence/display/Hive/HCatalog" rel="nofollow">HCatalog官方文档</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

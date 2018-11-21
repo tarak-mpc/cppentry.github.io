@@ -1,0 +1,100 @@
+---
+layout:     post
+title:      hive性能优化指南——初级篇
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div id="article_content" class="article_content">
+<div id="cnblogs_post_body" style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:21px;">
+<h1 style="font-size:28px;"><span style="font-size:24px;">1.概述</span></h1>
+<p>　　这个标题也是用血的教训换来的，希望对刚进入hive圈的童鞋和正在hive圈爬坑的童鞋有所帮助。打算分以下几个部分去描述：</p>
+<ul><li style="list-style: !important;">Hive的结构</li><li style="list-style: !important;">Hive的基本操作</li><li style="list-style: !important;">Hive Select</li><li style="list-style: !important;">Hive Join</li><li style="list-style: !important;">Hive UDF</li><li style="list-style: !important;">Hive的M/R</li><li style="list-style: !important;">使用Hive注意点</li><li style="list-style: !important;">优化及优化详情</li><li style="list-style: !important;">优化总结</li><li style="list-style: !important;">调优的经常手段</li><li style="list-style: !important;">解决Hive问题的途径</li></ul><p>　　这篇文章只是起个头，为描述其他部分做下准备。下面我赘述下Hive的结构和一些基本的操作。</p>
+<h1 style="font-size:28px;"><span style="font-size:24px;">2.介绍</span></h1>
+<p>　　Hive 是建立在 Hadoop 上的数据仓库基础构架。它提供了一系列的工具，可以用来进行数据提取转化加载（ETL），这是一种可以存储、查询和分析存储在 Hadoop 中的大规模数据的机制。Hive 定义了简单的类 SQL 查询语言，称为 HQL，它允许熟悉 SQL 的用户查询数据。同时，这个语言也允许熟悉 MapReduce 开发者的开发自定义的 mapper 和 reducer
+ 来处理内建的 mapper 和 reducer 无法完成的复杂的分析工作。</p>
+<p>　　首先，我来说说什么是hive（What is Hive?），请看下图：</p>
+<p><img src="http://images.cnitblog.com/blog/666745/201502/121618399176872.png" alt="" style="border:0px;"></p>
+<p><img src="http://images.cnitblog.com/blog/666745/201502/121619024959741.png" alt="" style="border:0px;"></p>
+<p>　　由于是在Retina下截的屏，为避免网络原因显示不出图片，这里为也用文字描述以下。这个和介绍中描述的内容大致是一致的，Hive构建在Hadoop的HDFS和MapReduce之上，用于管理和查询结构化/非结构化数据的数据仓库。</p>
+<ul><li style="list-style: !important;">使用HQL作为查询接口</li><li style="list-style: !important;">使用HDFS作为底层存储</li><li style="list-style: !important;">使用MapReduce作为执行层</li></ul><p>　　那么这里不禁会引发一个疑问？Hive是如何应用的呢？请看下图：</p>
+<p><img src="http://images.cnitblog.com/blog/666745/201502/121626125112937.png" alt="" height="384" width="870" style="border:0px none;"></p>
+<p>　　这里集群搭建Hive时用到了HA，这个是做大数据的常识，单点问题时刻铭记，最后用HAProxy来做代理。至于想了解如何使用来完成指标计算，可以参考我写的<span style="color:rgb(255,0,0);"><a id="cb_post_title_url" class="postTitle2" href="http://www.cnblogs.com/smartloli/p/4272705.html" rel="nofollow" style="color:#000000;"><span style="color:rgb(255,0,0);">网站日志统计案例分析与实现</span></a></span>中关于用Hive实现计算的描述，这里不做过多的赘述。</p>
+<h2 style="font-size:21px;"><span style="font-size:18px;">2.1结构描述</span></h2>
+<p align="left">　　Hive 的结构可以分为以下几部分：</p>
+<ul><li style="list-style: !important;">用户接口：包括 CLI, Client, WUI</li><li style="list-style: !important;">元数据存储。通常是存储在关系数据库如 mysql, derby 中</li><li style="list-style: !important;">解释器、编译器、优化器、执行器</li><li style="list-style: !important;">Hadoop：用 HDFS 进行存储，利用 MapReduce 进行计算</li></ul><p align="left">　　1、 用户接口主要有三个：CLI，Client 和 WUI。其中最常用的是 CLI，Cli 启动的时候，会同时启动一个 Hive 副本。Client 是 Hive 的客户端，用户连接至 Hive Server。在启动 Client 模式的时候，需要指出 Hive Server 所在节点，并且在该节点启动 Hive Server。 WUI 是通过浏览器访问
+ Hive。</p>
+<p align="left">　　2、 Hive 将元数据存储在数据库中，如 mysql、derby。Hive 中的元数据包括表的名字，表的列和分区及其属性，表的属性（是否为外部表等），表的数据所在目录等。</p>
+<p align="left">　　3、 解释器、编译器、优化器完成 HQL 查询语句从词法分析、语法分析、编译、优化以及查询计划的生成。生成的查询计划存储在 HDFS 中，并在随后有 MapReduce 调用执行。</p>
+<p>　　Hive 的数据存储在 HDFS 中，大部分的查询由 MapReduce 完成（包含 * 的查询，比如 select * from tbl 不会生成 MapRedcue 任务）。</p>
+<h2 style="font-size:21px;"><span style="font-size:18px;">2.2Hive和普通DB的异同</span></h2>
+<table border="0" style="border-collapse:collapse;border-spacing:0px;border:1px solid #C0C0C0;"><tbody><tr><td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+ </td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+Hive</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+RDBMS</td>
+</tr><tr><td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+查询语句</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+HQL</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+SQL</td>
+</tr><tr><td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+数据存储</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+HDFS</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+Raw Device or Local FS</td>
+</tr><tr><td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+索引</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+1.0.0版本支持</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+有</td>
+</tr><tr><td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+执行延迟</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+高</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+低</td>
+</tr><tr><td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+处理数据规模</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+大（或海量）</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+小</td>
+</tr><tr><td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+执行</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+MapReduce</td>
+<td style="border:1px solid #C0C0C0;border-collapse:collapse;">
+Excutor</td>
+</tr></tbody></table><p>　　截止本篇文章完成时，Hive对外发布的1.0.0版本已支持索引的创建，下面引用官方部分原话：</p>
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;font-size:12px !important;background-color:rgb(245,245,245);">
+<pre style="font-family:'Courier New' !important;"><span style="line-height:1.5 !important;">REPRO STEPS:
+create database skewtest;
+use skewtest;
+create table skew (</span><span style="color:rgb(0,0,255);line-height:1.5 !important;">id</span> bigint, acct <span style="color:rgb(0,0,255);line-height:1.5 !important;">string</span>) skewed by (acct) on (<span style="color:rgb(128,0,0);line-height:1.5 !important;">'</span><span style="color:rgb(128,0,0);line-height:1.5 !important;">CC</span><span style="color:rgb(128,0,0);line-height:1.5 !important;">'</span>,<span style="color:rgb(128,0,0);line-height:1.5 !important;">'</span><span style="color:rgb(128,0,0);line-height:1.5 !important;">CH</span><span style="color:rgb(128,0,0);line-height:1.5 !important;">'</span><span style="line-height:1.5 !important;">);
+create index skew_indx on table skew (</span><span style="color:rgb(0,0,255);line-height:1.5 !important;">id</span>) as <span style="color:rgb(128,0,0);line-height:1.5 !important;">'</span><span style="color:rgb(128,0,0);line-height:1.5 !important;">org.apache.hadoop.hive.ql.index.compact.CompactIndexHandler</span><span style="color:rgb(128,0,0);line-height:1.5 !important;">'</span> WITH DEFERRED REBUILD;</pre>
+</div>
+<p>　　具体详细信息可参考链接：https://issues.apache.org/jira/browse/HIVE-5631</p>
+<h2 style="font-size:21px;"><span style="font-size:18px;">2.3元数据</span></h2>
+<p align="left">　　Hive 将元数据存储在 RDBMS 中,一般常用的有MYSQL和DERBY。由于DERBY只支持单客户端登录，所以一般采用MySql来存储元数据。</p>
+<p align="left">　　注：关于如何安装配置Hive，请参考我写的<span style="color:rgb(255,0,0);"><a class="postTitle2" href="http://www.cnblogs.com/smartloli/p/4201831.html" rel="nofollow" style="color:#000000;"><span style="color:rgb(255,0,0);">Hive的安装部署</span></a></span>。</p>
+<h2 align="left" style="font-size:21px;"><span style="font-size:18px;">2.4数据存储</span></h2>
+<p align="left">　　首先，Hive 没有专门的数据存储格式，也没有为数据建立索引，用户可以非常自由的组织 Hive 中的表，只需要在创建表的时候告诉 Hive 数据中的列分隔符和行分隔符，Hive 就可以解析数据。</p>
+<p align="left">　　其次，Hive 中所有的数据都存储在 HDFS 中，Hive 中包含以下数据模型：Table，External Table，Partition，Bucket。</p>
+<ol start="1"><li style="list-style:decimal;">Hive 中的 Table 和数据库中的 Table 在概念上是类似的，每一个 Table 在 Hive 中都有一个相应的目录存储数据。例如，一个表 app，它在 HDFS 中的路径为：/ warehouse /app，其中，wh 是在 hive-site.xml 中由 ${hive.metastore.warehouse.dir} 指定的数据仓库的目录，所有的 Table 数据（不包括
+ External Table）都保存在这个目录中。</li><li style="list-style:decimal;">Partition 对应于数据库中的 Partition 列的密集索引，但是 Hive 中 Partition 的组织方式和数据库中的很不相同。在 Hive 中，表中的一个 Partition 对应于表下的一个目录，所有的 Partition 的数据都存储在对应的目录中。例如：xiaojun 表中包含 dt 和 city 两个 Partition，则对应于 dt = 20100801,
+ ctry = US 的 HDFS 子目录为：/ warehouse /app/dt=20100801/ctry=US；对应于 dt = 20100801, ctry = CA 的 HDFS 子目录为；/ warehouse /app/dt=20100801/ctry=CA</li><li style="list-style:decimal;">Buckets 对指定列计算 hash，根据 hash 值切分数据，目的是为了并行，每一个 Bucket 对应一个文件。将 user 列分散至 32 个 bucket，首先对 user 列的值计算 hash，对应 hash 值为 0 的 HDFS 目录为：/ warehouse /app/dt =20100801/ctry=US/part-00000；hash 值为 20 的 HDFS
+ 目录为：/ warehouse /app/dt =20100801/ctry=US/part-00020</li><li style="list-style:decimal;">External Table 指向已经在 HDFS 中存在的数据，可以创建 Partition。它和 Table 在元数据的组织上是相同的，而实际数据的存储则有较大的差异。</li></ol><ul><li style="list-style: !important;">Table （内部表）的创建过程和数据加载过程（这两个过程可以在同一个语句中完成），在加载数据的过程中，实际数据会被移动到数据仓库目录中；之后对数据对访问将会直接在数据仓库目录中完成。删除表时，表中的数据和元数据将会被同时删除。</li></ul><p>　　External Table 只有一个过程，加载数据和创建表同时完成（CREATE EXTERNAL TABLE ……LOCATION），实际数据是存储在 LOCATION 后面指定的 HDFS 路径中，并不会移动到数据仓库目录中。当删除一个 External Table 时，仅删除hive的元数据，不会删除hdfs上对应的文件。</p>
+<h1 style="font-size:28px;"><span style="font-size:24px;">3.总结</span></h1>
+<p>　　这篇就描述到这里，其他部分后面整理好资料后在与各位分享；若有疑问可加群讨论，或是发邮件给我，我会尽我所能给予帮助，与君共勉！</p>
+</div>
+<div id="MySignature" style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:14px;line-height:21px;">
+原文链接：http://www.thebigdata.cn/QiTa/13857.html<br></div>
+</div>
+            </div>
+                </div>

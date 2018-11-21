@@ -1,0 +1,301 @@
+---
+layout:     post
+title:      Hive基础一（数据库，表，分区表，视图，导入导出数据）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/login_sonata/article/details/74894685				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>相关链接： <br>
+<a href="http://blog.csdn.net/login_sonata/article/details/74894685" rel="nofollow" target="_blank">Hive基础一（数据库，表，分区表，视图，导入导出数据）</a> <br>
+<a href="http://blog.csdn.net/login_sonata/article/details/75000766" rel="nofollow" target="_blank">Hive基础二（join原理和机制，join的几种类型，数据倾斜简单处理）</a> <br>
+<a href="http://blog.csdn.net/login_sonata/article/details/75092590" rel="nofollow" target="_blank">Hive基础三（查询中常用的语法）</a></p>
+
+<p><strong>注意Hive版本问题，可能有些命令不适用或者漏掉了。查看Hive版本的方法是在Hive命令行中输入：</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">hive&gt; <span class="hljs-keyword">set</span> system:sun<span class="hljs-preprocessor">.java</span><span class="hljs-preprocessor">.command</span><span class="hljs-comment">;</span></code></pre>
+
+
+
+<h2 id="1hive的数据单元">1，Hive的数据单元</h2>
+
+<ul>
+<li>Databases：<strong>数据库</strong>，概念等同于关系型数据库的Schema；</li>
+<li>Tables：<strong>表</strong>，概念等同于关系型数据库的表，不多解释；</li>
+<li>Partitions：<strong>分区</strong>，概念类似于关系型数据库的表分区，没有那么多分区类型，只支持固定分区，将同一组数据存放至一个固定的分区中。</li>
+<li>Buckets (or Clusters)：<strong>分桶</strong>，同一个分区内的数据还可以细分，将相同的KEY再划分至一个桶中，这个有点类似于HASH分区，只不过这里是HASH分桶，也有点类似子分区吧。</li>
+</ul>
+
+
+
+<h2 id="2hive中的数据库database">2，Hive中的数据库(Database)</h2>
+
+<blockquote>
+  <p>进入Hive命令行，执行<code>show databases;</code>命令，可以列出hive中的所有数据库，进入Hive-Cli之后，默认进到default数据库下。使用<code>use databasename;</code>可以切换到某个数据库下，同mysql。</p>
+</blockquote>
+
+<ol>
+<li><p><strong>创建数据库。</strong> 比如，创建名为lxw1234的数据库：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">DATABASE</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> lxw1234 
+COMMENT <span class="hljs-string">'lxw的大数据田地-lxw1234.com'</span> 
+localtion <span class="hljs-string">'hdfs://namenode/user/lxw1234/lxw1234.db/'</span>;</span>  </code></pre>
+
+<p>创建时候可以指定数据库在HDFS上的存储位置。</p></li>
+<li><p><strong>修改数据库属性和所有者</strong> ： </p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> (<span class="hljs-keyword">DATABASE</span>|<span class="hljs-keyword">SCHEMA</span>) database_name 
+<span class="hljs-keyword">SET</span> DBPROPERTIES (property_name=property_value, …);</span></code></pre>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> (<span class="hljs-keyword">DATABASE</span>|<span class="hljs-keyword">SCHEMA</span>) database_name
+<span class="hljs-keyword">SET</span> OWNER [<span class="hljs-keyword">USER</span>|ROLE] user_or_role;</span></code></pre></li>
+<li><p><strong>删除数据库</strong>： </p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">DROP</span> (<span class="hljs-keyword">DATABASE</span>|<span class="hljs-keyword">SCHEMA</span>) [<span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span>] database_name [<span class="hljs-keyword">RESTRICT</span>|<span class="hljs-keyword">CASCADE</span>];</span></code></pre>
+
+<p>默认情况下，<code>RESTRICT</code>关键字就是默认情况，Hive不允许删除一个里面有表存在的数据库，如果想删除数据库，要么先将数据库中的表全部删除，要么可以使用<code>CASCADE</code>关键字，使用该关键字后，Hive会自己将数据库下的表全部删除。</p></li>
+</ol>
+
+
+
+<h2 id="3hive中的表table">3，Hive中的表(Table)</h2>
+
+<blockquote>
+  <p>进入Hive-Cli，使用<code>use databasename;</code>切换到指定数据库之后，执行<code>show tables;</code> 即可查看该数据库下所有的表，可以使用<code>desc tablename;</code>来查看表的结构，用<code>desc formatted tablename;</code>命令更详细，其中包括了存储路径。</p>
+</blockquote>
+
+<ol>
+<li><p><strong>内部表和外部表</strong>  <br>
+Hive中的表分为内部表(MANAGED_TABLE)和外部表(EXTERNAL_TABLE)。</p>
+
+<ul><li><strong>区别：</strong> 内部表DROP时候会删除HDFS上的数据; 外部表DROP时候不会删除HDFS上的数据;</li>
+<li><strong>内部表适用场景：</strong>适用于Hive中间表、结果表、以及不需要从外部（如本地文件、HDFS）load数据的情况。</li>
+<li><strong>外部表适用场景：</strong>源表，需要定期将外部数据映射到表中。</li>
+<li><strong>适用场景举例说明</strong>：每天将收集到的网站日志定期流入HDFS文本文件，一天一个目录，在Hive中建立外部表作为源表，通过添加分区的方式，将每天HDFS上的原始日志映射到外部表的天分区中，在外部表（原始日志表）的基础上做大量的统计分析，用到的中间表、结果表使用内部表存储，数据通过SELECT+INSERT进入内部表。</li></ul></li>
+<li><p><strong>创建表</strong>， 常用代码： </p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">EXTERNAL</span> <span class="hljs-keyword">TABLE</span> t_lxw1234 ( 
+id <span class="hljs-keyword">INT</span>, 
+ip STRING COMMENT <span class="hljs-string">'访问者IP'</span>, 
+avg_view_depth <span class="hljs-keyword">DECIMAL</span>(<span class="hljs-number">5</span>,<span class="hljs-number">1</span>), 
+bounce_rate <span class="hljs-keyword">DECIMAL</span>(<span class="hljs-number">6</span>,<span class="hljs-number">5</span>) 
+) COMMENT <span class="hljs-string">'lxw的大数据田地-lxw1234.com'</span> 
+PARTITIONED <span class="hljs-keyword">BY</span> (<span class="hljs-keyword">day</span> STRING) 
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED 
+FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">','</span> 
+STORED <span class="hljs-keyword">AS</span> textfile 
+LOCATION <span class="hljs-string">'hdfs://cdh5/tmp/lxw1234/'</span>;</span> </code></pre>
+
+<p>说明： </p>
+
+<ul><li><strong>关键字EXTERNAL</strong>：表示该表为外部表，如果不指定EXTERNAL关键字，则表示内部表 。</li>
+<li><strong>关键字COMMENT：</strong> 为表和列添加注释。</li>
+<li><strong>关键字PARTITIONED BY：</strong> 表示该表为分区表，分区字段为day,类型为string。表分区下一章单独讲。</li>
+<li><p><strong>关键字ROW FORMAT DELIMITED：</strong> 指定表的分隔符，通常后面要与以下关键字连用： </p>
+
+<ul><li><code>FIELDS TERMINATED BY ','</code>：指定每行中字段分隔符为逗号。</li>
+<li><code>LINES TERMINATED BY '\n'</code>：指定行分隔符 。</li>
+<li><code>COLLECTION ITEMS TERMINATED BY ','</code>：指定集合中元素之间的分隔符 。</li>
+<li><p><code>MAP KEYS TERMINATED BY ':'</code>：指定数据中Map类型的Key与Value之间的分隔符，举个例子： </p>
+
+<pre class="prettyprint"><code class=" hljs cpp">create table score(
+name <span class="hljs-built_in">string</span>,
+score <span class="hljs-stl_container"><span class="hljs-built_in">map</span>&lt; <span class="hljs-built_in">string</span>,<span class="hljs-keyword">int</span>&gt;</span>
+) ROW FORMAT DELIMITED 
+FIELDS TERMINATED BY <span class="hljs-string">'\t'</span>
+COLLECTION ITEMS TERMINATED BY <span class="hljs-string">','</span> 
+MAP KEYS TERMINATED BY <span class="hljs-string">':'</span>;</code></pre>
+
+<p>对应的要加载的文本数据为： </p>
+
+<pre class="prettyprint"><code class=" hljs bash">biansutao <span class="hljs-string">'数学'</span>:<span class="hljs-number">80</span>,<span class="hljs-string">'语文'</span>:<span class="hljs-number">89</span>,<span class="hljs-string">'英语'</span>:<span class="hljs-number">95</span> 
+jobs <span class="hljs-string">'语文'</span>:<span class="hljs-number">60</span>,<span class="hljs-string">'数学'</span>:<span class="hljs-number">80</span>,<span class="hljs-string">'英语'</span>:<span class="hljs-number">99</span> </code></pre></li></ul></li>
+<li><strong>关键字STORED AS：</strong> 指定表在HDFS上的文件存储格式，可选的文件存储格式有： <br>
+<ul><li>TEXTFILE：文本，默认值 。</li>
+<li>SEQUENCEFILE：  二进制序列文件 。</li>
+<li>RCFILE、ORC、PARQUET： 几种列式存储格式文件。</li></ul></li>
+<li><strong>关键字LOCATION：</strong> 指定表在HDFS上的存储位置。</li></ul></li>
+<li><p><strong>删除表</strong> <br>
+方式1，只删除表中数据：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">insert</span> overwrite <span class="hljs-keyword">table</span> t_table1 <span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> t_table1 <span class="hljs-keyword">where</span> <span class="hljs-number">1</span>=<span class="hljs-number">0</span>;</span></code></pre>
+
+<p>方式2，截断表（删除所有行）：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">TRUNCATE</span> <span class="hljs-keyword">TABLE</span> table_name;</span>
+<span class="hljs-operator"><span class="hljs-keyword">TRUNCATE</span> <span class="hljs-keyword">TABLE</span> table_name PARTITION (dt=<span class="hljs-string">'20080808'</span>);</span></code></pre>
+
+<p>方式3，删除表（同时删元数据，删除外部表时，存储的数据不会被删除）：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">DROP</span> <span class="hljs-keyword">TABLE</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span> table_name;</span></code></pre></li>
+</ol>
+
+<h2 id="4hive中的分区表">4，Hive中的分区表</h2>
+
+<blockquote>
+  <p>Hive中的表分区就是将同一组数据放到同一个HDFS目录下，当查询中过滤条件指定了某一个分区值时候，只将该分区对应的目录作为Input，从而减少MapReduce的输入数据，提高查询效率。</p>
+</blockquote>
+
+<ol>
+<li><p><strong>创建分区表</strong></p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">EXTERNAL</span> <span class="hljs-keyword">TABLE</span> t_lxw1234 (
+id <span class="hljs-keyword">INT</span>,
+ip STRING COMMENT <span class="hljs-string">'访问者IP'</span>,
+avg_view_depth <span class="hljs-keyword">DECIMAL</span>(<span class="hljs-number">5</span>,<span class="hljs-number">1</span>),
+bounce_rate <span class="hljs-keyword">DECIMAL</span>(<span class="hljs-number">6</span>,<span class="hljs-number">5</span>)
+) COMMENT <span class="hljs-string">'lxw的大数据田地-lxw1234.com'</span>
+PARTITIONED <span class="hljs-keyword">BY</span> (<span class="hljs-keyword">month</span> STRING, <span class="hljs-keyword">day</span> STRING)
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED
+FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">','</span>
+STORED <span class="hljs-keyword">AS</span> textfile;</span></code></pre>
+
+<p><strong>说明：</strong> <br>
+在创建表时候，使用<code>PARTITIONED BY</code>关键字来指定该表为分区表，后面括号中指定了分区的字段和类型，分区字段可以有多个，在HDFS中对应多级目录，比如，上面的表<code>t_lxw1234</code>的分区<code>month='2015-06',day='2015-06-15'</code>对应HDFS上的路径为： <br>
+<code>/user/hive/warehouse/default.db/t_lxw1234/month=2015-06/day=2015-06-15/</code> <br>
+当查询中指定了<code>month='2015-06' AND day='2015-06-15'</code>，MapReduce直接从该目录中读取数据，如果只指定了<code>month='2015-06'</code>，那么MapReduce将<code>/month=2015-06/</code>下所有的子目录都作为Input。</p></li>
+<li><p><strong>添加分区</strong></p>
+
+<ul><li><p><strong>往分区中追加数据</strong>：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">INSERT</span> <span class="hljs-keyword">INTO</span> <span class="hljs-keyword">TABLE</span> t_lxw1234 
+PARTITION (<span class="hljs-keyword">month</span> = <span class="hljs-string">'2015-06'</span>,<span class="hljs-keyword">day</span> = <span class="hljs-string">'2015-06-15'</span>)
+<span class="hljs-keyword">SELECT</span> * <span class="hljs-keyword">FROM</span> dual;</span></code></pre></li>
+<li><p><strong>覆盖分区数据</strong>：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">INSERT</span> overwrite <span class="hljs-keyword">TABLE</span> t_lxw1234 
+PARTITION (<span class="hljs-keyword">month</span> = <span class="hljs-string">'2015-06'</span>,<span class="hljs-keyword">day</span> = <span class="hljs-string">'2015-06-15'</span>)
+<span class="hljs-keyword">SELECT</span> * <span class="hljs-keyword">FROM</span> dual;</span></code></pre></li>
+<li><p><strong>使用ALTER TABLE添加分区</strong>：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> t_lxw1234 
+<span class="hljs-keyword">ADD</span> PARTITION (<span class="hljs-keyword">month</span> = <span class="hljs-string">'2015-06'</span>,<span class="hljs-keyword">day</span> = <span class="hljs-string">'2015-06-15'</span>) 
+location <span class="hljs-string">'hdfs://namenode/tmp/lxw1234/month=2015-06/day=2015-06-15/'</span>;</span></code></pre></li></ul></li>
+<li><p><strong>动态分区</strong>： <br>
+关系型数据库（如Oracle）中，对分区表Insert数据时候，数据库自动会根据分区字段的值，将数据插入到相应的分区中，Hive中也提供了类似的机制，即动态分区(Dynamic Partition)，只不过，使用Hive的动态分区，需要进行相应的配置，具体可看<a href="http://lxw1234.com/archives/2015/06/286.htm" rel="nofollow" target="_blank">http://lxw1234.com/archives/2015/06/286.htm</a> <br>
+然后语句类似这样：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">INSERT</span> overwrite <span class="hljs-keyword">TABLE</span> t_lxw1234_partitioned 
+PARTITION (<span class="hljs-keyword">month</span>,<span class="hljs-keyword">day</span>) 
+<span class="hljs-keyword">SELECT</span> url,substr(<span class="hljs-keyword">day</span>,<span class="hljs-number">1</span>,<span class="hljs-number">7</span>) <span class="hljs-keyword">AS</span> <span class="hljs-keyword">month</span>,<span class="hljs-keyword">day</span> 
+<span class="hljs-keyword">FROM</span> t_lxw1234;</span></code></pre>
+
+<p><strong>注意</strong>：在<code>PARTITION (month,day)</code>中指定分区字段名即可，同时SELECT子句的最后两个字段，必须对应前面<code>PARTITION (month,day)</code>中指定的分区字段，包括顺序。</p></li>
+<li><strong>查看分区表及对应的HDFS路径</strong> <br>
+使用命令 <code>show partitions t_lxw1234;</code> 查看对应表的所有分区。如果要查看该分区的详细信息（包括该分区在HDFS上的路径）的话，命令如下： <br>
+<code>desc formatted t_lxw1234 partition (month = '2015-01' , day = '2015-01-25');</code></li>
+<li><p><strong>删除分区表</strong></p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> t_lxw1234 
+<span class="hljs-keyword">DROP</span> PARTITION (<span class="hljs-keyword">month</span> = <span class="hljs-string">'2015-01'</span>, <span class="hljs-keyword">day</span> = <span class="hljs-string">'2015-01-25'</span>);</span></code></pre>
+
+<p><strong>注意：</strong>也分内部表和外部表，如果该分区表为外部表，则分区对应的HDFS目录数据不会被删除。</p></li>
+</ol>
+
+
+
+<h2 id="5hive视图相关">5，Hive视图相关</h2>
+
+<blockquote>
+  <p>在真实业务场景下，视图的应用比较少，分区使用的非常多，因此建议对分区这块多花的时间来了解。</p>
+</blockquote>
+
+<p>和关系型数据库一样，Hive中也提供了视图的功能，注意Hive中视图的特性，和关系型数据库中的<strong>稍有区别</strong>：</p>
+
+<ul>
+<li>只有逻辑视图，没有物化视图；</li>
+<li>视图只能查询，不能Load/Insert/Update/Delete数据；</li>
+<li>视图在创建时候，只是保存了一份元数据，当查询视图的时候，才开始执行视图对应的那些子查询；</li>
+</ul>
+
+<p></p>
+
+<ol>
+<li><p><strong>创建视图</strong></p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">VIEW</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> v_lxw1234 (
+url COMMENT <span class="hljs-string">'url'</span>
+) COMMENT <span class="hljs-string">'view lxw1234'</span>
+<span class="hljs-keyword">AS</span> <span class="hljs-keyword">SELECT</span> url <span class="hljs-keyword">FROM</span> lxw1234
+<span class="hljs-keyword">WHERE</span> url <span class="hljs-keyword">LIKE</span> <span class="hljs-string">'http://%'</span>
+LIMIT <span class="hljs-number">100</span>;</span></code></pre></li>
+<li><p><strong>删除视图</strong></p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">DROP</span> <span class="hljs-keyword">VIEW</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span> v_lxw1234;</span></code></pre></li>
+<li><p><strong>修改视图</strong></p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">VIEW</span> v_lxw1234 
+<span class="hljs-keyword">AS</span> <span class="hljs-keyword">SELECT</span> url <span class="hljs-keyword">FROM</span> lxw1234 limit <span class="hljs-number">500</span>;</span></code></pre></li>
+</ol>
+
+
+
+<h2 id="6导入导出数据">6，导入导出数据</h2>
+
+<blockquote>
+  <p>在Hive中建好表之后，需要将数据加载进来，以便做后续查询分析。</p>
+</blockquote>
+
+<ol>
+<li><p><strong>建表时直接指定HDFS路径</strong> <br>
+如果你的数据已经在HDFS上存在，已经为结构化数据，并且数据所在的HDFS路径不需要维护，那么可以直接在建表的时候使用<code>location</code>指定数据所在的HDFS路径即可。比如：</p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> [<span class="hljs-keyword">EXTERNAL</span>] <span class="hljs-keyword">TABLE</span> t_lxw1234 (
+<span class="hljs-keyword">day</span> STRING,
+url STRING)
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED 
+FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">' '</span> 
+stored <span class="hljs-keyword">as</span> textfile 
+location <span class="hljs-string">'/tmp/lxw1234/'</span>;</span></code></pre>
+
+<p><strong>注意</strong>：这里内部表和外部表都可以指定，如果是内部表，那么在DROP该表的时候，同时会将LOCATION所指定的目录一起删除。</p></li>
+<li><p><strong>表已存在，从本地文件系统或者HDFS加载数据</strong> <br>
+如果数据在本地，或者HDFS的某一个目录下，需要加载到目标中或分区中，那么使用LOAD DATA命令即可加载数据：</p>
+
+<pre class="prettyprint"><code class=" hljs sql">//加载本地文件
+<span class="hljs-operator"><span class="hljs-keyword">LOAD</span> DATA <span class="hljs-keyword">LOCAL</span> INPATH <span class="hljs-string">'/home/lxw1234/t_lxw1234/'</span>
+<span class="hljs-keyword">INTO</span> <span class="hljs-keyword">TABLE</span> t_lxw1234 PARTITION (<span class="hljs-keyword">day</span> = <span class="hljs-string">'2015-06-15'</span>);</span>
+//加载HDFS文件
+<span class="hljs-operator"><span class="hljs-keyword">LOAD</span> DATA INPATH <span class="hljs-string">'/user/lxw1234/t_lxw1234/'</span>
+<span class="hljs-keyword">INTO</span> <span class="hljs-keyword">TABLE</span> t_lxw1234 PARTITION (<span class="hljs-keyword">day</span> = <span class="hljs-string">'2015-06-15'</span>);</span></code></pre></li>
+<li><p><strong>表已存在，从一个子查询中加载数据</strong> <br>
+这个比较简单，就是将一个查询结果插入到目标表或分区中：</p>
+
+<pre class="prettyprint"><code class=" hljs sql">//追加数据是把overwrite改成INTO
+<span class="hljs-operator"><span class="hljs-keyword">INSERT</span> overwrite <span class="hljs-keyword">TABLE</span> t_lxw1234 
+PARTITION (<span class="hljs-keyword">day</span> = <span class="hljs-string">'2015-06-15'</span>)
+<span class="hljs-keyword">SELECT</span> <span class="hljs-keyword">day</span>,url <span class="hljs-keyword">from</span> source_table;</span></code></pre>
+
+<p><strong>注意</strong>：还支持<strong>多表插入</strong>，可以在同一个查询中使用多个insert子句，这样的好处是我们只需要扫描一遍源表就可以生成多个输出，具体做法是把from语句放在开头，例如：</p>
+
+<pre class="prettyprint"><code class=" hljs sql">from test1
+<span class="hljs-operator"><span class="hljs-keyword">insert</span> <span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> test2
+partition(age)
+<span class="hljs-keyword">select</span> id, name, tel, age
+<span class="hljs-keyword">insert</span> <span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> test3
+<span class="hljs-keyword">select</span> id, name
+<span class="hljs-keyword">where</span> age&gt;<span class="hljs-number">25</span>;</span></code></pre></li>
+<li><p><strong>用子查询的数据进行建表</strong></p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">table</span> new_table
+<span class="hljs-keyword">as</span> <span class="hljs-keyword">select</span> id, name
+<span class="hljs-keyword">from</span> old_table;</span></code></pre>
+
+<p><strong>注意</strong>：1，如果select查询失败，新表是不会创建的。2，子查询建表不能建外部表。</p></li>
+<li><p><strong>导出Hive中的数据到文件系统</strong></p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">INSERT</span> OVERWRITE <span class="hljs-keyword">LOCAL</span> DIRECTORY <span class="hljs-string">'/tmp/lxw1234/'</span> 
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED 
+FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">','</span> 
+<span class="hljs-keyword">SELECT</span> * <span class="hljs-keyword">FROM</span> t_lxw1234;</span></code></pre>
+
+<p><strong>注意：</strong>如果指定了<code>LOCAL</code>关键字，则为导出到本地文件系统，否则，导出到HDFS。使用<code>ROW FORMAT</code>关键字可以指定导出的文件分隔符，默认是<code>\001</code>。</p></li>
+</ol>
+
+<p>原文来自：<a href="http://lxw1234.com/archives/2015/07/365.htm" rel="nofollow" target="_blank">http://lxw1234.com/archives/2015/07/365.htm</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

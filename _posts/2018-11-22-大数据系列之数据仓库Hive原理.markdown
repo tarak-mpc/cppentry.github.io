@@ -1,0 +1,97 @@
+---
+layout:     post
+title:      大数据系列之数据仓库Hive原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/mengfanzhundsc/article/details/81300327				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="postBody">
+			<div id="cnblogs_post_body" class="blogpost-body"><h4><span style="color:#000000;"><span style="color:#000000;">Hive系列博文，持续更新~~~</span></span></h4>
+<h4><span style="color:#000000;"><a id="post_title_link_6684615" href="http://www.cnblogs.com/cnmenglang/p/6684615.html" rel="nofollow"><span style="color:#000000;">大数据系列之数据仓库Hive原理</span></a></span></h4>
+<h4><span style="color:#000000;"><a id="post_title_link_6661488" href="http://www.cnblogs.com/cnmenglang/p/6661488.html" rel="nofollow"><span style="color:#000000;">大数据系列之数据仓库Hive安装</span></a></span></h4>
+<h4><span style="color:#000000;"><a id="post_title_link_6683911" href="http://www.cnblogs.com/cnmenglang/p/6683911.html" rel="nofollow"><span style="color:#000000;">大数据系列之数据仓库Hive中分区Partition如何使用</span></a></span></h4>
+<h4><span style="color:#000000;"><a id="post_title_link_6683897" href="http://www.cnblogs.com/cnmenglang/p/6683897.html" rel="nofollow"><span style="color:#000000;">大数据系列之数据仓库Hive命令使用及JDBC连接</span></a></span></h4>
+<p> </p>
+<h2>Hive的工作原理简单来说就是一个查询引擎</h2>
+<p>先来一张Hive的架构图：</p>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409140228800-594915280.png" alt="" width="790" height="408"></p>
+<h2>Hive的工作原理如下：</h2>
+<p>接收到一个sql,后面做的事情包括：<br>1.词法分析/语法分析<br>	使用antlr将SQL语句解析成抽象语法树-AST<br>2.语义分析<br>	从Megastore获取模式信息，验证SQL语句中队表名,列名，以及数据类型的检查和隐式转换，以及Hive提供的函数和用户自定义的函数（UDF/UAF）<br>3.逻辑计划生产<br>	生成逻辑计划-算子树<br>4.逻辑计划优化<br>	对算子树进行优化，包括列剪枝，分区剪枝，谓词下推等<br>5.物理计划生成<br>	将逻辑计划生产包含由MapReduce任务组成的DAG的物理计划<br>6.物理计划执行<br>	将DAG发送到Hadoop集群进行执行<br>7.将查询结果返回</p>
+<p>流程如下图:</p>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409161514425-694872816.png" alt="" width="936" height="765"></p>
+<p> </p>
+<p>Query Compiler</p>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409140129816-158254375.png" alt="" width="713" height="470"></p>
+<p>新版本的Hive也支持使用Tez或Spark作为执行引擎。</p>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409161755675-929638435.png" alt="" width="888" height="537"><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409161801878-1617981610.png" alt="" width="886" height="543"><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409161807675-1905909160.png" alt="" width="886" height="578"><br>物理计划可以通过hive的Explain命令输出</p>
+<p>例如：</p>
+<div class="cnblogs_code">
+<pre><span style="color:#800080;">0</span>: jdbc:hive2:<span style="color:#008000;">//</span><span style="color:#008000;">master:10000/dbmfz&gt; explain select count(*) from record_dimension;</span>
++------------------------------------------------------------------------------------------------------+--+
+|                                               Explain                                                |
++------------------------------------------------------------------------------------------------------+--+
+| STAGE DEPENDENCIES:                                                                                  |
+|   Stage-<span style="color:#800080;">1</span> <span style="color:#0000ff;">is</span> a root stage                                                                            |
+|   Stage-<span style="color:#800080;">0</span> depends on stages: Stage-<span style="color:#800080;">1</span>                                                                 |
+|                                                                                                      |
+| STAGE PLANS:                                                                                         |
+|   Stage: Stage-<span style="color:#800080;">1</span>                                                                                     |
+|     Map Reduce                                                                                       |
+|       Map Operator Tree:                                                                             |
+|           TableScan                                                                                  |
+|             alias: record_dimension                                                                  |
+|             Statistics: Num rows: <span style="color:#800080;">1</span> Data size: <span style="color:#800080;">543</span> Basic stats: COMPLETE Column stats: COMPLETE      |
+|             Select Operator                                                                          |
+|               Statistics: Num rows: <span style="color:#800080;">1</span> Data size: <span style="color:#800080;">543</span> Basic stats: COMPLETE Column stats: COMPLETE    |
+|               Group By Operator                                                                      |
+|                 aggregations: count()                                                                |
+|                 mode: hash                                                                           |
+|                 outputColumnNames: _col0                                                             |
+|                 Statistics: Num rows: <span style="color:#800080;">1</span> Data size: <span style="color:#800080;">8</span> Basic stats: COMPLETE Column stats: COMPLETE    |
+|                 Reduce Output Operator                                                               |
+|                   sort order:                                                                        |
+|                   Statistics: Num rows: <span style="color:#800080;">1</span> Data size: <span style="color:#800080;">8</span> Basic stats: COMPLETE Column stats: COMPLETE  |
+|                   value expressions: _col0 (type: bigint)                                            |
+|       Reduce Operator Tree:                                                                          |
+|         Group By Operator                                                                            |
+|           aggregations: count(VALUE._col0)                                                           |
+|           mode: mergepartial                                                                         |
+|           outputColumnNames: _col0                                                                   |
+|           Statistics: Num rows: <span style="color:#800080;">1</span> Data size: <span style="color:#800080;">8</span> Basic stats: COMPLETE Column stats: COMPLETE          |
+|           File Output Operator                                                                       |
+|             compressed: <span style="color:#0000ff;">false</span>                                                                        |
+|             Statistics: Num rows: <span style="color:#800080;">1</span> Data size: <span style="color:#800080;">8</span> Basic stats: COMPLETE Column stats: COMPLETE        |
+|             table:                                                                                   |
+|                 input format: org.apache.hadoop.mapred.SequenceFileInputFormat                       |
+|                 output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat             |
+|                 serde: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe                            |
+|                                                                                                      |
+|   Stage: Stage-<span style="color:#800080;">0</span>                                                                                     |
+|     Fetch Operator                                                                                   |
+|       limit: -<span style="color:#800080;">1</span>                                                                                      |
+|       Processor Tree:                                                                                |
+|         ListSink                                                                                     |
+|                                                                                                      |
++------------------------------------------------------------------------------------------------------+--+
+<span style="color:#800080;">42</span> rows selected (<span style="color:#800080;">0.844</span> seconds)</pre>
+</div>
+<p> </p>
+<p><br>除了DML，Hive也提供DDL来创建表的schema。<br>Hive数据存储支持HDFS的一些文件格式，比如CSV，Sequence File,Avro,RC File,ORC,Parquet。也支持访问HBase。<br>Hive提供一个CLI工具，类似Oracle的sqlplus，可以交互式执行sql,提供JDBC驱动作为Java的API。</p>
+<p>转载请注明出处：</p>
+<p>作者：mengfanzhu</p>
+<p>原文链接：<a id="Editor_Edit_hlEntryLink" title="view: 大数据系列之数据仓库Hive原理" href="http://www.cnblogs.com/cnmenglang/p/6684615.html" rel="nofollow">http://www.cnblogs.com/cnmenglang/p/6684615.html</a></p></div><div id="MySignature"></div>
+<div class="clear"></div>
+<div id="blog_post_info_block">
+<div id="BlogPostCategory"></div>
+<div id="EntryTag"></div>
+<div id="blog_post_info">
+</div>
+<div class="clear"></div>
+<div id="post_next_prev"></div>
+</div>
+
+
+		</div>            </div>
+                </div>

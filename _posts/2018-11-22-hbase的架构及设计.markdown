@@ -1,0 +1,71 @@
+---
+layout:     post
+title:      hbase的架构及设计
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/liweisnake/article/details/78086262				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>hbase是强一致性的海量数据库，无论是读写性能，或是数据容量，还是一致性方面，hbase都有非常优秀的表现。</p>
+<p>本文从架构方面探讨hbase的主要设计，从而在需要hbase的场合能够更好的设计和判断。</p>
+<p>首先，先来看看<strong>hbase的整体架构</strong>。除了DFS组件，hbase的基本组件图实际上就是Zookeeper，HMaster，RegionServer。</p>
+<p><img src="https://img-blog.csdn.net/20171007104837576?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p></p>
+<p>其中，<strong>RegionServer</strong>作为数据的实际存取服务器，主要负责数据的最终存取，一般情况都是多台；</p>
+<p>RegionServer根据不同的row key划分为许多region，每个region按顺序存放从startKey到endKey的数据。每个RegionServer有下面这些组件：</p>
+<p><img src="https://img-blog.csdn.net/20171015092617159?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><img src="https://img-blog.csdn.net/20171007212610301?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><strong><br></strong></p>
+<p><strong>一个WAL</strong>: write ahead log. 听名知其意，该文件是落库前先写的日志文件，它最主要的作用是恢复数据用，类似于mysql的binlog。保存在HDFS中<br></p>
+<p></p>
+<p><strong>一个BlockCache</strong>: regionServer的读缓存。保存使用最频繁的数据，使用LRU算法换出不需要的数据。</p>
+<p><strong>多个Region</strong>: 每个region包含多个store，每个CF拥有一个store<br></p>
+<p><strong>store</strong>: 每个store包含多个storeFile和一个memstore<br></p>
+<p><strong>Memstore</strong>: region的写缓存。保存还未写入HFile的数据，写入数据前会先做排序，每个region每个CF都会拥有一个Memstore，这就是为什么CF不能建太多的原因。</p>
+<strong>storeFile</strong>: 真正存储keyvalue数据的文件，其保存的文件是排序过的。一个storeFile对应一个HFile。保存在HDFS中
+<p><br></p>
+<p>HFile分为数据块，索引块，bloom过滤器以及trailer。</p>
+<p><img src="https://img-blog.csdn.net/20171015100418759?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p></p>
+<p><strong>Trailer</strong>主要记录了HFile的基本信息，各个部分的偏移和地址信息。</p>
+<p><strong>Data block</strong>主要存储用户的key-value数据</p>
+<p><strong>Bloom filter</strong>主要用来快速定位文件是否不在数据块。<br></p>
+<img src="https://img-blog.csdn.net/20171015103532031?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><p><img src="https://img-blog.csdn.net/20171015103549504?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p>比较容易混淆的是<strong>zookeeper和hmaster</strong>。</p>
+<p><strong>Zookeeper</strong>负责保持多台Hmaster中只有一台是活跃的；存储Hbase的schema，table，CF等元信息；存储所有的region入口；监控regionServer的状态，并将该信息通知hmaster。可以看出来，zookeeper几乎是负责整个集群的关键信息存取以及关键状态监控。<strong>如果zookeeper挂了，那么整个hbase集群几乎就是不可用的状态</strong>。</p>
+<p><img src="https://img-blog.csdn.net/20171007233209495?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p><strong>Hmaster</strong>则是负责对table元数据的管理；对HRegion的负载均衡，调整HRegion的布局，比如分裂和合并；包括恢复数据的迁移等。Hmaster相当于对RegionServer的后台管理，对于一些定制的管理行为，zookeeper不可能帮你完成，于是乎才有了hmaster。<strong>如果hmaster挂了，除了不能对table进行管理配置，不能扩展region，并不会影响整体服务的可用性</strong>。</p>
+<br><p>接下来我们来关注一些关键流程。</p>
+<p><strong>客户端首次读写的流程</strong>：</p>
+<p>1. 客户端首先从zookeeper中得到META table的位置，根据META table的存储位置得到具体的RegionServer是哪台</p>
+<p>2. 询问具体的RegionServer</p>
+<p><strong>写流程</strong>：</p>
+<p>1. 首先写入WAL日志，以防crash。</p>
+<p>2. 紧接着写入Memstore，即写缓存。由于是内存写入，速度较快。</p>
+<p>3. 立马返回客户端表示写入完毕。</p>
+<p>4. 当Memstore满时，从Memstore刷新到HFile，磁盘的顺序写速度非常快，并记录下最后一次最高的sequence号。这样系统能知道哪些记录已经持久化，哪些没有。</p>
+<p><strong>读流程</strong>：</p>
+<p>1. 首先到读缓存BlockCache中查找可能被缓存的数据</p>
+<p>2. 如果未找到，到写缓存查找已提交但是未落HFile的数据</p>
+<p>3. 如果还未找到， 到HFile中继续查找数据</p>
+<p><img src="https://img-blog.csdn.net/20171008110233034?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p><strong>数据紧凑</strong>：<br></p>
+<p>数据从memStore刷新到HFile时，为了保持简单，都是每个memStore放一个HFile，这会带来大量小HFile文件，使得查询时效率相对较低，于是，采用数据紧凑的方式将多个小文件压缩为几个大文件。其中，minor compaction是自动将相关的小文件做一些适当的紧凑，但不彻底；而major compaction则是放在午夜跑的定时任务，将文件做最大化的紧凑。</p>
+<p><img src="https://img-blog.csdn.net/20171008114505743?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p><img src="https://img-blog.csdn.net/20171008114703447?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p><strong>数据恢复流程</strong>：</p>
+<p>当RegionServer挂了，zookeeper很快就能检测到，于是将其下的region状态设置为不可用。Hmaster随即开始恢复的流程。</p>
+<p>1. HFile本身有2个备份，而且有专门的HDFS来管理其下的文件。因此对HFile来说并不需要恢复。</p>
+<p>2. Hmaster重置region到新的regionServer</p>
+<p>3. 之前在MemStore中丢失的数据，通过WAL分裂先将WAL按照region切分。切分的原因是WAL并不区分region，而是所有region的log都写入同一个WAL。</p>
+<p>4. 根据WAL回放并恢复数据。回放的过程实际上先进MemStore，再flush到HFile</p>
+<p><img src="https://img-blog.csdn.net/20171008154723461?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p><br></p>
+<p><img src="https://img-blog.csdn.net/20171008154745990?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<br><p>我们为什么选择hbase https://yq.aliyun.com/articles/54410<br></p>
+<p>hbase架构 https://mapr.com/blog/in-depth-look-hbase-architecture/?spm=5176.100239.blogcont54410.5.ALCmt2#.VdMxvWSqqko<br></p>
+<p>HBase原理－RegionServer宕机数据恢复 http://hbasefly.com/2016/10/29/hbase-regionserver-recovering/<br></p>
+<p>HBase – 存储文件HFile结构解析 http://hbasefly.com/2016/03/25/hbase-hfile/</p>
+<p>Apache HBase I/O – HFile http://blog.cloudera.com/blog/2012/06/hbase-io-hfile-input-output/<br></p>
+            </div>
+                </div>

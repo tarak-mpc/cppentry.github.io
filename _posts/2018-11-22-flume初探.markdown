@@ -1,0 +1,216 @@
+---
+layout:     post
+title:      flume初探
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2><span style="font-size:14px;">flume的历史</span></h2>
+<div><span style="font-size:14px;">flume最早是由cloudera开发的一个分布式的、高可用、高可靠的日志收集系统。后将项目转移到apache进行管理，目前属于apache的顶级项目。</span></div>
+<h2><span style="font-size:14px;">flume版本</span></h2>
+<div><span style="font-size:14px;">在项目进入apache后，对flume进行了大规模的整体重构，由原始的一个分布式系统，逐渐的变为一个tool或者service。不再包含zookeeper等逐渐，也不存在master等管理节点。<br></span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div>
+<table border="1" cellspacing="1" cellpadding="1"><caption>flume版本对比</caption>
+<tbody><tr><td><span style="font-size:14px;"><br></span></td>
+<td><span style="font-size:14px;">flume-0.x</span></td>
+<td><span style="font-size:14px;">flume-1.x</span></td>
+</tr><tr><td><span style="font-size:14px;">项目托管</span></td>
+<td><span style="font-size:14px;">cloudera</span></td>
+<td><span style="font-size:14px;">apache</span></td>
+</tr><tr><td><span style="font-size:14px;">支持hadoop版本信息</span></td>
+<td><span style="font-size:14px;">hadoop-1.x<br>
+hadoop-0.20.x<br>
+hadoop-0.21.x<br>
+hadoop-0.22.x</span></td>
+<td><span style="font-size:14px;">hadoop-2.x<br>
+hadoop-0.23.x</span></td>
+</tr><tr><td><span style="font-size:14px;">特点</span></td>
+<td><span style="font-size:14px;">一个分布式系统，有主节点；<br>
+利用zookeeper解决高可用性；</span></td>
+<td><span style="font-size:14px;">更加像是一个工具（类似于scribe），解耦掉zookeeper；<br>
+抽象为source channel sink，可靠性由channel来保证（<br>
+类似于scribe的store概念）。<br></span></td>
+</tr></tbody></table><span style="font-size:14px;"><br></span></div>
+<h2><span style="font-size:14px;">flume架构简述</span></h2>
+<div><span style="font-size:14px;">flume的数据流向示意图如下</span></div>
+<div><span style="font-size:14px;"><img src="http://flume.apache.org/_images/UserGuide_image00.png" alt=""><br></span></div>
+<h3><span style="font-size:14px;">source</span></h3>
+<div><span style="font-size:14px;">数据的源端，负责产生数据；也可以接收其他程序或者agent发来的数据。目前的已经支持的常用的source包括：</span></div>
+<div>
+<table border="1" cellspacing="1" cellpadding="1"><caption>flume支持的source介绍</caption>
+<tbody><tr><td><span style="font-size:14px;">source名</span></td>
+<td><span style="font-size:14px;">source.type</span></td>
+<td><span style="font-size:14px;">简介</span></td>
+</tr><tr><td><span style="font-size:14px;">avro source</span></td>
+<td><span style="font-size:14px;">avro</span></td>
+<td><span style="font-size:14px;">提供一个基于avro协议的server，bind到某个端口上，等待<br>
+avro协议客户端发过来的消息；一般在agent之间传输数据时，可以配置为avro</span></td>
+</tr><tr><td><span style="font-size:14px;">thrift source</span></td>
+<td><span style="font-size:14px;">thrift</span></td>
+<td><span style="font-size:14px;">同上，不过传输协议为thrift</span></td>
+</tr><tr><td><span style="font-size:14px;">exec source</span></td>
+<td><span style="font-size:14px;">exec</span></td>
+<td><span style="font-size:14px;">执行一个unix command，以其std out作为数据源；<br>
+命令可以通过&lt;agent&gt;.&lt;source&gt;.command配置，如：<br>
+tail -f /var/log/mesg。支持对命令或者脚本的自动重启</span></td>
+</tr><tr><td><span style="font-size:14px;">netcat source</span></td>
+<td><span style="font-size:14px;">netcat</span></td>
+<td><span style="font-size:14px;">监控指定端口，每一行作为一个event传输；认为输入的数据为text的，每一行<br>
+的数据最大长度可配置（<span style="font-family:Simsun;">max-line-length）默认为512</span></span></td>
+</tr><tr><td><span style="font-size:14px;">http source</span></td>
+<td><span style="font-size:14px;">http</span></td>
+<td><span style="font-size:14px;">支持http的post和get（get仅仅用于测试）</span></td>
+</tr><tr><td><span style="font-size:14px;">scribe source</span></td>
+<td><span style="font-size:14px;"><span style="font-family:monospace;background-color:rgb(236,240,243);">org.apache.flume.source.scribe.ScribeSource</span><br></span></td>
+<td><span style="font-size:14px;">对scribe的兼容</span></td>
+</tr><tr><td><span style="font-size:14px;">syslog source</span></td>
+<td><span style="font-size:14px;">syslogtcp<br>
+syslogudp</span></td>
+<td><span style="font-size:14px;">监听syslog，支持tcp或者udp；</span></td>
+</tr><tr><td><span style="font-size:14px;">sequence source</span></td>
+<td><span style="font-size:14px;">seq</span></td>
+<td><span style="font-size:14px;">用于测试，自动产生编号自增的数据</span></td>
+</tr><tr><td><span style="font-size:14px;">spooling directory source</span></td>
+<td><span style="font-size:14px;"><br></span></td>
+<td><span style="font-size:14px;">监控某个目录下的所有文件，将其新加入的文件作为数据源传输走；<br>
+每传输玩一个文件后，会被rename成其他名字（表示已经传输过）或者删掉；<br>
+默认监控目录下的文件具有：immutable、uniquely-named属性，否则会出错；</span></td>
+</tr><tr><td><span style="font-size:14px;">jms source</span></td>
+<td><span style="font-size:14px;">jms</span></td>
+<td><span style="font-size:14px;">从消息队列获取数据。active mq</span></td>
+</tr></tbody></table><span style="font-size:14px;"><br>
+用户也可以自己实现source，继承与类AbstractSource即可。配置时，type配置为类的全称。</span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div>
+<h3><span style="font-size:14px;">channel</span></h3>
+<table border="1" cellspacing="1" cellpadding="1"><caption>channel</caption>
+<tbody><tr><td><span style="font-size:14px;"><br></span></td>
+<td><span style="font-size:14px;">type</span></td>
+<td><span style="font-size:14px;">简介</span></td>
+</tr><tr><td><span style="font-size:14px;">memory channel</span></td>
+<td><span style="font-size:14px;">memory</span></td>
+<td><span style="font-size:14px;">消息放在内存中，提供高吞吐，但不提供可靠性；<br><span style="color:#ff6666;">可能丢失数据</span>；</span></td>
+</tr><tr><td><span style="font-size:14px;">file channel</span></td>
+<td><span style="font-size:14px;">file</span></td>
+<td><span style="font-size:14px;">对数据持久化；但是配置较为麻烦，需要配置数据目录和checkpoint目录；<br>
+不同的file channel均需要配置一个checkpoint 目录；<br><span style="font-family:Simsun;line-height:20px;text-align:justify;background-color:rgb(238,238,238);">By default the File Channel uses paths for checkpoint<br>
+ and data directories that are within the user home <br>
+as specified above. As a result if you have more than <br>
+one File Channel instances active within the agent, <br>
+only one will be able to lock the directories and cause <br>
+the other channel initialization to fail.</span><br></span></td>
+</tr><tr><td><span style="font-size:14px;">jdbc channel</span></td>
+<td><span style="font-size:14px;">jdbc</span></td>
+<td><span style="font-size:14px;">内置的derb数据库，对event进行了持久化，提供高可靠性；<br>
+看来是取代同样具有持久特性的file channel</span></td>
+</tr></tbody></table><span style="font-size:14px;"><br></span>
+<h3><span style="font-size:14px;">sinks</span></h3>
+</div>
+<div><span style="font-size:14px;">sinks，负责处理source来的数据，常用的如下：</span></div>
+<div>
+<table border="1" cellspacing="1" cellpadding="1"><caption>flume支持的sink</caption>
+<tbody><tr><td><span style="font-size:14px;"><br></span></td>
+<td><span style="font-size:14px;">type</span></td>
+<td><span style="font-size:14px;">简介</span></td>
+</tr><tr><td><span style="font-size:14px;">hdfs sink</span></td>
+<td><span style="font-size:14px;">hdfs</span></td>
+<td><span style="font-size:14px;">将数据写到hdfs上；<br>
+可以配置目录（支持转义%Y-%m-%d）;</span></td>
+</tr><tr><td><span style="font-size:14px;">logger sink</span></td>
+<td><span style="font-size:14px;">logger</span></td>
+<td><span style="font-size:14px;">采用logger，logger可以配置（可以直接输出到控制台，也可输出到文件）；<br>
+注意：<span style="color:#ff6666;">logger对event的body长度有限制，超过限制会截断；</span></span></td>
+</tr><tr><td><span style="font-size:14px;">avro sink</span></td>
+<td><span style="font-size:14px;">avro</span></td>
+<td><span style="font-size:14px;">发送给另外一个avro的source（当然也可以不是flume的source，可以是自己<br>
+开发的基于avro的server）</span></td>
+</tr><tr><td><span style="font-size:14px;">thift sink</span></td>
+<td><span style="font-size:14px;">thrift</span></td>
+<td><span style="font-size:14px;">发送给另外一个thrift的source</span></td>
+</tr><tr><td><span style="font-size:14px;">IRC sink</span></td>
+<td><span style="font-size:14px;">irc</span></td>
+<td><span style="font-size:14px;"><span style="font-family:arial;line-height:18px;">Internet Relay Chat</span><br></span></td>
+</tr><tr><td><span style="font-size:14px;">file roll sink</span></td>
+<td><span style="font-size:14px;">file_roll</span></td>
+<td><span style="font-size:14px;">本地file，支持rotate（可配置大小、时间、event count来进行rotate）；</span></td>
+</tr><tr><td><span style="font-size:14px;">null sink</span></td>
+<td><span style="font-size:14px;">null</span></td>
+<td><span style="font-size:14px;">丢弃，等同于scribe的null store</span></td>
+</tr><tr><td><span style="font-size:14px;">hbase sink</span></td>
+<td><span style="font-size:14px;">hbase<br><span style="font-family:monospace;background-color:rgb(236,240,243);">asynchbase</span><br></span></td>
+<td><span style="font-size:14px;">写到hbase中；需要配置hbase的table，columnFamily等信息；<br>
+比较扯淡的是，到底写入到哪一个hbase，取决于flume的classpath中碰到的第一个<br>
+hbase-site.xml；<br><span style="font-family:Simsun;line-height:20px;text-align:justify;">The Hbase configuration is picked up from the first hbase-site.xml<br>
+encountered in the classpath.<br></span><span style="font-family:monospace;background-color:rgb(236,240,243);">asynchbase支持可配置的hbase（配置zookeper，znode path）</span><br></span></td>
+</tr><tr><td><span style="font-size:14px;">morphline solr sink</span></td>
+<td><span style="font-size:14px;"><span style="font-family:monospace;background-color:rgb(236,240,243);">org.apache.flume.sink.solr.morphline.MorphlineSolrSink</span><br></span></td>
+<td><span style="font-size:14px;"><span style="font-family:Simsun;line-height:20px;text-align:justify;"><span style="color:rgb(51,51,51);font-family:Arial;line-height:26px;">Solr是一个基于Lucene java库的</span><span style="font-family:Arial;line-height:26px;color:rgb(255,0,0);">企业级搜索服务器。</span><br>
+transforms it, and loads it in near-real-time into Apache Solr servers, <br>
+which in turn serve queries to end users or search applications.</span><br></span></td>
+</tr><tr><td><span style="font-size:14px;">elastic search sink</span></td>
+<td><span style="font-size:14px;"><span style="font-family:monospace;background-color:rgb(236,240,243);">org.apache.flume.sink.elasticsearch.ElasticSearchSink</span><br></span></td>
+<td><span style="font-size:14px;">类似的同上，换成了<span style="font-family:Simsun;line-height:20px;text-align:justify;">elasticsearch cluster</span></span></td>
+</tr><tr><td><span style="font-size:14px;">custom sink</span></td>
+<td><span style="font-size:14px;">$FQCN</span></td>
+<td><span style="font-size:14px;">full qualified class name</span></td>
+</tr></tbody></table><span style="font-size:14px;"><br></span></div>
+<h2><span style="font-size:14px;">flume测试</span></h2>
+<div><span style="font-size:14px;">agent1：</span></div>
+<div><span style="font-size:14px;">source：netcat</span></div>
+<div><span style="font-size:14px;">channel：memory</span></div>
+<div><span style="font-size:14px;">sink：avro</span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div><span style="font-size:14px;">agent2：</span></div>
+<div><span style="font-size:14px;">source： arvo</span></div>
+<div><span style="font-size:14px;">channel：memory</span></div>
+<div><span style="font-size:14px;">sink：hdfs</span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div><span style="font-size:14px;">agent1将数据传输给agent2，agent2将数据写到hdfs上。</span></div>
+<div><span style="font-size:14px;">通过telnet可以向agent1发送测试数据。</span></div>
+<div><span style="font-size:14px;">使用hdfs的过程中，碰到的问题及解决方法如下：</span></div>
+<div>
+<div>
+<div style="font-family:Tahoma;">
+<div><span style="font-size:14px;">1、出现找不到hadoop的方法</span></div>
+<div><span style="font-size:14px;">    默认的flume中，不包含hadoop相关的jar包，因此需要将hadoop下的jar包拷贝到flume的lib下，或者将hadoop的jar包通过flume的--classpath增加到java的classpath中；</span></div>
+<div><span style="font-size:14px;">    需要拷贝的jar包包括：</span></div>
+<div><span style="font-size:14px;">     hadoop-annotations-*.jar</span></div>
+<div><span style="font-size:14px;">     hadoop-auth-*.jar</span></div>
+<div><span style="font-size:14px;">     hadoop-common-*.jar</span></div>
+<div><span style="font-size:14px;">     hadoop-hdfs-*.jar</span></div>
+</div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">2、出现protocol.proto的rpc的 overrides finalmethod getUnknownFields错误</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">     是因为flume和hadoop使用了不同版本的protocol版本，具体见FLUME-2172；</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">      解决方法，将hadoop中的高版本（11）protocol拷贝到flume/lib下，删掉flume的低版本（10）</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">3、出现java.lang.NoSuchMethodError: com.google.common.cache.CacheBuilder.build()错误</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">      google的jar不一致引起的，将hadoop下的guava-11.0.2.jar包拷贝到flume中，删掉flume中的低版本（10.0.1）</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">4、出现hadoo url解析不了</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">      flume相当于一个hadoop hdfs的客户端，到目前为止只拷贝了jar包，并没有拷贝hadoop的配置，因此</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">      需要让客户端能够“找到”正确的配置，并加载。由于配置较多，不便于拷贝，因此可以通过设置flume的classpath来解决，</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">    启动flume-ng时，指定--classpath=$HADOOP_HOME/etc/即可。</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;"><br></span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">5、当关闭（kill）flume-ng（hdfs sink）时，出现了如下错误：</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;"> java.lang.InterruptedException: Timed out before HDFS call was made. Your hdfs.callTimeout might be set too low or HDFS calls are taking too long</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">    at org.apache.flume.sink.hdfs.BucketWwriter.checkAndThrowInterruptedException(BucketWriter.java:517)</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">    ....</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">错误</span></div>
+<div style="font-family:Tahoma;"><span style="font-size:14px;">  默认情况下: hdfs.callTimeout为10000（milliseconds），即10秒，根据集群状况进行配置。</span></div>
+</div>
+</div>
+<h2><span style="font-size:14px;">flume其他功能</span></h2>
+<div><span style="font-size:14px;">1、flume通过配置sink group，可以支持load balance功能；</span></div>
+<div><span style="font-size:14px;">2、还支持对source的interceptor机制（拦截）,可以改写数据；</span></div>
+<div><span style="font-size:14px;">3、flume还支持filter功能，可以定制确定哪些数据需要sink；</span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div><span style="font-size:14px;">参考文献：</span></div>
+<div><span style="font-size:14px;">1、<a href="http://flume.apache.org/FlumeUserGuide.html" rel="nofollow">http://flume.apache.org/FlumeUserGuide.html</a></span></div>
+<div><span style="font-size:14px;"><br></span></div>
+<div><br></div>
+            </div>
+                </div>

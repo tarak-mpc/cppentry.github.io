@@ -1,0 +1,143 @@
+---
+layout:     post
+title:      flume小白入门篇一
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="小白flume学习手册">小白flume学习手册</h2>
+
+
+
+<h2 id="flume是什么">flume是什么？</h2>
+
+<p>flume是分布式，可信任的系统用于<strong>高效收集</strong>、聚合和移动大量<strong>日志</strong>数据，从各种不同的源到一个中央数据仓库。</p>
+
+
+
+<h2 id="flume的优势">flume的优势</h2>
+
+<ol>
+<li>可以存储数据在任何集中式存储设备中</li>
+<li>在数源头和存储之间协调速率。</li>
+<li>contextual routing上下文路由支持</li>
+<li>flume的事务是基于通道的，为每个消息维护了两个事务（sender、receiver），确保消息可靠分发。</li>
+<li><p>Flume is reliable, fault tolerant, scalable, manageable, and customizable.</p>
+
+<h2 id="flume的架构">flume的架构</h2></li>
+</ol>
+
+<p><img src="https://img-blog.csdn.net/20170812095346904?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXFfMjc5ODQ5MTE=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+ 6. flume event <br>
+   event是flume中传输数据的基本单元，它包括从源到目的间传输的字节数组和一个可选的header，header被表示为一个map,其中有字符串key和字符串value。header不是用来传输数据，只为了路由意图和跟踪事件的优先级和严重性，典型的event结构如下： <br>
+   <img src="https://img-blog.csdn.net/20170812100444578?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXFfMjc5ODQ5MTE=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+ 7. flume agent <br>
+ 在flume中，agent是一个独立的守护线程。从client或者其他agent中接受数据（event），转发给下一个destination(sink或者agent ),flume中可能有多个agent，如下所示： <br>
+ <img src="https://img-blog.csdn.net/20170812101459083?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXFfMjc5ODQ5MTE=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+  由图可知，agent由三个部分构成：source、channel、sink。 <br>
+  source（源头）：从客户端接受数据，传输给一个或多个channel，以event形式。flume支持各种类型的source（Avro source, Thrift source, twitter 1% source etc），各种数据源都从指定的数据生成器收集数据。 <br>
+  channel（通道）：临时存储，接受来自source中的数据并且缓存直到它们被sink消费。在source和sink中起到桥梁作用。channel是完全事务性的。有JDBC channel, File system channel, Memory channel。 <br>
+  sink（沉槽）：从通道中消费数据，存储到HDFS或者hbase等集中数据库，也可以是其他的agent。sink有HDFS sink, HBase sink, Avro sink, Kafka sink, etc. <br>
+   <strong>注意</strong>：一个flume agent可以有多个source，channel和sink</p>
+
+<h2 id="flume-dataflow">flume dataflow##</h2>
+
+<p>-一般来说，event和log数据是由log服务器和运行flume agent的服务器产生的，而这些agent是从数据生成器中接收数据的。  <br>
+   在agent中的数据将会被中间节点Collector收集起来，就像agent一样，在flume中可以有多个Collerctor。最后，所有Cellector中的数据将会被聚合起来，传送给HDFS or Hbase存起来，过程如下： <br>
+<img src="https://img-blog.csdn.net/20170812161608008?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXFfMjc5ODQ5MTE=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+<strong>Multi-hop Flow</strong> <br>
+        在flume中，一个event可能经过多个agent，在它到达最终destination之前，这个就是multi-hop flow. <br>
+<strong>Fan-out Flow</strong> <br>
+    从一个source到多个channels的数据流就是Fan-out Flow。 <br>
+主要两种类型： <br>
+      重复：数据流中的数据会在所有的配置文件中复制。 <br>
+      复用：数据流中的数据将会被发送到指定通道，在event的header中声明。 <br>
+<strong>Fan-in Flow</strong> <br>
+     数据由多个source传输到一个channel的数据流。 <br>
+ <strong>Failure Handling</strong> <br>
+     在flume中，每一个event都会产生两个事务：sender和receiver。sender发送event给reciever。一旦收到数据，receiver会提交自己的事务，发送一个“收到”信号给sender。收到信号后，sender会提交自己的事务（<strong>sender不会提交事务，知道收到所有receiver的信号</strong>）</p>
+
+
+
+<h2 id="单机版例子">单机版例子</h2>
+
+<ol>
+<li><p>编辑simple.conf文件 <br>
+   #命名agent组件 <br>
+    a.sources = r <br>
+    a.sinks = k <br>
+    a.channels = c <br>
+  #配置source <br>
+    a.sources.r.type = netcat <br>
+    a.sources.r.bind = localhost <br>
+    a.sources.r.port = 8888 <br>
+    #配置sink <br>
+    a.sinks.k.type = logger</p>
+
+<pre><code># Use a channel which buffers events in memory
+a.channels.c.type = memory
+a.channels.c.capacity = 1000
+a.channels.c.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a.sources.r.channels = c
+a.sinks.k.channel = c
+</code></pre>
+
+<p>2.flume-ng agent -f /soft/flume/conf/simple.conf -n a-Dflume.root.logger=INFO,console <br>
+3.测试：通过nc客户端向8888发送消息 <br>
+nc localhost 8888 <br>
+helloworld</p>
+
+<h2 id="sources-avro">Sources  avro</h2>
+
+<ol><li>创建r_avro.conf <br>
+    #component <br>
+    a1.sources = r1 <br>
+    a1.channels = c1 <br>
+    a1.sinks = k1 <br>
+    #r1 <br>
+    a1.sources.r1.type = avro <br>
+    a1.sources.r1.channels = c1 <br>
+    a1.sources.r1.bind = 0.0.0.0 <br>
+    a1.sources.r1.port = 4141 <br>
+    #k1 <br>
+    a1.sinks.k1.type = logger <br>
+    #c1 <br>
+    a1.channels.c1.type = memory <br>
+    #bind <br>
+    a1.sources.r1.channels = c1 <br>
+    a1.sinks.k1.channel = c1 <br>
+2.启动flume <br>
+flume-ng agent -f r_avro.conf -n a1 -Dflume.root.logger=INFO,console <br>
+3.启动avro-client发送数据 <br>
+flume-ng avro-client -F /home/centos/customers.txt -H localhost -p 4141 -R /home/centos/header.txt</li></ol></li>
+</ol>
+
+
+
+<h2 id="spooldir">spooldir</h2>
+
+<p>1.创建r_spooldir.conf <br>
+a1.sources = r1 <br>
+            a1.channels = c1 <br>
+            a1.sinks = k1</p>
+
+<pre><code>        a1.sources.r1.type = spooldir
+        a1.sources.r1.channels = c1
+        a1.sources.r1.spoolDir = /home/centos/logs
+        a1.sources.r1.fileHeader = true
+
+        a1.sinks.k1.type = logger
+        a1.channels.c1.type = memory
+
+        a1.sources.r1.channels = c1
+        a1.sinks.k1.channel = c1
+</code></pre>
+
+<p>2.启动flume <br>
+   flumg-ng agent -f r_spooldir.conf -n a1 -Dflume.root.logger=INFO,console <br>
+3.创建/home/centos/logs目录</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

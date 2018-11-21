@@ -1,0 +1,46 @@
+---
+layout:     post
+title:      hive(一)--hql摘要
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+一. 为什么hive是数据仓库<br>
+  1) hive局限于hdfs, 不能进行记录级别的增删改<br>
+  2) hive底层的mapreduce启动耗时很长, 无法做到传统数据库的秒查, 只适合离线分析<br>
+  3) hive不支持事务, 无法完成OLTP的要求, OLTP选择hbase或cassandera<br>
+  <br>
+二. hive安装<br>
+   1) 每个hive客户端, 都需要有一个元数据服务来存储元信息(表模式,分区信息), 通常用传统数据库的一个表来存储元信息<br>
+   2) hive内部默认用derby存储元信息, 由于derby是单进程存储, 使得不允许两个以上的hive cli执行操作<br><br><br>
+三.HQL数据操作<br>
+  1)LOAD DATA [LOCAL] INPATH 'filepath' [OVERWRITE] INTO TABLE tablename [PARTITION (partcol1=val1, partcol2=val2 ...)]<br>
+  2)动态分区插入 : <br>
+      insert  OVERWRITE  TABLE  employees  PARTITION (country, state)  SELECT  *  FROM  staged_employees  se ;<br><span></span> CREATE  TABLE  ca_employees  AS  SELECT  name,slary  FROM  employee  WHERE  se.state='CA'<br>
+  3)将查询的数据导出到文件系统<br>
+      FROM from_statement  //这种from 后跟多个insert into的语句, 可以只扫描表一次. 而多次插入表, 效率最高<br><span></span>INSERT INTO TABLE tablename1 [PARTITION (partcol1=val1, partcol2=val2 ...)] select_statement1<br><span></span>[INSERT INTO TABLE tablename2 [PARTITION ...] select_statement2]<br><span></span>[INSERT OVERWRITE TABLE tablename2 [PARTITION ... [IF NOT EXISTS]] select_statement2]<pre><code class="language-sql">--1. 建立桶表, 分区表
+			CREATE TABLE TESTA
+			  (person_name string,
+			  person_org_name	string,
+			  level2_org_name	string
+			  )
+			  PARTITIONED BY (import_time	string)
+			  CLUSTERED BY (person_name) INTO 8 BUCKETS
+			 ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'
+			  STORED AS textfile
+			  
+		--2.  插入分区数据
+		from  (select person_name ,
+		   person_org_name	,
+		   level2_org_name  from iap_app_log_import_minute where import_time in ('2015-01-16-0000','2015-01-20-0000')) applog
+		  insert into table testa partition (import_time='2015-01')select applog.person_name ,applog.person_org_name	,applog.level2_org_name</code></pre><br>
+四. 查询语句<br>
+   1) sort by  + distribute by 与 order by + group  by<br>
+       order by: 查询语句全局有序<br><span></span>  sort  by : 每个reducer内的数据有序, 当reducer的个数为1, sort by的数据才全局有序 (效率高)<br><span></span>  distribute by  : mapreduce会把map输入的键甲酸哈希值, 把 相同哈希值的键值对发往一个reducer. <br><span></span>                         用distribute by 可以把相同字段值的数据发往一个reducer, 让数据在这个字段上有序, 再用sort by来保证每个reducer内有序, 配合使用达到全局有序<br><span></span>  cluster by :  先distribute by 再order by , 达到全局有序<br><span></span>  <br><span></span>2)查看partition<br><span></span>show partitions employees;<br><span></span>SHOW PARTITIONS employees PARTITION(country='US');<br><span></span>  <br><span></span>3) 桶表的抽样查询tablesample<br><span></span>  select * from testa tablesample(bucket 3 out of 10 on  person_name)<br><span></span>   <br><span></span>  <br>
+五. 其他形式<br>
+  1) 视图 : CRETAE  VIEW  视图名  AS  SLECTSTATEMENT<br>
+  2) 索引 : <br>
+        CREATE INDEX index_name<br><span></span>ON TABLE base_table_name (col_name, ...)<br><span></span>AS 'index.handler.class.name'<br><span></span>[WITH DEFERRED REBUILD]   //当表的数据发生变化, 自动更新分区内的全部索引<br><span></span>[IDXPROPERTIES (property_name=property_value, ...)]<br><span></span>[IN TABLE index_table_name]<br><span></span>[PARTITIONED BY (col_name, ...)]<br><span></span>[<br><span></span>  [ ROW FORMAT ...] STORED AS ...<br><span></span>  | STORED BY ...<br><span></span>]<br><span></span>[LOCATION hdfs_path]<br><span></span>[TBLPROPERTIES (...)]<br><span></span>[COMMENT "index comment"]
+            </div>
+                </div>

@@ -1,0 +1,14 @@
+---
+layout:     post
+title:      Hadoop--hbase
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>一.伪分布式模式配置</p><p>1.配置/usr/local/hbase/conf/hbase-env.sh</p><p><img src="https://img-blog.csdn.net/20180404212752799" alt=""></p><p>2.配置/usr/local/hbase/conf/hbase-site.xml</p><p><img src="https://img-blog.csdn.net/20180404212800716" alt=""></p><p>3.<span style="color:rgb(0,0,0);font-family:'Microsoft YaHei';background-color:rgb(254,254,254);">测试运行HBase</span></p><p><span style="color:rgb(0,0,0);font-family:'Microsoft YaHei';background-color:rgb(254,254,254);">登陆ssh，再切换目录至/usr/local/hadoop ，再启动hadoop<br></span></p><p><img src="https://img-blog.csdn.net/20180404212810878" alt=""></p><p>切换目录至/usr/local/hbase，再启动HBase<br></p><p><img src="https://img-blog.csdn.net/201804042128200" alt=""></p><p><br></p><p>二、编程实践</p><p>1.HBase中创建表<br></p><p>HBase中用create命令创建表<br></p><pre><code class="language-java">create 'student','Sname','Ssex','Sage','Sdept','course'</code></pre>通过describe命令查看“student”表的基本信息<br><p><img src="https://img-blog.csdn.net/20180404212937698" alt=""></p><p>2.添加数据</p><pre><code class="language-java">put 'student','95001','Sname','LiYing'</code></pre><p>3.删除数据</p><pre><code class="language-java">delete 'student','95001','Ssex'</code></pre><p><img src="https://img-blog.csdn.net/20180404212949473" alt=""></p><p>4.scan命令用于查看某个表的全部数据<br></p><pre><code class="language-java">scan 'student'</code></pre><p><img src="https://img-blog.csdn.net/20180404212959926" alt=""></p><p>5.删除表</p><p>删除表：第一步让该表不可用，第二步删除表<br></p><pre><code class="language-java">disable 'student'  
+drop 'student'</code></pre><p><img src="https://img-blog.csdn.net/20180404213006408" alt=""></p><p>6.查询表历史数据</p><pre><code class="language-java">create 'teacher',{NAME=&gt;'username',VERSIONS=&gt;5}</code></pre><p><img src="https://img-blog.csdn.net/20180404213016543" alt=""></p><p>三、Java API编程</p><p>1.新建Java Project</p><p><img src="https://img-blog.csdn.net/20180404213023338" alt=""></p><p>2.在工程中导入外部jar包</p><p><img src="https://img-blog.csdn.net/20180404213031414" alt=""></p><p>3.编程实例主程序代码</p><pre><code class="language-java">public static void main(String[] args)throws IOException{
+        createTable("Score",new String[]{"sname","course"});
+        insertRow("Score", "95001", "sname", "", "Mary");
+        insertRow("Score", "95001", "course", "Math", "88");
+        insertRow("Score", "95001", "course", "English", "85");</code></pre><span style="color:rgb(0,0,0);font-family:'Microsoft YaHei';background-color:rgb(254,254,254);">执行完后在shell界面查看是否执行成功</span><br><p><img src="https://img-blog.csdn.net/20180404213037755" alt=""></p>            </div>
+                </div>

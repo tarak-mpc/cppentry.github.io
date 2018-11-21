@@ -1,0 +1,168 @@
+---
+layout:     post
+title:      Hbase新手技术入门
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<span style="color:rgb(51,51,51);font-family:'宋体';font-size:14px;line-height:18px;text-indent:26.6667px;"><strong>HBase是什么？</strong></span><br></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+HBase是Apache Hadoop中的一个子项目，Hbase依托于Hadoop的HDFS作为最基本存储基础单元，通过使用hadoop的DFS工具就可以看到这些这些数据 存储文件夹的结构,还可以通过Map/Reduce的框架(算法)对HBase进行操作，如右侧的图所示：</p>
+<p align="center" class="artcon" style="text-align:left;color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<img src="http://www.uml.org.cn/sjjm/images/2012121411.png" alt="" style="border:none;"></p>
+<p align="center" class="artcon" style="text-align:left;color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<span style="font-weight:bold;text-indent:2em;">为什么采用HBase？</span></p>
+<p align="center" class="artcon" style="text-indent:2em;"></p>
+<p class="artcon" style="color:rgb(51,51,51);font-family:'宋体';font-size:13px;line-height:20px;text-align:left;text-indent:2em;">
+HBase 不同于一般的关系数据库,它是一个适合于非结构化数据存储的数据库.所谓非结构化数据存储就是说HBase是基于列的而不是基于行的模式，这样方面读写你的大数据内容。</p>
+<p class="artcon" style="color:rgb(51,51,51);font-family:'宋体';font-size:13px;line-height:20px;text-align:left;text-indent:2em;">
+HBase是介于Map Entry(key &amp; value)和DB Row之间的一种数据存储方式。就点有点类似于现在流行的Memcache，但不仅仅是简单的一个key对应一个 value，你很可能需要存储多个属性的数据结构，但没有传统数据库表中那么多的关联关系，这就是所谓的松散数据。</p>
+<p class="artcon" style="color:rgb(51,51,51);font-family:'宋体';font-size:13px;line-height:20px;text-align:left;text-indent:2em;">
+简单来说，你在HBase中的表创建的可以看做是一张很大的表，而这个表的属性可以根据需求去动态增加，在HBase中没有表与表之间关联查询。你只需要 告诉你的数据存储到Hbase的那个column families 就可以了，不需要指定它的具体类型：char,varchar,int,tinyint,text等等。但是你需要注意HBase中不包含事务此类的功 能。</p>
+<p class="artcon" style="color:rgb(51,51,51);font-family:'宋体';font-size:13px;line-height:20px;text-align:left;text-indent:2em;">
+Apache HBase 和Google Bigtable 有非常相似的地方，一个数据行拥有一个可选择的键和任意数量的列。表是疏松的存储的，因此用户可以给行定义各种不同的列，对于这样的功能在大项目中非常实用，可以简化设计和升级的成本。</p>
+<p class="artcon" style="color:rgb(51,51,51);font-family:'宋体';font-size:13px;line-height:20px;text-align:left;text-indent:2em;">
+</p>
+<p class="artdir2" style="color:rgb(51,51,51);font-size:14px;text-indent:20pt;font-family:'宋体';line-height:18px;font-weight:bold;">
+扩展阅读2：</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+什么是列存储？列存储不同于传统的关系型数据库，其数据在表中是按行存储的，列方式所带来的重要好处之一就是，由于查询中的选择规则是通过列来定义的，因 此整个数据库是自动索引化的。按列存储每个字段的数据聚集存储，在查询只需要少数几个字段的时候，能大大减少读取的数据量，一个字段的数据聚集存储，那就 更容易为这种聚集存储设计更好的压缩/解压算法。这张图讲述了传统的行存储和列存储的区别：</p>
+<p align="center" class="artcon" style="text-align:left;color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<img src="http://www.uml.org.cn/sjjm/images/2012121416.jpg" alt="" style="border:none;"></p>
+<p align="center" class="artcon" style="text-align:left;color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<br></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+先来看一下读取一行记录HBase是如何进行工作的，首先HBase Client端会连接Zookeeper Qurom(从下面的代码也能看出来，例如：HBASE_CONFIG.set("hbase.zookeeper.quorum", "192.168.50.216") )。通过Zookeeper组件Client能获知哪个Server管理-ROOT- Region。那么Client就去访问管理-ROOT-的Server，在META中记录了HBase中所有表信息，(你可以使用 scan '.META.' 命令列出你创建的所有表的详细信息),从而获取Region分布的信息。一旦Client获取了这一行的位置信息，比如这一行属于哪个Region，Client将会缓存这个信息并直接访问HRegionServer。久而久之Client缓存的信息渐渐增多，即使不访问.META.表也能知道去访问哪个HRegionServer。HBase中包含两种基本类型的文件，一种用于存储WAL的log，另一种用于存储具体的数据，这些数据都通过DFS
+ Client和分布式的文件系统HDFS进行交互实现存储。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+如图所示：</p>
+<p align="center" class="artcon" style="text-align:left;color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<img src="http://www.uml.org.cn/sjjm/images/2012121417.jpg" alt="" style="border:none;"></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+再来看看HBase的一些内存实现原理：</p>
+<ul style="color:rgb(51,51,51);font-size:14px;font-family:'宋体';line-height:20px;"><li>HMaster— HBase中仅有一个Master server。</li><li>HRegionServer—负责多个HRegion使之能向client端提供服务，在HBase cluster中会存在多个HRegionServer。</li><li>ServerManager—负责管理Region server信息，如每个Region server的HServerInfo(这个对象包含HServerAddress和startCode),已load Region个数，死亡的Region server列表</li><li>RegionManager—负责将region分配到region server的具体工作，还监视root和meta 这2个系统级的region状态。</li><li>RootScanner—定期扫描root region，以发现没有分配的meta region。</li><li>MetaScanner—定期扫描meta region,以发现没有分配的user region。</li></ul><p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<strong>HBase基本命令</strong></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+下面我们再看看看HBase的一些基本操作命令，我列出了几个常用的HBase Shell命令，如下：</p>
+<table width="674" border="0" align="center" bgcolor="#666666" class="content" style="color:rgb(0,0,0);font-family:'宋体';font-size:12px;line-height:20px;"><tbody><tr bgcolor="#FFFFFF" valign="top"><td>
+<div align="center">名称</div>
+</td>
+<td colspan="2">
+<div align="center">命令表达式</div>
+</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>创建表</td>
+<td colspan="2">create '表名称', '列名称1','列名称2','列名称N'</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>添加记录</td>
+<td colspan="2">put '表名称', '行名称', '列名称:', '值'</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>查看记录</td>
+<td colspan="2">get '表名称', '行名称'</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>查看表中的记录总数</td>
+<td colspan="2">count '表名称'</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>删除记录</td>
+<td colspan="2">delete '表名' ,'行名称' , '列名称'</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>删除一张表</td>
+<td colspan="2">先要屏蔽该表，才能对该表进行删除，第一步 disable '表名称' 第二步 drop '表名称'</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>查看所有记录</td>
+<td colspan="2">scan "表名称"</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>查看某个表某个列中所有数据</td>
+<td colspan="2">scan "表名称" , ['列名称:']</td>
+</tr><tr bgcolor="#FFFFFF" valign="top"><td>更新记录</td>
+<td colspan="2">就是重写一遍进行覆盖</td>
+</tr></tbody></table><br><div style="text-align:left;"><span style="font-family:'宋体';color:#333333;"><span style="font-size:13px;line-height:20px;"></span></span>
+<p class="artdir1" style="color:rgb(51,51,51);text-indent:20pt;font-size:18px;font-family:'宋体';line-height:20px;font-weight:bold;">
+3-HBase优化技巧<a name="3" style="color:rgb(51,102,153);"></a></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+这篇文章浅显的从几个方面谈谈HBase的一些优化技巧，只能作为我学习笔记的一部分，因为学多了怕忘，留给自己以后看看。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<strong>1 修改 linux 系统参数</strong></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+Linux系统最大可打开文件数一般默认的参数值是1024,如果你不进行修改并发量上来的时候会出现“Too Many Open Files”的错误，导致整个HBase不可运行，你可以用ulimit -n 命令进行修改，或者修改/etc/security/limits.conf 和/proc/sys/fs/file-max 的参数，具体如何修改可以去Google 关键字 “linux limits.conf ”</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<strong>2 JVM 配置</strong></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+修改 hbase-env.sh 文件中的配置参数，根据你的机器硬件和当前操作系统的JVM(32/64位)配置适当的参数</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+HBASE_HEAPSIZE 4000 HBase使用的 JVM 堆的大小</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+HBASE_OPTS "‐server ‐XX:+UseConcMarkSweepGC"JVM GC 选项</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+HBASE_MANAGES_ZKfalse 是否使用Zookeeper进行分布式管理</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<strong>3 HBase持久化</strong></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+重启操作系统后HBase中数据全无，你可以不做任何修改的情况下，创建一张表，写一条数据进行，然后将机器重启，重启后你再进入HBase的shell中使用 list 命令查看当前所存在的表，一个都没有了。是不是很杯具？没有关系你可以在hbase/conf/hbase-default.xml中设置hbase.rootdir的值，来设置文件的保存位置指定一个文件夹 ，例如：&lt;value&gt;file:///you/hbase-data/path&lt;/value&gt;，你建立的HBase中的表和数据就直接写到了你的磁盘上，如图所示：</p>
+<p align="center" class="artcon" style="text-align:left;color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<img src="http://www.uml.org.cn/sjjm/images/2012121418.jpg" alt="" style="border:none;"></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+同样你也可以指定你的分布式文件系统HDFS的路径例如: hdfs://NAMENODE_SERVER:PORT/HBASE_ROOTDIR，这样就写到了你的分布式文件系统上了。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<strong>4 配置HBase运行参数</strong></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+其次就需要对hbase/conf/hbase-default.xml 文件进行配置，以下是我认为比较重要的配置参数</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hbase.client.write.buffer</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述：这个参数可以设置写入数据缓冲区的大小，当客户端和服务器端传输数据，服务器为了提高系统运行性能开辟一个写的缓冲区来处理它， 这个参数设置如果设置的大了，将会对系统的内存有一定的要求，直接影响系统的性能。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hbase.master.meta.thread.rescanfrequency</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述：多长时间 HMaster对系统表 root 和 meta 扫描一次，这个参数可以设置的长一些，降低系统的能耗。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hbase.regionserver.handler.count</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述：由于HBase/Hadoop的Server是采用Multiplexed, non-blocking I/O方式而设计的，所以它可以透过一个Thread来完成处理，但是由于处理Client端所呼叫的方法是Blocking I/O，所以它的设计会将Client所传递过来的物件先放置在Queue，并在启动Server时就先产生一堆Handler(Thread)，该Handler会透过Polling的方式来取得该物件并执行对应的方法，默认为25，根据实际场景可以设置大一些。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hbase.regionserver.thread.splitcompactcheckfrequency</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述：这个参数是表示多久去RegionServer服务器运行一次split/compaction的时间间隔，当然split之前会先进行一个compact操作.这个compact操作可能是minor compact也可能是major compact.compact后,会从所有的Store下的所有StoreFile文件最大的那个取midkey.这个midkey可能并不处于全部数据的mid中.一个row-key的下面的数据可能会跨不同的HRegion。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hbase.hregion.max.filesize</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述：HRegion中的HStoreFile最大值，任何表中的列族一旦超过这个大小将会被切分，而HStroeFile的默认大小是256M。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hfile.block.cache.size</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述：指定 HFile/StoreFile 缓存在JVM堆中分配的百分比，默认值是0.2，意思就是20%，而如果你设置成0，就表示对该选项屏蔽。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hbase.zookeeper.property.maxClientCnxns</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述： 这项配置的选项就是从zookeeper中来的，表示ZooKeeper客户端同时访问的并发连接数，ZooKeeper对于HBase来说就是一个入口这个参数的值可以适当放大些。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hbase.regionserver.global.memstore.upperLimit</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述：在Region Server中所有memstores占用堆的大小参数配置，默认值是0.4，表示40%，如果设置为0，就是对选项进行屏蔽。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+hbase.hregion.memstore.flush.size</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+描述：Memstore中缓存的内容超过配置的范围后将会写到磁盘上，例如：删除操作是先写入MemStore里做个标记，指示那个value, column 或 family等下是要删除的，HBase会定期对存储文件做一个major compaction，在那时HBase会把MemStore刷入一个新的HFile存储文件中。如果在一定时间范围内没有做major compaction，而Memstore中超出的范围就写入磁盘上了。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+</p>
+<p class="artdir1" style="color:rgb(51,51,51);text-indent:20pt;font-size:18px;font-family:'宋体';line-height:20px;font-weight:bold;">
+4–存储<a name="4" style="color:rgb(51,102,153);"></a></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+在HBase中创建的一张表可以分布在多个Hregion，也就说一张表可以被拆分成多块，每一块称我们呼为一个Hregion。每个Hregion会保 存一个表里面某段连续的数据，用户创建的那个大表中的每个Hregion块是由Hregion服务器提供维护，访问Hregion块是要通过 Hregion服务器，而一个Hregion块对应一个Hregion服务器，一张完整的表可以保存在多个Hregion 上。HRegion Server 与Region的对应关系是一对多的关系。每一个HRegion在物理上会被分为三个部分：Hmemcache(缓存)、Hlog(日志)、HStore(持久层)。<br>
+上述这些关系在我脑海中的样子，如图所示：</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+1.HRegionServer、HRegion、Hmemcache、Hlog、HStore之间的关系，如图所示：</p>
+<p align="center" class="artcon" style="text-align:center;color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<img src="http://www.uml.org.cn/sjjm/images/2012121419.jpg" alt="" style="border:none;"></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<strong>2.HBase表中的数据与HRegionServer的分布关系，</strong>如图所示：</p>
+<p align="center" class="artcon" style="text-align:center;color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<img src="http://www.uml.org.cn/sjjm/images/20121214110.jpg" alt="" style="border:none;"></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<strong>HBase读数据</strong></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+HBase读取数据优先读取HMemcache中的内容，如果未取到再去读取Hstore中的数据，提高数据读取的性能。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+<strong>HBase写数据</strong></p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+HBase写入数据会写到HMemcache和Hlog中，HMemcache建立缓存，Hlog同步Hmemcache和Hstore的事务日志，发起Flush Cache时，数据持久化到Hstore中，并清空HMemecache。</p>
+<p class="artcon" style="color:rgb(51,51,51);text-indent:2em;font-family:'宋体';font-size:13px;line-height:20px;">
+客户端访问这些数据的时候通过Hmaster ，每个 Hregion 服务器都会和Hmaster 服务器保持一个长连接，Hmaster 是HBase分布式系统中的管理者，他的主要任务就是要告诉每个Hregion 服务器它要维护哪些Hregion。用户的这些都数据可以保存在Hadoop 分布式文件系统上。 如果主服务器Hmaster死机，那么整个系统都会无效。下面我会考虑如何解决Hmaster的SPFO的问题，这个问题有点类似Hadoop的SPFO 问题一样只有一个NameNode维护全局的DataNode，HDFS一旦死机全部挂了，也有人说采用Heartbeat来解决这个问题，但我总想找出
+ 其他的解决方案，多点时间，总有办法的。</p>
+<br><br></div>
+            </div>
+                </div>

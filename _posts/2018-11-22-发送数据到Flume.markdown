@@ -1,0 +1,76 @@
+---
+layout:     post
+title:      发送数据到Flume
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/Regan_Hoo/article/details/78728882				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>Flume有两类发送数据到Flume Agent的程序性方法：Flume SDK和Embedded Agent API。Flume也自带有log4j appender，可以用来从应用程序发送数据到Flume Agent。</p>
+
+<p>1、构建Flume事件</p>
+
+<p>事件是Flume中数据的基本表现形式，每个Flume事件包含header的一个map集合和一个body，是表示为字节数组的有效负荷。 <br>
+Event接口：</p>
+
+<p><img src="https://img-blog.csdn.net/20171206112656602?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+EventBuilder类提供了4个通常用来创建Flume事件的方法：</p>
+
+<p><img src="https://img-blog.csdn.net/20171206112907065?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+创建好了事件之后，就可以使用Flume SDK和Embedded Agent API发送数据到Flume Agent了。 <br>
+需要加入如下Maven依赖：</p>
+
+<p><img src="https://img-blog.csdn.net/20171206112928250?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>2、Flume客户端SDK</p>
+
+<p>因为Flume事件的格式是固定的，因此发送数据到Flume的最好方式是通过Flume支持的RPC格式之一的 <br>
+RPC调用：Avro和Thrift。通常，首选Avro RPC，它更成熟和优秀。缺点是Avro RPC只支持Java和其他JVM语言。Flume通过Thrift RPC支持非JVM语言。 <br>
+①创建Flume RPC客户端 <br>
+通过RpcClientFactory类创建RPC客户端实例：</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113008025?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+②RPC客户端接口 <br>
+应用程序调用append和appendBatch方法发送事件。</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113027258?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+如果列表中传递给appendBatch的事件数量比批量大小要大，RPC客户端将把列表分为多个批量顺次将它们写出，一旦有一个批量操作失败，该方法就抛出异常。如果一些批量操作成功而另一些失败，而应用程序又进行了重试则可能导致最终目的地的事件重复。因此，传递一个不大于批量大小的事件通常是一个好主意。getBatchSize方法返回RPC客户端使用的批量的最大大小。 <br>
+在每个RPC调用之前，通过调用isActive方法检查RPC客户端是否仍然活跃和是否为执行做好准备是一个好主意。一旦不需要RPC客户端或isActive返回false，必须通过调用close方法关闭RPC客户端，以清理资源和避免任何资源的泄露。</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113046474?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+③RPC客户端的公共配置参数</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113104165?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+④默认RPC客户端 <br>
+默认RPC客户端实例使用Avro RPC协议只能连接到一个Avro Source。为了创建默认RPC客户端，可以使用RpcClientFactory提供的方法：</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113125424?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+⑤Load-Balancing RPC客户端 <br>
+对于每个append或appendBatch调用，load-balancing RPC客户端，基于配置，以random或round-robin的顺序，选择配置要发送数据的多个Agent的其中一个。</p>
+
+<p>⑥编写自己的主机选择器 <br>
+须要实现LoadBalancingRpcClient$HostSelector接口：</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113217561?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+3、Failover RPC客户端</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113247645?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+基于hosts参数中主机的顺序进行重试，重试的次数可配置，最大不超过主机数。 <br>
+4、Thrift RPC客户端 <br>
+Apache Thrift是一个数据序列化和RPC的框架，用来序列化和反序列化来自不同语言的数据。Thrift通过拥有与语言无关的数据格式规范来支持该特性。然后Thrift编译器可以生成不同语言的代码，用来读取和写入数据。 <br>
+5、嵌入式Agent <br>
+嵌入式Agent是一类很受限的Flume Agent，可以部署在第三方应用程序。比起RPC客户端，使用嵌入式的Agent的优点是该Agent有一个Channel，一个应用程序不需要管理的缓冲区，也可以在磁盘上。这使得应用程序能更长时间的拯救下游失败的Agent，直到Channel满。 <br>
+嵌入式Agent存在于应用程序的进程地址空间，且在应用程序中创建和运行线程，因此，比起只是使用RPC客户端，应用程序将消耗更多的资源，这就是使用嵌入式Agent提供额外缓冲时间所付出的代价：</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113326796?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+嵌入式Agent也支持使用File Channel，即使应用程序死亡或机器重启，也能帮助持久化事件。当没有其他进程使用磁盘时File Channel的性能较好，因此即使嵌入该Agent的应用程序也最好不要使用相同的磁盘，以避免不必要的搜索。 <br>
+通过需要一个名字的公共构造函数创建EmbeddedAgent类的实例，进而创建嵌入式Agent，该名字指的是这个特定Agent的名称。 <br>
+事件可以使用put或putAll方法写入到Agent，这两个方法分别接收单个事件和批量事件。</p>
+
+<p><img src="https://img-blog.csdn.net/20171206113507126?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+6、配置嵌入式Agent <br>
+一个嵌入式Agent只能有一个Source、一个Channel和一个Sink组，但是Sink组可以包含多个Sink。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

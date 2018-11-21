@@ -1,0 +1,224 @@
+---
+layout:     post
+title:      04 hbase提取kafka中的数据存储
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>    上一篇中的测试时是采用kafka消费者，如果把消费者换成hbase就可以实现hbase提取kafka中的数据进行存储。</p>
+
+<p>      启动hbase要先启动hdfs，hbase需要zk</p>
+
+<p>      启动hdfs：start-dfs.sh </p>
+
+<p>       启动hbase：start-hbase.sh</p>
+
+<p>        要hbase高可用，需要在其他节点中启动：hbase-daemon.sh start master</p>
+
+<p>        各节点进程：</p>
+
+<p>        <img alt="" class="has" src="https://img-blog.csdn.net/20180618105947474?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2E4MzMwNTA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<p>创建hbase消费者：</p>
+
+<p>        在idea中需要引入hbase-site.xml以及hdfs-site.xml 文件 一样配置文件外部化：</p>
+
+<p>        <img alt="" class="has" src="https://img-blog.csdn.net/20180618110207261?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2E4MzMwNTA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<p>kafka.properties:</p>
+
+<p> </p>
+
+<pre class="has">
+<code class="language-html">zookeeper.connect=s128:2181,s129:2181,s130:2181
+group.id=g4  //用户组
+zookeeper.session.timeout.ms=500
+zookeeper.sync.time.ms=250
+auto.commit.interval.ms=1000
+auto.offset.reset=smallest
+#主题
+topic=calllog    //kafka中的topic
+#表名
+table.name=ns1:calllogs //hbase中数据表名
+#分区数
+partition.number=100
+#主叫标记
+caller.flag=0
+#hash区域的模式
+hashcode.pattern=00</code></pre>
+
+<p> </p>
+
+<p>创建HbaseDao类，访问hbase，进行数据相关操作:</p>
+
+<p> </p>
+
+<pre class="has">
+<code class="language-html">/**
+ * Hbase数据访问对象
+ */
+public class HbaseDao {
+    //
+    private DecimalFormat df = new DecimalFormat() ;
+
+    private Table table = null ;
+
+    private int partitions ;
+
+    private String flag  ;
+    public HbaseDao(){
+        try {
+            Configuration conf = HBaseConfiguration.create();
+            Connection conn = ConnectionFactory.createConnection(conf);
+            TableName name = TableName.valueOf(PropertiesUtil.getProp("table.name"));
+            table = conn.getTable(name);
+
+            df.applyPattern(PropertiesUtil.getProp("hashcode.pattern"));
+
+            partitions = Integer.parseInt(PropertiesUtil.getProp("partition.number"));
+            flag = PropertiesUtil.getProp("caller.flag") ;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    /**
+     * put数据到hbase
+     */
+    public void put(String log){
+        if (log == null || log.equals("")) {
+            return;
+        }
+        try {
+            //解析日志
+            String[] arr = log.split(",");
+            if (arr != null &amp;&amp; arr.length == 4) {
+                String caller = arr[0];
+                String callee = arr[1];
+                String callTime = arr[2];
+                callTime = callTime.replace("/","") ;       //删除/
+                callTime = callTime.replace(" ","") ;       //删除空格
+                callTime = callTime.replace(":","") ;       //删除空格
+
+                String callDuration = arr[3];
+                //结算区域号
+
+                //构造put对象
+                String rowkey = genRowkey(getHashcode(caller, callTime), caller, callTime, flag, callee, callDuration);
+                //
+                Put put = new Put(Bytes.toBytes(rowkey));
+                put.addColumn(Bytes.toBytes("f1"), Bytes.toBytes("caller"), Bytes.toBytes(caller));
+                put.addColumn(Bytes.toBytes("f1"), Bytes.toBytes("callee"), Bytes.toBytes(callee));
+                put.addColumn(Bytes.toBytes("f1"), Bytes.toBytes("callTime"), Bytes.toBytes(callTime));
+                put.addColumn(Bytes.toBytes("f1"), Bytes.toBytes("callDuration"), Bytes.toBytes(callDuration));
+                table.put(put);
+
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public String getHashcode(String caller ,String callTime){
+        int len = caller.length();
+        //取出后四位电话号码
+        String last4Code = caller.substring(len - 4);
+        //取出时间单位,年份和月份.
+        String mon = callTime.substring(0,6);
+        //
+        int hashcode = (Integer.parseInt(mon) ^ Integer.parseInt(last4Code)) % partitions ;
+        return df.format(hashcode);
+    }
+
+    /**
+     * 生成rowkey
+     * @param hash
+     * @param caller
+     * @param time
+     * @param flag
+     * @param callee
+     * @param duration
+     * @return
+     */
+    public String genRowkey(String hash,String caller,String time,String flag,String callee,String duration){
+        return hash + "," + caller + "," + time + "," + flag + "," + callee + "," + duration ;
+    }
+}</code></pre>
+
+<p>创建HbaseConsumer（hbase消费者）:</p>
+
+<p>    </p>
+
+<pre class="has">
+<code class="language-html">**
+ * Hbase消费者，从kafka提取数据，存储到hbase中。
+ */
+public class HbaseConsumer {
+
+    public static void main(String[] args) throws Exception {
+        HbaseDao dao = new HbaseDao();
+        //创建配置对象
+        ConsumerConfig config = new ConsumerConfig(PropertiesUtil.props);
+
+        //获得主题
+        String topic = PropertiesUtil.getProp("topic");
+        //
+        Map&lt;String, Integer&gt; map = new HashMap&lt;String, Integer&gt;();
+        map.put(topic, new Integer(1));
+        Map&lt;String, List&lt;KafkaStream&lt;byte[], byte[]&gt;&gt;&gt; msgs = Consumer.createJavaConsumerConnector(new ConsumerConfig(PropertiesUtil.props)).createMessageStreams(map);
+
+        List&lt;KafkaStream&lt;byte[], byte[]&gt;&gt; msgList = msgs.get(topic);
+
+        String msg = null ;
+        for (KafkaStream&lt;byte[], byte[]&gt; stream : msgList) {
+            ConsumerIterator&lt;byte[], byte[]&gt; it = stream.iterator();
+            while (it.hasNext()) {
+                byte[] message = it.next().message();
+                //取得kafka的消息
+                msg = new String(message) ;
+                //写入hbase中。
+                dao.put(msg);
+            }
+        }
+    }
+}
+</code></pre>
+
+<p> </p>
+
+<p>打成jar包放到s128。</p>
+
+<p> </p>
+
+<p><img alt="" class="has" src="https://img-blog.csdn.net/20180618110536250?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2E4MzMwNTA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<p> </p>
+
+<p>因为事先要到入很多相关包，所以在window下使用mvn命令，下载工件的所有依赖软件包<br>
+----------------------------------------</p>
+
+<p>mvn -DoutputDirectory=./lib -DgroupId=com.chenway -DartifactId=CallLogConsumerModule -Dversion=1.0-SNAPSHOT dependency:copy-dependencies -DgroupId=com.chenway -DartifactId=CallLogConsumerModule -Dversion=1.0-SNAPSHOT dependency:copy-dependencies</p>
+
+<p>    将生成的所有jar包放入s128下lib文件夹</p>
+
+<p>       编写run-kafkaconsumer.sh脚本：</p>
+
+<p>    <img alt="" class="has" src="https://img-blog.csdn.net/20180618110843174?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2E4MzMwNTA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<p> </p>
+
+<p>运行生成数据以及hbase消费者脚本：</p>
+
+<p>        ./run-kafkaconsumer.sh</p>
+
+<p>        ./calllog.sh</p>
+
+<p>可以进入hbase shell</p>
+
+<p> 查看命令：scan ‘ns1:calllogs’</p>
+
+<p>        <img alt="" class="has" src="https://img-blog.csdn.net/20180618111211642?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2E4MzMwNTA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<p>      </p>            </div>
+                </div>

@@ -1,0 +1,287 @@
+---
+layout:     post
+title:      SPARK官方文档中文翻译
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>Spark版本：1.6.0</p>
+
+<p>转载请注明出处：<a href="http://www.cnblogs.com/BYRans/" rel="nofollow">http://www.cnblogs.com/BYRans/</a></p>
+
+<p>1 概述(Overview) <br>
+2 引入Spark(Linking with Spark) <br>
+3 初始化Spark(Initializing Spark) <br>
+3.1 使用Spark Shell(Using the Shell) <br>
+4 弹性分布式数据集(RDDs) <br>
+4.1 并行集合(Parallelized Collections) <br>
+4.2 外部数据库(External Datasets) <br>
+4.3 RDD操作(RDD Operations) <br>
+4.3.1 基础(Basics) <br>
+4.3.2 把函数传递到Spark(Passing Functions to Spark) <br>
+4.3.3 理解闭包(Understanding closures) <br>
+4.3.3.1 示例(Example) <br>
+4.3.3.2 本地模式 VS 集群模式(Local vs. cluster modes) <br>
+4.3.3.3 打印RDD的元素(Printing elements of an RDD) <br>
+4.3.4 操作键值对(Working with Key­Value Pairs) <br>
+4.3.5 Transformations <br>
+4.3.6 Actions <br>
+4.3.7 Shuffle操作(Shuffle operations) <br>
+4.3.7.1 背景(Background) <br>
+4.3.7.2 性能影响(Performance Impact) <br>
+4.4 RDD持久化(RDD Persistence) <br>
+4.4.1 如何选择存储级别(Which Storage Level to Choose?) <br>
+4.4.2 移除数据(Removing Data) <br>
+5 共享变量(Shared Variables) <br>
+5.1 广播变量(broadcast variables) <br>
+5.2 累加器(Accumulators) <br>
+6 将应用提交到集群(Deploying to a Cluster) <br>
+7 Java/Scala中启动Spark作业(Launching Spark jobs from Java / Scala) <br>
+8 单元测试(Unit Testing) <br>
+9 从Spark1.0之前的版本迁移(Migrating from pre­1.0 Versions of Spark) <br>
+10 下一步(Where to Go from Here)</p>
+
+<p>1 概述(Overview) <br>
+总体来讲，每一个Spark驱动程序应用都由一个驱动程序组成，该驱动程序包含一个由用户编写的main方法，该方法会在集群上并行执行一些列并行计算操作。Spark最重要的一个概念是弹性分布式数据集，简称RDD（resilient distributed dataset ）。RDD是一个数据容器，它将分布在集群上各个节点上的数据抽象为一个数据集，并且RDD能够进行一系列的并行计算操作。可以将RDD理解为一个分布式的List，该List的数据为分布在各个节点上的数据。RDD通过读取Hadoop文件系统中的一个文件进行创建，也可以由一个RDD经过转换得到。用户也可以将RDD缓存至内存，从而高效的处理RDD，提高计算效率。另外，RDD有良好的容错机制。</p>
+
+<p>Spark另外一个重要的概念是共享变量（shared variables）。在并行计算时，可以方便的使用共享变量。在默认情况下，执行Spark任务时会在多个节点上并行执行多个task，Spark将每个变量的副本分发给各个task。在一些场景下，需要一个能够在各个task间共享的变量。Spark支持两种类型的共享变量：</p>
+
+<p>广播变量（broadcast variables）：将一个只读变量缓存到集群的每个节点上。例如，将一份数据的只读缓存分发到每个节点。</p>
+
+<p>累加变量（accumulators）：只允许add操作，用于计数、求和。</p>
+
+<p>2 引入Spark（Linking with Spark) <br>
+在Spark 1.6.0上编写应用程序，支持使用Scala 2.10.X、Java 7+、Python 2.6+、R 3.1+。如果使用Java 8，支持lambda表达式（lambda expressions）。 <br>
+在编写Spark应用时，需要在Maven依赖中添加Spark，Spark的Maven Central为：</p>
+
+<p>groupId = org.apache.spark <br>
+artifactId = spark-core_2.10 <br>
+version = 1.6.0 <br>
+另外，如果Spark应用中需要访问HDFS集群，则需要在hadoop-client中添加对应版本的HDFS依赖：</p>
+
+<p>groupId = org.apache.hadoop <br>
+artifactId = hadoop-client <br>
+version =  <br>
+最后，需要在程序中添加Spark类。代码如下：</p>
+
+<p>import org.apache.spark.SparkContext <br>
+import org.apache.spark.SparkConf <br>
+(在Spark 1.3.0之前的版本，使用Scala语言编写Spark应用程序时，需要添加import org.apache.spark.SparkContext._来启用必要的隐式转换)</p>
+
+<p>3 初始化Spark（Initializing Spark） <br>
+使用Scala编写Spark程序的需要做的第一件事就是创建一个SparkContext对象（使用Java语言时创建JavaSparkContext）。SparkContext对象指定了Spark应用访问集群的方式。创建SparkContext需要先创建一个SparkConf对象，SparkConf对象包含了Spark应用的一些列信息。代码如下：</p>
+
+<p>Scala <br>
+val conf = new SparkConf().setAppName(appName).setMaster(master) <br>
+new SparkContext(conf) <br>
+java <br>
+SparkConf conf = new SparkConf().setAppName(appName).setMaster(master); <br>
+JavaSparkContext sc = new JavaSparkContext(conf); <br>
+appName参数为应用程序在集群的UI上显示的名字。master为Spark、Mesos、YARN URL或local。使用local值时，表示在本地模式下运行程序。应用程序的执行模型也可以在使用spark-submit命令提交任务时进行指定。</p>
+
+<p>3.1 使用Spark Shell（Using the Shell）</p>
+
+<p>在Spark Shell下，一个特殊的SparkContext对象已经帮用户创建好，变量为sc。使用参数–master设置master参数值，使用参数–jars设置依赖包，多个jar包使用逗号分隔。可以使用–packages参数指定Maven坐标来添加依赖包，多个坐标使用逗号分隔。可以使用参数–repositories添加外部的repository。示例如下：</p>
+
+<p>本地模式下，使用4个核运行Spark程序： <br>
+<span class="MathJax_Preview"></span><span class="MathJax" id="MathJax-Element-1-Frame" role="textbox" aria-readonly="true"><nobr><span class="math" id="MathJax-Span-1" style="width: 35.309em; display: inline-block;"><span style="display: inline-block; position: relative; width: 28.216em; height: 0px; font-size: 125%;"><span style="position: absolute; clip: rect(1.763em 1000em 3.149em -0.424em); top: -2.717em; left: 0.003em;"><span class="mrow" id="MathJax-Span-2"><span class="mo" id="MathJax-Span-3" style="font-family: MathJax_Main;">.</span><span class="texatom" id="MathJax-Span-4" style="padding-left: 0.163em;"><span class="mrow" id="MathJax-Span-5"><span class="mo" id="MathJax-Span-6" style="font-family: MathJax_Main;">/</span></span></span><span class="mi" id="MathJax-Span-7" style="font-family: MathJax_Math-italic;">b</span><span class="mi" id="MathJax-Span-8" style="font-family: MathJax_Math-italic;">i</span><span class="mi" id="MathJax-Span-9" style="font-family: MathJax_Math-italic;">n</span><span class="texatom" id="MathJax-Span-10"><span class="mrow" id="MathJax-Span-11"><span class="mo" id="MathJax-Span-12" style="font-family: MathJax_Main;">/</span></span></span><span class="mi" id="MathJax-Span-13" style="font-family: MathJax_Math-italic;">s</span><span class="mi" id="MathJax-Span-14" style="font-family: MathJax_Math-italic;">p</span><span class="mi" id="MathJax-Span-15" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-16" style="font-family: MathJax_Math-italic;">r</span><span class="mi" id="MathJax-Span-17" style="font-family: MathJax_Math-italic;">k</span><span class="mo" id="MathJax-Span-18" style="font-family: MathJax_Main; padding-left: 0.216em;">−</span><span class="mi" id="MathJax-Span-19" style="font-family: MathJax_Math-italic; padding-left: 0.216em;">s</span><span class="mi" id="MathJax-Span-20" style="font-family: MathJax_Math-italic;">h</span><span class="mi" id="MathJax-Span-21" style="font-family: MathJax_Math-italic;">e</span><span class="mi" id="MathJax-Span-22" style="font-family: MathJax_Math-italic;">l</span><span class="mi" id="MathJax-Span-23" style="font-family: MathJax_Math-italic;">l</span><span class="mo" id="MathJax-Span-24" style="font-family: MathJax_Main;">–</span><span class="mi" id="MathJax-Span-25" style="font-family: MathJax_Math-italic; padding-left: 0.163em;">m</span><span class="mi" id="MathJax-Span-26" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-27" style="font-family: MathJax_Math-italic;">s</span><span class="mi" id="MathJax-Span-28" style="font-family: MathJax_Math-italic;">t</span><span class="mi" id="MathJax-Span-29" style="font-family: MathJax_Math-italic;">e</span><span class="mi" id="MathJax-Span-30" style="font-family: MathJax_Math-italic;">r</span><span class="mi" id="MathJax-Span-31" style="font-family: MathJax_Math-italic;">l</span><span class="mi" id="MathJax-Span-32" style="font-family: MathJax_Math-italic;">o</span><span class="mi" id="MathJax-Span-33" style="font-family: MathJax_Math-italic;">c</span><span class="mi" id="MathJax-Span-34" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-35" style="font-family: MathJax_Math-italic;">l</span><span class="mo" id="MathJax-Span-36" style="font-family: MathJax_Main;">[</span><span class="mn" id="MathJax-Span-37" style="font-family: MathJax_Main;">4</span><span class="mo" id="MathJax-Span-38" style="font-family: MathJax_Main;">]</span><span class="texatom" id="MathJax-Span-39"><span class="mrow" id="MathJax-Span-40"><span class="mo" id="MathJax-Span-41"><span style="font-family: STIXGeneral, 'Arial Unicode MS', serif; font-size: 80%; font-style: normal; font-weight: normal;">将</span></span></span></span><span class="mi" id="MathJax-Span-42" style="font-family: MathJax_Math-italic;">c</span><span class="mi" id="MathJax-Span-43" style="font-family: MathJax_Math-italic;">o</span><span class="mi" id="MathJax-Span-44" style="font-family: MathJax_Math-italic;">d<span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="mi" id="MathJax-Span-45" style="font-family: MathJax_Math-italic;">e</span><span class="mo" id="MathJax-Span-46" style="font-family: MathJax_Main;">.</span><span class="mi" id="MathJax-Span-47" style="font-family: MathJax_Math-italic; padding-left: 0.163em;">j</span><span class="mi" id="MathJax-Span-48" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-49" style="font-family: MathJax_Math-italic;">r</span><span class="texatom" id="MathJax-Span-50"><span class="mrow" id="MathJax-Span-51"><span class="mo" id="MathJax-Span-52"><span style="font-family: STIXGeneral, 'Arial Unicode MS', serif; font-size: 80%; font-style: normal; font-weight: normal;">包</span></span></span></span><span class="texatom" id="MathJax-Span-53"><span class="mrow" id="MathJax-Span-54"><span class="mo" id="MathJax-Span-55"><span style="font-family: STIXGeneral, 'Arial Unicode MS', serif; font-size: 80%; font-style: normal; font-weight: normal;">添</span></span></span></span><span class="texatom" id="MathJax-Span-56"><span class="mrow" id="MathJax-Span-57"><span class="mo" id="MathJax-Span-58"><span style="font-family: STIXGeneral, 'Arial Unicode MS', serif; font-size: 80%; font-style: normal; font-weight: normal;">加</span></span></span></span><span class="texatom" id="MathJax-Span-59"><span class="mrow" id="MathJax-Span-60"><span class="mo" id="MathJax-Span-61"><span style="font-family: STIXGeneral, 'Arial Unicode MS', serif; font-size: 80%; font-style: normal; font-weight: normal;">到</span></span></span></span><span class="mi" id="MathJax-Span-62" style="font-family: MathJax_Math-italic;">c</span><span class="mi" id="MathJax-Span-63" style="font-family: MathJax_Math-italic;">l</span><span class="mi" id="MathJax-Span-64" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-65" style="font-family: MathJax_Math-italic;">s</span><span class="mi" id="MathJax-Span-66" style="font-family: MathJax_Math-italic;">s</span><span class="mi" id="MathJax-Span-67" style="font-family: MathJax_Math-italic;">p</span><span class="mi" id="MathJax-Span-68" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-69" style="font-family: MathJax_Math-italic;">t</span><span class="mi" id="MathJax-Span-70" style="font-family: MathJax_Math-italic;">h</span><span class="texatom" id="MathJax-Span-71"><span class="mrow" id="MathJax-Span-72"><span class="mo" id="MathJax-Span-73"><span style="font-family: STIXGeneral, 'Arial Unicode MS', serif; font-size: 80%; font-style: normal; font-weight: normal;">：</span></span></span></span></span><span style="display: inline-block; width: 0px; height: 2.723em;"></span></span></span><span style="border-left-width: 0.003em; border-left-style: solid; display: inline-block; overflow: hidden; width: 0px; height: 1.47em; vertical-align: -0.397em;"></span></span></nobr></span><script type="math/tex" id="MathJax-Element-1"> ./bin/spark-shell –master local[4]  
+将code.jar包添加到classpath：  
+</script> ./bin/spark-shell –master local[4] –jars code.jar <br>
+使用Maven坐标添加一个依赖： <br>
+$ ./bin/spark-shell –master local[4] –packages “org.example:example:0.1” <br>
+详细的Spark Shell参数描述请执行命令spark-shell –help。更多的spark-submit脚本请见spark-submit script。</p>
+
+<p>4 弹性分布式数据集（RDDs) <br>
+Spark最重要的一个概念就是RDD，RDD是一个有容错机制的元素容器，它可以进行并行运算操作。得到RDD的方式有两个：</p>
+
+<p>通过并行化驱动程序中已有的一个集合而获得 <br>
+通过外部存储系统（例如共享的文件系统、HDFS、HBase等）的数据集进行创建</p>
+
+<p>4.1 并行集合（Parallelized Collections）</p>
+
+<p>在驱动程序中，在一个已经存在的集合上（例如一个Scala的Seq）调用SparkContext的parallelize方法可以创建一个并行集合。集合里的元素将被复制到一个可被并行操作的分布式数据集中。下面为并行化一个保存数字1到5的集合示例：</p>
+
+<p>Scala <br>
+val data = Array(1, 2, 3, 4, 5) <br>
+val distData = sc.parallelize(data) <br>
+Java <br>
+List data = Arrays.asList(1, 2, 3, 4, 5); <br>
+JavaRDD distData = sc.parallelize(data); <br>
+当分布式数据集创建之后，就可以进行并行操作。例如，可以调用方法distData.reduce((a,b) =&gt; a + b)求数组内元素的和。Spark支持的分布式数据集上的操作将在后面章节中详细描述。</p>
+
+<p>并行集合的一个重要的参数是表示将数据划分为几个分区（partition）的分区数。Spark将在集群上每个数据分区上启动一个task。通常情况下，你可以在集群上为每个CPU设置2-4个分区。一般情况下，Spark基于集群自动设置分区数目。也可以手动进行设置，设置该参数需要将参数值作为第二参数传给parallelize方法，例如：sc.parallelize(data, 10)。注意：在代码中，部分位置使用术语slices（而不是partition），这么做的原因是为了保持版本的向后兼容性。</p>
+
+<p>4.2 外部数据库（External Datasets）</p>
+
+<p>Spark可以通过Hadoop支持的外部数据源创建分布式数据集，Hadoop支持的数据源有本地文件系统、HDFS、Cassandra、HBase、Amazon S3、Spark支持的文本文件、SequenceFiles、Hadoop InputFormat。</p>
+
+<p>SparkContext的testFile方法可以创建文本文件RDD。使用这个方法需要传递文本文件的URI，URI可以为本机文件路径、hdfs://、s3n://等。该方法读取文本文件的每一行至容器中。示例如下：</p>
+
+<p>Scala <br>
+scala&gt; val distFile = sc.textFile(“data.txt”) <br>
+distFile: RDD[String] = MappedRDD@1d4cee08 <br>
+Java <br>
+JavaRDD distFile = sc.textFile(“data.txt”); <br>
+创建之后，distFile就可以进行数据集的通用操作。例如，使用map和reduce操作计算所有行的长度的总和：distFile.map(s =&gt; s.length).reduce((a, b) =&gt; a + b)。 <br>
+使用Spark读取文件需要注意一下几点：</p>
+
+<p>程序中如果使用到本地文件路径，在其它worker节点上该文件必须在同一目录，并有访问权限。在这种情况下，可以将文件复制到所有的worker节点，也可以使用网络内的共享文件系统。 <br>
+Spark所有的基于文件输入的方法（包括textFile），都支持文件夹、压缩文件、通配符。例如：textFile(“/my/directory”)、textFile(“/my/directory/<em>.txt”)、textFile(“/my/directory/</em>.gz”)。 <br>
+textFile方法提供了一个可选的第二参数，用于控制文件的分区数。默认情况下，Spark为文件的每个块创建一个分区（块使用HDFS的默认值64MB），通过设置这个第二参数可以修改这个默认值。需要注意的是，分区数不能小于块数。 <br>
+除了文本文件之外，Spark还支持其它的数据格式：</p>
+
+<p>SparkContext.wholeTextFiles能够读取指定目录下的许多小文本文件，返回（filename,content）对。而textFile只能读取一个文本文件，返回该文本文件的每一行。 <br>
+对于SequenceFiles可以使用SparkContext的sequenceFile[K,V]方法，其中K是文件中key和value的类型。它们必须为像IntWritable和Text那样，是Hadoop的Writable接口的子类。另外，对于通用的Writable，Spark允许用户指定原生类型。例如，sequenceFile[Int,String]将自动读取IntWritable和Text。 <br>
+对于其他Hadoop InputFormat，可以使用SparkContext.hadoopRDD方法，该方法接收任意类型的JobConf和输入格式类、键类型和值类型。可以像设置Hadoop job那样设置输入源。对于InputFormat还可以使用基于新版本MapReduce API(org.apache.hadoop.mapreduce)的SparkContext.newAPIHadoopRDD。（老版本接口为：SparkContext.newHadoopRDD） <br>
+RDD.saveAsObjectFile和SparkContext.objectFile能够保存包含简单的序列化Java对象的RDD。但是这个方法不如Avro高效，Avro能够方便的保存任何RDD。</p>
+
+<p>4.3 RDD操作(RDD Operations)</p>
+
+<p>RDD支持两种类型的操作：</p>
+
+<p>transformation：从一个RDD转换为一个新的RDD。 <br>
+action：基于一个数据集进行运算，并返回RDD。 <br>
+例如，map是一个transformation操作，map将数据集的每一个元素按指定的函数转换为一个RDD返回。reduce是一个action操作，reduce将RDD的所有元素按指定的函数进行聚合并返回结果给驱动程序（还有一个并行的reduceByKey能够返回一个分布式的数据集）。</p>
+
+<p>Spark的所有transformation操作都是懒执行，它们并不立马执行，而是先记录对数据集的一系列transformation操作。在执行一个需要执行一个action操作时，会执行该数据集上所有的transformation操作，然后返回结果。这种设计让Spark的运算更加高效，例如，对一个数据集map操作之后使用reduce只返回结果，而不返回庞大的map运算的结果集。</p>
+
+<p>默认情况下，每个转换的RDD在执行action操作时都会重新计算。即使两个action操作会使用同一个转换的RDD，该RDD也会重新计算。在这种情况下，可以使用persist方法或cache方法将RDD缓存到内存，这样在下次使用这个RDD时将会提高计算效率。在这里，也支持将RDD持久化到磁盘，或在多个节点上复制。</p>
+
+<p>4.3.1 基础（Basics）</p>
+
+<p>参考下面的程序，了解RDD的基本轮廓：</p>
+
+<p>Scala <br>
+val lines = sc.textFile(“data.txt”) <br>
+val lineLengths = lines.map(s =&gt; s.length) <br>
+val totalLength = lineLengths.reduce((a, b) =&gt; a + b) <br>
+Java <br>
+JavaRDD lines = sc.textFile(“data.txt”); <br>
+JavaRDD lineLengths = lines.map(s -&gt; s.length()); <br>
+int totalLength = lineLengths.reduce((a, b) -&gt; a + b); <br>
+第一行通过读取一个文件创建了一个基本的RDD。这个数据集没有加载到内存，也没有进行其他的操作，变量lines仅仅是一个指向文件的指针。第二行为transformation操作map的结果。此时lineLengths也没有进行运算，因为map操作为懒执行。最后，执行action操作reduce。此时Spark将运算分隔成多个任务分发给多个机器，每个机器执行各自部分的map并进行本地reduce，最后返回运行结果给驱动程序。</p>
+
+<p>如果在后面的运算中仍会用到lineLengths，可以将其缓存，在reduce操作之前添加如下代码，该persist操作将在lineLengths第一次被计算得到后将其缓存到内存：</p>
+
+<p>Scala <br>
+lineLengths.persist() <br>
+Java <br>
+lineLengths.persist(StorageLevel.MEMORY_ONLY());</p>
+
+<p>4.3.2 把函数传递到Spark(Passing Functions to Spark)</p>
+
+<p>Scala <br>
+Spark的API，在很大程度上依赖于把驱动程序中的函数传递到集群上运行。这有两种推荐的实现方式： <br>
+使用匿名函数的语法，这可以让代码更加简洁。 <br>
+使用全局单例对象的静态方法。比如，你可以定义函数对象objectMyFunctions，然后将该对象的MyFunction.func1方法传递给Spark,如下所示： <br>
+object MyFunctions { <br>
+  def func1(s: String): String = { … } <br>
+}</p>
+
+<p>myRdd.map(MyFunctions.func1) <br>
+注意：由于可能传递的是一个类实例方法的引用（而不是一个单例对象），在传递方法的时候，应该同时传递包含该方法的类对象。举个例子：</p>
+
+<p>class MyClass { <br>
+  def func1(s: String): String = { … } <br>
+  def doStuff(rdd: RDD[String]): RDD[String] = { rdd.map(func1) } <br>
+} <br>
+上面示例中，如果我们创建了一个类实例new MyClass，并且调用了实例的doStuff方法，该方法中的map操作调用了这个MyClass实例的func1方法，所以需要将整个对象传递到集群中。类似于写成：rdd.map(x=&gt;this.func1(x))。</p>
+
+<p>类似地，访问外部对象的字段时将引用整个对象：</p>
+
+<p>class MyClass { <br>
+  val field = “Hello” <br>
+  def doStuff(rdd: RDD[String]): RDD[String] = { rdd.map(x =&gt; field + x) } <br>
+} <br>
+等同于写成rdd.map(x=&gt;this.field+x),引用了整个this。为了避免这种问题，最简单的方式是把field拷贝到本地变量，而不是去外部访问它：</p>
+
+<p>def doStuff(rdd: RDD[String]): RDD[String] = { <br>
+  val field_ = this.field <br>
+  rdd.map(x =&gt; field_ + x) <br>
+} <br>
+Java <br>
+Spark的API，在很大程度上依赖于把驱动程序中的函数传递到集群上运行。在Java中，函数由那些实现了org.apache.spark.api.java.function包中的接口的类表示。有两种创建这样的函数的方式： <br>
+在你自己的类中实现Function接口，可以是匿名内部类，或者命名类，并且传递类的一个实例到Spark。 <br>
+在Java8中，使用lambda表达式来简明地定义函数的实现。 <br>
+为了保持简洁性，本指南中大量使用了lambda语法，这在长格式中很容易使用所有相同的APIs。比如，我们可以把上面的代码写成：</p>
+
+<p>JavaRDD  lines = sc.textFile(“data.txt”); <br>
+JavaRDD lineLengths = lines.map(new Function Integer&gt;() { <br>
+  public Integer call(String s) { return s.length(); } <br>
+}); <br>
+int totalLength = lineLengths.reduce(new Function2 Integer, Integer&gt;() { <br>
+  public Integer call(Integer a, Integer b) { return a + b; } <br>
+}); <br>
+同样的功能，使用内联式的实现显得更为笨重繁琐，代码如下：</p>
+
+<p>class GetLength implements Function Integer&gt; { <br>
+  public Integer call(String s) { return s.length(); } <br>
+} <br>
+class Sum implements Function2 Integer, Integer&gt; { <br>
+  public Integer call(Integer a, Integer b) { return a + b; } <br>
+}</p>
+
+<p>JavaRDD lines = sc.textFile(“data.txt”); <br>
+JavaRDD lineLengths = lines.map(new GetLength()); <br>
+int totalLength = lineLengths.reduce(new Sum()); <br>
+注意，java中的内部匿名类，只要带有final关键字，就可以访问类范围内的变量。Spark也会把变量复制到每一个worker节点。</p>
+
+<p>4.3.3 理解闭包（Understanding closures）</p>
+
+<p>使用Spark的一个难点为：理解程序在集群中执行时变量和方法的生命周期。RDD操作可以在变量范围之外修改变量，这是一个经常导致迷惑的地方。比如下面的例子，使用foreach()方法增加计数器（counter）的值（类似的情况，在其他的RDD操作中经常出现）。</p>
+
+<p>4.3.3.1 示例（Example）</p>
+
+<p>参考下面简单的RDD元素求和示例，求和运算是否在同一个JVM中执行，其复杂度也不同。Spark可以在local模式下（–master = local[n])执行应用，也可以将该Spark应用提交到集群上执行（例如通过spark-submit提交到YARN)：</p>
+
+<p>Scala <br>
+var counter = 0 <br>
+var rdd = sc.parallelize(data)</p>
+
+<p>// Wrong: Don’t do this!! <br>
+rdd.foreach(x =&gt; counter += x)</p>
+
+<p>println(“Counter value: ” + counter) <br>
+Java <br>
+int counter = 0; <br>
+JavaRDD rdd = sc.parallelize(data);</p>
+
+<p>// Wrong: Don’t do this!! <br>
+rdd.foreach(x -&gt; counter += x);</p>
+
+<p>println(“Counter value: ” + counter);</p>
+
+<p>4.3.3.2 本地模式 VS 集群模式（Local vs. cluster modes）</p>
+
+<p>在本地模式下仅有一个JVM，上面的代码将直接计算RDD中元素和，并存储到counter中。此时RDD和变量counter都在driver节点的同一内存空间中。</p>
+
+<p>然而，在集群模式下，情况会变得复杂，上面的代码并不会按照预期的方式执行。为了执行这个job，Spark把处理RDD的操作分割成多个任务，每个任务将被一个executor处理。在执行之前，Spark首先计算闭包（closure）。闭包是必须对executor可见的变量和方法，在对RDD进行运算时将会用到这些变量和方法（在本例子中指foreach()）。这个闭包会被序列化，并发送给每个executor。在local模式下，只有一个executor，所以所有的变量和方法都使用同一个闭包。在其他模式下情况跟local模式不一样，每个executor在不同的worker节点上运行，每个executor都有一个单独的闭包。</p>
+
+<p>在这里，发送给每个executor的闭包内的变量是当前变量的副本，因此当counter在foreach中被引用时，已经不是在driver节点上的counter了。在driver节点的内存中仍然有一个counter，但这个counter对executors不可见。executor只能操作序列化的闭包中的counter副本。因此，最终counter的值仍然是0，因为所有对counter的操作都是在序列化的闭包内的counter上进行的。</p>
+
+<p>在类似这种场景下，为了保证良好的行为确保，应该使用累加器。Spark中的累加器专门为在集群中多个节点间更新变量提供了一种安全机制。在本手册的累加器部分将对累加器进行详细介绍。</p>
+
+<p>一般情况下，像环或本地定义方法这样的闭包结构，不应该用于更改全局状态。Spark不定义也不保证来自闭包外引用导致的对象变化行为。有些情况下，在local模式下可以正常运行的代码，在分布式模式下也许并不会像预期那样执行。在分布式下运行时，建议使用累加器定义一些全局集合。</p>
+
+<p>4.3.3.3 打印RDD的元素(Printing elements of an RDD)</p>
+
+<p>打印一个RDD的元素也是一个常用的语法，带引RDD元素可以使用方法rdd.foreach(println)或rdd.map(println)。在本地模式下，该方法将生成预期的输出并打印RDD所有的元素。然而，在集群模式下各个executor调用stdout，将结果打印到executor的stdout中。因为不是打印到driver节点上，所以在driver节点的stdout上不会看到这些输出。如果想将RDD的元素打印到driver节点上，可以使用collect()方法将RDD发送到driver节点上，然后再打印该RDD:rdd.collect().foreach(println)。这个操作可能会导致driver节点内存不足，因为collect()方法将RDD全部的数据都发送到一台节点上。如果仅仅打印RDD的部分元素，一个安全的方法是使用take()方法：rdd.take(100).foreach(println)。</p>
+
+<p>4.3.4 操作键值对(Working with Key­Value Pairs)</p>
+
+<p>Spark大部分的RDD操作都是对任意类型的对象的，但是，有部分特殊的操作仅支持对键值对的RDD进行操作。最常用的是分布式“shuffle”操作，比如按照key将RDD的元素进行分组或聚集操作。</p>
+
+<p>Scala <br>
+在Scala中，包含Tuple2对象在内的RDD键值对操作，都是可以自动可用的（Tuple2对象是Scala语言内置的元组类型，可以通过简单的编写进行(a,b)创建）。键值对操作接口在PairRDDFunctions类中，该类中的接口自动使用RDD的元组。 <br>
+例如，在下面的代码中使用reduceByKey操作对键值对进行计数，计算每行的文本出现的次数： <br>
+val lines = sc.textFile(“data.txt”) <br>
+val pairs = lines.map(s =&gt; (s, 1)) <br>
+val counts = pairs.reduceByKey((a, b) =&gt; a + b) <br>
+Java <br>
+在Java中，键值对使用的是scala.Tuple2类。用户可以使用特定的map操作将JavaRDDs转换为JavaPairRDDs，例如mapToPair和flatMapToPair。JavaPairRDD拥有标准RDD和特殊键值对的方法。 <br>
+例如，在下面的代码中使用reduceByKey操作对键值对进行计数，计算每行的文本出现的次数： <br>
+JavaRDD lines = sc.textFile(“data.txt”); <br>
+JavaPairRDD</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

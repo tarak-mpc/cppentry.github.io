@@ -1,0 +1,185 @@
+---
+layout:     post
+title:      Hive HQL 操作总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/rav009/article/details/79643063				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>hive 的log path(linux) 在 /tmp/username/</p>
+
+<h3>调用hive:</h3>
+
+<pre class="has">
+<code class="language-plain">hive -f script.sql
+hive -e 'select * from table'</code></pre>
+
+<pre class="has">
+<code class="language-plain">hive --config /user/another/config/directory
+hive -hiveconf fs.defaultFS=hdfs://localhost</code></pre>
+
+<p> </p>
+
+<h3>HQL 和 Mysql 中用的 SQL 非常相似:</h3>
+
+<pre class="has">
+<code class="language-sql">show tables;
+dfs -ls /;
+SET hive.some.parameter;   	# view the value of parameter
+SET hive.some.parameter=1; 	# set the value
+SET hive.block.size;        # hdfs block size
+
+describe tablename; 		# show the information of a table
+describe function length; 
+
+create table tablename(ID int);
+load data inpath '/user/input/data.txt' into table tablename;
+load data inpath '/user/input/data.txt' overwrite into table tablename;
+
+create external table tablename(ID int); 
+load data local inpath '/user/input/sample.txt' into table tablename; # when specify "local", load data from the local directory not hdfs
+
+crete table tablename (ID int, field1 int, field2 String)
+ROW FORMAT DELIMITED      # means one row in file is equivalent to one row in hive table
+fields terminated by ','; # column delimiter
+
+# Will create a sperate new table, CREATE-TABLE-AS-SELECT cannot create external table
+create table tablename as select * from oldtable; 
+
+select map('a',1,'b',2)
+select array(1,2)
+
+show create table tablename;</code></pre>
+
+<p>hive的外部表在drop时不会删除本地文件! 只是把元数据中的映射关系删除.</p>
+
+<p> </p>
+
+<h3><br>
+Partition &amp; Bucket:</h3>
+
+<pre class="has">
+<code class="language-sql"># make one column as partition column
+create table logs(ts bigint, line string) partition by (dt string);
+
+# use hash to divide data into different groups
+create table logs(ts bigint, line string) clustered by ts into 4 buckets;
+
+create table logs(ts bigint, line string) clustered by (ts) sorted by (ts asc) into 5 buckets;
+
+# use both
+create table logs(ts bigint, line string) 
+partition by (dt string)
+clustered by ts into 4 buckets;
+
+select * from bucketed_table tablesample(bucket 1 out of 4 on id);</code></pre>
+
+<p>如果想在JOIN的过程中利用partition的话, 必须在 WHERE子句或ON子句中指明partition列的取值.</p>
+
+<p> </p>
+
+<h3>以下引用自https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Select#LanguageManualSelect-PartitionBasedQueries</h3>
+
+<h3>Partition Based Queries</h3>
+
+<p>In general, a SELECT query scans the entire table (other than for <a href="https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Sampling" rel="nofollow">sampling</a>). If a table created using the <a href="https://cwiki.apache.org/confluence/display/Hive/LanguageManual+DDL#LanguageManualDDL-CreateTable" rel="nofollow">PARTITIONED BY</a> clause, a query can do <strong>partition pruning</strong> and scan only a fraction of the table relevant to the partitions specified by the query. Hive currently does partition pruning if the partition predicates are specified in the WHERE clause or the ON clause in a JOIN. For example, if table page_views is partitioned on column date, the following query retrieves rows for just days between 2008-03-01 and 2008-03-31.</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td style="vertical-align:baseline;">
+			<p><code>SELECT page_views.*</code></p>
+
+			<p><code>FROM page_views</code></p>
+
+			<p><code>WHERE page_views.date &gt;= </code><code>'2008-03-01'</code> <code>AND page_views.date &lt;= </code><code>'2008-03-31'</code></p>
+			</td>
+		</tr></tbody></table><p>If a table page_views is joined with another table dim_users, you can specify a range of partitions in the ON clause as follows:</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td style="vertical-align:baseline;">
+			<p><code>SELECT page_views.*</code></p>
+
+			<p><code>FROM page_views JOIN dim_users</code></p>
+
+			<p><code>  </code><code>ON (page_views.user_id = dim_users.id AND page_views.date &gt;= </code><code>'2008-03-01'</code> <code>AND page_views.date &lt;= </code><code>'2008-03-31'</code><code>)</code></p>
+			</td>
+		</tr></tbody></table><p> </p>
+
+<p> </p>
+
+<p> </p>
+
+<p>使用正则表达式来解析文件并生成表:</p>
+
+<pre class="has">
+<code class="language-plain">create table users(user STRING,address STRING,phone STRING)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.contrib.serde2.RegexSerDe' with SERDEPROPERTIES(
+    "input.regex" = "(\\d{6} (\\d{5} (.{29}))) .*"
+);</code></pre>
+
+<p>插入数据(insert into 表示追加数据, overwite表示清空后插入, 不要忘了"table"):</p>
+
+<pre class="has">
+<code class="language-sql">insert into table destination_table select col1, col2 from source;
+
+insert overwrite table destination_table select col1, col2 from source;
+
+insert overwrite table destination_table partition (part='1') select col1, col2 from source;
+
+insert overwrite table destination_table partition (dt) select col1, col2, dt from source; #partition根据源表某列动态生成
+
+insert into table destination_table partition (year,month) (id,num2,num3) select id, year(dt6) as year ,month(dt6) as month  from employee  limit 1000;
+
+insert into table destination_table partition (year,month) select id, year(dt6) as year ,month(dt6) as month  from employee  limit 1000;
+
+insert overwrite table destination_table partition (year=2003,month) select * ,month(dt6) as month  from employee  limit 1000;</code></pre>
+
+<p>这里的insert语句其实涉及到了Hive的动态分区和静态分区的问题了. 动态分区是运行时根据insert语句的附带的select子句来动态地创建分区, 而静态分区与之相反, 比如上面例句的最后一条year=2003表示了year这个分区是静态的, 而后面的month则是动态地根据month(dt6)来生成.</p>
+
+<p>Hive静态分区不能是动态分区的子分区, 比如上面的year作为动态的,而month作静态分区是不允许的.</p>
+
+<p>默认情况下动态分区功能关闭, 打开该功能语句:</p>
+
+<pre class="has">
+<code class="language-plain">set hive.exec.dynamic.partition=true</code></pre>
+
+<p>默认情况下为了防止用户不小心创建了大量分区, 所以Hive默认必须有一个静态分区(strict模式),如果你的要求是所有分区均为动态的,则运行:</p>
+
+<pre class="has">
+<code class="language-plain">set hive.exec.dynamic.partition.mode=nonstrict;</code></pre>
+
+<p> </p>
+
+<p>HQL 高级查询:</p>
+
+<pre class="has">
+<code class="language-sql">#use distribute that all the rows for a given year end up in the same reducer
+from table
+select year, temperature
+distribute by year
+sort by year asc, temperature desc;
+
+#add a file to distributed cache, then use the file as a mapper.
+ADD FILE /user/script/mapper.py
+from table select transform(year, temperature, quality)
+using 'mapper.py' as year, temperature
+
+FROM (
+	FROM table
+	MAP year, temperature, quality
+	USING 'mapper.py'
+	AS year, temperature) map_output
+REDUCE year, temperature
+USING 'reducer.py'
+AS year, temperature;</code></pre>
+
+<p>UDF(User Defined Function):</p>
+
+<pre class="has">
+<code class="language-sql">create function strip as 'com.company.hive.Strip'
+using jar '/path/to/some.jar' #local address or dfs address</code></pre>
+
+<p> </p>
+
+<p> </p>
+
+<p> </p>            </div>
+                </div>

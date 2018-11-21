@@ -1,0 +1,725 @@
+---
+layout:     post
+title:      Hadoop集群完全分布式模式环境部署
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div class="Blog_tit4 Blog_tit5" style="border-bottom:0px;color:rgb(86,86,86);font-family:'宋体', Arial;">
+ <a href="http://blog.chinaunix.net/uid-25266990-id-3900239.html" rel="nofollow" style="text-decoration:none;color:rgb(25,89,155);font-family:'微软雅黑', '黑体', Verdana;font-size:20px;">Hadoop集群完全分布式模式环境部署</a> <span style="margin-left:22px;color:rgb(187,186,186);font-family:Arial;">2013-09-13
+ 17:24:14</span></div>
+<div class="Blog_con2" style="color:rgb(102,102,102);line-height:26px;font-family:'宋体', Arial;">
+<div class="Blog_con3" style="line-height:22px;">
+<p style="color:rgb(25,89,155);">
+分类： <span style="color:rgb(187,186,186);">HADOOP</span></p>
+<p style="color:rgb(25,89,155);">
+</p>
+</div>
+<div class="Blog_wz1" style="font-size:16px;">
+<p style="border:0px;vertical-align:baseline;line-height:24px;">
+</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+<span>Hadoop简介</span></p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+        Hadoop是Apache软件基金会旗下的一个开源分布式计算平台。以Hadoop分布式文件系统（HDFS，Hadoop Distributed Filesystem）和MapReduce（Google MapReduce的开源实现）为核心的Hadoop为用户提供了系统底层细节透明的分布式基础架构。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+对于Hadoop的集群来讲，可以分成两大类角色：Master和Salve。一个HDFS集群是由一个NameNode和若干个DataNode组成的。其中NameNode作为主服务器，管理文件系统的命名空间和客户端对文件系统的访问操作；集群中的DataNode管理存储的数据。MapReduce框架是由一个单独运行在主节点上的JobTracker和运行在每个集群从节点的TaskTracker共同组成的。主节点负责调度构成一个作业的所有任务，这些任务分布在不同的从节点上。主节点监控它们的执行情况，并且重新执行之前的失败任务；从节点仅负责由主节点指派的任务。当一个Job被提交时，JobTracker接收到提交作业和配置信息之后，就会将配置信息等分发给从节点，同时调度任务并监控TaskTracker的执行。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+从上面的介绍可以看出，HDFS和MapReduce共同组成了Hadoop分布式系统体系结构的核心。HDFS在集群上实现分布式文件系统，MapReduce在集群上实现了分布式计算和任务处理。HDFS在MapReduce任务处理过程中提供了文件操作和存储等支持，MapReduce在HDFS的基础上实现了任务的分发、跟踪、执行等工作，并收集结果，二者相互作用，完成了Hadoop分布式集群的主要任务。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+<span>先决条件</span></p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+1) 确保在你集群中的每个节点上都安装了所有必需软件：sun-JDK ssh Hadoop。<br>
+2) JavaTM1.5.x，必须安装，建议选择Sun公司发行的Java版本。<br>
+3) ssh 必须安装并且保证 sshd一直运行，以便用Hadoop 脚本管理远端Hadoop守护进程。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+<span>实验环境</span></p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+操作平台：vmware<br>
+操作系统：CentOS 5.9<br>
+软件版本：hadoop-1.2.1,jdk-6u45<br>
+集群架构：包括4个节点：1个Master，3个Salve，节点之间局域网连接，可以相互ping通。节点IP地址分布如下：</p>
+<table style="border:0px;font-family:'helvetica neue', arial, sans-serif;font-size:16px;width:636px;color:rgb(51,51,51);"><tbody><tr><td valign="top" width="54" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+主机名</td>
+<td valign="top" width="112" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+IP</td>
+<td valign="top" width="72" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+系统版本</td>
+<td valign="top" width="67" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+Hadoop node</td>
+<td valign="top" width="139" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+hadoop<span style="font-family:'宋体';font-style:inherit;vertical-align:baseline;">进程名</span></td>
+</tr><tr><td valign="top" width="54" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+Master</td>
+<td valign="top" width="112" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+192.168.137.100</td>
+<td valign="top" width="72" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+CetOS 5.9</td>
+<td valign="top" width="67" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+master</td>
+<td valign="top" width="139" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+namenode,jobtracker</td>
+</tr><tr><td valign="top" width="54" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+Slave1</td>
+<td valign="top" width="112" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+192.168.137.101</td>
+<td valign="top" width="72" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+CetOS 5.9</td>
+<td valign="top" width="67" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+slave</td>
+<td valign="top" width="139" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+datanode,tasktracker</td>
+</tr><tr><td valign="top" width="54" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+Slave2</td>
+<td valign="top" width="112" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+192.168.137.102</td>
+<td valign="top" width="72" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+CetOS 5.9</td>
+<td valign="top" width="67" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+slave</td>
+<td valign="top" width="139" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+datanode,tasktracker</td>
+</tr><tr><td valign="top" width="54" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+Slave3</td>
+<td valign="top" width="112" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+192.168.137.103</td>
+<td valign="top" width="72" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+CetOS 5.9</td>
+<td valign="top" width="67" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+slave</td>
+<td valign="top" width="139" style="border:0px;font-family:inherit;font-style:inherit;vertical-align:baseline;">
+datanode,tasktracker</td>
+</tr></tbody></table><p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+四个节点上均是CentOS5.9系统，并且有一个相同的用户hadoop。Master机器主要配置NameNode和JobTracker的角色，负责总管分布式数据和分解任务的执行；3个Salve机器配置DataNode和TaskTracker的角色，负责分布式数据存储以及任务的执行。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+<span>安装步骤</span></p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+下载：jdk-6u45-linux-x64.bin , hadoop-1.2.1.tar.gz （主机名和网络配置略）<br>
+说明：在生产的hadoop集群环境中，由于服务器可能会有许多台，通过配置DNS映射机器名，相比配置/etc/host方法，可以避免在每个节点都配置各自的host文件，而且在新增节点时也不需要修改每个节点的/etc/host的主机名-IP映射文件。减少了配置步骤和时间，便于管理。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+1、JDK安装</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#/bin/bash
+ jdk-6u45-linux-x64.bin</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#mv jdk1.6.0_45
+ /usr/local/</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+添加java环境变量：</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#vim /etc/profile</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#最后添加</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"># set java
+ environment</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">export JAVA_HOME=/usr/local/jdk1.6.0_45/</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">export JRE_HOME=/usr/local/jdk1.6.0_45/jre</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">export CLASSPATH=.:$CLASSPATH:$JAVA_HOME/lib:$JRE_HOME/lib</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">export PATH=$PATH:$JAVA_HOME/bin:$JRE_HOME/bin</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+生效java变量：</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#source
+ /etc/profile</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"># java
+ -version</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">java version "1.6.0_45"</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Java(TM)
+ SE Runtime Environment (build 1.6.0_45-b06)</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Java HotSpot(TM)
+ 64-Bit Server VM (build 20.45-b01, mixed mode)</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+在所有的机器上都建立相同的目录，也可以就建立相同的用户，最好是以该用户的home路径来做hadoop的安装路径。安装路径都是：/home/hadoop/hadoop-1.2.1</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#useradd
+ hadoop</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#passwd
+ hadoop</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+2、SSH配置</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+在Hadoop启动以后，Namenode是通过SSH（Secure Shell）来启动和停止各个datanode上的各种守护进程的，这就须要在节点之间执行指令的时候是不须要输入密码的形式，故我们须要配置SSH运用无密码公钥认证的形式。以本文中的四台机器为例，现在Master是主节点，他须要连接Slave1、Slave2和Slave3。须要确定每台机器上都安装了ssh，并且datanode机器上sshd服务已经启动。<br>
+切换到hadoop用户( 保证用户hadoop可以无需密码登录，因为我们后面安装的hadoop属主是hadoop用户。)<br>
+1) 在每台主机生成密钥对</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#su - hadoop</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#ssh-keygen
+ -t rsa#cat ~/.ssh/id_rsa.pub</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+这个命令生成一个密钥对：id_rsa（私钥文件）和id_rsa.pub（公钥文件）。默认被保存在~/.ssh/目录下。<br>
+2) 将Master公钥添加到远程主机Slave1的 authorized_keys 文件中<br>
+在/home/hadoop/.ssh/下创建authorized_keys</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#vim authorized_keys</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+将刚才复制的公钥复制进去<br>
+权限设置为600.(这点很重要，网没有设置600权限会导致登陆失败)<br>
+测试登陆：</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ ssh Slave1</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">The authenticity
+ of host 'slave2 (192.168.137.101)' can't be established.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">RSA key
+ fingerprint is d5:18:cb:5f:92:66:74:c7:30:30:bb:36:bf:4c:ed:e9.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Are you
+ sure you want to continue connecting (yes/no)? yes</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Warning:
+ Permanently added 'slave2,192.168.137.101' (RSA) to the list of known hosts.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Last login:
+ Fri Aug 30 21:31:36 2013 from slave1</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">[hadoop@Slave1
+ ~]$</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+同样的方法，将Master 的公钥复制到其他节点。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+3、安装Hadoop</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+1) 切换为hadoop用户，下载安装包后，直接解压安装即可：</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#su - hadoop</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;">#wget <a href="http://apache.stu.edu.tw/hadoop/common/hadoop-1.2.1/hadoop-1.2.1.tar.gz" rel="nofollow" style="text-decoration:none;color:rgb(86,86,86);">http://apache.stu.edu.tw/hadoop/common/hadoop-1.2.1/hadoop-1.2.1.tar.gz</a></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">#tar -zxvf
+ hadoop-1.2.1.tar.gz</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+我的安装目录为：<br>
+/home/hadoop/hadoop-1.2.1<br>
+为了方便，使用hadoop命令或者start-all.sh等命令，修改Master上/etc/profile 新增以下内容：</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">export HADOOP_HOME=/home/hadoop/hadoop-1.2.1</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">export PATH=$PATH:$HADOOP_HOME/bin</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+修改完毕后，执行source /etc/profile 来使其生效。<br>
+2) 配置conf/hadoop-env.sh文件<br>
+配置conf/hadoop-env.sh文件,添加：</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">export JAVA_HOME=/usr/local/jdk1.6.0_45/</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+这里修改为你的jdk的安装位置。<br>
+测试hadoop安装：</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">/home/hadoop/hadoop-1.2.1/bin/hadoop
+ jar hadoop-0.20.2-examples.jarwordcount conf/ /tmp/out</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+4、集群配置（所有节点相同）</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+1) 配置文件：conf/core-site.xml</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;"></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;"></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;"></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">fs.default.name</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Master:9000</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">The name
+ of the default file system. Either the literal string "local" or a host:port forDFS.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">hadoop.tmp.dir</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">/home/hadoop/tmp</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">A base for other
+ temporary directories.</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+fs.default.name是NameNode的URI。hdfs://主机名:端口/hadoop.tmp.dir ：Hadoop的默认临时路径，这个最好配置，如果在新增节点或者其他情况下莫名其妙的DataNode启动不了，就删除此文件中的tmp目录即可。不过如果删除了NameNode机器的此目录，那么就需要重新执行NameNode格式化的命令。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+2) 配置文件：conf/mapred-site.xml</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;"></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;"></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">mapred.job.tracker</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Master:9001</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">The host and port
+ that the MapReduce job tracker runs at. If "local", then jobs are runin-process as a single map and reduce task.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">mapred.local.dir</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">/home/hadoop/tmp</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+mapred.job.tracker是JobTracker的主机（或者IP）和端口。主机:端口。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+3) 配置文件：conf/hdfs-site.xml</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;"></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;"></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><span style="vertical-align:baseline !important;"></span></span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">dfs.name.dir</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">/home/hadoop/name1,
+ /home/hadoop/name2</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Determines
+ where on the local filesystem the DFS name node should store the name table. If this is a comma-delimited list of directories then the name table is replicated in all of the directories, for redundancy.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">dfs.data.dir</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">/home/hadoop/data1,
+ /home/hadoop/data2</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Determines
+ where on the local filesystem an DFS data node should store its blocks. If this is a comma-delimited list of directories, then data will be stored in all named directories, typically on different devices. Directories that do not exist are ignored.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">dfs.replication</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">3</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Default
+ block replication. The actual number of replications can be specified when the file is created. The default is used if replication is not specified in create time.</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+dfs.name.dir是NameNode持久存储名字空间及事务日志的本地文件系统路径。 当这个值是一个逗号分割的目录列表时，nametable数据将会被复制到所有目录中做冗余备份。<br>
+dfs.data.dir是DataNode存放块数据的本地文件系统路径，逗号分割的列表。 当这个值是逗号分割的目录列表时，数据将被存储在所有目录下，通常分布在不同设备上。<br>
+dfs.replication是数据需要备份的数量，默认是3，如果此数大于集群的机器数会出错。<br>
+注意：此处的name1、name2、data1、data2目录不能预先创建，hadoop格式化时会自动创建，如果预先创建反而会有问题。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+4) 配置masters和slaves主从结点<br>
+配置conf/masters和conf/slaves来设置主从结点，注意最好使用主机名，并且保证机器之间通过主机名可以互相访问，每个主机名一行。</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$vim masters：</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">输入：</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Master</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$vim slaves：</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">输入：</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave1</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave2</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave3</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+配置结束，把配置好的hadoop文件夹拷贝到其他集群的机器中，并且保证上面的配置对于其他机器而言正确，例如：如果其他机器的Java安装路径不一样，要修改conf/hadoop-env.sh</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$scp -r
+ /home/hadoop/hadoop-1.2.1 Slave1:/home/hadoop/</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$scp -r
+ /home/hadoop/hadoop-1.2.1 Slave2:/home/hadoop/</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$scp -r
+ /home/hadoop/hadoop-1.2.1 Slave3:/home/hadoop/</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+5、hadoop启动</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+1) 格式化一个新的分布式文件系统</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ cd /home/hadoop/hadoop-1.2.1
+ $ bin/hadoop namenode -format</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">成功情况下系统输出：</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Warning:
+ $HADOOP_HOME is deprecated.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:31 INFO namenode.NameNode: STARTUP_MSG:</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">/************************************************************</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">STARTUP_MSG:
+ Starting NameNode</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">STARTUP_MSG:
+ host = Master/192.168.137.100</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">STARTUP_MSG:
+ args = [-format]</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">STARTUP_MSG:
+ version = 1.2.1</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">STARTUP_MSG:
+ build = <a href="https://svn.apache.org/repos/asf/hadoop/common/branches/branch-1.2" rel="nofollow" style="text-decoration:none;color:rgb(86,86,86);">https://svn.apache.org/repos/asf/hadoop/common/branches/branch-1.2</a> -r 1503152;
+ compiled by 'mattf' on Mon Jul 22 15:23:09 PDT 2013</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">STARTUP_MSG:
+ java = 1.6.0_45</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">************************************************************/</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO util.GSet: Computing capacity for map BlocksMap</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO util.GSet: VM type = 64-bit</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO util.GSet: 2.0% max memory = 1013645312</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO util.GSet: capacity = 2^21 = 2097152 entries</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO util.GSet: recommended=2097152, actual=2097152</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO namenode.FSNamesystem: fsOwner=hadoop</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO namenode.FSNamesystem: supergroup=supergroup</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO namenode.FSNamesystem: isPermissionEnabled=true</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO namenode.FSNamesystem: dfs.block.invalidate.limit=100</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO namenode.FSNamesystem: isAccessTokenEnabled=falseaccessKeyUpdateInterval=0 min(s), accessTokenLifetime=0 min(s)</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO namenode.FSEditLog: dfs.namenode.edits.toleration.length = 0</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:32 INFO namenode.NameNode: Caching file names occuring more than 10 times</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO common.Storage: Image file /home/hadoop/name1/current/fsimage of size 112 bytes saved in 0 seconds.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO namenode.FSEditLog: closing edit log: position=4, editlog=/home/hadoop/name1/current/edits</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO namenode.FSEditLog: close success: truncate to 4, editlog=/home/hadoop/name1/current/edits</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO common.Storage: Storage directory /home/hadoop/name1 has been successfully formatted.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO common.Storage: Image file /home/hadoop/name2/current/fsimage of size 112 bytes saved in 0 seconds.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO namenode.FSEditLog: closing edit log: position=4, editlog= /home/hadoop/name2/current/edits</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO namenode.FSEditLog: close success: truncate to 4, editlog= /home/hadoop/name2/current/edits</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO common.Storage: Storage directory /home/hadoop/name2 has been successfully formatted.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 16:39:33 INFO namenode.NameNode: SHUTDOWN_MSG:</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">/************************************************************</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">SHUTDOWN_MSG:
+ Shutting down NameNode at Master/192.168.137.100</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">************************************************************/</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+查看输出保证分布式文件系统格式化成功执行完后可以到master机器上看到/home/hadoop//name1和/home/hadoop/name2两个目录。在主节点master上面启动hadoop，主节点会启动所有从节点的hadoop。<br>
+2) 启动所有节点<br>
+启动方式1：</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ bin/start-all.sh</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">（同时启动HDFS和Map/Reduce）系统输出：</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ bin/start-all.sh</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Warning:
+ $HADOOP_HOME is deprecated.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">starting
+ namenode, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-namenode-Master.out</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave3:
+ starting datanode, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-datanode-Slave3.out</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave2:
+ starting datanode, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-datanode-Slave2.out</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave1:
+ starting datanode, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-datanode-Slave1.out</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">The authenticity
+ of host 'master (192.168.137.100)' can't be established.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">RSA key
+ fingerprint is d5:18:cb:5f:92:66:74:c7:30:30:bb:36:bf:4c:ed:e9.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Are you
+ sure you want to continue connecting (yes/no)? yes</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Master:
+ Warning: Permanently added 'master,192.168.137.100' (RSA) to the list of known hosts.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">hadoop@master's
+ password:</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Master:
+ starting secondarynamenode, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-secondarynamenode-Master.out</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">starting
+ jobtracker, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-jobtracker-Master.out</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave2:
+ starting tasktracker, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-tasktracker-Slave2.out</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave3:
+ starting tasktracker, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-tasktracker-Slave3.out</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Slave1:
+ starting tasktracker, logging to /home/hadoop/hadoop-1.2.1/libexec/../logs/hadoop-hadoop-tasktracker-Slave1.out</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+执行完后可以到master（Master）和slave（Slave1,Slave2,Slave3）机器上看到/home/hadoop/hadoopfs/data1和/home/hadoop/data2两个目录。<br>
+启动方式2：</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+启动Hadoop集群需要启动HDFS集群和Map/Reduce集群。<br>
+在分配的NameNode上，运行下面的命令启动HDFS：<br>
+$ bin/start-dfs.sh</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+（单独启动HDFS集群）<br>
+bin/start-dfs.sh脚本会参照NameNode上${HADOOP_CONF_DIR}/slaves文件的内容，在所有列出的slave上启动DataNode守护进程。<br>
+在分配的JobTracker上，运行下面的命令启动Map/Reduce：$bin/start-mapred.sh<br>
+（单独启动Map/Reduce）<br>
+bin/start-mapred.sh脚本会参照JobTracker上${HADOOP_CONF_DIR}/slaves文件的内容，在所有列出的slave上启动TaskTracker守护进程。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+3) 关闭所有节点</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+从主节点master关闭hadoop，主节点会关闭所有从节点的hadoop。</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ bin/stop-all.sh</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+Hadoop守护进程的日志写入到 ${HADOOP_LOG_DIR} 目录 (默认是 ${HADOOP_HOME}/logs).<br>
+${HADOOP_HOME}就是安装路径.</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+6、测试</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+1) 用jps检验各后台进程是否成功启动</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">--在master节点查看后台进程</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ /usr/local/jdk1.6.0_45/bin/jps</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">3180 Jps</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">2419 SecondaryNameNode</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">2236 NameNode</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">2499 JobTracker</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">--在slave节点查看后台进程</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ /usr/local/jdk1.6.0_45/bin/jps</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">2631 Jps</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">2277 DataNode</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">2365 TaskTracker</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+2) 通过用浏览器和http访问NameNode和JobTracker的网络接口：<br>
+NameNode – http://192.168.137.100:50070/dfshealth.jsp<br><a href="http://www.zhirs.com/blog/wp-content/uploads/2013/09/hadoop1.png" rel="nofollow" style="text-decoration:none;color:rgb(25,89,155);"><img src="http://blog.chinaunix.net/attachment/201309/13/25266990_137906421925Vr.png" width="700" height="675" alt="" style="border:0px;"></a><br>
+Jobtracker – http://192.168.137.101:50060/tasktracker.jsp<br><a href="http://www.zhirs.com/blog/wp-content/uploads/2013/09/hadoop2.png" rel="nofollow" style="text-decoration:none;color:rgb(25,89,155);"><img src="http://blog.chinaunix.net/attachment/201309/13/25266990_1379064228Oocn.png" width="700" height="397" alt="" style="border:0px;"></a><br>
+3) 使用netstat –nat查看端口9000和9001是否正在使用。</p>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+HDFS操作<br>
+运行bin/目录的hadoop命令，可以查看Haoop所有支持的操作及其用法，这里以几个简单的操作为例。<br>
+建立目录</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$bin/hadoop
+ dfs -mkdir testdir</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Warning:
+ $HADOOP_HOME is deprecated.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 17:29:05 WARN fs.FileSystem: "Master:9000" is a deprecated filesystem name. Use"<a href="" rel="nofollow" style="text-decoration:none;color:rgb(86,86,86);">hdfs://Master</a>:9000/" instead.</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+在HDFS中建立一个名为testdir的目录<br>
+复制文件</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ bin/hadoop
+ dfs -put /home/hadoop/hadoop-1.2.1.tar.gz testfile.zip</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Warning:
+ $HADOOP_HOME is deprecated.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 17:30:32 WARN fs.FileSystem: "Master:9000" is a deprecated filesystem name. Use"<a href="" rel="nofollow" style="text-decoration:none;color:rgb(86,86,86);">hdfs://Master</a>:9000/" instead.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 17:30:33 WARN fs.FileSystem: "Master:9000" is a deprecated filesystem name. Use"<a href="" rel="nofollow" style="text-decoration:none;color:rgb(86,86,86);">hdfs://Master</a>:9000/" instead</span></div>
+</div>
+</div>
+<p style="font-family:'helvetica neue', arial, sans-serif;vertical-align:baseline;color:rgb(51,51,51);">
+把本地文件/home/hadoop/hadoop-1.2.1.tar.gz拷贝到HDFS的根目录/user/hadoop/下，文件名为testfile.zip<br>
+查看现有文件</p>
+<div style="color:rgb(51,51,51);border:0px !important;font-family:Consolas, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">$ bin/hadoop
+ dfs -ls</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Warning:
+ $HADOOP_HOME is deprecated.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"> </span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">13/09/10
+ 17:32:00 WARN fs.FileSystem: "Master:9000" is a deprecated filesystem name. Use"<a href="" rel="nofollow" style="text-decoration:none;color:rgb(86,86,86);">hdfs://Master</a>:9000/" instead.</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">Found 2
+ items</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;background-color:rgb(248,248,248) !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">drwxr-xr-x
+ - hadoop supergroup 0 2013-09-10 17:29 /user/hadoop/testdir</span></div>
+<div style="border:0px !important;font-size:10pt !important;vertical-align:baseline !important;">
+<span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;">-rw-r--r--
+ 3 hadoop supergroup 63851630 2013-09-10 17:30 /user/hadoop/testfile.zip</span></div>
+<div><span style="font-family:Consolas, Monaco, 'Bitstream Vera Sans Mono', 'Courier New', Courier, monospace !important;font-size:12px !important;vertical-align:baseline !important;line-height:16px !important;color:rgb(0,0,0) !important;"><br></span></div>
+</div>
+</div>
+</div>
+</div>
+            </div>
+                </div>

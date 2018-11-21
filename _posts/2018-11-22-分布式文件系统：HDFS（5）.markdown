@@ -1,0 +1,45 @@
+---
+layout:     post
+title:      分布式文件系统：HDFS（5）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>六、HDFS</p>
+<p>HDFS是Hadoop生态系统中的基础构件--文件系统。它的设计与与GFS类似：文件系统的元数据与文件内容数据分开存储。文件系统的可用性通过复制，而不是依靠RAID来实现的。</p>
+<p>1. 特点</p>
+<p>HDFS就有如下特点：</p>
+<ul><li>文件操作接口尽量与Unix系统保持一致</li><li>NameNode存储元数据包括文件层次关系，文件块的位置等。</li><li>DataNode存储文件内容数据。文件数据被划分为大小为64MB（可以调节）文件块，文件块被复制到不同的DataNode上，以提高系统可用性。</li><li>采用单写多读Single-writer, multiple-reader模型。<br>
+HDFS客户端在写某个文件的时候，它会得到一个令牌。当客户端关闭这个文件的时候，令牌被收回。这个令牌有一个存活时限。这样HDFS可以保证一个客户端在获得令牌后，不会因崩溃而导致令牌被长久持有。</li></ul><p>2. NameNode</p>
+<p>NameNode负责维护HDFS的名字空间namespace。在HDFS格式化的时候，一个名字空间ID会分配给它，并且这个ID会保存在这个HDFS集群中所有的Node中，包括NameNode和DataNode。<br></p>
+<p>HDFS把整个文件系统的名字空间保存在内存中。如此HDFS可以快速定位文件块的位置，对更新和增加文件块请求提供服务。</p>
+<p>但是这个方式有一个问题，如果NameNode崩溃，它所作的修改将有可能丢失。准确的说，在最后一次写磁盘后所作的修改将会丢失。为了重建这个名字空间，NameNode在启动后需要跟所有DataNode通信获取所有关于文件块的信息。为了加快这一过程，NameNode提供检查点和日志。通过最新的检查点和日志，NameNode可以快速重建内存中的名字空间。</p>
+<p>同时，检查点和日志也可以提高NameNode的可用性：只要将检查点文件和日志复制到另一服务器，这一服务器就可以用作备NameNode。</p>
+<br><p>3. DataNode</p>
+<p>文件块保存于DataNode中。每一个文件块中，除了文件数据外， 还有校验和、时间戳。DataNode所拥有的存储空间被赋予独特的存储ID。即使DataNode更换IP，这些存储ID依然保持不变。</p>
+<p><br></p>
+<p>DataNode启动后，会与NameNode通信，检查本地文件系统名字空间ID和软件版本是否NameNode匹配。如果不匹配，DataNode就会自动关闭。</p>
+<p>在这些检验通过后，DataNode会将自己拥有的存储ID汇报给NameNode；与此同时，DataNode会向NameNode发送自己的文件块列表报告，其中包含文件块ID，大小等。</p>
+<p>在第一次发送文件块列表报告之后，DataNode每隔一定时间（比如一个小时）就会向NameNode发送更新的报告。</p>
+<p><br></p>
+<p>除去文件块列表报告外，DataNode还会定时向NameNode发送心跳信号，通常发送间隔在数秒。心跳信号的主要作用有：1）通知NameNode本DataNode正常工作；2）汇报本DataNode存储容量，以及关于数据传送的统计信息。</p>
+<p>NameNode会回复心跳信号。在回复中，有可能包含以下命令：1）向指定DataNode复制一些文件块；2）删除本地的一些文件块；3）重新注册或关闭本DataNode；4）立即发送文件块列表报告。</p>
+<br><p>4. 写文件</p>
+<p>当用户需要写文件的时候，HDFS客户端会与NameNode发送请求，NameNode会返回合适的DataNode列表。通常DataNode会按照它们与用户网络距离的远近排序。</p>
+<p><img src="https://img-blog.csdn.net/20160610141737188?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p>用户挑选出所需的DataNode，并向其中第一个DataNode发送第一个文件块。第一个DataNode接受到文件块后，会执行实际的写文件操作，同时它会将收到的文件块发送给第二个DataNode。第二个DataNode的行为与第一个一致。</p>
+<p>用户的第二个文件块以及后续的文件块操作与第一个文件块相同。</p>
+<p>最后，如有必要用户可能调用hflush<br></p>
+<p><br></p>
+<p><br></p>
+<p>5. 复制</p>
+<p>如前所述，HDFS并不依赖硬件支持如RAID实现高可靠性，而是通过复制来提高系统可靠性的。</p>
+<p>通常，对一数据块来说，第一份数据块备份位于写操作所在服务器上；第二份数据块备份位于不同机架的不同服务器上；其他的数据块备份将随机放置。在随机选择备份位置的时候，下面的原则会努力得到贯彻：1）同一个服务器不会保持有一个数据块的2个及以上备份；2）同一个机架不会保持有一个数据块的2个及以上备份。</p>
+<br><p>6. Snapshot快照</p>
+<p>HDFS提供文件系统快照功能。这样，HDFS在运行过程中，或升级过程中，如果遇到意外，通过快照HDFS可以回滚到快照记录的系统状态。</p>
+<p>在快照创建的过程中，NameNode会创建最新的检查点：它首先将当前的检查点和日志记录的修改合并，并形成一个最新的检查点和相应的空的日志文件。同时DataNode会拷贝它的存储目录，并建立数据块与存储目录之间的硬链接。这样，在NameNode上的检查点和DataNode上的存储目录（及其指向数据块的链接）就形成HDFS的快照。</p>
+<p>HDFS后续的文件操作，如读写文件，增加删除文件，加减文件块，会更新HDFS在内存中的名字空间，或DataNode当前的存储目录。但并不影响已保存的快照数据。</p>
+<p>如有需要，HDFS在回滚的过程中，NameNode会根据快照中的检查点恢复当时的文件系统名字空间， DataNode会根据保存的存储目录恢复被改名的文件目录，及被删除的文件数据块。</p>
+            </div>
+                </div>

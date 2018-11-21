@@ -1,0 +1,22 @@
+---
+layout:     post
+title:      hbase集群在启动的时候报错：JAVA_HOME is not set and Java could not be found
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/believe__sss/article/details/78813278				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p><strong>hbase集群在启动的时候报错：JAVA_HOME is not set and Java could not be found </strong></p>
+
+<p>出现这种错误，一般应该是hbase下conf文件下的hbase-env.sh文件中的java_home的环境变量没有配置或者是被注释了</p>
+
+<p>cd /usr/local/hbase   #到hbase文件下 <br>
+cd conf  <br>
+sudo gedit hbase-env.sh #在文件中配置java路径，或者是取消注释 <br>
+如下图：保存以后sudo bin/start-hbase.sh即可成功启动。</p>
+
+<p><img src="https://img-blog.csdn.net/20171215145959721?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvYmVsaWV2ZV9fc3Nz/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,146 @@
+---
+layout:     post
+title:      大数据开发基础下笔记
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/xqclll/article/details/52107753				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><br></p>
+<p>HBase原理</p>
+<p>1.      认识HBase</p>
+<p>2.      Hbase架构</p>
+<p>3.      HBase读写流程</p>
+<p> </p>
+<p> </p>
+<p>1.      认识HBase</p>
+<p>HBase是一个高可靠性、面向列、可伸缩的分布式存储系统</p>
+<p>可以随机访问，弥补了HDFS不能随机访问数据，随机读取数据的缺陷</p>
+<p>存储和检索数据的平台</p>
+<p>不介意数据类型，允许动态的，灵活的数据类型</p>
+<p>（1）      HBase架构：master-slaver</p>
+<p><img src="https://img-blog.csdn.net/20160803212809257?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p></p>
+<p>Zookeeper存储的是root表，HMaster的地址</p>
+<p>RegionServer把自己注册到在zookeeper中，提供HBase regionserver状态信息，是否在线</p>
+<p>HMaster可以随时感知各个regionserver的健康状况</p>
+<p>Zookeeper可以避免HMaster的单点故障</p>
+<p>在HBase中Hmaster可以有多个，通过zookeeper的master选举机制，保证有一个master提供服务</p>
+<p> </p>
+<p> </p>
+<p>HMaster管理用户对表的增删改查的操作，管理regionserver的负载均衡，调整region的分布，在region split后负责新的region分布，在regionserver停机后，负责失效的regionserver的region迁移。这些都可以手动使用命令控制</p>
+<p> </p>
+<p>Regionserver里包含多个region</p>
+<p>Store 存储表的column family的部分数据</p>
+<p>Storefile,Hfile存储在Hadoop之下的二进制文件，storefile是对hfile的轻量级封装</p>
+<p>Memstore</p>
+<p>Regionserver是HBase中最核心的模块，主要负责相应用户的I/O请求，像HDFS文件系统中读写数据。</p>
+<p>Regionserver管理一系列的region对象，region由多个store组成，每个store对应一个columnfamily。</p>
+<p>（2）      HBase的逻辑模型</p>
+<p><img src="https://img-blog.csdn.net/20160803212922290?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p>尽量设计为一个列簇</p>
+<p>（3）HBase的读写流程</p>
+<p><img src="https://img-blog.csdn.net/20160803212845867?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p></p>
+<p>HBase相较于传统关系型数据库</p>
+<p>优势：速度，并发量可以突破传统关系数据库的瓶颈，扩展性也好，不用加硬件就可以使访问性能成线性增长</p>
+<p>缺点：不支持表与表的关联，但是其协处理器可以实现部分的join过程</p>
+<p> </p>
+<p>写过程：HBase首先根据zookeeper找到root表，进而找到meta表（存储region在regionserver上的位置），client访问regionserver相应的region，如果集群开启预选设置机制的话，首先会将数据写入memstore，同样会去写预选式日志（memstore达到一个阈值的时候会刷写到磁盘，如果宕机，开启了预选设置机制，可以恢复memstore的数据）。当集群的memstore达到lowerlimit时，会找根节点较大的memstore刷写；如果达到了upperlimit，它会强制把memstore刷写到磁盘。</p>
+<p><span style="background:#FFFF00;">Compaction</span><span style="background:#FFFF00;">的过程：合并文件，清除过期文件</span></p>
+<p><span style="background:#FFFF00;"> </span></p>
+<p><span style="background:#FFFF00;">Split</span><span style="background:#FFFF00;">切分</span></p>
+<p> </p>
+<p> </p>
+<p>读过程</p>
+<p>找到root表，进而找到meta表，找到region首先在memstore里读，如果没有找到数据，就会去blockcache中找，如果还是没找到就去磁盘里去找，找到了放到browcache里方便下次去读。</p>
+<p> </p>
+<p>//增加和更新</p>
+<p>//HBase的增删改查的java代码</p>
+<p>Configurationconf = HBaseConfiguration.create();</p>
+<p>conf.set(“hbase.zookeeper.quorum”,”192.168.1.149”);</p>
+<p>conf.set(“hbase.zookeeper.property.clientport”,”2181”);</p>
+<p>HConnection conn= HConnectionManager.createConnection(conf);</p>
+<p>HTableInterfacetable = conn.getTable(“创建的表名”);</p>
+<p> </p>
+<p>Put put = newPut(Bytes.toBytes(“row1”));</p>
+<p>Put.add(Bytes.toBytes(“列名”),Bytes.toBytes(“a”),Bytes.toBytes(“abc”));//更新可以直接用</p>
+<p>//put实现abc-&gt;abcd</p>
+<p>table.put(put);</p>
+<p>table.close();</p>
+<p>conn.close();</p>
+<p> </p>
+<p> </p>
+<p>读取数据</p>
+<p>Configurationconf = HBaseConfiguration.create();</p>
+<p>conf.set(“hbase.zookeeper.quorum”,”192.168.1.149”);</p>
+<p>conf.set(“hbase.zookeeper.property.clientport”,”2181”);</p>
+<p>HConnection conn= HConnectionManager.createConnection(conf);</p>
+<p>HTableInterfacetable = conn.getTable(“创建的表名”);</p>
+<p> </p>
+<p>Get get = newGet(Bytes.toBytes(“row1”));</p>
+<p>get.addColumn(Bytes.toBytes(“d”),Bytes.toBytes(“b”));</p>
+<p>Result  rr = table.get(get);</p>
+<p>if(rr.getValue(Bytes.toBytes(“d”),Bytes.toBytes(“c”))!=null){</p>
+<p>String value = new String(rr.getValue(Bytes.toBytes(“d”), Bytes.toBytes(“c”)));</p>
+<p>System.out.println(value);</p>
+<p>}</p>
+<p>List&lt;cell&gt;cells = rr.listCells();</p>
+<p>for(Cell cell :cells){</p>
+<p>String rowkey = new String(CellUtil.cloneRow(cell));</p>
+<p>String family = new String(CellUtil.cloneFamily(cell));</p>
+<p>String column = new String(CellUtil.cloneQualifier(cell));</p>
+<p>String value = new String(CellUtil.cloneValue(cell));</p>
+<p>System.out.println(“rowkey:”+rowkey+”family:”+family+”column:”+colume+”value:”+value);</p>
+<p> </p>
+<p>}</p>
+<p>String value =new String(rr.getValue(Bytes.toBytes(“d”), Bytes.toBytes(“b”)));</p>
+<p>System.out.println(value);</p>
+<p>table.close();</p>
+<p>conn.close();</p>
+<p> </p>
+<p> </p>
+<p>查询scan</p>
+<p>Configurationconf = HBaseConfiguration.create();</p>
+<p>conf.set(“hbase.zookeeper.quorum”,”192.168.1.149”);</p>
+<p>conf.set(“hbase.zookeeper.property.clientport”,”2181”);</p>
+<p>HConnection conn= HConnectionManager.createConnection(conf);</p>
+<p>HTableInterfacetable = conn.getTable(“创建的表名”);</p>
+<p> </p>
+<p>Scan scan = newScan();</p>
+<p>ResultScan ss = table.getScanner(scan);</p>
+<p>for(Result r : ss){</p>
+<p>           List&lt;cell&gt; cells = rr.listCells();</p>
+<p>for(Cell cell : cells){</p>
+<p>                    Stringrowkey = new String(CellUtil.cloneRow(cell));</p>
+<p>String family = new String(CellUtil.cloneFamily(cell));</p>
+<p>String column = new String(CellUtil.cloneQualifier(cell));</p>
+<p>String value = new String(CellUtil.cloneValue(cell));</p>
+<p>System.out.println(“rowkey:”+rowkey+”family:”+family+”column:”+colume+”value:”+value);</p>
+<p>}</p>
+<p> </p>
+<p>}</p>
+<p>table.close();</p>
+<p>conn.close();</p>
+<p> </p>
+<p>删除</p>
+<p>Configurationconf = HBaseConfiguration.create();</p>
+<p>conf.set(“hbase.zookeeper.quorum”,”192.168.1.149”);</p>
+<p>conf.set(“hbase.zookeeper.property.clientport”,”2181”);</p>
+<p>HConnection conn= HConnectionManager.createConnection(conf);</p>
+<p>HTableInterfacetable = conn.getTable(“创建的表名”);</p>
+<p> </p>
+<p>Delete delete =new Delete(Bytes.toBytes(“row1”));</p>
+<p>table.delete(delete);</p>
+<p> </p>
+<p>Delete delete1 =new Delete(Bytes.toBytes(“row2”));</p>
+<p>delete1.deleteColumns(Bytes.toBytes(“d”),Bytes.toBytes(“b”));</p>
+<p>table.delete(delete1);</p>
+<p> </p>
+<p>table.close();</p>
+<p>conn.close(); </p>
+<p> </p>
+            </div>
+                </div>

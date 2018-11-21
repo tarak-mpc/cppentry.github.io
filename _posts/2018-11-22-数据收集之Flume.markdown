@@ -1,0 +1,1134 @@
+---
+layout:     post
+title:      数据收集之Flume
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/wangpei1949/article/details/81839645				</div>
+								            <div id="content_views" class="markdown_views prism-dracula">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>Flume最初由Cloudera开发，于2011年6月贡献给Apache,于2012成为顶级项目。在孵化这一年，基于老版本的Flume(Flume OG：Flume Original Generation 即Flume 0.9.x版本)进行重构，摒弃了Zookeeper和Master，升级为现在的轻量级的Flume(Flume NG：Flume Next Generation，即Flume 1.x版本)，</p>
+
+
+
+<h1 id="架构要点">架构要点</h1>
+
+
+
+<h3 id="核心概念">核心概念</h3>
+
+<ol>
+<li>Agent：Flume进程，包含组件Source、Channel、Sink。</li>
+<li>Source：源。收集数据，发送给Channel。</li>
+<li>Sink：输出。从Channel取数据，发送到目标地。</li>
+<li>Channel：缓冲。缓存Source传递过来的Event。</li>
+<li>Event：事件。Flume处理数据的最小单元。由键值对的Header和字节数组Body组成。</li>
+</ol>
+
+
+
+<h3 id="基本架构">基本架构</h3>
+
+<p>单个Flume Agent基本架构。</p>
+
+<p><img src="https://github.com/wangpei1949/photos/raw/master/bigDataNut/flume_struct.png" alt="flume_struct" title=""></p>
+
+
+
+<h3 id="运行机制">运行机制</h3>
+
+<p>提到Flume的运行机制，就不得不提Flume的事务机制和可靠性。</p>
+
+<p>Flume最核心的就是把数据从数据源收集过来，再送达到目的地。为了保证At-Least-Once投送，Agent会事先把Events缓存起来并采用两阶段事务提交的方式。每一批次对应两个事务，Source-Channel事务，保证这一Batch放入Channel的操作是原子的，要么全部放入Channel，要么一个不放；Channel-Sink事务，保证事务的投送是原子的，要么全部投送成功，要么全部回滚。</p>
+
+
+
+<h1 id="主要组件">主要组件</h1>
+
+
+
+<h3 id="source">Source</h3>
+
+
+
+<h5 id="http-source">HTTP Source</h5>
+
+<p>某些环境可能不能部署Flume，此时可用HTTP Source接收数据倒Flume中。 <br>
+在${FlUME_HOME}/conf目录下创建http_source.conf，内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = http
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = <span class="hljs-number">0.0</span><span class="hljs-number">.0</span><span class="hljs-number">.0</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">9600</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/http_source<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>发送POST请求,观察日志变化。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs fsharp">curl -X POST -d'[{<span class="hljs-string">"headers"</span>:{<span class="hljs-string">"Header1"</span>:<span class="hljs-string">"value1"</span>,<span class="hljs-string">"Header2"</span>:<span class="hljs-string">"value2"</span>},<span class="hljs-string">"body"</span>:<span class="hljs-string">"this is http source"</span>}]'  http:<span class="hljs-comment">//192.168.113.102:9600</span></code></pre>
+
+
+
+<h5 id="avro-source">Avro Source</h5>
+
+<p>在${FlUME_HOME}/conf目录下创建avro_source.conf，内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = avro
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = <span class="hljs-number">0.0</span><span class="hljs-number">.0</span><span class="hljs-number">.0</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">4141</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/avro_source<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>在${FlUME_HOME}目录下启动一个avro-client 客户端生产数据</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> avro<span class="hljs-attribute">-client</span> <span class="hljs-attribute">-H</span> localhost <span class="hljs-attribute">-p</span> <span class="hljs-number">4141</span> <span class="hljs-attribute">-F</span> README<span class="hljs-built_in">.</span>md</code></pre>
+
+<p>可以看到，README.md中的内容被接收并打印出来了。</p>
+
+
+
+<h5 id="exec-source">Exec Source</h5>
+
+<p>Exec Source可执行Linux命令，并将输出同步给Sink。 <br>
+在${FlUME_HOME}/conf目录下创建exec_source.conf，内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = exec
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.command</span> = tail -f /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/access<span class="hljs-preprocessor">.log</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/exec_source<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向/data/software/apache-flume-1.7.0-bin/data/access.log中追加数据，观察日志变化。 <br>
+注意:agent重启会重复消费。</p>
+
+
+
+<h5 id="spooling-directory-source">Spooling Directory Source</h5>
+
+<p>Spooling Directory Source可监听一个目录，同步目录中的新文件到sink,被同步完的文件可被立即删除或被打上标记。适合用于同步新文件，但不适合对实时追加日志的文件进行监听并同步。 <br>
+在${FlUME_HOME}/conf目录下创建spooling_directory_source.conf ，内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = spooldir
+<span class="hljs-preprocessor">#监控目录</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.spoolDir</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data
+<span class="hljs-preprocessor">#Event Header中添加文件绝对路径</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.fileHeader</span> = true
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/spooling_directory_source<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>cp一个文件到/data/software/apache-flume-1.7.0-bin/data,观察agent日志变化,且能看到被同步的文件被打上.COMPLETED后缀。</p>
+
+
+
+<h5 id="taildir-source">Taildir Source</h5>
+
+<p>Taildir Source可实时监控一批文件，并记录每个文件最新消费位置。 <br>
+具体可见：<a href="https://blog.csdn.net/wangpei1949/article/details/80472928" rel="nofollow">Flume Taildir Source监听实时追加内容的文件</a></p>
+
+
+
+<h5 id="kafka-source">Kafka Source</h5>
+
+<p>在${FlUME_HOME}/conf目录下创建kafka_source.conf ，内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.source</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaSource</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = localhost:<span class="hljs-number">9092</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topics</span> = testTopic3
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.consumer</span><span class="hljs-preprocessor">.group</span><span class="hljs-preprocessor">.id</span> = consumer_testTopic3
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/kafka_source<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向testTopic3发送数据，可以看到消息被打印出来。如{ headers:{topic=testTopic3, partition=2, timestamp=1534177649622} body: 6E 6E 6E nnn }</p>
+
+
+
+<h3 id="sink">Sink</h3>
+
+
+
+<h5 id="logger-sink">Logger Sink</h5>
+
+<p>主要用于测试。将收到的Events以Logger INFO Level的方式打印出来。</p>
+
+<p>在Source中多次使用，这里不再赘述。</p>
+
+
+
+<h5 id="file-roll-sink">File Roll Sink</h5>
+
+<p>Events存放本地文件系统。</p>
+
+<p>在${FlUME_HOME}/conf目录下创建file_roll_sink.conf ，内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = http
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = <span class="hljs-number">0.0</span><span class="hljs-number">.0</span><span class="hljs-number">.0</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">9600</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = file_roll
+<span class="hljs-preprocessor">#文件存放目录</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.directory</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/logs
+<span class="hljs-preprocessor">#多久生成一个新文件，单位秒。指定0将禁用滚动并导致所有事件都写入单个文件。</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.rollInterval</span> = <span class="hljs-number">30</span>
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1
+</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/file_roll_sink<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向9600端口发送数据，观察日志及 /data/software/apache-flume-1.7.0-bin/data目录变化。可看到每隔30秒生成一个新文件。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs fsharp"><span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> `seq <span class="hljs-number">1</span> <span class="hljs-number">100</span>`;<span class="hljs-keyword">do</span> curl -X POST -d'[{<span class="hljs-string">"headers"</span>:{<span class="hljs-string">"Header1"</span>:<span class="hljs-string">"value1"</span>,<span class="hljs-string">"Header2"</span>:<span class="hljs-string">"value2"</span>},<span class="hljs-string">"body"</span>:<span class="hljs-string">"Hello"</span>}]'  http:<span class="hljs-comment">//192.168.113.102:9600;done</span></code></pre>
+
+
+
+<h5 id="hdfs-sink">HDFS Sink</h5>
+
+<p>Events写到HDFS 分布式文件系统中。</p>
+
+<p>在${FlUME_HOME}/conf目录下创建hdfs_sink.conf ，内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = exec
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.command</span> = tail -f /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/access<span class="hljs-preprocessor">.log</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = hdfs
+<span class="hljs-preprocessor">#使用服务器本地时间代替Event Header中的timestamp</span>
+<span class="hljs-preprocessor">#注意:HDFS Sink中所有与时间相关的转义序列，事件标题中必须存在带有“timestamp”键的标头（除非hdfs.useLocalTimeStamp设置为true）&gt;。自动添加timestamp的一种方法是使用TimestampInterceptor</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.useLocalTimeStamp</span> = true
+<span class="hljs-preprocessor">#hdfs 目录 这里%Y%m%d取自timestamp</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.path</span> = hdfs://node1:<span class="hljs-number">8020</span>/test/%<span class="hljs-built_in">Y</span>%m%d/accessLog
+<span class="hljs-preprocessor">#hdfs 目录下文件前缀</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.filePrefix</span> = data
+<span class="hljs-preprocessor">#hdfs 目录下文件后缀</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.fileSuffix</span> = <span class="hljs-preprocessor">.log</span>
+<span class="hljs-preprocessor">#多少秒生成一个新文件 0:不根据时间滚动</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.rollInterval</span> = <span class="hljs-number">60</span>
+<span class="hljs-preprocessor">#文件达到多少字节后生成一个新文件 0:不根据文件大小滚动</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.rollSize</span> = <span class="hljs-number">1024</span>
+<span class="hljs-preprocessor">#多个个Event生成一个新文件 0:不根据事件数量滚动</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.rollCount</span> = <span class="hljs-number">10</span>
+<span class="hljs-preprocessor">#Event数量达到多少向hdfs刷新一次</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.batchSize</span> = <span class="hljs-number">100</span>
+<span class="hljs-preprocessor">#指定压缩格式 支持gzip, bzip2, lzo, lzop, snappy</span>
+<span class="hljs-preprocessor">#agent.sinks.r1.hdfs.codeC =</span>
+<span class="hljs-preprocessor">#文件类型 支持SequenceFile, DataStream or CompressedStream</span>
+<span class="hljs-preprocessor">#DataStream 不启用压缩</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.fileType</span> = DataStream
+<span class="hljs-preprocessor">#文件格式</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.hdfs</span><span class="hljs-preprocessor">.writeFormat</span> = Text
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/hdfs_sink<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向/data/software/apache-flume-1.7.0-bin/data/access.log中追加文件，观察日志和HDFS目录变化。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">for i <span class="hljs-keyword">in</span> <span class="hljs-string">`seq 1 1000`</span>;<span class="hljs-keyword">do</span> echo <span class="hljs-string">"Hello Flume ${i}"</span><span class="hljs-subst">&gt;&gt;</span> /<span class="hljs-built_in">data</span>/software/apache<span class="hljs-attribute">-flume</span><span class="hljs-subst">-</span><span class="hljs-number">1.7</span><span class="hljs-number">.0</span><span class="hljs-attribute">-bin</span>/<span class="hljs-built_in">data</span>/access<span class="hljs-built_in">.</span><span class="hljs-keyword">log</span>;sleep <span class="hljs-number">1</span>;done</code></pre>
+
+<p>可以看到，HDFS中生成了新文件。内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">hdfs dfs <span class="hljs-attribute">-cat</span> /test/<span class="hljs-number">20180814</span>/accessLog/<span class="hljs-built_in">data</span><span class="hljs-number">.1534211236747</span><span class="hljs-built_in">.</span><span class="hljs-keyword">log</span>
+Hello Flume <span class="hljs-number">21</span>
+Hello Flume <span class="hljs-number">22</span>
+Hello Flume <span class="hljs-number">23</span>
+Hello Flume <span class="hljs-number">24</span>
+Hello Flume <span class="hljs-number">25</span>
+Hello Flume <span class="hljs-number">26</span>
+Hello Flume <span class="hljs-number">27</span>
+Hello Flume <span class="hljs-number">28</span>
+Hello Flume <span class="hljs-number">29</span>
+Hello Flume <span class="hljs-number">30</span></code></pre>
+
+
+
+<h5 id="kafka-sink">Kafka Sink</h5>
+
+<p>Events 写到Hive 分区或Hive表中。 <br>
+在${FlUME_HOME}/conf目录下创建kafka_sink.conf ，内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = netcat
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">6666</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaSink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = node2:<span class="hljs-number">6667</span>,node3:<span class="hljs-number">6667</span>,node1:<span class="hljs-number">6667</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = testTopic
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/kafka_sink<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向端口6666发送数据，观察到kafka-console-consumer消费出了数据。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs erlang-repl"><span class="hljs-function_or_atom">telnet</span> <span class="hljs-function_or_atom">localhost</span> <span class="hljs-number">6666</span>
+<span class="hljs-variable">Hello</span> <span class="hljs-variable">Flume</span><span class="hljs-exclamation_mark">!</span></code></pre>
+
+
+
+<h4 id="其他sink">其他Sink</h4>
+
+<ul>
+<li>Hive Sink  <br>
+通过Hive的事务，将Events近实时写到Hive分区中。注意:Hive必须开启事务，Hive的表必须是内部表，且是桶表，需存储为ORC格式。</li>
+<li>HBase Sink <br>
+将Events存储到HBase中。写入HBase不成功会尝试重写。</li>
+<li>Async HBase Sink <br>
+以异步的方式将Events存储到HBase中，比普通的HBase Sink要快。</li>
+<li>Elasticsearch Sink <br>
+Flume 支持的Elasticsearch版本较老。各种不兼容问题。</li>
+<li>Avro Sink <br>
+Avro Sink多用于多Agent节点间数据传输。</li>
+<li>File Roll Sink <br>
+把Events存储到本地文件系统。</li>
+<li>Null Sink <br>
+丢弃从Channel中取到的Events。</li>
+</ul>
+
+
+
+<h3 id="channel">Channel</h3>
+
+<p>Channel临时缓存Events。Source向Channel添加事件，Sink从Channel删除事件。</p>
+
+
+
+<h5 id="memory-channel">Memory Channel</h5>
+
+<p>Events存储在内存中。吞吐量高，但Agent重启、JVM崩溃会丢数据。 <br>
+关键参数：</p>
+
+<ul>
+<li><p>agent.channels.c1.type = memory <br>
+channel的类型是memory</p></li>
+<li><p>agent.channels.c1.capacity  <br>
+默认100。channel中存储的最大事件数</p></li>
+<li><p>agent.channels.c1.transactionCapacity <br>
+默认100。指源Source单次事务可以写入的最大事件数，也指Sink单次事务所能读取的最大事件数。可以增大该值，但要注意还要同时增加JVM堆空间大小，因为事件是以Event对象的形式存在于堆中的。同时还要注意，增大该值可以提升速度，但事务失败就要回滚更多的数据。</p></li>
+<li><p>agent.channels.c1.keep-alive <br>
+单位是秒，默认3秒。指channel已满，Source线程将Events写入到channel中的等待时间，这个值设的太大容易导致Events堵在Source端。会抛出异常。</p></li>
+<li><p>agent.channels.c1.byteCapacityBufferPercentage与agent.channels.c1.byteCapacity <br>
+使用字节而非数量来控制内存中事件的总大小。避免OutOfMemoryError。</p></li>
+</ul>
+
+<h5 id="file-channel">File Channel</h5>
+
+<p>Events持久化到文件中。多个Channel，应为每个Channel显示指定检查点目录和数据目录，且尽量在不同磁盘。 <br>
+关键参数：</p>
+
+<ul>
+<li><p>agent.channels.c1.type = file</p></li>
+<li><p>agent.channels.c1.dataDirs <br>
+数据持久化目录。逗号分隔。在不同磁盘上使用多个目录可以提高文件通道的性能。</p></li>
+<li><p>agent.channels.c1.checkpointDir <br>
+检查点目录。</p></li>
+<li><p>agent.channels.c1.checkpointInterval <br>
+两个检查点之间的毫秒数。</p></li>
+<li><p>agent.channels.c1.useDualCheckpoints与agent.channels.c1.backupCheckpointDir <br>
+备份检查点目录。</p></li>
+<li><p>agent.channels.c1.capacity <br>
+默认1000000。同Memory Channel。</p></li>
+<li><p>agent.channels.c1.transactionCapacity <br>
+默认10000。同Memory Channel。</p></li>
+<li><p>agent.channels.c1.keep-alive <br>
+单位是秒，默认3秒。同Memory Channel。</p></li>
+</ul>
+
+<p>在${FlUME_HOME}/conf目录下创建file_channel_sink.conf ，内容如下：</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = netcat
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">6666</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = file
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.dataDirs</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/fileChannel/dataDirs
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.checkpointDir</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/fileChannel/checkpointDir
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/file_channel_sink<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向6666端口发送一段时间数据后，将agent关掉，然后重启。观察变化。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> `seq <span class="hljs-number">1</span> <span class="hljs-number">100000</span>`;<span class="hljs-keyword">do</span> <span class="hljs-built_in">echo</span> <span class="hljs-variable">${i}</span> &gt; /dev/tcp/localhost/<span class="hljs-number">6666</span>;<span class="hljs-built_in">echo</span> <span class="hljs-variable">${i}</span>;<span class="hljs-keyword">done</span></code></pre>
+
+<p>重启后可以看到，flume会接着消费。</p>
+
+<h5 id="其他channel">其他Channel</h5>
+
+<ul>
+<li><p>Kafka Channel <br>
+Events缓存在Kafka中，但需要Kafka 0.9以上的版本。</p></li>
+<li><p>JDBC Channel <br>
+Events缓存在数据库中。目前只支持Derby。</p></li>
+<li><p>Spillable Memory Channel <br>
+Events同时缓存在内存和文件中。内存做主存。实验性的，不建议生产下使用。</p></li>
+<li><p>Pseudo Transaction Channel <br>
+仅用于测试，不用于生产。</p></li>
+</ul>
+
+<h3 id="channel-selector">Channel Selector</h3>
+
+<p>一个源Source可以被选择性的写入多个Channel中，叫Channel选择器。</p>
+
+
+
+<h5 id="多路复制">多路复制</h5>
+
+<p>同一Source数据，复制多份，即复制到多个Channel，每个Channel最终分别发向不同Sink，如HDFS、Kafka、本地文件系统等。 <br>
+关键参数：</p>
+
+<ul>
+<li><p>agent.sources.s1.selector.type = replicating <br>
+channel selector为多路复制。</p></li>
+<li><p>agent.sources.s1.selector.optional = c1 <br>
+如下c1是可选channel。无法写入c1的事务会被忽略。c2和c3未标记为可选，无法写入这些channel将导致事务失败。</p></li>
+</ul>
+
+<p>在${FlUME_HOME}/conf目录下创建replicating_channel_selector.conf 内容如下：</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1 c2 c3
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span> <span class="hljs-built_in">r2</span> <span class="hljs-built_in">r3</span>
+
+<span class="hljs-preprocessor">#source 配置</span>
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = netcat
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">6666</span>
+
+<span class="hljs-preprocessor">#配置channel selector</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.selector</span><span class="hljs-preprocessor">.type</span> = replicating
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1 c2 c3
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.selector</span><span class="hljs-preprocessor">.optional</span> = c1
+
+<span class="hljs-preprocessor">#channel 配置</span>
+<span class="hljs-preprocessor">#channel c1</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = file
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.dataDirs</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/fileChannel/dataDirs
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.checkpointDir</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/fileChannel/checkpointDir
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor">#channel c2</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>2<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#channel c3</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>3<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink 配置</span>
+<span class="hljs-preprocessor">#sink r1</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+<span class="hljs-preprocessor">#sink r2</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaSink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = node2:<span class="hljs-number">6667</span>,node3:<span class="hljs-number">6667</span>,node1:<span class="hljs-number">6667</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = testTopic
+
+<span class="hljs-preprocessor">#sink r3</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.type</span> = file_roll
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.directory</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/file_roll
+
+<span class="hljs-preprocessor">#source/channel/sink绑定</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.channel</span> = c2
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.channel</span> = c3</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/replicating_channel_selector<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向6666端口发送数据后，在控制台、file_roll目录、kafka中均收到一样的数据。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> `seq <span class="hljs-number">1</span> <span class="hljs-number">100000</span>`;<span class="hljs-keyword">do</span> <span class="hljs-built_in">echo</span> <span class="hljs-string">'{"name":"'</span><span class="hljs-string">"name<span class="hljs-variable">${i}</span>"</span><span class="hljs-string">'","age":10}'</span> &gt; /dev/tcp/localhost/<span class="hljs-number">6666</span>;<span class="hljs-built_in">echo</span> <span class="hljs-variable">${i}</span>;<span class="hljs-keyword">done</span></code></pre>
+
+
+
+<h5 id="多路复用">多路复用</h5>
+
+<p>同一Source，根据某个Header值分别写入到不同Channel中。</p>
+
+<p>关键参数：</p>
+
+<ul>
+<li><p>agent.sources.s1.selector.type = multiplexing <br>
+channel selector为多路复用。</p></li>
+<li><p>agent.sources.s1.selector.header <br>
+用Header中哪个字段的值分流。</p></li>
+<li><p>agent.sources.s1.selector.mapping.* <br>
+值匹配到*则发送到相应channel。</p></li>
+</ul>
+
+<p>在${FlUME_HOME}/conf目录下创建multiplexing_channel_selector.conf 内容如下：</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1 c2 c3
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span> <span class="hljs-built_in">r2</span> <span class="hljs-built_in">r3</span>
+
+<span class="hljs-preprocessor">#source 配置</span>
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = netcat
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">6666</span>
+
+<span class="hljs-preprocessor">#这里使用拦截器向Event Header中添加字段</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span> = i1
+<span class="hljs-preprocessor">#基于正则从Event body中抽取字段,添加到Event Header中</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.type</span> = regex_extractor
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.regex</span> = <span class="hljs-string">"log_type"</span>:<span class="hljs-string">"(\\w+)"</span>.*
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.serializers</span> = i1_ser1
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.serializers</span><span class="hljs-preprocessor">.i</span>1_ser1<span class="hljs-preprocessor">.name</span> = log_type
+
+<span class="hljs-preprocessor">#配置channel selector 为多路复用</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1 c2 c3
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.selector</span><span class="hljs-preprocessor">.type</span> = multiplexing
+<span class="hljs-preprocessor">#使用Header中log_type字段的值分流</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.selector</span><span class="hljs-preprocessor">.header</span> = log_type
+<span class="hljs-preprocessor">#Header中log_type=AppError 发送到channel c1</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.selector</span><span class="hljs-preprocessor">.mapping</span><span class="hljs-preprocessor">.AppError</span> = c1
+<span class="hljs-preprocessor">#Header中log_type=UserInfo 发送到channel c2</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.selector</span><span class="hljs-preprocessor">.mapping</span><span class="hljs-preprocessor">.UserInfo</span> = c2
+<span class="hljs-preprocessor">#Header中log_type=AccessLog 发送到channel c3</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.selector</span><span class="hljs-preprocessor">.mapping</span><span class="hljs-preprocessor">.AccessLog</span> = c3
+
+<span class="hljs-preprocessor">#channel 配置</span>
+<span class="hljs-preprocessor">#channel c1</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = file
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.dataDirs</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/fileChannel/dataDirs
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.checkpointDir</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/fileChannel/checkpointDir
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.capacity</span> = <span class="hljs-number">1000</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.transactionCapacity</span> = <span class="hljs-number">100</span>
+
+<span class="hljs-preprocessor">#channel c2</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>2<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#channel c3</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>3<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink 配置</span>
+<span class="hljs-preprocessor">#sink r1</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+<span class="hljs-preprocessor">#sink r2</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaSink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = node2:<span class="hljs-number">6667</span>,node3:<span class="hljs-number">6667</span>,node1:<span class="hljs-number">6667</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = testTopic
+
+<span class="hljs-preprocessor">#sink r3</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.type</span> = file_roll
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.directory</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/file_roll
+
+
+<span class="hljs-preprocessor">#source/channel/sink绑定</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.channel</span> = c2
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>3<span class="hljs-preprocessor">.channel</span> = c3</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/multiplexing_channel_selector<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向6666端口发送数据后，在控制台、file_roll目录、kafka中分别收到各自的数据。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs fsharp">log1='{<span class="hljs-string">"log_type"</span>:<span class="hljs-string">"AppError"</span>,<span class="hljs-string">"msg"</span>:<span class="hljs-string">"this is AppError !"</span>}'
+log2='{<span class="hljs-string">"log_type"</span>:<span class="hljs-string">"UserInfo"</span>,<span class="hljs-string">"msg"</span>:<span class="hljs-string">"this is UserInfo !"</span>}'
+log3='{<span class="hljs-string">"log_type"</span>:<span class="hljs-string">"AccessLog"</span>,<span class="hljs-string">"msg"</span>:<span class="hljs-string">"this is AccessLog !"</span>}'
+
+#将会在kafka中收到此类数据
+<span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> `seq <span class="hljs-number">1</span> <span class="hljs-number">100000</span>`;<span class="hljs-keyword">do</span> echo <span class="hljs-string">"${log2}"</span> &gt; /dev/tcp/localhost/<span class="hljs-number">6666</span>;echo ${i};<span class="hljs-keyword">done</span></code></pre>
+
+
+
+<h3 id="sink-processors">Sink Processors</h3>
+
+<p>通过接收器组，来解决Sink的单点故障与负载均衡问题。</p>
+
+
+
+<h5 id="故障转移-failover-sink-processor">故障转移 Failover Sink Processor</h5>
+
+<p>维护一个带优先级的sink列表，对失败根据优先级进行路由。若sinks都不可用，则事务会回滚。</p>
+
+<p>关键参数：</p>
+
+<ul>
+<li><p>agent.sinkgroups.g1.processor.type = failover <br>
+配置接收器组中接收器之间处理方式为故障转移。</p></li>
+<li><p>agent.sinkgroups.g1.processor.priority.r1 <br>
+配置每个接收器sink的优先级。</p></li>
+<li><p>agent.sinkgroups.g1.processor.maxpenalty <br>
+不可用接收器的最大等待毫秒数。首次失败，间隔一秒后失败sink才可使用，之后指数级等待直到达到最大上限maxpenalty。</p></li>
+</ul>
+
+<p>在${FlUME_HOME}/conf目录下创建failover_sink_processor.conf 内容如下：</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span> <span class="hljs-built_in">r2</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = netcat
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">6666</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinkgroups</span> = g1
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span> <span class="hljs-built_in">r2</span>
+<span class="hljs-preprocessor">#故障转移</span>
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.type</span> = failover
+<span class="hljs-preprocessor">#sink r1 的优先级是10</span>
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.priority</span><span class="hljs-preprocessor">.r</span>1 = <span class="hljs-number">10</span>
+<span class="hljs-preprocessor">#sink r2 的优先级是100 会优先写到文件</span>
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.priority</span><span class="hljs-preprocessor">.r</span>2 = <span class="hljs-number">100</span>
+<span class="hljs-preprocessor">#不可用接收器的最大等待毫秒数</span>
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.maxpenalty</span> = <span class="hljs-number">10000</span>
+
+<span class="hljs-preprocessor">#sink r1</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaSink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = node2:<span class="hljs-number">6667</span>,node3:<span class="hljs-number">6667</span>,node1:<span class="hljs-number">6667</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = testTopic
+
+<span class="hljs-preprocessor">#sink r2</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.type</span> = file_roll
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.directory</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/file_roll
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/failover_sink_processor<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向端口发送数据,可以看到，数据都写进file_roll sink对应的本地目录，然后删掉file_roll sink本地目录(模拟某个sink挂掉)，数据发送到kafka。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">log2=<span class="hljs-string">'{"log_type":"UserInfo","msg":"this is UserInfo !"}'</span>
+<span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> `seq <span class="hljs-number">1</span> <span class="hljs-number">100000</span>`;<span class="hljs-keyword">do</span> <span class="hljs-built_in">echo</span> <span class="hljs-string">"<span class="hljs-variable">${log2}</span>"</span> &gt; /dev/tcp/localhost/<span class="hljs-number">6666</span>;<span class="hljs-built_in">echo</span> <span class="hljs-variable">${i}</span>;<span class="hljs-keyword">done</span></code></pre>
+
+
+
+<h5 id="负载均衡-load-balancing-sink-processor">负载均衡 Load balancing Sink Processor</h5>
+
+<p>接收器组中的接收器之间根据负责均衡策略。 <br>
+关键参数：</p>
+
+<ul>
+<li><p>agent.sinkgroups.g1.processor.type = load_balance <br>
+配置接收器组中接收器之间处理方式为负载均衡。</p></li>
+<li><p>agent.sinkgroups.g1.processor.selector = round_robin <br>
+负载均衡的方式为轮询。也可配置成随机random。</p></li>
+<li><p>agent.sinkgroups.g1.processor.backoff = false <br>
+值为true，某个sink失败后会指数级等待并重试。</p></li>
+</ul>
+
+<p>在${FlUME_HOME}/conf目录下创建load_balancing_sink_processor.conf 内容如下：</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span> <span class="hljs-built_in">r2</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = netcat
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">6666</span>
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinkgroups</span> = g1
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span> <span class="hljs-built_in">r2</span>
+<span class="hljs-preprocessor">#负载均衡</span>
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.type</span> = load_balance
+<span class="hljs-preprocessor">#负载均衡方式 random/round_robin</span>
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.selector</span> = round_robin
+agent<span class="hljs-preprocessor">.sinkgroups</span><span class="hljs-preprocessor">.g</span>1<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.backoff</span> = false
+
+
+<span class="hljs-preprocessor">#sink r1</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaSink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = node2:<span class="hljs-number">6667</span>,node3:<span class="hljs-number">6667</span>,node1:<span class="hljs-number">6667</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = testTopic
+
+<span class="hljs-preprocessor">#sink r2</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.type</span> = file_roll
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.directory</span> = /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/file_roll
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>2<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/load_balancing_sink_processor<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向端口发送数据,可以看到，数据以轮询的方式写入本地目录和kafka，然后删掉file_roll sink本地目录(模拟某个sink挂掉)，数据发送到kafka。</p>
+
+
+
+<h3 id="event-serializers">Event Serializers</h3>
+
+<p>编解码器用于通过各种压缩算法压缩或解压缩数据。Flume支持gzip, bzip2, lzo, lzop, snappy方式压缩。而事件序列化器是将Flume事件转换为另一种方式输出。 <br>
+常见事件序列化器有：</p>
+
+<ul>
+<li><p>Body Text Serializer <br>
+只输出Event Body，会丢掉Event Header。</p></li>
+<li><p>Avro Event Serializer <br>
+序列化成Avro格式。类似Protobuf。</p></li>
+</ul>
+
+<h3 id="interceptors">Interceptors</h3>
+
+<p>拦截器一般用于修改事件。拦截器的配置顺序即拦截器的调用顺序。</p>
+
+
+
+<h5 id="timestamp-interceptor">Timestamp Interceptor</h5>
+
+<p>在Event Header中增加timestamp字段，值为毫秒时间戳。</p>
+
+
+
+<h5 id="host-interceptor">Host Interceptor</h5>
+
+<p>在Event Header中增加host字段，值为Agent主机名或IP。</p>
+
+
+
+<h5 id="static-interceptor">Static Interceptor</h5>
+
+<p>在Event Header中增加指定的静态值，如datacenter=NEW_YORK。</p>
+
+
+
+<h5 id="remove-header-interceptor">Remove Header Interceptor</h5>
+
+<p>删除Event Header中指定字段。</p>
+
+
+
+<h5 id="uuid-interceptor">UUID Interceptor</h5>
+
+<p>在Event Header中增加id字段，值为Flume生成的UUID。</p>
+
+
+
+<h5 id="search-and-replace-interceptor">Search and Replace Interceptor</h5>
+
+<p>基于正则查找并和替换。具体可参考<a href="https://blog.csdn.net/wangpei1949/article/details/80721195" rel="nofollow">:</a></p>
+
+
+
+<h5 id="regex-filtering-interceptor">Regex Filtering Interceptor</h5>
+
+<p>基于正则过滤或反向过滤Events。具体可参考<a href="https://blog.csdn.net/wangpei1949/article/details/80721195" rel="nofollow">:</a></p>
+
+
+
+<h5 id="regex-extractor-interceptor">Regex Extractor Interceptor</h5>
+
+<p>基于正则从Event body中抽取字段,添加到Event Header中。具体可参考<a href="https://blog.csdn.net/wangpei1949/article/details/80721195" rel="nofollow">:</a></p>
+
+
+
+<h5 id="多个拦截器同时使用">多个拦截器同时使用</h5>
+
+<p>在${FlUME_HOME}/conf目录下创建load_balancing_sink_processor.conf 内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = netcat
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.bind</span> = localhost
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.port</span> = <span class="hljs-number">6666</span>
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span> = i1 i2 i3 i4 i5
+<span class="hljs-preprocessor">#基于正则从Event body中抽取字段,添加到Event Header中</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.type</span> = regex_extractor
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.regex</span> = <span class="hljs-string">"log_type"</span>:<span class="hljs-string">"(\\w+)"</span>.*
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.serializers</span> = i1_ser1
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.serializers</span><span class="hljs-preprocessor">.i</span>1_ser1<span class="hljs-preprocessor">.name</span> = log_type
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>2<span class="hljs-preprocessor">.type</span> = timestamp
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>3<span class="hljs-preprocessor">.type</span> = host
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>3<span class="hljs-preprocessor">.useIP</span> = false
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>4<span class="hljs-preprocessor">.type</span> = static
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>4<span class="hljs-preprocessor">.key</span> = datacenter
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>4<span class="hljs-preprocessor">.value</span> = NEW_YORK
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>5<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.solr</span><span class="hljs-preprocessor">.morphline</span><span class="hljs-preprocessor">.UUIDInterceptor</span>$Builder
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>5<span class="hljs-preprocessor">.headerName</span> = uuid
+
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = logger
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/multiple_interceptors<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent</code></pre>
+
+<p>向端口发送数据,可以看到,Event Header中添加了如下内容。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">log2=<span class="hljs-string">'{"log_type":"UserInfo","msg":"this is UserInfo !"}'</span>
+<span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> `seq <span class="hljs-number">1</span> <span class="hljs-number">100000</span>`;<span class="hljs-keyword">do</span> <span class="hljs-built_in">echo</span> <span class="hljs-string">"<span class="hljs-variable">${log2}</span>"</span> &gt; /dev/tcp/localhost/<span class="hljs-number">6666</span>;<span class="hljs-built_in">echo</span> <span class="hljs-variable">${i}</span>;<span class="hljs-keyword">done</span>
+headers:{log_<span class="hljs-built_in">type</span>=UserInfo, host=node2, datacenter=NEW_YORK, uuid=<span class="hljs-number">2</span>b286f72-<span class="hljs-number">0453</span>-<span class="hljs-number">48</span>a4<span class="hljs-operator">-a</span>0fd-be00b4777966, timestamp=<span class="hljs-number">1534360528235</span>}</code></pre>
+
+
+
+<h1 id="agent组合形式">Agent组合形式</h1>
+
+
+
+<h3 id="多agent顺序连接">多Agent顺序连接</h3>
+
+<p><img src="https://github.com/wangpei1949/photos/raw/master/bigDataNut/agent_1.png" alt="agent1" title=""> <br>
+需要注意:数据链路太长，出问题的概率就大。</p>
+
+
+
+<h3 id="多agent汇聚到一个agent">多Agent汇聚到一个Agent</h3>
+
+<p><img src="https://github.com/wangpei1949/photos/raw/master/bigDataNut/agent2.png" alt="agent2" title=""> <br>
+服务端业务服务器一般都会采取负载均衡方式来进行分流，这样同一份日志就会分布在多台服务器上。在每台业务服务器上都部署一个Flume Agent收集日志，最后统一汇总到到数据收集服务器，再分发到目标存储。</p>
+
+
+
+<h3 id="多路agent">多路Agent</h3>
+
+<p><img src="https://github.com/wangpei1949/photos/raw/master/bigDataNut/agent3.png" alt="agent3" title=""> <br>
+红色方框部分可以用多路复制，也可以用多路复用，来分发到不同存储。</p>
+
+
+
+<h1 id="flume监控">Flume监控</h1>
+
+
+
+<h3 id="进程监控">进程监控</h3>
+
+<ul>
+<li>Crontab + Shell</li>
+<li>Supervisor</li>
+<li>Monit <br>
+monit是一个开源轻量级监控工具，可从系统、进程、文件、网络等多个层面进行监控。自带Web UI、可配置邮件告警或短信告警。</li>
+</ul>
+
+
+
+<h3 id="性能监控">性能监控</h3>
+
+<ul>
+<li>JMX</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">export JAVA_OPTS=”-Dcom<span class="hljs-preprocessor">.sun</span><span class="hljs-preprocessor">.management</span><span class="hljs-preprocessor">.jmxremote</span> -Dcom<span class="hljs-preprocessor">.sun</span><span class="hljs-preprocessor">.management</span><span class="hljs-preprocessor">.jmxremote</span><span class="hljs-preprocessor">.port</span>=<span class="hljs-number">5445</span> -Dcom<span class="hljs-preprocessor">.sun</span><span class="hljs-preprocessor">.management</span><span class="hljs-preprocessor">.jmxremote</span><span class="hljs-preprocessor">.authenticate</span>=false -Dcom<span class="hljs-preprocessor">.sun</span><span class="hljs-preprocessor">.management</span><span class="hljs-preprocessor">.jmxremote</span><span class="hljs-preprocessor">.ssl</span>=false”</code></pre>
+
+<ul>
+<li>Ganglia</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor">#flume.monitoring.hosts 逗号分隔的Ganglia服务器列表</span>
+bin/flume-ng agent --conf-file example<span class="hljs-preprocessor">.conf</span> --name a1 -Dflume<span class="hljs-preprocessor">.monitoring</span><span class="hljs-preprocessor">.type</span>=ganglia -Dflume<span class="hljs-preprocessor">.monitoring</span><span class="hljs-preprocessor">.hosts</span>=<span class="hljs-keyword">com</span><span class="hljs-preprocessor">.example</span>:<span class="hljs-number">1234</span>,<span class="hljs-keyword">com</span><span class="hljs-preprocessor">.example</span>2:<span class="hljs-number">5455</span></code></pre>
+
+<ul>
+<li>HTTP <br>
+HTTP请求返回JSON格式数据。通过HTTP请求查看各个指标。 <br>
+在${FlUME_HOME}/conf目录下创建http_monitor.conf 内容如下：</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">agent<span class="hljs-preprocessor">.sources</span> = s1
+agent<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span> = <span class="hljs-built_in">r1</span>
+
+<span class="hljs-preprocessor">#source</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.type</span> = exec
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.command</span> = cat /data/software/apache-flume-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-bin/data/access<span class="hljs-preprocessor">.log</span>
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span> = i1
+<span class="hljs-preprocessor">#基于正则从Event body中抽取字段,添加到Event Header中</span>
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.type</span> = regex_extractor
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.regex</span> = <span class="hljs-string">"log_type"</span>:<span class="hljs-string">"(\\w+)"</span>.*
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.serializers</span> = i1_ser1
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.interceptors</span><span class="hljs-preprocessor">.i</span>1<span class="hljs-preprocessor">.serializers</span><span class="hljs-preprocessor">.i</span>1_ser1<span class="hljs-preprocessor">.name</span> = log_type
+
+<span class="hljs-preprocessor">#channel</span>
+agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.c</span>1<span class="hljs-preprocessor">.type</span> = memory
+
+<span class="hljs-preprocessor">#sink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaSink</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = node2:<span class="hljs-number">6667</span>,node3:<span class="hljs-number">6667</span>,node1:<span class="hljs-number">6667</span>
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = testTopic
+
+agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.s</span>1<span class="hljs-preprocessor">.channels</span> = c1
+agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.r</span>1<span class="hljs-preprocessor">.channel</span> = c1</code></pre>
+
+<p>在${FlUME_HOME}目录下启动agent</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/flume<span class="hljs-attribute">-ng</span> agent <span class="hljs-attribute">-c</span> conf <span class="hljs-attribute">-f</span> conf/http_monitor<span class="hljs-built_in">.</span>conf <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>root<span class="hljs-built_in">.</span>logger<span class="hljs-subst">=</span>DEBUG,console <span class="hljs-attribute">-n</span> agent <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>monitoring<span class="hljs-built_in">.</span><span class="hljs-keyword">type</span><span class="hljs-subst">=</span>http <span class="hljs-attribute">-Dflume</span><span class="hljs-built_in">.</span>monitoring<span class="hljs-built_in">.</span>port<span class="hljs-subst">=</span><span class="hljs-number">34545</span></code></pre>
+
+<p>访问监控接口<a href="http://node2:34545/metrics" rel="nofollow">http://node2:34545/metrics</a>并观察变化。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs json">{
+    "<span class="hljs-attribute">CHANNEL.c1</span>":<span class="hljs-value">{
+        "<span class="hljs-attribute">ChannelCapacity</span>":<span class="hljs-value"><span class="hljs-string">"100"</span></span>,
+        "<span class="hljs-attribute">ChannelFillPercentage</span>":<span class="hljs-value"><span class="hljs-string">"75.0"</span></span>,
+        "<span class="hljs-attribute">Type</span>":<span class="hljs-value"><span class="hljs-string">"CHANNEL"</span></span>,
+        "<span class="hljs-attribute">ChannelSize</span>":<span class="hljs-value"><span class="hljs-string">"52"</span></span>,
+        "<span class="hljs-attribute">EventTakeSuccessCount</span>":<span class="hljs-value"><span class="hljs-string">"46700"</span></span>,
+        "<span class="hljs-attribute">EventTakeAttemptCount</span>":<span class="hljs-value"><span class="hljs-string">"46800"</span></span>,
+        "<span class="hljs-attribute">StartTime</span>":<span class="hljs-value"><span class="hljs-string">"1534365360844"</span></span>,
+        "<span class="hljs-attribute">EventPutAttemptCount</span>":<span class="hljs-value"><span class="hljs-string">"46820"</span></span>,
+        "<span class="hljs-attribute">EventPutSuccessCount</span>":<span class="hljs-value"><span class="hljs-string">"46800"</span></span>,
+        "<span class="hljs-attribute">StopTime</span>":<span class="hljs-value"><span class="hljs-string">"0"</span>
+    </span>}</span>,
+    "<span class="hljs-attribute">SOURCE.s1</span>":<span class="hljs-value">{
+        "<span class="hljs-attribute">EventReceivedCount</span>":<span class="hljs-value"><span class="hljs-string">"46820"</span></span>,
+        "<span class="hljs-attribute">AppendBatchAcceptedCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">Type</span>":<span class="hljs-value"><span class="hljs-string">"SOURCE"</span></span>,
+        "<span class="hljs-attribute">EventAcceptedCount</span>":<span class="hljs-value"><span class="hljs-string">"46800"</span></span>,
+        "<span class="hljs-attribute">AppendReceivedCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">StartTime</span>":<span class="hljs-value"><span class="hljs-string">"1534365361074"</span></span>,
+        "<span class="hljs-attribute">AppendAcceptedCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">OpenConnectionCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">AppendBatchReceivedCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">StopTime</span>":<span class="hljs-value"><span class="hljs-string">"0"</span>
+    </span>}</span>,
+    "<span class="hljs-attribute">SINK.r1</span>":<span class="hljs-value">{
+        "<span class="hljs-attribute">ConnectionCreatedCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">BatchCompleteCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">EventDrainAttemptCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">BatchEmptyCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">StartTime</span>":<span class="hljs-value"><span class="hljs-string">"1534365362817"</span></span>,
+        "<span class="hljs-attribute">BatchUnderflowCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">ConnectionFailedCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">ConnectionClosedCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">Type</span>":<span class="hljs-value"><span class="hljs-string">"SINK"</span></span>,
+        "<span class="hljs-attribute">RollbackCount</span>":<span class="hljs-value"><span class="hljs-string">"0"</span></span>,
+        "<span class="hljs-attribute">EventDrainSuccessCount</span>":<span class="hljs-value"><span class="hljs-string">"46800"</span></span>,
+        "<span class="hljs-attribute">KafkaEventSendTimer</span>":<span class="hljs-value"><span class="hljs-string">"49636"</span></span>,
+        "<span class="hljs-attribute">StopTime</span>":<span class="hljs-value"><span class="hljs-string">"0"</span>
+    </span>}
+</span>}</code></pre>
+
+<p>可通过ChannelFillPercentage判断出去的速度是否大于进来的速度。以及结合其他参数判断当前Agent配置是否满足需求。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

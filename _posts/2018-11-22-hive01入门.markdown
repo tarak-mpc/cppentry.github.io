@@ -1,0 +1,171 @@
+---
+layout:     post
+title:      hive01入门
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<br><br>
+Hive<br><span></span>** Facebook开源<br><span></span>** 官网：hive.apache.org<br><span></span>** Hive是基于Hadoop的一个数据仓库工具<span></span><br><br><br>
+Hive与数据库：<br>
+数据库: mysql、oracle、DB2、sqlserver<br>
+数据仓库 !== 数据库  换言之, Hive不是数据库<br><br><br>
+为什么要选择hive<br><span></span>** MapReduce编程成本高<br><span></span>** 针对传统的DBA,不会不熟悉java,要想数据分析,借助Hive<br><br><br>
+Hive简介：<br><span></span>** 流程<br><span></span>** hql --&gt; Hive(java) --&gt; mapreduce --&gt;yarn --&gt; hdfs<br><span></span>** 本质: 将HQL转化成MapReduce程序<br><span></span>** 使用MapReduce计算模型，运行在yarn平台之上<br><span></span>** Hive适合离线批量处理,延时比较大<br><span></span>** 不适合在线业务实时分析结果,业务要求延时较低的场景不适合<br><br><br>
+Hive体系结构<br><span></span>** 用户接口: Client<span></span><br><span></span>** 终端命令行CLI --主要的一种使用方式<br><span></span>** JDBC方式   <span></span>--几乎不用<br><span></span>** 元数据：metastore<br><span></span>** 默认apache使用的是derby数据库(只能有一个客户端使用),CDH使用postgreDB<br><span></span>** 企业通常我们会选择另外一种mysql来存储<br><span></span>** 元数据包括：表名、表所属的数据库（默认是default）、<br><span></span>表的拥有者、列/分区字段、表的类型（是否是外部表）、<br><span></span>表的数据所在目录等<br><span></span>** 这里并没有存储Hive表的真实数据<br><span></span>** Hadoop<br><span></span>** 使用HDFS进行存储<br><span></span>** 使用MapReduce进行计算<br><span></span>** 驱动器: Driver<br><span></span>** 解析器： 解析Hql语句<br><span></span>** 编译器： 把sql语句翻译成MapReduce程序<br><span></span>** 优化器： 优化sql语句<br><span></span>** 执行器： 在yarn平台运行MapReduce程序<br><br><br>
+====Hive安装======================================================<br><span></span><br><span></span>** 版本 0.13.1(和后面使用到的框架兼容性好)<br><span></span>1、安装JDK<br><span></span>  $ java -version<br><span></span>  <br><span></span>2、安装Hadoop<br><span></span>** 确保Hadoop可以正常使用(测试：上传文件、或者运行jar)<br><span></span>$ hdfs dfs -mkdir /input2<span></span>     #在HDFS上创建文件夹，没有类似-cd进入目录的参数<br><span></span>$ hdfs dfs -mkdir -p /aaa/bbb/ccc #级联创建目录<br><span></span>$ hdfs dfs -ls /                  #查看<br><span></span>$ hdfs dfs -put b.txt /input      #把本地文件拷到HDFS<br><span></span>$ hdfs dfs -cat /input2/b.txt     #查看文件<br><span></span>$ hdfs dfs -rm /input2/b.txt      #删除文件<br><span></span>$ hdfs dfs -rmr /input?           #递归删除文件夹和里面的文件，推荐使用'-rm -r'格式；单字符通配符'?'<br><span></span>$ hdfs dfs -help<br><br><br><span></span>3、安装mysql<br><span></span>$ su - <br><span></span># yum -y install mysql         --安装mysql客户端、常用命令<br><span></span># yum -y install mysql-server  --mysql服务<br><span></span># yum -y install mysql-devel   --mysql develop扩展包<br><span></span>***以上可以合并为一句，-y表示所有提问回答都为yes<br><span></span># yum -y install mysql mysql-server mysql-devel<br><span></span><br><span></span># rpm -qa|grep mysql                          --查看安装的mysql<br><span></span># rpm -ql mysql-server-5.1.73-7.el6.x86_64    --查看安装位置<br><span></span># rpm -e --nodeps mysql-server-5.1.73-7.el6.x86_64    --卸载，nodeps:不检查依赖<br><span></span><br><span></span># service mysqld start    --启动mysql服务<br><span></span># chkconfig mysqld on     --设置开机启动<br><span></span># /usr/bin/mysqladmin -uroot password 'root'<span></span>--初始化密码，只能执行一次<br><span></span>给用户授权：<br><span></span># mysql -uroot -proot<br><span></span>*** grant 权限 on 数据库对象(数据库.表) to 用户<br><span></span>mysql&gt; grant all on *.* to root@'blue01.mydomain' identified by 'root';<br><span></span>mysql&gt; flush privileges;  #刷新授权表，可以不执行<br><span></span>mysql&gt; set password for root@localhost = password('root');  --修改密码<br><span></span>mysql&gt; show databases;<br><span></span><br><span></span>** mysql数据库默认只允许root用户通过localhost(127.0.0.1)来登录使用<br><span></span>** 想要使用Windows上的Navicat登录，需要授权<br><span></span>** mysql&gt; grant all on *.* to root@'192.168.122.1' identified by 'root';<br><span></span><br><span></span>附：yum命令和rpm命令安装的都是rpm包<br><span></span>yum安装包的来源: 来自互联网(由仓库配置文件指定)<br><span></span>rpm安装包的来源: 先提取现在需要安装的软件包<br><span></span><br>
+----------------------<br><span></span><br><span></span>4、安装Hive<br><span></span># su - tom<br><span></span>$ tar zxf /opt/softwares/apache-hive-0.13.1-bin.tar.gz<br><span></span><br><span></span>** 在conf/目录：<br><span></span>$ cp -a hive-env.sh.template  hive-env.sh         --重命名，-a连同原来属性一起复制<br><span></span>$ cp -a hive-default.xml.template  hive-site.xml<br><br><br><span></span>5、修改hive-env.sh<br><span></span>JAVA_HOME=/opt/modules/jdk1.7.0_67<br><span></span>HADOOP_HOME=/opt/modules/hadoop-2.5.0<br><span></span>export HIVE_CONF_DIR=/opt/modules/apache-hive-0.13.1-bin/conf<br><br><br><span></span>6、配置hive-site.xml，注意：用户名和密码不可以有空格<br><span></span>&lt;property&gt;<br><span></span> &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt;<br><span></span> &lt;value&gt;jdbc:mysql://blue01.mydomain:3306/metastore?createDatabaseIfNotExist=true&lt;/value&gt;<br><span></span>&lt;/property&gt;<br><span></span>&lt;property&gt;<br><span></span> &lt;name&gt;javax.jdo.option.ConnectionDriverName&lt;/name&gt;<br><span></span> &lt;value&gt;com.mysql.jdbc.Driver&lt;/value&gt;<br><span></span>&lt;/property&gt;<br><span></span>&lt;property&gt;<br><span></span> &lt;name&gt;javax.jdo.option.ConnectionUserName&lt;/name&gt;<br><span></span> &lt;value&gt;root&lt;/value&gt;<br><span></span>&lt;/property&gt;<br><span></span>&lt;property&gt;<br><span></span> &lt;name&gt;javax.jdo.option.ConnectionPassword&lt;/name&gt;<br><span></span> &lt;value&gt;root&lt;/value&gt;<br><span></span>&lt;/property&gt;<br><br><br><span></span>7、拷贝mysql驱动到lib/<br><span></span>** 若是jar已解压，则不必执行这步：$ tar zxf mysql-connector-java-5.1.27.tar.gz<br><span></span>$ cp mysql-connector-java-5.1.27-bin.jar /opt/modules/apache-hive-0.13.1-bin/lib/<br><br><br><span></span>8、进入Hadoop目录，修改目录权限<br><span></span>** /tmp存放临时文件<br><span></span>$ bin/hadoop fs -chmod g+w /tmp   #给用户组加上写的权限<br><span></span><br><span></span>** /user/hive/warehouse为Hive存放数据的目录<br><span></span>$ bin/hdfs dfs -mkdir -p /user/hive/warehouse<br><span></span>$ bin/hadoop fs -chmod g+w /user/hive/warehouse<br><span></span><br><span></span>9、启动客户端使用Hive<br><span></span>$ bin/hive<span> </span>
+--用法几乎跟mysql一样<br><span></span>hive&gt; show databases;<br><br><br>
+====基本操作==========================================<br><br><br>
+基本操作语句：<br>
+hive&gt; show databases; <br>
+hive&gt; create database mydb;<br>
+hive&gt; use mydb;<br><br><br>
+hive&gt; show tables;<br>
+--创建表<br>
+create table customer(<br>
+  id int,<br>
+  username string<br>
+)row format delimited fields terminated by '\t';<br>
+hive&gt; desc customer;<br>
+hive&gt; desc formatted customer;    --详细信息<br><br><br>
+--向表插入数据<br>
+[tom@blue01 ~]$ vi b.txt<br>
+1001<span> </span>aaa<br>
+1002<span> </span>bbb<br>
+hive&gt; load data local inpath '/home/tom/b.txt' into table customer;<br>
+--查看数据<br>
+hive&gt; select * from customer;<br><br><br>
+Hive与Hadoop的关系、mysql的关系：<br><span></span>** Hive数据存储在HDFS的/user/hive/warehouse目录<br><span></span>** 由hive-site.xml里hive.metastore.warehouse.dir属性指定<br><span></span>** 创建数据库(create database)<br><span></span>** 默认会到仓库目录下面去创建一个同名的目录,<br><span></span>** 这个目录用来保存该数据库所有的表数据<br><span></span>** 创建表<br><span></span>** 在数据库目录下面生成一个同名的目录，用来保存该表的所有数据<br><span></span>** 载入数据<br><span></span>** load data(0.14版本之前没有insert)<br><span></span>** 文件上传到：/user/hive/warehouse/mydb.db/customer/b.txt<br><span></span>总结： Hive数据就是把文件存在HDFS上，然后做了表和文件之间的映射<span></span><br><span></span>  Hive的数据并没有存入mysql,mysql只是存放元数据<br><br><br>
+----日志----------------------<br><br><br>
+定义Hive的日志信息<br><span></span>** 重命名配置文件<br><span></span>$ cp hive-log4j.properties.template hive-log4j.properties<br><span></span>$ mkdir logs  --用来存放日志<br><span></span>** 修改hive-log4j.properties，指定日志文件生成的位置<br><span></span>hive.log.dir=/opt/modules/apache-hive-0.13.1-bin/logs<br><span></span>重启Hive<br><span></span><br><span></span># 动态监视日志文件，hive里执行任何操作，日志都会有显示<br><span></span># 此时可以打开一个hive窗口，随意执行些操作，观察效果<br><span></span>$ tail -f hive.log<br><span></span><br>
+-------------------------------<br><br><br>
+** 修改hive-site.xml（重启）<br>
+# 显示列名<br>
+&lt;property&gt;<br>
+  &lt;name&gt;hive.cli.print.header&lt;/name&gt;<br>
+  &lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;<br><br><br>
+# 显示数据库名<br>
+&lt;property&gt;<br>
+  &lt;name&gt;hive.cli.print.current.db&lt;/name&gt;<br>
+  &lt;value&gt;true&lt;/value&gt;<br>
+&lt;/property&gt;<span> </span><br><br><br>
+====杂项操作============================================<span></span><br><span></span><br>
+Hive里面两个重要的选项：<br><span></span># -e  一次性执行hive语句<br><span></span>$ bin/hive -e "select * from mydb.customer"<br><span></span>$ bin/hive -e "select * from mydb.customer" &gt; a.txt  --结果导入到文件<br><span></span><br><span></span># -f  执行hql脚本文件<br><span></span>$ vi a.hql  --创建hql脚本<br><span></span>select * from mydb.customer;<span></span><br><span></span>$ hive -f a.hql       --linux命令行<br><span></span>hive&gt; source a.hql;   --hive命令行<br><span></span><br><span></span># 在Hive里执行简单的Linux命令（并非所有的命令都可以在Hive里执行）<br><span></span>&gt; !pwd;<br><span></span>&gt; !ls;<br><br><br><span></span># dfs命令<br><span></span>hive&gt; dfs -ls /;<br><span></span>hive&gt; dfs -mkdir /aaa;<br><span></span>hive&gt; dfs -rmr /aaa; <br><span></span><br>
+Hive中set命令：<br><span></span>hive &gt; set;                                 --显示hive属性<br><span></span>hive &gt; set -v;                              --更多的属性，包括hadoop、mapreduce、yarn属性<br><span></span>hive &gt; set hive.cli.print.current.db;       --显示单个属性<br><span></span>hive &gt; set hive.cli.print.current.db=true;  --设置，set命令设置的值是临时生效<br><span></span><br><span></span># 假如记不清某个属性，可以使用如下技巧来查找<br><span></span>$ hive -e "set"|grep print; <br><span></span>$ hive -e "set -v"|grep print;<br><span></span><br>
+Hive中历史命令的存放位置<span> </span><br><span></span>~/.hivehistory    --'~'是指/home/tom目录<br><span></span>$ cat .hivehistory<br><span></span><br>
+Hive调试参数<br><span></span>** 将日志输出级别降低为DEBUG，通常在调试错误时，会加这个参数<br><span></span>** 日志级别为5级：DEBUG、INFO、WARN、ERROR、FATAL<br><span></span>$ hive --hiveconf hive.root.logger=DEBUG,console<span></span><br><br><br>
+hive &gt; select * from mydb.customer;<span> </span>       --不走MapReduce，速度快<span></span><br>
+hive &gt; select username from mydb.customer;<span> </span>--走MapReduce，慢<span></span><br><span></span><br>
+hive的其他语句：<span> </span><br>
+hive &gt; show functions;<span> </span>--函数，如：count、sum...<span></span><br>
+hive &gt; truncate 表名;<span> </span><br><br><br>
+====Hive表常用操作==========================================<br><br><br>
+***Hive官网：wiki--User Documentation（DDL）<br><br><br>
+Hive创建数据库<br><span></span>hive (mydb)&gt; create database 数据库名称 ;<span></span><br><span></span>hive (mydb)&gt; drop database 数据库名称 ;<span></span><br><br><br>
+Hive创建表<span> </span><br>
+CREATE [EXTERNAL] TABLE [IF NOT EXISTS] [db_name.]table_name<br><span></span>[(col_name data_type  ...)]<span></span><br><span></span>[PARTITIONED BY (col_name data_type , ...)]<span></span><br><span></span>[ROW FORMAT row_format] <span>
+</span><br><span></span>[LOCATION hdfs_path]<span></span><br><span></span>[AS select_statement];<br><span></span><br>
+create table aaa(<br>
+a int,<br>
+b string<br>
+)row format delimited fields terminated by '\t';<br><br><br>
+Hive中常见数据类型：<br><span></span>tinyint  smallint  int  bigint<br><span></span>float double<br><span></span>boolean<br><span></span>string<br><span></span>......<br><span></span><br>
+加载数据<br>
+load data local inpath '文件路径' [overwrite] into table 数据库名.表名 ;<br><span></span>** local 表示加载本地文件，若inpath后面跟随一个目录，那么会将该目录下的所有文件copy过去<br><span></span>** 去掉local表示hdfs，注意：此时使用load data，进行的将是move操作<br><span></span>** 文件加载模式<br><span></span>**  append    追加，默认的，可以省略，<br><span></span>**  overwrite 覆盖<br><span></span>** load data加载只是把文件从本地简单地复制到hdfs上，我们可以通过hdfs增加、删除对应表格目录里面的文件，<br><span></span>  这样做，会影响到表格里的数，可见hive和hdfs是松散关系<br><span></span>** 加载数据时，hive不会去判断字段分隔符是否正确，只有在查询数据时,才会发现是否有错<br>
+hive&gt; load data local inpath '/home/tom/b.txt' into table aaa;<br>
+***若是再次执行load data，新的文件中的数据将会追加到hive表的末尾<br><span></span><br>
+--创建表<br>
+create table dept(<br>
+deptno int,    --部门编号<br>
+dname string,  --部门名称<br>
+loc string     --地点<br>
+)row format delimited fields terminated by '\t';<br><br><br>
+create table emp(<br>
+empno int,       --雇员号<br>
+ename string,<br>
+job string,      --职位<br>
+mgr int,         --上司<br>
+hiredate string,<br>
+sal double,      --薪水<br>
+comm double,     --奖金(注意：有人没有奖金)<br>
+deptno int<br>
+)row format delimited fields terminated by '\t';<br><br><br>
+--导入数据<br>
+hive &gt; load data local inpath 'dept.txt' into table dept;<br>
+hive &gt; load data local inpath 'emp.txt' into table emp;<span></span><br><br><br>
+Hive创建表注意事项<br><span></span>** 一般都是先有数据文件，再去用Hive把它映射成一张对应的表<br><span></span>** 创建表时，字段要根据原文件内容而定<br><span></span>** 指定表的列分隔符时，必须要和原文件字段分隔符一致,否则Hive识别不到数据<br><br><br>
+终止job任务：<br>
+***执行 select deptno,dname from dept; 语句时，将会运行mapreduce任务，可以在8088端口查看<br>
+***若是任务运行过程中卡住了，可以执行"hadoop job -kill 任务名"来终止任务，如：<br>
+***hadoop job -kill job_1479691925666_0003<br>
+***执行语句时，日志中有提示：Kill Command = /opt/modules/hadoop-2.5.0/bin/hadoop job  -kill job_1479691925666_0003<br><br><br>
+====管理表、外部表=================================<br><br><br>
+Hive中表类型：<br><span></span>** 管理表(内部表)<br><span></span>** MANAGED_TABLE   --可以通过desc formatted emp查看<br><span></span>** 删除表,会连同HDFS上面的数据文件一起删除<br><span></span>** 外部表<br><span></span>** EXTERNAL_TABLE <br><span></span>** 删除表,不会连同HDFS上面的数据文件一起删除<br><span></span>** 通常有多个业务接入同一个文件(同一个数据源)时，会创建外部表<br><span></span>业务1     业务2<span> </span>
+   业务3<br><span></span>table1<span> </span>
+ table2    table3<br><span></span>同一个文件(HDFS)<br><span></span>** 外部表在创建的时候，数据源一般就已经存在了<br><br><br>
+--创建管理表<br>
+create table emp_inner(<br>
+empno int,<br>
+ename string,<br>
+job string,<br>
+mgr int,<br>
+hiredate string,<br>
+sal double,<br>
+comm double,<br>
+deptno int<br>
+)row format delimited fields terminated by '\t';<br><br><br>
+--创建外部表<br>
+create external table emp_ext(<br>
+empno int,<br>
+ename string,<br>
+job string,<br>
+mgr int,<br>
+hiredate string,<br>
+sal double,<br>
+comm double,<br>
+deptno int<br>
+)row format delimited fields terminated by '\t';<br><br><br>
+load data local inpath 'emp.txt' into table emp_inner;<span></span><br>
+load data local inpath 'emp.txt' into table emp_ext;<span></span><br><br><br>
+***基于相同数据，创建其他外部表<br>
+create external table emp_ext1(<br>
+empno int,<br>
+ename string,<br>
+job string,<br>
+mgr int,<br>
+hiredate string,<br>
+sal double,<br>
+comm double,<br>
+deptno int<br>
+)<br>
+row format delimited fields terminated by '\t'<br>
+--关联对应目录<br>
+location "/user/hive/warehouse/mydb.db/emp_ext"; <br><br><br>
+hive &gt; select * from emp_ext1;<br><br><br>
+**同理可创建emp_ext2<br>
+create external table emp_ext2(<br>
+empno int,<br>
+ename string,<br>
+job string,<br>
+mgr int,<br>
+hiredate string,<br>
+sal double,<br>
+comm double,<br>
+deptno int<br>
+)<br>
+row format delimited fields terminated by '\t'<br>
+location "/user/hive/warehouse/mydb.db/emp_ext";<br><br><br>
+hive &gt; select * from emp_ext2 ;  <br><br><br>
+测试：<br>
+**删除表emp_ext2,观察数据文件是否被删除,emp_ext1表的数据是否可以查询<br>
+hive &gt; drop table emp_ext2;<br>
+hive &gt; select * from emp_ext1;<br><br><br>
+** 外部表<br>
+   a) 共享数据<br>
+   b) 删除表时不删除对应数据<br><span></span><br>
+附：<br>
+** Hive0.14版本前，没有insert、update、delete，没有事务<span> </span><br><br><br><br><br><br>            </div>
+                </div>

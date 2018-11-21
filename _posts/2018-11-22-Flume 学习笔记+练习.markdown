@@ -1,0 +1,519 @@
+---
+layout:     post
+title:      Flume 学习笔记+练习
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p># 从http://flume.apache.org/download.html 下载flume<br>
+#############################################<br>
+# 概述：Flume 是Cloudera提供的一个高可用的，高可靠的，分布式的海量日志采集、聚合和传输的软件。<br>
+# Flume的核心是把数据从数据源(source)收集过来，送到指定的目的地(sink)。为了保证输送的过程一定<br>
+# 成功，在送到目的地(sink)之前，会先缓存数据(channel)，待数据真正到达目的地(sink)后，再删除自<br>
+# 己缓存的数据。<br>
+#############################################<br>
+# 上传到Linux,<br>
+tar zxvf apache-flume-1.8.0-bin.tar.gz<br>
+rm -rf apache-flume-1.8.0-bin.tar.gz<br>
+mv apache-flume-1.8.0-bin/ flume-1.8.0<br>
+cd flume-1.8.0/conf/<br>
+cp flume-env.sh.template flume-env.sh</p>
+
+<p>vim flume-env.sh<br>
+# 导入正确的JDK路径<br>
+export JAVA_HOME=/usr/local/src/jdk1.8.0_161</p>
+
+<p><br>
+########################################<br>
+# 从网络端口接收数据，下沉到logger<br>
+######################################## 采集配置文件，netcat-logger.conf</p>
+
+<p># Name the components on this agent<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># Describe/configure the sources<br>
+a1.sources.r1.type = netcat<br>
+a1.sources.r1.bind = localhost<br>
+a1.sources.r1.port = 44444</p>
+
+<p># Describe the sinks<br>
+a1.sinks.k1.type = logger</p>
+
+<p># Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000<br>
+a1.channels.c1.transactionCapacity = 100</p>
+
+<p># Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+
+<p>######################################## 采集配置文件 结束</p>
+
+<p># 启动命令<br>
+bin/flume-ng agent --conf conf/ --conf-file conf/netcat-logger.conf --name a1 -Dflume.root.logger=INFO,console<br>
+# 将出现监听： Created serverSocket:sun.nio.ch.ServerSocketChannelImpl[/127.0.0.1:44444]<br>
+# 用另一个终端来测试：<br>
+yum install -y telnet<br>
+telnet localhost 44444 # 登录成功会显示 Connected to localhost.  Escape character is '^]'.<br>
+hello, world.  # 发送一段文字。 看启动监听的终端有没有收到。<br>
+# 监听端：2018-05-27 20:33:29,974 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 68 65 6C 6C 6F 2C 77 6F 72 6C 64 2E 0D          hello,world.. }</p>
+
+<p><br>
+##########################################<br>
+# 采集目录到HDFS上。# 启动好HDFS，<br>
+################################## spooldir-hdfs.cnf 文件：</p>
+
+<p>#Name the components on this agent<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># Describe/configure the sources<br>
+# 注意不能往监控目录中重复放置同名文件，一旦重名，服务将出错并停止。<br>
+a1.sources.r1.type = spooldir<br>
+a1.sources.r1.spoolDir = /root/logs<br>
+a1.sources.r1.fileHeader = true</p>
+
+<p># Describe the sinks<br>
+a1.sinks.k1.type = hdfs<br>
+a1.sinks.k1.channel = c1<br>
+a1.sinks.k1.hdfs.path = /flume/events/%y-%m-%d/%H%M/<br>
+a1.sinks.k1.hdfs.filePrefix = events-<br>
+a1.sinks.k1.hdfs.round = true<br>
+a1.sinks.k1.hdfs.roundValue = 10<br>
+a1.sinks.k1.hdfs.roundUnit = minute<br>
+a1.sinks.k1.hdfs.rollInterval = 3<br>
+a1.sinks.k1.hdfs.rollSize = 20<br>
+a1.sinks.k1.hdfs.rollCount = 5<br>
+a1.sinks.k1.hdfs.batchSize = 1<br>
+a1.sinks.k1.hdfs.useLocalTimeStamp = true<br>
+# 生成的文件类型，默认是Sequencefile, 可用DataStream ，则为普通文本<br>
+a1.sinks.k1.hdfs.fileType = DataStream</p>
+
+<p># Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000<br>
+a1.channels.c1.transactionCapacity = 100</p>
+
+<p># Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+
+<p>##################################</p>
+
+<p># 启动命令 如果/root/logs中已有文件，则会被立刻采集到HDFS <br>
+bin/flume-ng agent -c conf/ -f conf/spooldir-hdfs.cnf -n a1 -Dflume.root.logger=INFO,console<br>
+# 成功后：2018-05-27 22:08:02,505 (lifecycleSupervisor-1-0) [INFO - org.apache.flume.instrumentation.MonitoredCounterGroup.start(MonitoredCounterGroup.java:95)] Component type: SOURCE, name: r1 started</p>
+
+<p># 在/root/logs/下创建一个文件，监听端会显示：Writer callback called.<br>
+# HDFS上则得到文件：/flume/events/18-05-27/2210/events-.1527430208616<br>
+# 注意 spooldir 不能往源目录/root/logs/中重复放置同名文件，一旦重名，服务将出错并停止工作。</p>
+
+<p><br>
+##########################################<br>
+### 增量采集内容变化的文件到HDFS <br>
+########################################## tail-hdfs.cnf 文件</p>
+
+<p>#Name the components on this agent<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># Describe/configure the sources<br>
+# 注意不能往监控目录中重复放置同名文件，一旦重名，服务将出错并停止。<br>
+a1.sources.r1.type = exec<br>
+a1.sources.r1.command = tail -F /root/logs/test.log<br>
+a1.sources.r1.channels = c1</p>
+
+<p># Describe the sinks<br>
+a1.sinks.k1.type = hdfs<br>
+a1.sinks.k1.channel = c1<br>
+a1.sinks.k1.hdfs.path = /flume/tailout/%y-%m-%d/%H%M/<br>
+a1.sinks.k1.hdfs.filePrefix = events-<br>
+a1.sinks.k1.hdfs.round = true<br>
+a1.sinks.k1.hdfs.roundValue = 10<br>
+a1.sinks.k1.hdfs.roundUnit = minute<br>
+a1.sinks.k1.hdfs.rollInterval = 3<br>
+a1.sinks.k1.hdfs.rollSize = 20<br>
+a1.sinks.k1.hdfs.rollCount = 5<br>
+a1.sinks.k1.hdfs.batchSize = 1<br>
+a1.sinks.k1.hdfs.useLocalTimeStamp = true<br>
+# 生成的文件类型，默认是Sequencefile, 可用DataStream ，则为普通文本<br>
+a1.sinks.k1.hdfs.fileType = DataStream</p>
+
+<p># Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000<br>
+a1.channels.c1.transactionCapacity = 100</p>
+
+<p># Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+
+<p>##########################################<br>
+# 启动命令 如果/root/logs中已有文件，则会被立刻采集到HDFS <br>
+bin/flume-ng agent -c conf -f conf/tail-hdfs.cnf -n a1 -Dflume.root.logger=INFO,console</p>
+
+<p># 模拟数据不断写入.<br>
+while true; do date &gt;&gt;/root/logs/test.log;sleep 1.5;done</p>
+
+<p><br>
+########################################## <br>
+#Load balance 负载均衡<br>
+##########################################<br>
+# 使用三台机器，设置二级flume, 前面一台采集，使用轮询方式发往后面的二台，后二台再收集前一台发来的数据，下沉到目标。<br>
+scp -r flume-1.8.0/ slave2:/usr/local/src/<br>
+scp -r flume-1.8.0/ slave3:/usr/local/src/</p>
+
+<p># 使用slave1在最前，slave2 , slave3在其后的方式。</p>
+
+<p>################# 第一级slave1 配置文件：exec-avro.cnf</p>
+
+<p>#agent1 name<br>
+agent1.channels = c1<br>
+agent1.sources = r1<br>
+agent1.sinks = k1 k2</p>
+
+<p><br>
+# set group<br>
+agent1.sinkgroups = g1</p>
+
+<p># set channel<br>
+agent1.channels.c1.type = memory<br>
+agent1.channels.c1.capacity = 1000<br>
+agent1.channels.c1.transactionCapacity = 100</p>
+
+<p>agent1.sources.r1.channels = c1<br>
+agent1.sources.r1.type = exec<br>
+agent1.sources.r1.command = tail -F /root/logs/123.log</p>
+
+<p># set sink1<br>
+agent1.sinks.k1.channel = c1<br>
+agent1.sinks.k1.type = avro<br>
+agent1.sinks.k1.hostname = slave2<br>
+agent1.sinks.k1.port = 52020</p>
+
+<p># set sink2<br>
+agent1.sinks.k2.channel = c1<br>
+agent1.sinks.k2.type = avro<br>
+agent1.sinks.k2.hostname = slave3<br>
+agent1.sinks.k2.port = 52020</p>
+
+<p># set sink group<br>
+agent1.sinkgroups.g1.sinks = k1 k2</p>
+
+<p># set failover<br>
+agent1.sinkgroups.g1.processor.type = load_balance<br>
+agent1.sinkgroups.g1.processor.backoff = true<br>
+agent1.sinkgroups.g1.processor.selector = round_robin<br>
+agent1.sinkgroups.g1.processor.selector.maxTimeOut = 10000</p>
+
+<p>############# end ##############</p>
+
+<p>################# 第二级slave2 配置文件：avro-logger.cnf</p>
+
+<p># Name the components on this agent<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># Describe/configure the sources<br>
+a1.sources.r1.type = avro<br>
+a1.sources.r1.channels = c1<br>
+a1.sources.r1.bind = slave2<br>
+a1.sources.r1.port = 52020</p>
+
+<p># Describe the sinks<br>
+a1.sinks.k1.type = logger</p>
+
+<p># Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000<br>
+a1.channels.c1.transactionCapacity = 100</p>
+
+<p># Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+
+<p>############# slave2 end ##############</p>
+
+<p>################# 第二级slave3 配置文件：avro-logger.cnf 唯一的改变是slave3</p>
+
+<p># Name the components on this agent<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># Describe/configure the sources<br>
+a1.sources.r1.type = avro<br>
+a1.sources.r1.channels = c1<br>
+a1.sources.r1.bind = slave3<br>
+a1.sources.r1.port = 52020</p>
+
+<p># Describe the sinks<br>
+a1.sinks.k1.type = logger</p>
+
+<p># Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000<br>
+a1.channels.c1.transactionCapacity = 100</p>
+
+<p># Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+
+<p>############# slave3 end ##############</p>
+
+<p>## 先启动第二级的slave2, slave3 <br>
+bin/flume-ng agent -c conf -f conf/avro-logger.cnf -n a1 -Dflume.root.logger=INFO,console<br>
+## 再启动一级的slave1 <br>
+bin/flume-ng agent -c conf -f conf/exec-avro.cnf -n agent1 -Dflume.root.logger=INFO,console<br>
+# 启动成功后，第二级终端会出现类似：CONNECTED: /192.168.112.11:56404 <br>
+# 而后续终止第一级时，第二级会出现类似： /192.168.112.11:56404 disconnected. </p>
+
+<p># 模拟数据写入. 会看到仅第二级有采集动作，第一级不作显示。<br>
+while true; do date &gt;&gt;/root/logs/123.log;sleep 1;done</p>
+
+<p><br>
+############################################# <br>
+#  Failover 容错<br>
+#  同一时间后端只有一台机器工作.<br>
+#############################################<br>
+# 还是使用三台机器，设置二级flume, 前面一台采集，发往后面的某一台，优先级最高的收集前一台发来的数据；<br>
+# 如果这台机器挂了，另一台自动替补<br>
+scp -r flume-1.8.0/ slave2:/usr/local/src/<br>
+scp -r flume-1.8.0/ slave3:/usr/local/src/</p>
+
+<p># 使用slave1在最前，slave2 , slave3在其后的方式。</p>
+
+<p>################# 第一级slave1 配置文件：exec-avro.cnf</p>
+
+<p>#agent1 name<br>
+agent1.channels = c1<br>
+agent1.sources = r1<br>
+agent1.sinks = k1 k2</p>
+
+<p><br>
+# set group<br>
+agent1.sinkgroups = g1</p>
+
+<p># set channel<br>
+agent1.channels.c1.type = memory<br>
+agent1.channels.c1.capacity = 1000<br>
+agent1.channels.c1.transactionCapacity = 100</p>
+
+<p>agent1.sources.r1.channels = c1<br>
+agent1.sources.r1.type = exec<br>
+agent1.sources.r1.command = tail -F /root/logs/456.log</p>
+
+<p># set sink1<br>
+agent1.sinks.k1.channel = c1<br>
+agent1.sinks.k1.type = avro<br>
+agent1.sinks.k1.hostname = slave2<br>
+agent1.sinks.k1.port = 52020</p>
+
+<p># set sink2<br>
+agent1.sinks.k2.channel = c1<br>
+agent1.sinks.k2.type = avro<br>
+agent1.sinks.k2.hostname = slave3<br>
+agent1.sinks.k2.port = 52020</p>
+
+<p># set sink group<br>
+agent1.sinkgroups.g1.sinks = k1 k2</p>
+
+<p># set failover<br>
+agent1.sinkgroups.g1.processor.type = failover<br>
+agent1.sinkgroups.g1.processor.priority.k1 = 10<br>
+agent1.sinkgroups.g1.processor.priority.k2 = 1<br>
+agent1.sinkgroups.g1.processor.maxpenalty = 10000</p>
+
+<p>############# end ##############</p>
+
+<p>################# 第二级slave2 配置文件：avro-logger.cnf</p>
+
+<p># Name the components on this agent<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># Describe/configure the sources<br>
+a1.sources.r1.type = avro<br>
+a1.sources.r1.channels = c1<br>
+a1.sources.r1.bind = slave2<br>
+a1.sources.r1.port = 52020</p>
+
+<p># Describe the sinks<br>
+a1.sinks.k1.type = logger</p>
+
+<p># Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000<br>
+a1.channels.c1.transactionCapacity = 100</p>
+
+<p># Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+
+<p>############# slave2 end ##############</p>
+
+<p>################# 第二级slave3 配置文件：avro-logger.cnf 唯一的改变是slave3</p>
+
+<p># Name the components on this agent<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># Describe/configure the sources<br>
+a1.sources.r1.type = avro<br>
+a1.sources.r1.channels = c1<br>
+a1.sources.r1.bind = slave3<br>
+a1.sources.r1.port = 52020</p>
+
+<p># Describe the sinks<br>
+a1.sinks.k1.type = logger</p>
+
+<p># Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000<br>
+a1.channels.c1.transactionCapacity = 100</p>
+
+<p># Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+
+<p>############# slave3 end ##############</p>
+
+<p>## 先启动第二级的slave3, slave2 <br>
+bin/flume-ng agent -c conf -f conf/avro-logger.cnf -n a1 -Dflume.root.logger=INFO,console<br>
+## 再启动一级的slave1 <br>
+bin/flume-ng agent -c conf -f conf/exec-avro.cnf -n agent1 -Dflume.root.logger=INFO,console<br>
+# 启动成功后，第二级终端会出现类似：CONNECTED: /192.168.112.11:56404 <br>
+# 而后续终止第一级时，第二级会出现类似： /192.168.112.11:56404 disconnected. </p>
+
+<p># 模拟数据写入. 会看到仅第二级slave2有采集动作，第一级不作显示。slave3待命。<br>
+while true; do date &gt;&gt;/root/logs/123.log;sleep 1;done<br>
+# 一旦slave2终止，则slave3自动顶上，继续接收。</p>
+
+<p> </p>
+
+<p> </p>
+
+<p>################################################################ <br>
+# 案例：<br>
+# A、B两台日志服务器实时生产日志，主要类型为access.log, nginx.log, web.log<br>
+# 要求：把A、B中的三种日志采集汇总到C机器上，然后收集到HDFS<br>
+# 且HDFS中要求按类别存放到不同的目录<br>
+################################################################<br>
+### 现将slave1 slave2 slave3 分别对应A B C<br>
+### A &amp; B 配置文件 exec_source_avro_sink.conf 基本上一样，仅hostname不一样</p>
+
+<p># Name the components on this agent<br>
+a1.sources = r1 r2 r3 <br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># Describe/configure the source<br>
+a1.sources.r1.type = exec<br>
+a1.sources.r1.command = tail -F /root/logs1/access.log<br>
+a1.sources.r1.interceptors = i1<br>
+a1.sources.r1.interceptors.i1.type = static<br>
+a1.sources.r1.interceptors.i1.key = type<br>
+a1.sources.r1.interceptors.i1.value = access</p>
+
+<p>a1.sources.r2.type = exec<br>
+a1.sources.r2.command = tail -F /root/logs1/nginx.log<br>
+a1.sources.r2.interceptors = i2<br>
+a1.sources.r2.interceptors.i2.type = static<br>
+a1.sources.r2.interceptors.i2.key = type<br>
+a1.sources.r2.interceptors.i2.value = nginx</p>
+
+<p>a1.sources.r3.type = exec<br>
+a1.sources.r3.command = tail -F /root/logs1/web.log<br>
+a1.sources.r3.interceptors = i3<br>
+a1.sources.r3.interceptors.i3.type = static<br>
+a1.sources.r3.interceptors.i3.key = type<br>
+a1.sources.r3.interceptors.i3.value = web</p>
+
+<p># Describe the sink 发送到下一级主机<br>
+a1.sinks.k1.type = avro<br>
+a1.sinks.k1.hostname = slave3<br>
+a1.sinks.k1.port = 41414</p>
+
+<p># Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 2000000<br>
+a1.channels.c1.transactionCapacity = 100000</p>
+
+<p># Bind the sourceand sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sources.r2.channels = c1<br>
+a1.sources.r3.channels = c1<br>
+a1.sinks.k1.channel = c1<br>
+### end ###</p>
+
+<p><br>
+### C 配置文件 avro_source_hdfs_sink.conf</p>
+
+<p># 定义agent名, source channel sink的名称<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1</p>
+
+<p># 定义source<br>
+a1.sources.r1.type = avro<br>
+a1.sources.r1.bind = slave3<br>
+a1.sources.r1.port = 41414</p>
+
+<p># 添加时间拦截器<br>
+a1.sources.r1.interceptors = i1<br>
+a1.sources.r1.interceptors.i1.type = org.apache.flume.interceptor.TimestampInterceptor$Builder</p>
+
+<p># 定义channels<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 20000<br>
+a1.channels.c1.transactionCapacity = 10000</p>
+
+<p># 定义sink<br>
+a1.sinks.k1.type = hdfs<br>
+a1.sinks.k1.hdfs.path = hdfs://master:9000/source/logs/%{type}/%Y%m%d<br>
+a1.sinks.k1.hdfs.filePrefix = events<br>
+a1.sinks.k1.hdfs.fileType = DataStream<br>
+a1.sinks.k1.hdfs.writeFormat = Text</p>
+
+<p># 时间类型<br>
+# a1.sinks.k1.hdfs.useLocalTimeStamp = true<br>
+# 生成的文件不按条数生成<br>
+a1.sinks.k1.hdfs.rollCount = 0<br>
+# 生成的文件不按时间生成<br>
+a1.sinks.k1.hdfs.rollInterval = 30<br>
+# 生成的文件按大小生成<br>
+a1.sinks.k1.hdfs.rollSize = 10485760<br>
+# 批量写入HDFS的个数<br>
+a1.sinks.k1.hdfs.batchSize = 20<br>
+# flume操作hdfs的线程数(包括新建，写入等)<br>
+a1.sinks.k1.hdfs.threadsPoolSize = 10<br>
+# 操作hdfs超时时间<br>
+a1.sinks.k1.hdfs.callTimeout = 30000</p>
+
+<p># 组装source channel sink<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+
+<p>### end ###</p>
+
+<p>## 先启动第二级的slave2 <br>
+bin/flume-ng agent -c conf -f conf/avro_source_hdfs_sink.conf -name a1 -Dflume.root.logger=DEBUG,console<br>
+## 再启动一级的slave1 <br>
+bin/flume-ng agent -c conf -f conf/exec_source_avro_sink.conf -name a1 -Dflume.root.logger=DEBUG,console<br>
+# 启动成功后，slave2会出现类似：CONNECTED: /192.168.112.11:56404 </p>
+
+<p># 模拟数据写入. <br>
+while true; do echo "access..  `date` " &gt;&gt;/root/logs1/access.log;sleep 1;done<br>
+while true; do echo "nginx..  `date` " &gt;&gt;/root/logs1/nginx.log;sleep 1;done<br>
+while true; do echo "web..  `date` " &gt;&gt;/root/logs1/web.log;sleep 1;done</p>
+
+<p># 查看hdfs上采集成功。</p>            </div>
+                </div>

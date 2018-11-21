@@ -1,0 +1,621 @@
+---
+layout:     post
+title:      HDFS入门详解（二）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p><a href="https://www.lousenjay.top/2018/08/26/HDFS%E5%85%A5%E9%97%A8%E8%AF%A6%E8%A7%A3%EF%BC%88%E4%BA%8C%EF%BC%89/" rel="nofollow">个人博客原文链接</a></p>
+<h3><a id="HDFSjavaAPI_2"></a>HDFS的java-API操作</h3>
+<h4><a id="_3"></a>简介</h4>
+<p>hdfs在生产应用中主要是客户端的开发，其核心步骤是从hdfs提供的api中构造一个hdfs的访问客户端对象，然后通过该客户端对象操作（增删改查）hdfs上的文件。</p>
+<h4><a id="maven_6"></a>导入依赖包（maven）</h4>
+<p>利用maven导入hadoop开发相关的依赖包，pom.xml</p>
+<pre><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"&gt;
+    &lt;modelVersion&gt;4.0.0&lt;/modelVersion&gt;
+
+    &lt;groupId&gt;hadoop&lt;/groupId&gt;
+    &lt;artifactId&gt;hadoop&lt;/artifactId&gt;
+    &lt;packaging&gt;pom&lt;/packaging&gt;
+    &lt;version&gt;1.0-SNAPSHOT&lt;/version&gt;
+    &lt;modules&gt;
+        &lt;module&gt;hdfs&lt;/module&gt;
+    &lt;/modules&gt;
+
+    &lt;properties&gt;
+        &lt;project.build.sourceEncoding&gt;UTF-8&lt;/project.build.sourceEncoding&gt;
+        &lt;hadoop.version&gt;3.0.3&lt;/hadoop.version&gt;
+    &lt;/properties&gt;
+
+    &lt;dependencies&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hadoop&lt;/groupId&gt;
+            &lt;artifactId&gt;hadoop-common&lt;/artifactId&gt;
+            &lt;version&gt;${hadoop.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.apache.hadoop&lt;/groupId&gt;
+            &lt;artifactId&gt;hadoop-client&lt;/artifactId&gt;
+            &lt;version&gt;${hadoop.version}&lt;/version&gt;
+        &lt;/dependency&gt;
+
+        &lt;dependency&gt;
+            &lt;groupId&gt;commons-io&lt;/groupId&gt;
+            &lt;artifactId&gt;commons-io&lt;/artifactId&gt;
+            &lt;version&gt;2.4&lt;/version&gt;
+        &lt;/dependency&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;junit&lt;/groupId&gt;
+            &lt;artifactId&gt;junit&lt;/artifactId&gt;
+            &lt;version&gt;4.11&lt;/version&gt;
+            &lt;scope&gt;test&lt;/scope&gt;
+        &lt;/dependency&gt;
+        &lt;!-- --&gt;
+    &lt;/dependencies&gt;
+
+    &lt;build&gt;
+        &lt;defaultGoal&gt;compile&lt;/defaultGoal&gt;
+        &lt;plugins&gt;
+            &lt;plugin&gt;
+                &lt;groupId&gt;org.apache.maven.plugins&lt;/groupId&gt;
+                &lt;artifactId&gt;maven-compiler-plugin&lt;/artifactId&gt;
+                &lt;version&gt;3.1&lt;/version&gt;
+                &lt;configuration&gt;
+                    &lt;source&gt;1.8&lt;/source&gt;
+                    &lt;target&gt;1.8&lt;/target&gt;
+                &lt;/configuration&gt;
+            &lt;/plugin&gt;
+        &lt;/plugins&gt;
+    &lt;/build&gt;
+</code></pre>
+<p>注：如需手动引入jar包，hdfs的jar包----hadoop的安装目录的share下</p>
+<h4><a id="API_72"></a>获取API中的客户端对象</h4>
+<p>获取到的fs对象就是DistributedFileSysytem的实例，通过fs可以直接操作fs</p>
+<ol>
+<li>获取客户端对象fs（默认配置）<br>
+在java中操作hdfs，首先要获得一个客户端实例<pre><code>Configuration conf = getConf();
+FileSystem fs = FileSystem.get(conf);
+</code></pre>
+</li>
+<li>获取客户端对象fs（set）<pre><code>Configuration conf = getConf();
+conf.set("fs.defaultFS", "hdfs://hadoop1:9000"); // 指定配置
+conf.set("dfs.replication", "3"); // 副本数量
+FileSystem fs = FileSystem.get(conf);
+</code></pre>
+</li>
+<li>获取客户端对象fs（URI）<pre><code>Configuration conf = getConf();
+// 集群地址，配置信息
+fs = FileSystem.get(URI.create("hdfs://172.16.0.4:9000"), conf); 
+</code></pre>
+</li>
+<li>get方法是如何判断具体实例化了哪种客户端呢？<br>
+首先从conf中的参数fs.defaultFS的配置值判断，如果我们的代码中没有指定fs.defaultFS，并且工程classpath下也没有给定相应的配置，conf中的默认值就来自于hadoop的jar包中的core-default.xml，默认值为： file:///，则获取的将不是一个DistributedFileSystem的实例，而是一个本地文件系统的客户端对象。因此，推荐使用默认值打包到安装有hadoop客户端的Linux上运行。</li>
+</ol>
+<h4><a id="javaAPI_96"></a>java-API基本操作</h4>
+<ol>
+<li>上传文件</li>
+</ol>
+<pre><code>// hadoop jar
+// extends Configuration获得配置对象
+// implements Tool控制命名参数
+public class Put extends Configured implements Tool{
+
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new Put(),args); //把参数拆分封装到Configuration
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        FileSystem fs1 = FileSystem.get(conf);
+        Path fin = new Path(conf.get("inpath")); // 本地端
+        Path fout = new Path(conf.get("outpath")); // 服务端
+        fs1.copyFromLocalFile(fin,fout);
+        return 0;
+    }
+}
+</code></pre>
+<ol start="2">
+<li>下载文件</li>
+</ol>
+<pre><code>public class Get extends Configured implements Tool{
+
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new Get(),args); //把参数拆分封装到Configuration
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        FileSystem fs1 = FileSystem.get(conf);
+        Path fin = new Path(conf.get("inpath")); // 服务端
+        Path fout = new Path(conf.get("outpath")); // 本地端
+        fs1.copyToLocalFile(fin,fout);
+        return 0;
+    }
+}
+</code></pre>
+<ol start="3">
+<li>目录操作（增、删、改）</li>
+</ol>
+<pre><code>public class DirTest extends Configured implements Tool{
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new DirTest(),args); //把参数拆分封装到Configuration
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        FileSystem fs1 = FileSystem.get(conf);
+        Path fin = new Path(conf.get("inpath")); 
+        Path fout = new Path(conf.get("outpath")); 
+        fs1.mkdirs(fin); // 创建目录
+      //  fs1.delete(fout, true) // 删除文件夹 ，如果是非空文件夹，参数2必须给值true
+      //  fs1.rename(fin,fout); // 重命名文件或文件夹
+        return 0;
+    }
+}
+</code></pre>
+<ol start="4">
+<li>递归查看目录信息(只显示文件)</li>
+</ol>
+<pre><code>public class Ls extends Configured implements Tool {
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new Ls(),args); //把参数拆分封装到Configuration
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        FileSystem fs = FileSystem.get(conf);
+        RemoteIterator&lt;LocatedFileStatus&gt; listFiles = fs.listFiles(new Path(conf.get("path")),true);
+        while(listFiles.hasNext()){
+            LocatedFileStatus fileStatus = listFiles.next();
+            System.out.println("blocksize："+fileStatus.getBlockSize()); //块大小
+            System.out.println("owner："+fileStatus.getOwner()); //主用户
+            System.out.println("replication："+fileStatus.getReplication()); //副本数量
+            System.out.println("permission："+fileStatus.getPermission()); //权限
+            System.out.println("name："+fileStatus.getPath().getName()); //文件名称
+            BlockLocation[] blockLocations = fileStatus.getBlockLocations();
+            for (BlockLocation b : blockLocations) {
+                System.out.println("块的名字:"+b.getNames());
+                System.out.println("块的偏移量:"+b.getOffset());
+                System.out.println("块的长度"+b.getLength());
+                //块所在的datanode节点
+                String[] datanodes = b.getHosts();
+                for (String dn : datanodes){
+                    System.out.println("datanode:"+ dn);
+                }
+            }
+            System.out.println("=================");
+        }
+        return 0;
+    }
+}
+</code></pre>
+<ol start="5">
+<li>递归查看目录信息(显示文件和文件夹)</li>
+</ol>
+<pre><code>public class List extends Configured implements Tool {
+    FileSystem fs;
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        fs = FileSystem.get(conf);
+        FileStatus[] sts = fs.listStatus(new Path(conf.get("path")));
+        Stream.of(sts).forEach(this::showDetail);
+        return 0;
+    }
+    //对于FileStatus进行判断
+    //如果是文件，打印相关元信息
+    //如果代表是目录，递归调用showDetail
+    public void showDetail(FileStatus st) {
+        if(st.isFile() &amp;&amp; st.getLen() &gt; 0){
+            show(st);
+        }else if(st.isDirectory()){
+            try {
+                Stream.of(fs.listStatus(st.getPath())).forEach(this::showDetail);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+    public void show(FileStatus st){
+        System.out.println("--------");
+        System.out.println(st.getPath());
+        System.out.println(st.getPermission());
+        System.out.println(st.getAccessTime());
+        System.out.println(st.getOwner());
+    }
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new List(),args);
+    }
+}
+</code></pre>
+<h4><a id="javaAPI_233"></a>java-API基本操作(流)</h4>
+<ol>
+<li>上传文件</li>
+</ol>
+<pre><code>public class Put extends Configured implements Tool{
+
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new Put(),args); //把参数拆分封装到Configuration
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        FileSystem fs1 = FileSystem.get(conf);
+        Path fin = new Path(conf.get("inpath")); // 本地端
+        Path fout = new Path(conf.get("outpath")); // 服务端
+        FSDataInputStream in = fs1.open(fin);
+        FSDataOutputStream out = fs1.create(fout);
+        IOUtils.copyBytes(in,out,128,true);
+        return 0;
+    }
+}
+</code></pre>
+<ol start="2">
+<li>下载文件</li>
+</ol>
+<pre><code>public class Get extends Configured implements Tool{
+
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new Get(),args); //把参数拆分封装到Configuration
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        FileSystem fs1 = FileSystem.get(conf);
+        Path fin = new Path(conf.get("inpath")); // 服务端
+        Path fout = new Path(conf.get("outpath")); // 本地端
+        FSDataInputStream in = fs1.open(fin); //输入
+        FSDataOutputStream out = fs2.create(fout); //输出到本地
+        IOUtils.copyBytes(in,out,128,true);
+        return 0;
+    }
+}
+</code></pre>
+<ol start="3">
+<li>查看文件内容</li>
+</ol>
+<pre><code>public class Cat extends Configured implements Tool{
+
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new Cat(),args); //把参数拆分封装到Configuration
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        FileSystem fs1 = FileSystem.get(conf);
+        Path fin = new Path(conf.get("inpath")); 
+        FSDataInputStream in = fs1.open(fin); // 输入
+        IOUtils.copyBytes(in,System.out,128,true); // 输出到控制台
+        return 0;
+    }
+}
+</code></pre>
+<h4><a id="javaAPI_296"></a>常见java-API操作</h4>
+<ol>
+<li>压缩和解压缩（CompressionCodec）<br>
+上传文件并压缩</li>
+</ol>
+<pre><code>public class CompressionWriteTest extends Configured implements Tool {
+
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new CompressionWriteTest(),args);
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        Path inpath = new Path(conf.get("inpath"));
+        Path outpath = new Path(conf.get("outpath"));
+        FileSystem infs = FileSystem.getLocal(conf);
+        FileSystem outfs = FileSystem.get(conf);
+        FSDataInputStream in = infs.open(inpath);
+        FSDataOutputStream out = outfs.create(outpath);
+        //压缩要上传的文件
+        CompressionCodecFactory factory = new CompressionCodecFactory(conf);
+        CompressionCodec codec = factory.getCodec(outpath);
+        CompressionOutputStream cout = codec.createOutputStream(out);
+        IOUtils.copyBytes(in,cout,128,true);
+        return 0;
+    }
+}
+</code></pre>
+<p>下载文件并解压缩</p>
+<pre><code>public class CompressionReadTest extends Configured implements Tool {
+
+    public static void main(String[] args) throws Exception {
+        ToolRunner.run(new CompressionReadTest(),args);
+    }
+
+    @Override
+    public int run(String[] strings) throws Exception {
+        Configuration conf = getConf();
+        Path inpath = new Path(conf.get("inpath"));
+        Path outpath = new Path(conf.get("outpath"));
+        FileSystem infs = FileSystem.get(conf);
+        FileSystem outfs = FileSystem.getLocal(conf);
+        FSDataInputStream in = infs.open(inpath);
+        FSDataOutputStream out = outfs.create(outpath);
+        //解压要下载的文件
+        CompressionCodecFactory factory = new CompressionCodecFactory(conf);
+        CompressionCodec codec = factory.getCodec(inpath);
+        CompressionInputStream cin = codec.createInputStream(in);
+        IOUtils.copyBytes(cin,out,128,true);
+        return 0;
+    }
+}
+</code></pre>
+<ol start="2">
+<li>SequenceFile<br>
+SequenceFile文件是Hadoop用来存储二进制形式的key-value对而设计的一种平面文件。SequenceFile文件可支持三种压缩类型NONE:对records不进行压缩;RECORD:仅压缩每一个record中的value值;BLOCK:将一个block中的所有records压缩在一起。<br>
+FileKey.java</li>
+</ol>
+<pre><code>public class FileKey implements WritableComparable&lt;FileKey&gt; {
+    private Text fileName = new Text();
+    private LongWritable length = new LongWritable();
+
+    @Override
+    public void readFields(DataInput input) throws IOException {
+        fileName.readFields(input);
+        length.readFields(input);
+    }
+
+    @Override
+    public void write(DataOutput output) throws IOException {
+        fileName.write(output);
+        length.write(output);
+    }
+
+    @Override
+    public int compareTo(FileKey other) {
+        if((fileName.compareTo(other.fileName) ==0)
+                &amp;&amp;(length.compareTo(other.length)==0)){
+            return 0;
+        }else if((fileName.compareTo(other.fileName) !=0)){
+            return fileName.compareTo(other.fileName);
+        }else{
+            return length.compareTo(other.length);
+        }
+    }
+
+    public String getFileName() {
+        return fileName.toString();
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName.set(fileName);
+    }
+
+    public long getLength() {
+        return length.get();
+    }
+
+    public void setLength(long length) {
+        this.length.set(length);
+    }
+
+    public String toString(){
+        return fileName.toString() + ":" + length.get();
+    }
+}
+</code></pre>
+<p>PutSeq.java</p>
+<pre><code>/**
+ *将目录及子目录和成一个序列文件文件上传
+ */
+public class PutSeq extends Configured implements Tool {
+
+    private void construct(File dir, Writer writer) throws IOException {
+        File[] lists = dir.listFiles();
+        Stream.of(lists).forEach(f -&gt; {
+            try {
+                if (f.isDirectory()) {
+                    //一个目录的开始，做上同步标记
+                    writer.sync();
+                    construct(f, writer);
+                } else {
+                    byte[] content = getData(f);
+                    FileKey key = new FileKey();
+                    BytesWritable value = new BytesWritable();
+                    key.setFileName(f.getPath());
+                    key.setLength(f.length());
+                    value.set(content, 0, content.length);
+                    writer.append(key, value);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    /**
+     * 从file文件中读取所有数据，放入字节数组并返回该字节数组
+     */
+    private byte[] getData(File file) throws IOException {
+        FileInputStream fis = new FileInputStream(file);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        byte[] content = new byte[1024];
+        int length = 0;
+        while ((length = fis.read(content, 0, 1024)) &gt; 0) {
+            baos.write(content, 0, length);
+        }
+        fis.close();
+        baos.flush();
+        byte[] r = baos.toByteArray();
+        baos.close();
+        return r;
+    }
+
+    @Override
+    public int run(String[] arg0) throws Exception {
+        Configuration conf = getConf();
+
+        SequenceFile.Writer.Option op1 = Writer.file(new Path(conf.get("output")));
+        SequenceFile.Writer.Option op2 = Writer.keyClass(FileKey.class);
+        SequenceFile.Writer.Option op3 = Writer.valueClass(BytesWritable.class);
+        SequenceFile.Writer writer = SequenceFile.createWriter(conf, op1, op2, op3);
+
+        File ds = new File(conf.get("input"));
+        construct(ds, writer);
+        writer.close();
+        return 0;
+    }
+
+    public static void main(String[] args) throws Exception {
+        System.exit(ToolRunner.run(new PutSeq(), args));
+    }
+
+}
+</code></pre>
+<p>ListSeq.java</p>
+<pre><code>/**
+ * 展示序列文件的目录结构
+ */
+public class ListSeq extends Configured implements Tool {
+    private SequenceFile.Reader reader;
+
+    @Override
+    public int run(String[] arg0) throws Exception {
+        Configuration conf = getConf();
+
+        Path input = new Path(conf.get("input"));
+        SequenceFile.Reader.Option op1 = SequenceFile.Reader.file(input);
+        reader = new SequenceFile.Reader(conf, op1);
+
+        Writable key = (Writable) reader.getKeyClass().newInstance();
+        Writable value = (Writable) reader.getValueClass().newInstance();
+
+        reader.sync(reader.getPosition());
+
+        while (reader.next(key, value)) {
+            FileKey file = (FileKey) key;
+            System.out.printf("%s\n", new File(file.getFileName()).getParent());
+            reader.sync(reader.getPosition());
+        }
+
+        return 0;
+    }
+
+    public static void main(String[] args) throws Exception {
+        System.exit(ToolRunner.run(new ListSeq(), args));
+
+    }
+
+}
+</code></pre>
+<p>GetSeq.java</p>
+<pre><code>/**
+ * 下载序列文件并还原其目录结构
+ */
+public class GetSeq extends Configured implements Tool {
+    private SequenceFile.Reader reader;
+
+    @Override
+    public int run(String[] arg0) throws Exception {
+        Configuration conf = getConf();
+        Path input = new Path(conf.get("input"));
+        File output = new File(conf.get("output"));
+
+        SequenceFile.Reader.Option op1 = SequenceFile.Reader.file(input);
+        reader = new SequenceFile.Reader(conf, op1);
+
+        Writable key = (Writable) reader.getKeyClass().newInstance();
+        Writable value = (Writable) reader.getValueClass().newInstance();
+        while (reader.next(key, value)) {
+            String file = ((FileKey) key).getFileName().toString();
+            save(new File(output, file), value);
+        }
+        return 0;
+    }
+
+    private void save(File file, Writable value) throws IOException {
+        File d = file.getParentFile();
+        if (!d.exists()) d.mkdirs();
+
+        BytesWritable bw = (BytesWritable) value;
+        byte[] bs = bw.copyBytes();
+
+        FileOutputStream fos = new FileOutputStream(file);
+        fos.write(bs, 0, bs.length);
+        fos.close();
+    }
+
+    public static void main(String[] args) throws Exception {
+        System.exit(ToolRunner.run(new GetSeq(), args));
+    }
+}
+</code></pre>
+<ol start="3">
+<li>serialization(序列化)<br>
+hadoop序列化和反序列化</li>
+</ol>
+<pre><code>public class Student implements Writable {
+    //属性类为hadoop已经提供的类型
+    private IntWritable id;
+    private Text name;
+    private IntWritable age;
+
+    //反序列化时，需要反射调用空参构造函数，所以需要显式定义一个
+    public Student(){}
+
+    //构造器 复制赋值 不要引用赋值
+    public Student(IntWritable id, Text name, IntWritable age) {
+        this.id = new IntWritable(id.get());
+        this.name = new Text(name.toString());
+        this.age = new IntWritable(age.get());
+    }
+
+    public IntWritable getId() {
+        return id;
+    }
+
+    public void setId(IntWritable id) {
+        this.id = new IntWritable(id.get());
+    }
+
+    public Text getName() {
+        return name;
+    }
+
+    public void setName(Text name) {
+        this.name = new Text(name.toString());
+    }
+
+    public IntWritable getAge() {
+        return age;
+    }
+
+    public void setAge(IntWritable age) {
+        this.age = new IntWritable(age.get());
+    }
+
+    @Override
+    public void write(DataOutput dataOutput) throws IOException {
+        id.write(dataOutput);
+        name.write(dataOutput);
+        age.write(dataOutput);
+    }
+
+    @Override
+    public void readFields(DataInput dataInput) throws IOException {
+        id.readFields(dataInput);
+        name.readFields(dataInput);
+        age.readFields(dataInput);
+    }
+}
+</code></pre>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

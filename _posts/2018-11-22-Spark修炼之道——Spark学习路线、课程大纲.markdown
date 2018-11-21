@@ -1,0 +1,129 @@
+---
+layout:     post
+title:      Spark修炼之道——Spark学习路线、课程大纲
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/lovehuangjiaju/article/details/47786223				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="课程内容">课程内容</h2>
+
+<ol>
+<li>Spark修炼之道（基础篇）——Linux基础（15讲）、Akka分布式编程（8讲）</li>
+<li>Spark修炼之道（进阶篇）——Spark入门到精通（30讲）</li>
+<li>Spark修炼之道（实战篇）——Spark应用开发实战篇（20讲）</li>
+<li>Spark修炼之道（高级篇）——Spark源码解析（50讲）</li>
+</ol>
+
+<p>部分内容会在实际编写时动态调整，或补充、或删除。</p>
+
+<h2 id="spark修炼之道基础篇linux大数据开发基础15讲">Spark修炼之道（基础篇）——Linux大数据开发基础（15讲）、</h2>
+
+<ol>
+<li>Linux大数据开发基础——第一节：Ubuntu Linux安装与介绍</li>
+<li>Linux大数据开发基础——第二节：Linux文件系统、目录（一）</li>
+<li>Linux大数据开发基础——第三节：Linux文件系统、目录（二）</li>
+<li>Linux大数据开发基础——第四节：Linux用户、组与权限管理</li>
+<li>Linux大数据开发基础——第五节：软件包管理</li>
+<li>Linux大数据开发基础——第六节：进程管理</li>
+<li>Linux大数据开发基础——第七节：网络管理</li>
+<li>Linux大数据开发基础——第八节：SSH原理与应用</li>
+<li>Linux大数据开发基础——第九节：vi编程器（一）</li>
+<li>Linux大数据开发基础——第十节：vi编程器（二）</li>
+<li>Linux大数据开发基础——第十一节：shell编程基础（一）</li>
+<li>Linux大数据开发基础——第十二节：shell编程基础（二）</li>
+<li>Linux大数据开发基础——第十三节：shell编程基础（三）</li>
+<li>Linux大数据开发基础——第十四节：shell编程基础（四）</li>
+<li>Linux大数据开发基础——第十五节：Java开发环境、MySQL及Tomcat等的安装与使用</li>
+</ol>
+
+<h2 id="spark修炼之道基础篇akka并发编程国内首发scala版">Spark修炼之道（基础篇）——Akka并发编程（国内首发，Scala版）</h2>
+
+<ol>
+<li>Akka并发编程——第一节：Akka简介、开发环境部署及第一个Akka应用程序</li>
+<li>Akka并发编程——第二节：Actors、Typed Actors、ActorSystem</li>
+<li>Akka并发编程——第三节：Akka 容错机制</li>
+<li>Akka并发编程——第四节：FUTURES AND AGENTS</li>
+<li>Akka并发编程——第五节：Akka 消息通道</li>
+<li>Akka并发编程——第六节：Akka 事务</li>
+<li>Akka并发编程——第七节：Routing、IO等</li>
+<li>Akka并发编程——第八节：分布式环境下Akka应用程序开发</li>
+</ol>
+
+<h2 id="spark修炼之道进阶篇spark入门到精通30讲">Spark修炼之道（进阶篇）——Spark入门到精通（30讲）</h2>
+
+<ol>
+<li>Spark入门到精通（入门）——第一节：Spark简介，主要介绍Spark生态系统、架构及容错机制</li>
+<li>Spark入门到精通——第二节：开发环境部署（一），Linux系统安装、Hadoop集群搭建</li>
+<li>Spark入门到精通——第三节：开发环境部署（二），Hadoop集群搭建、Spark集群部署及测试</li>
+<li>Spark入门到精通——第四节：开发环境部署（三），Intellij IDEA Spark开发环境搭建并开发第一个Spark应用程序</li>
+<li>Spark入门到精通——第五节：Spark交互式命令行,如何使用Spark交互式命令行、理解Spark任务提交流程、执行流程，如果通过WebUI查看任何执行状态</li>
+<li>Spark入门到精通——第六节：RDD弹性分布式数据集，介绍RDD实现原理，理解什么是Action和Transformation，理解窄依赖与宽依赖</li>
+<li>Spark入门到精通——第七节：RDD 常用函数（一）</li>
+<li>Spark入门到精通——第八节：RDD 常用函数（二）</li>
+<li>Spark入门到精通——第九节：RDD 常用函数（三）</li>
+<li>Spark入门到精通——第十节：Spark Job执行原理分析、shuffle操作解析</li>
+<li>Spark入门到精通——第十一节：Spark广播变量与累加器、Cache与checkpoint问题</li>
+<li>Spark入门到精通——第十二节：Spark多语言编程</li>
+<li>Spark入门到精通（Spark SQL）——第十三节： Spark SQL组件、架构</li>
+<li>Spark入门到精通（Spark SQL）——第十四节： DataFrame、SparkSQL运行原理</li>
+<li>Spark入门到精通（Spark SQL）——第十五节： Spark SQL基础应用</li>
+<li>Spark入门到精通（Spark SQL）——第十六节： 复杂应用案例实战</li>
+<li>Spark入门到精通（Spark SQL）——第十七节： SparkSQL性能调优</li>
+<li>Spark入门到精通（Spark Streaming）——第十八节： Spark Streaming运行原理、DStream</li>
+<li>Spark入门到精通（Spark Streaming）——第十九节： DStream 常用函数（一）</li>
+<li>Spark入门到精通（Spark Streaming）——第二十节： DStream 常用函数（二）</li>
+<li>Spark入门到精通（Spark Streaming）——第二十一节： 应用案例实战</li>
+<li>Spark入门到精通（Spark MLlib）——第二十二节： Machine Learning On Spark简介、常用数据结构</li>
+<li>Spark入门到精通（Spark MLlib）——第二十三节：逻辑回归算法实战</li>
+<li>Spark入门到精通（Spark MLlib）——第二十四节：K均值算法实战</li>
+<li>Spark入门到精通（Spark MLlib）——第二十五节：协同过滤推荐算法实战</li>
+<li>Spark入门到精通（Spark MLlib）——第二十六节：卷积神经网络CNN算法实战</li>
+<li>Spark入门到精通（Spark MLlib）——第二十七节：高级文本处理实战</li>
+<li>Spark入门到精通（Spark MLlib）——第二十八节：基于Spark Streaming的实时机器学习实战</li>
+<li>Spark入门到精通（Spark Graphx）——第二十九节：Spark图计算简介、Spark Graphx架构与原理</li>
+<li>Spark入门到精通（Spark Graphx）——第三十节： Graphx常用数据结构（例如Vertices等）</li>
+<li>Spark入门到精通（Spark Graphx）——第三十一节： Graphx基本操作实战</li>
+<li>Spark入门到精通（Spark Graphx）——第三十二节： PageRank算法实战</li>
+<li>Spark入门到精通（Spark R） ——第三十三节：Spark R 与结束语</li>
+</ol>
+
+<h2 id="spark修炼之道实战篇spark应用开发实战篇15讲">Spark修炼之道（实战篇）——Spark应用开发实战篇（15讲）</h2>
+
+<ol>
+<li>Spark应用开发实战——第一节：Spark实时推荐系统开发（一）</li>
+<li>Spark应用开发实战——第二节：Spark实时推荐系统开发（二）</li>
+<li>Spark应用开发实战——第三节：Spark实时推荐系统开发（三）</li>
+<li>Spark应用开发实战——第四节：Spark实时推荐系统开发（四）</li>
+<li>Spark应用开发实战——第五节：Spark实时推荐系统开发（五）</li>
+<li>Spark应用开发实战——第六节：Spark SQL网站日志分析（一）</li>
+<li>Spark应用开发实战——第七节：Spark SQL网站日志分析（二）</li>
+<li>Spark应用开发实战——第八节：Spark SQL网站日志分析（三）</li>
+<li>Spark应用开发实战——第九节：Spark SQL网站日志分析（四）</li>
+<li>Spark应用开发实战——第十节：Spark SQL网站日志分析（五）</li>
+<li>Spark应用开发实战——第十一节：金融数据分析案例（一）</li>
+<li>Spark应用开发实战——第十二节：金融数据分析案例（二）</li>
+<li>Spark应用开发实战——第十三节：金融数据分析案例（三）</li>
+<li>Spark应用开发实战——第十四节：金融数据分析案例（四）</li>
+<li>Spark应用开发实战——第十五节：金融数据分析案例（五）</li>
+</ol>
+
+<h2 id="spark修炼之道高级篇spark源码解析50讲">Spark修炼之道（高级篇）——Spark源码解析（50讲）</h2>
+
+<ol>
+<li>Spark源码解析——Spark源码分析环境搭建、源码分析技巧</li>
+<li>Spark源码解析——RDD源码分析</li>
+<li>Spark源码解析——SparkContext源码分析</li>
+<li>Spark源码解析——TaskScheduler源码分析</li>
+<li>Spark源码解析——DAGScheduler源码分析</li>
+<li>Spark源码解析——Spark Standalone调度器源码分析</li>
+<li>Spark源码解析——Worker、Executor源码分析</li>
+<li>Spark源码解析——MLib 源码分析</li>
+<li>Spark源码解析——DataFrame源码分析</li>
+<li>Spark源码解析——DStream源码解析</li>
+<li>………………………………………………………</li>
+</ol>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

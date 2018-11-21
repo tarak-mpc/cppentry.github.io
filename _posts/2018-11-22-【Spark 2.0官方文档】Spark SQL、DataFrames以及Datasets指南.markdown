@@ -1,0 +1,2174 @@
+---
+layout:     post
+title:      【Spark 2.0官方文档】Spark SQL、DataFrames以及Datasets指南
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="文档说明">文档说明</h1>
+
+<p>本文是基于《Spark 官方文档》Spark SQL, DataFrames 以及 Datasets 编程指南 这篇文章翻译而来。 <br>
+原文中关于R语言的部分本文档全都省略。 <br>
+由于个人水平有限，有些地方难免翻译的不准确，烦请指正。</p>
+
+
+
+<h1 id="概述-spark-sql-是-spark-用于处理结构化数据的一个模块不同于基础的-spark-rdd-apispark-sql-提供的接口提供了更多关于数据和执行的计算任务的结构信息spark-sql-内部使用这些额外的信息来执行一些额外的优化操作有几种方式可以与-spark-sql-进行交互其中包括-sql-和-dataset-api当计算一个结果时-spark-sql-使用的执行引擎是一样的-它跟你使用哪种-api-或编程语言来表达计算无关这种统一意味着开发人员可以很容易地在不同的-api-之间来回切换基于哪种-api-能够提供一种最自然的方式来表达一个给定的变换-transformation">概述 Spark SQL 是 Spark 用于处理结构化数据的一个模块。不同于基础的 Spark RDD API，Spark SQL 提供的接口提供了更多关于数据和执行的计算任务的结构信息。Spark SQL 内部使用这些额外的信息来执行一些额外的优化操作。有几种方式可以与 Spark SQL 进行交互，其中包括 SQL 和 Dataset API。当计算一个结果时 Spark SQL 使用的执行引擎是一样的, 它跟你使用哪种 API 或编程语言来表达计算无关。这种统一意味着开发人员可以很容易地在不同的 API 之间来回切换，基于哪种 API 能够提供一种最自然的方式来表达一个给定的变换 （transformation）。</h1>
+
+<p>本文中所有的示例程序都使用 Spark 发行版本中自带的样本数据，并且可以在 spark-shell、pyspark shell 以及 sparkR shell 中运行。</p>
+
+
+
+<h2 id="sql">SQL</h2>
+
+<p>Spark SQL 的用法之一是执行 SQL 查询，它也可以从现有的 Hive 中读取数据，想要了解更多关于如何配置这个特性的细节, 请参考 Hive表 这节。如果从其它编程语言内部运行 SQL，查询结果将作为一个 Dataset/DataFrame 返回。你还可以使用命令行或者通过 JDBC/ODBC 来与 SQL 接口进行交互。</p>
+
+
+
+<h2 id="dataset和dataframe">Dataset和DataFrame</h2>
+
+<p>Dataset 是一个分布式数据集，它是 Spark 1.6 版本中新增的一个接口, 它结合了 RDD（强类型，可以使用强大的 lambda 表达式函数）和 Spark SQL 的优化执行引擎的好处。Dataset 可以从 JVM 对象构造得到，随后可以使用函数式的变换（map，flatMap，filter 等）进行操作。Dataset API 目前支持 Scala 和 Java 语言，还不支持 Python, 不过由于 Python 语言的动态性, Dataset API 的许多好处早就已经可用了（例如，你可以使用 row.columnName 来访问数据行的某个字段）。这种场景对于 R 语言来说是类似的。</p>
+
+<p>DataFrame 是按命名列方式组织的一个 Dataset。从概念上来讲，它等同于关系型数据库中的一张表或者 R 和 Python 中的一个 data frame，只不过在底层进行了更多的优化。DataFrame 可以从很多数据源构造得到，比如：结构化的数据文件，Hive 表，外部数据库或现有的 RDD。DataFrame API 支持 Scala, Java, Python 以及 R 语言。在 Scala 和 Java 语言中, DataFrame 由 Row 的 Dataset 来表示的。在 Scala API 中, DataFrame 仅仅只是 Dataset[Row] 的一个类型别名，而在 Java API 中, 开发人员需要使用 Dataset 来表示一个 DataFrame。</p>
+
+<p>在本文中, 我们往往把 Scala/Java 中 Row 的 Dataset 当做 DataFrame。</p>
+
+
+
+<h1 id="入门">入门</h1>
+
+
+
+<h2 id="入口sparksession">入口:SparkSession</h2>
+
+<p>Spark 中所有的功能入口都是 SparkSession 类。要创建一个基本的 SparkSession 对象，只需要使用 SparkSession.builder() 方法。</p>
+
+<p>Scala</p>
+
+<p>import org.apache.spark.sql.SparkSession</p>
+
+<p>val spark = SparkSession <br>
+  .builder() <br>
+  .appName(“Spark SQL Example”) <br>
+  .config(“spark.some.config.option”, “some-value”) <br>
+  .getOrCreate()</p>
+
+<p>// 用于隐式转换，像将RDD转换成DataFrame <br>
+import spark.implicits._ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SparkSQLExample.scala” 文件。</p>
+
+
+
+<h5 id="java">Java</h5>
+
+<p>import org.apache.spark.sql.SparkSession;</p>
+
+<p>SparkSession spark = SparkSession <br>
+  .builder() <br>
+  .appName(“Java Spark SQL Example”) <br>
+  .config(“spark.some.config.option”, “some-value”) <br>
+  .getOrCreate(); <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSparkSQLExample.java” 文件。</p>
+
+
+
+<h5 id="python">Python</h5>
+
+<p>from pyspark.sql import SparkSession</p>
+
+<p>spark = SparkSession\ <br>
+    .builder\ <br>
+    .appName(“PythonSQL”)\ <br>
+    .config(“spark.some.config.option”, “some-value”)\ <br>
+    .getOrCreate() <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/python/sql.py” 文件。</p>
+
+<p>Spark 2.0 版本中的 SparkSession 对于 Hive 的一些功能特性提供了内置支持, 包括使用 HiveQL 编写查询语句, 访问 Hive UDF 以及从 Hive 表中读取数据。想要使用这些特性, 需要确保你已经安装了 Hive。</p>
+
+
+
+<h2 id="创建dataframe">创建DataFrame</h2>
+
+<p>Spark 应用程序可以使用 SparkSession 从现有的RDD、Hive 表或 Spark 数据源创建DataFrame。</p>
+
+<p>下面这个示例基于一个 JSON 文件内容创建了一个 DataFrame：</p>
+
+
+
+<h5 id="scala">Scala</h5>
+
+<p>val df = spark.read.json(“examples/src/main/resources/people.json”)</p>
+
+<p>// 将 DataFrame 内容展示到标准输出 <br>
+df.show() <br>
+// +—-+——-+ <br>
+// | age|   name| <br>
+// +—-+——-+ <br>
+// |null|Michael| <br>
+// |  30|   Andy| <br>
+// |  19| Justin| <br>
+// +—-+——-+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SparkSQLExample.scala” 文件。</p>
+
+
+
+<h5 id="java-1">Java</h5>
+
+<p>import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Row;</p>
+
+<p>Dataset df = spark.read().json(“examples/src/main/resources/people.json”);</p>
+
+<p>// 将 DataFrame 内容展示到标准输出 <br>
+df.show(); <br>
+// +—-+——-+ <br>
+// | age|   name| <br>
+// +—-+——-+ <br>
+// |null|Michael| <br>
+// |  30|   Andy| <br>
+// |  19| Justin| <br>
+// +—-+——-+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSparkSQLExample.java” 文件。</p>
+
+
+
+<h5 id="python-1">Python</h5>
+
+
+
+<h1 id="spark是已存在的-sparksession-对象">spark是已存在的 SparkSession 对象</h1>
+
+<p>df = spark.read.json(“examples/src/main/resources/people.json”)</p>
+
+
+
+<h1 id="将-dataframe-内容展示到标准输出">将 DataFrame 内容展示到标准输出</h1>
+
+<p>df.show()</p>
+
+
+
+<h2 id="非强类型dataset操作即dataframe操作">非强类型Dataset操作(即DataFrame操作)</h2>
+
+<p>DataFrame 为 Scala, Java, Python 以及 R 语言中的结构化数据操作提供了一个领域特定语言。</p>
+
+<p>上面我们也提到过, Spark 2.0 版本中, Scala 和 Java API 中的 DataFrame 只是 Row 的 Dataset。与强类型 Scala/Java Dataset 提供的”强类型变换(typed transformations)”相比，这些操作也被称为”非强类型变换(untyped transformations)” 。</p>
+
+<p>下面提供了几个使用 Dataset 处理结构化数据的基础示例：</p>
+
+
+
+<h5 id="scala-1">Scala</h5>
+
+<p>// import语句需要使用 $ 符号 <br>
+import spark.implicits._ <br>
+// 按照tree格式打印schema <br>
+df.printSchema() <br>
+// root <br>
+// |– age: long (nullable = true) <br>
+// |– name: string (nullable = true)</p>
+
+<p>// 只选择”name”列 <br>
+df.select(“name”).show() <br>
+// +——-+ <br>
+// |   name| <br>
+// +——-+ <br>
+// |Michael| <br>
+// |   Andy| <br>
+// | Justin| <br>
+// +——-+</p>
+
+<p>// 选择所有人, 但是age加 1 <br>
+df.select(<span class="MathJax_Preview"></span><span class="MathJax" id="MathJax-Element-1-Frame" role="textbox" aria-readonly="true" style=""><nobr><span class="math" id="MathJax-Span-1" style="width: 5.336em; display: inline-block;"><span style="display: inline-block; position: relative; width: 4.269em; height: 0px; font-size: 125%;"><span style="position: absolute; clip: rect(1.869em 1000em 3.096em -0.424em); top: -2.717em; left: 0.003em;"><span class="mrow" id="MathJax-Span-2"><span class="mo" id="MathJax-Span-3" style="font-family: MathJax_Main;">"</span><span class="mi" id="MathJax-Span-4" style="font-family: MathJax_Math-italic; padding-left: 0.269em;">n</span><span class="mi" id="MathJax-Span-5" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-6" style="font-family: MathJax_Math-italic;">m</span><span class="mi" id="MathJax-Span-7" style="font-family: MathJax_Math-italic;">e</span><span class="mo" id="MathJax-Span-8" style="font-family: MathJax_Main; padding-left: 0.269em;">"</span><span class="mo" id="MathJax-Span-9" style="font-family: MathJax_Main;">,</span></span><span style="display: inline-block; width: 0px; height: 2.723em;"></span></span></span><span style="border-left: 0.003em solid; display: inline-block; overflow: hidden; width: 0px; height: 1.27em; vertical-align: -0.33em;"></span></span></nobr></span><script type="math/tex" id="MathJax-Element-1">"name", </script>”age” + 1).show() <br>
+// +——-+———+ <br>
+// |   name|(age + 1)| <br>
+// +——-+———+ <br>
+// |Michael|     null| <br>
+// |   Andy|       31| <br>
+// | Justin|       20| <br>
+// +——-+———+</p>
+
+<p>// 选择年龄大于21岁的人 <br>
+df.filter($”age” &gt; 21).show() <br>
+// +—+—-+ <br>
+// |age|name| <br>
+// +—+—-+ <br>
+// | 30|Andy| <br>
+// +—+—-+</p>
+
+<p>// 按年龄统计人数 <br>
+df.groupBy(“age”).count().show() <br>
+// +—-+—–+ <br>
+// | age|count| <br>
+// +—-+—–+ <br>
+// |  19|    1| <br>
+// |null|    1| <br>
+// |  30|    1| <br>
+// +—-+—–+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SparkSQLExample.scala” 文件。</p>
+
+<p>DataFrame 上可执行的操作类型的一个完整列表可以参考：API文档 。</p>
+
+<p>除了简单的列引用和表达式之外，DataFrame 还提供了丰富的函数库，包括字符串操作，日期计算，常见的数学操作等。完整列表可以参见：DataFrame函数参考文档 。</p>
+
+
+
+<h5 id="java-2">Java</h5>
+
+<p>// col(“…”) 比 df.col(“…”) 更好 <br>
+import static org.apache.spark.sql.functions.col;</p>
+
+<p>// 按照tree格式打印schema <br>
+df.printSchema(); <br>
+// root <br>
+// |– age: long (nullable = true) <br>
+// |– name: string (nullable = true)</p>
+
+<p>// 只选择”name”列 <br>
+df.select(“name”).show(); <br>
+// +——-+ <br>
+// |   name| <br>
+// +——-+ <br>
+// |Michael| <br>
+// |   Andy| <br>
+// | Justin| <br>
+// +——-+</p>
+
+<p>// 选择所有人, 但是age加 1 <br>
+df.select(col(“name”), col(“age”).plus(1)).show(); <br>
+// +——-+———+ <br>
+// |   name|(age + 1)| <br>
+// +——-+———+ <br>
+// |Michael|     null| <br>
+// |   Andy|       31| <br>
+// | Justin|       20| <br>
+// +——-+———+</p>
+
+<p>// 选择年龄大于21岁的人 <br>
+df.filter(col(“age”).gt(21)).show(); <br>
+// +—+—-+ <br>
+// |age|name| <br>
+// +—+—-+ <br>
+// | 30|Andy| <br>
+// +—+—-+</p>
+
+<p>// 按年龄统计人数 <br>
+df.groupBy(“age”).count().show(); <br>
+// +—-+—–+ <br>
+// | age|count| <br>
+// +—-+—–+ <br>
+// |  19|    1| <br>
+// |null|    1| <br>
+// |  30|    1| <br>
+// +—-+—–+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSparkSQLExample.java” 文件。</p>
+
+<p>DataFrame 上可执行的操作类型的一个完整列表可以参考：API文档 。</p>
+
+<p>除了简单的列引用和表达式之外，DataFrame 还提供了丰富的函数库，包括字符串操作，日期计算，常见的数学操作等。完整列表可以参见：DataFrame函数参考文档。</p>
+
+
+
+<h5 id="python-2">Python</h5>
+
+<p>在 Python 中, 可以使用属性 (df.age) 或者通过索引 (df[‘age’]) 来访问 DataFrame 的列。 虽然前者对于交互式数据检索非常方便, 但是我们还是非常建议开发人员使用后者, 因为后者更面向于未来，并且不会与也是 DataFrame 类上的属性的列名冲突。</p>
+
+
+
+<h1 id="spark是一个已存在的-sparksession-对象">spark是一个已存在的 SparkSession 对象</h1>
+
+
+
+<h1 id="创建-dataframe">创建 DataFrame</h1>
+
+<p>df = spark.read.json(“examples/src/main/resources/people.json”)</p>
+
+
+
+<h1 id="将-dataframe-内容展示到标准输出-1">将 DataFrame 内容展示到标准输出</h1>
+
+<p>df.show()</p>
+
+
+
+<h2 id="age-name">age  name</h2>
+
+
+
+<h2 id="null-michael">null Michael</h2>
+
+
+
+<h2 id="30-andy">30   Andy</h2>
+
+
+
+<h2 id="19-justin">19   Justin</h2>
+
+
+
+<h1 id="按照tree格式打印schema">按照tree格式打印schema</h1>
+
+<p>df.printSchema()</p>
+
+
+
+<h2 id="root">root</h2>
+
+
+
+<h2 id="age-long-nullable-true">|– age: long (nullable = true)</h2>
+
+
+
+<h2 id="name-string-nullable-true">|– name: string (nullable = true)</h2>
+
+
+
+<h1 id="只选择name列">只选择”name”列</h1>
+
+<p>df.select(“name”).show()</p>
+
+
+
+<h2 id="name">name</h2>
+
+
+
+<h2 id="michael">Michael</h2>
+
+
+
+<h2 id="andy">Andy</h2>
+
+
+
+<h2 id="justin">Justin</h2>
+
+
+
+<h1 id="选择所有人-但是age加-1">选择所有人, 但是age加 1</h1>
+
+<p>df.select(df[‘name’], df[‘age’] + 1).show()</p>
+
+
+
+<h2 id="name-age-1">name    (age + 1)</h2>
+
+
+
+<h2 id="michael-null">Michael null</h2>
+
+
+
+<h2 id="andy-31">Andy    31</h2>
+
+
+
+<h2 id="justin-20">Justin  20</h2>
+
+
+
+<h1 id="选择年龄大于21岁的人">选择年龄大于21岁的人</h1>
+
+<p>df.filter(df[‘age’] &gt; 21).show()</p>
+
+
+
+<h2 id="age-name-1">age name</h2>
+
+
+
+<h2 id="30-andy-1">30  Andy</h2>
+
+
+
+<h1 id="按年龄统计人数">按年龄统计人数</h1>
+
+<p>df.groupBy(“age”).count().show()</p>
+
+
+
+<h2 id="age-count">age  count</h2>
+
+
+
+<h2 id="null-1">null 1</h2>
+
+
+
+<h2 id="19-1">19   1</h2>
+
+
+
+<h2 id="30-1">30   1</h2>
+
+<p>DataFrame 上可执行的操作类型的一个完整列表可以参考：API文档 。</p>
+
+<p>除了简单的列引用和表达式之外，DataFrame 还提供了丰富的函数库，包括字符串操作，日期计算，常见的数学操作等。完整列表可以参见：DataFrame函数参考文档。</p>
+
+
+
+<h2 id="编程方式运行sql查询">编程方式运行SQL查询</h2>
+
+
+
+<h5 id="scala-2">Scala</h5>
+
+<p>SparkSession 中的 sql 函数可以使应用程序能够以编程方式运行 SQL 查询并将查询结果作为一个 DataFrame 返回。</p>
+
+<p>// 将 DataFrame 注册为一个SQL临时视图 <br>
+df.createOrReplaceTempView(“people”)</p>
+
+<p>val sqlDF = spark.sql(“SELECT * FROM people”) <br>
+sqlDF.show() <br>
+// +—-+——-+ <br>
+// | age|   name| <br>
+// +—-+——-+ <br>
+// |null|Michael| <br>
+// |  30|   Andy| <br>
+// |  19| Justin| <br>
+// +—-+——-+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SparkSQLExample.scala” 文件。</p>
+
+
+
+<h5 id="java-3">Java</h5>
+
+<p>SparkSession 中的 sql 函数可以使应用程序能够以编程方式运行 SQL 查询并将结果作为一个 Dataset 返回。</p>
+
+<p>import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Row;</p>
+
+<p>// 将 DataFrame 注册为一个SQL临时视图 <br>
+df.createOrReplaceTempView(“people”);</p>
+
+<p>Dataset sqlDF = spark.sql(“SELECT * FROM people”); <br>
+sqlDF.show(); <br>
+// +—-+——-+ <br>
+// | age|   name| <br>
+// +—-+——-+ <br>
+// |null|Michael| <br>
+// |  30|   Andy| <br>
+// |  19| Justin| <br>
+// +—-+——-+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSparkSQLExample.java” 文件。</p>
+
+
+
+<h5 id="python-3">Python</h5>
+
+<p>SparkSession 中的 sql 函数可以使应用程序能够以编程方式运行 SQL 查询并将结果作为一个 DataFrame 返回。</p>
+
+
+
+<h1 id="spark-是一个已存在的-sparksession-对象">spark 是一个已存在的 SparkSession 对象</h1>
+
+<p>df = spark.sql(“SELECT * FROM table”)</p>
+
+
+
+<h2 id="创建dataset">创建Dataset</h2>
+
+<p>Dataset 和 RDD 类似, 但是 Dataset 使用的是一个专门的编码器（Encoder ）来序列化对象以进行跨网络的数据处理和传输, 而不是使用 Java 序列化或者 Kryo 。 虽然编码器和标准的序列化都可以将对象转化成字节, 但是编码器可以根据代码动态生成并且使用一种可以允许 Spark 执行很多像过滤、排序、哈希等操作而不需要将字节反序列化成一个对象的特殊的数据格式。</p>
+
+
+
+<h5 id="scala-3">Scala</h5>
+
+<p>// 注意: Scala 2.10 中的Case classes 最多只能支持到22个字段，想要突破这个限制, <br>
+// 你可以使用实现了Product接口的自定义类 <br>
+case class Person(name: String, age: Long)</p>
+
+<p>// 为 case classes 创建Encoders <br>
+val caseClassDS = Seq(Person(“Andy”, 32)).toDS() <br>
+caseClassDS.show() <br>
+// +—-+—+ <br>
+// |name|age| <br>
+// +—-+—+ <br>
+// |Andy| 32| <br>
+// +—-+—+</p>
+
+<p>// 通过引入spark.implicits._来自动地提供可用于大多数常用类型的Encoders <br>
+val primitiveDS = Seq(1, 2, 3).toDS() <br>
+primitiveDS.map(_ + 1).collect() // Returns: Array(2, 3, 4)</p>
+
+<p>// 通过提供一个类，DataFrames可以转换成一个 Dataset。映射是基于名称的。 <br>
+val path = “examples/src/main/resources/people.json” <br>
+val peopleDS = spark.read.json(path).as[Person] <br>
+peopleDS.show() <br>
+// +—-+——-+ <br>
+// | age|   name| <br>
+// +—-+——-+ <br>
+// |null|Michael| <br>
+// |  30|   Andy| <br>
+// |  19| Justin| <br>
+// +—-+——-+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SparkSQLExample.scala” 文件。</p>
+
+
+
+<h5 id="java-4">Java</h5>
+
+<p>import java.util.Arrays; <br>
+import java.util.Collections; <br>
+import java.io.Serializable;</p>
+
+<p>import org.apache.spark.api.java.function.MapFunction; <br>
+import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Row; <br>
+import org.apache.spark.sql.Encoder; <br>
+import org.apache.spark.sql.Encoders;</p>
+
+<p>public static class Person implements Serializable { <br>
+  private String name; <br>
+  private int age;</p>
+
+<p>public String getName() { <br>
+    return name; <br>
+  }</p>
+
+<p>public void setName(String name) { <br>
+    this.name = name; <br>
+  }</p>
+
+<p>public int getAge() { <br>
+    return age; <br>
+  }</p>
+
+<p>public void setAge(int age) { <br>
+    this.age = age; <br>
+  } <br>
+}</p>
+
+<p>// 创建一个Person类的实例 <br>
+Person person = new Person(); <br>
+person.setName(“Andy”); <br>
+person.setAge(32);</p>
+
+<p>// 创建用于Java bean的Encoders <br>
+Encoder personEncoder = Encoders.bean(Person.class); <br>
+Dataset javaBeanDS = spark.createDataset( <br>
+  Collections.singletonList(person), <br>
+  personEncoder <br>
+); <br>
+javaBeanDS.show(); <br>
+// +—+—-+ <br>
+// |age|name| <br>
+// +—+—-+ <br>
+// | 32|Andy| <br>
+// +—+—-+</p>
+
+<p>// 大多数常用类型的Encoders是由 Encoder 类提供的 <br>
+Encoder integerEncoder = Encoders.INT(); <br>
+Dataset primitiveDS = spark.createDataset(Arrays.asList(1, 2, 3), integerEncoder); <br>
+Dataset transformedDS = primitiveDS.map(new MapFunction</p>
+
+<h2 id="与rdd互操作">与RDD互操作</h2>
+
+<p>Spark SQL 支持两种不同的方法来将现有 RDD 转化成 Dataset. 第一种方法是使用反射来推导包含特定类型对象的 RDD 的 schema。当你编写 Spark 应用程序的时候如果已经知道了 schema, 那么这种基于反射机制的方法能够使代码更加简洁并且运行良好。</p>
+
+<p>第二种用于创建 Dataset 的方法是通过一个允许你构造一个 schema 并将其应用到一个现有 RDD 上的编程接口。尽管这种方法代码非常冗长, 但是它允许你在不知道列和列类型的情况下构造 Dataset。</p>
+
+
+
+<h3 id="使用反射推导schema">使用反射推导Schema</h3>
+
+
+
+<h5 id="scala-4">Scala</h5>
+
+<p>Spark SQL 的 Scala 接口支持自动地将包含 case class 的 RDD 转化为一个 DataFrame, 其中 case class 定义了表的 schema。case class 的参数名称使用反射读取并映射成表的列名。Case classes可以是嵌套的或者包含一些像 Seq 或 Array 这样的复杂类型。这个 RDD 可以隐式地转换成一个 DataFrame 然后注册成一个表。 可以在后续的 SQL 语句中使用这些表。</p>
+
+<p>import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder <br>
+import org.apache.spark.sql.Encoder</p>
+
+<p>// 用于从RDD到DataFrame的隐式转换 <br>
+import spark.implicits._</p>
+
+<p>// 从一个文本文件中创建一个Person对象的RDD，将其转换成一个Dataframe <br>
+val peopleDF = spark.sparkContext <br>
+  .textFile(“examples/src/main/resources/people.txt”) <br>
+  .map(_.split(“,”)) <br>
+  .map(attributes =&gt; Person(attributes(0), attributes(1).trim.toInt)) <br>
+  .toDF() <br>
+// 将DataFrame注册成一个临时视图 <br>
+peopleDF.createOrReplaceTempView(“people”)</p>
+
+<p>// SQL语句可以通过Spark的sql方法来运行 <br>
+val teenagersDF = spark.sql(“SELECT name, age FROM people WHERE age BETWEEN 13 AND 19”)</p>
+
+<p>// 查询结果中某一行的列可以通过字段索引来访问  <br>
+teenagersDF.map(teenager =&gt; “Name: ” + teenager(0)).show() <br>
+// +————+ <br>
+// |       value| <br>
+// +————+ <br>
+// |Name: Justin| <br>
+// +————+</p>
+
+<p>// 或者通过字段名称 <br>
+teenagersDF.map(teenager =&gt; “Name: ” + teenager.getAs[String](“name”)).show() <br>
+// +————+ <br>
+// |       value| <br>
+// +————+ <br>
+// |Name: Justin| <br>
+// +————+</p>
+
+<p>// 没有用于Dataset[Map[K,V]]的预定义 encoders , 需要显示地定义 <br>
+implicit val mapEncoder = org.apache.spark.sql.Encoders.kryo[Map[String, Any]] <br>
+// 基本类型和 case classes 也可以定义成: <br>
+implicit val stringIntMapEncoder: Encoder[Map[String, Int]] = ExpressionEncoder()</p>
+
+<p>// row.getValuesMap[T] 一次检索多个列到一个 Map[String, T] <br>
+teenagersDF.map(teenager =&gt; teenager.getValuesMap<a href="List%28%22name%22,%20%22age%22%29" rel="nofollow" target="_blank">Any</a>).collect() <br>
+// Array(Map(“name” -&gt; “Justin”, “age” -&gt; 19)) <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SparkSQLExample.scala” 文件。</p>
+
+
+
+<h5 id="java-5">Java</h5>
+
+<p>Spark SQL 支持自动地将一个 JavaBean 的 RDD 转换成一个 DataFrame。使用反射获得的 BeanInfo 对象定义了表的 schema。目前 Spark SQL 不支持包含 Map 字段的 JavaBean，但是支持嵌套的 JavaBean 和 List 或 Array 字段。你可以创建一个实现了 Serializable 接口的JavaBean，并且为它所有的字段生成 getters 和 setters 方法。</p>
+
+<p>import org.apache.spark.api.java.JavaRDD; <br>
+import org.apache.spark.api.java.function.Function; <br>
+import org.apache.spark.api.java.function.MapFunction; <br>
+import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Row; <br>
+import org.apache.spark.sql.Encoder; <br>
+import org.apache.spark.sql.Encoders;</p>
+
+<p>// 从一个文本文件中创建Person对象的RDD <br>
+JavaRDD peopleRDD = spark.read() <br>
+  .textFile(“examples/src/main/resources/people.txt”) <br>
+  .javaRDD() <br>
+  .map(new Function</p>
+
+<h5 id="python-4">Python</h5>
+
+<p>Spark SQL 可以将 Row 对象的 RDD 转化成一个 DataFrame, 并推导其数据类型。Row 是通过将 key/value 键值对列表作为 kwargs 参数传递给 Row 类构造而来。这个列表的键定义了表的列名, 并且其类型是通过抽样整个数据集推导而来, 类似于 JSON 文件上执行的推导。</p>
+
+
+
+<h1 id="spark是一个已存在的sparksession对象">spark是一个已存在的SparkSession对象.</h1>
+
+<p>from pyspark.sql import Row <br>
+sc = spark.sparkContext</p>
+
+
+
+<h1 id="加载一个文本文件并将每一行转换成一个row对象">加载一个文本文件并将每一行转换成一个Row对象.</h1>
+
+<p>lines = sc.textFile(“examples/src/main/resources/people.txt”) <br>
+parts = lines.map(lambda l: l.split(“,”)) <br>
+people = parts.map(lambda p: Row(name=p[0], age=int(p[1])))</p>
+
+
+
+<h1 id="推导-schema-并将dataframe注册成一个表">推导 schema , 并将DataFrame注册成一个表.</h1>
+
+<p>schemaPeople = spark.createDataFrame(people) <br>
+schemaPeople.createOrReplaceTempView(“people”)</p>
+
+
+
+<h1 id="sql-可以运行在已经注册成表的dataframe上">SQL 可以运行在已经注册成表的DataFrame上</h1>
+
+<p>teenagers = spark.sql(“SELECT name FROM people WHERE age &gt;= 13 AND age &lt;= 19”)</p>
+
+
+
+<h1 id="sql查询的结果是rdd并支持所有标准的rdd操作">SQL查询的结果是RDD并支持所有标准的RDD操作</h1>
+
+<p>teenNames = teenagers.map(lambda p: “Name: ” + p.name) <br>
+for teenName in teenNames.collect(): <br>
+  print(teenName)</p>
+
+
+
+<h3 id="编程方式指定schema">编程方式指定Schema</h3>
+
+
+
+<h5 id="scala-5">Scala</h5>
+
+<p>如果不能事先定义 case class (例如, 要解析编码于一个字符串或是一个文本数据集中的记录结构, 而且字段对于不同的用户字段映射不同), 那么按照下面三个步骤可以以编程方式创建一个 DataFrame ：</p>
+
+<p>从原始的 RDD 创建一个Row 的 RDD; <br>
+创建由 StructType 表示的 schema, 它和步骤1中创建的 RDD 中的 Row 结构相匹配； <br>
+通过 SparkSession 提供的 createDataFrame 方法将得到的 schema 应用到 Row 的 RDD 上。 <br>
+例如:</p>
+
+<p>import org.apache.spark.sql.types._</p>
+
+<p>// 创建一个 RDD <br>
+val peopleRDD = spark.sparkContext.textFile(“examples/src/main/resources/people.txt”)</p>
+
+<p>// schema编码于一个字符串中 <br>
+val schemaString = “name age”</p>
+
+<p>// 基于schema的字符串生成schema <br>
+val fields = schemaString.split(” “) <br>
+  .map(fieldName =&gt; StructField(fieldName, StringType, nullable = true)) <br>
+val schema = StructType(fields)</p>
+
+<p>//   将RDD (people) 的记录转换成 Row <br>
+val rowRDD = peopleRDD <br>
+  .map(_.split(“,”)) <br>
+  .map(attributes =&gt; Row(attributes(0), attributes(1).trim))</p>
+
+<p>//   将schema应用到RDD上 <br>
+val peopleDF = spark.createDataFrame(rowRDD, schema)</p>
+
+<p>// 使用DataFrame创建一个临时视图 <br>
+peopleDF.createOrReplaceTempView(“people”)</p>
+
+<p>// SQL可以运行在一个使用DataFrame创建的临时视图上 <br>
+val results = spark.sql(“SELECT name FROM people”)</p>
+
+<p>// SQL查询的结果是DataFrame并支持所有标准的RDD操作 <br>
+// 查询结果中某一行的列可以通过字段索引或字段名称来访问 <br>
+results.map(attributes =&gt; “Name: ” + attributes(0)).show() <br>
+// +————-+ <br>
+// |        value| <br>
+// +————-+ <br>
+// |Name: Michael| <br>
+// |   Name: Andy| <br>
+// | Name: Justin|</p>
+
+<p>// +————-+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SparkSQLExample.scala” 文件。</p>
+
+
+
+<h5 id="java-6">Java</h5>
+
+<p>如果不能事先定义 JavaBean (例如, 要解析编码于一个字符串或是一个文本数据集中的记录结构, 而且字段对于不同的用户字段映射不同), 那么按照下面三个步骤可以以编程方式创建一个 Dataset：</p>
+
+<p>从原始的 RDD 创建一个 Row的 RDD; <br>
+创建由 StructType 表示的 schema, 它和步骤1中创建的 RDD 中的 Row 结构相匹配； <br>
+通过 SparkSession 提供的 createDataFrame 方法将得到的 schema 应用到 Row的 RDD 上。 <br>
+例如:</p>
+
+<p>import java.util.ArrayList; <br>
+import java.util.List;</p>
+
+<p>import org.apache.spark.api.java.JavaRDD; <br>
+import org.apache.spark.api.java.function.Function;</p>
+
+<p>import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Row;</p>
+
+<p>import org.apache.spark.sql.types.DataTypes; <br>
+import org.apache.spark.sql.types.StructField; <br>
+import org.apache.spark.sql.types.StructType;</p>
+
+<p>// 创建一个 RDD <br>
+JavaRDD peopleRDD = spark.sparkContext() <br>
+  .textFile(“examples/src/main/resources/people.txt”, 1) <br>
+  .toJavaRDD();</p>
+
+<p>// schema编码于一个字符串中 <br>
+String schemaString = “name age”;</p>
+
+<p>// 基于schema的字符串生成schema <br>
+List fields = new ArrayList&lt;&gt;(); <br>
+for (String fieldName : schemaString.split(” “)) { <br>
+  StructField field = DataTypes.createStructField(fieldName, DataTypes.StringType, true); <br>
+  fields.add(field); <br>
+} <br>
+StructType schema = DataTypes.createStructType(fields);</p>
+
+<p>// 将RDD (people) 的记录转换成 Row <br>
+JavaRDD rowRDD = peopleRDD.map(new Function</p>
+
+<h5 id="python-5">Python</h5>
+
+<p>如果不能事先定义 kwargs 字典 (例如, 要解析编码于一个字符串或是一个文本数据集中的记录结构, 而且字段对于不同的用户字段映射不同), 那么按照下面三个步骤可以以编程方式创建一个 DataFrame：</p>
+
+<p>从原始的 RDD 创建一个 tuple 或 list 的 RDD; <br>
+创建由 StructType 表示的 schema, 它和步骤1中创建的 RDD 中的 tuple 或 list 结构相匹配； <br>
+通过 SparkSession 提供的 createDataFrame 方法将得到的 schema 应用到 RDD 上。 <br>
+例如:</p>
+
+
+
+<h1 id="引入-sparksession-和数据类型">引入 SparkSession 和数据类型</h1>
+
+<p>from pyspark.sql.types import *</p>
+
+
+
+<h1 id="spark-是一个已存在的sparksession对象">spark 是一个已存在的SparkSession对象</h1>
+
+<p>sc = spark.sparkContext</p>
+
+
+
+<h1 id="加载一个文本文件并将每一行转换成一个tuple">加载一个文本文件并将每一行转换成一个tuple</h1>
+
+<p>lines = sc.textFile(“examples/src/main/resources/people.txt”) <br>
+parts = lines.map(lambda l: l.split(“,”)) <br>
+people = parts.map(lambda p: (p[0], p[1].strip()))</p>
+
+
+
+<h1 id="schema编码于一个字符串中">schema编码于一个字符串中</h1>
+
+<p>schemaString = “name age”</p>
+
+<p>fields = [StructField(field_name, StringType(), True) for field_name in schemaString.split()] <br>
+schema = StructType(fields)</p>
+
+
+
+<h1 id="将schema应用到rdd上">将schema应用到RDD上</h1>
+
+<p>schemaPeople = spark.createDataFrame(people, schema)</p>
+
+
+
+<h1 id="使用dataframe创建一个临时视图">使用DataFrame创建一个临时视图</h1>
+
+<p>schemaPeople.createOrReplaceTempView(“people”)</p>
+
+
+
+<h1 id="sql可以运行在一个已经注册成表的dataframe上">SQL可以运行在一个已经注册成表的DataFrame上</h1>
+
+<p>results = spark.sql(“SELECT name FROM people”)</p>
+
+
+
+<h1 id="sql查询的结果是dataframe并支持所有标准的rdd操作">SQL查询的结果是DataFrame并支持所有标准的RDD操作</h1>
+
+<p>names = results.map(lambda p: “Name: ” + p.name) <br>
+for name in names.collect(): <br>
+  print(name)</p>
+
+
+
+<h1 id="数据源">数据源</h1>
+
+<p>通过统一的 DataFrame 接口, Spark SQL 支持在不同的数据源上进行操作。既可以在 DataFrame 上使用关系型的变换 (transformations) 进行操作，也可以用其创建一个临时视图。将 DataFrame 注册成一个临时视图可以允许你在它的数据上运行SQL查询。本节将描述使用 Spark 数据源加载和保存数据的一些通用方法，然后深入介绍一下专门用于内置数据源的一些选项。</p>
+
+
+
+<h2 id="通用的加载保存函数">通用的加载/保存函数</h2>
+
+<p>最简单的方式就是所有操作都使用默认的数据源（除非使用了spark.sql.sources.default 进行配置，否则默认值是 parquet）。</p>
+
+
+
+<h5 id="scala-6">Scala</h5>
+
+<p>val usersDF = spark.read.load(“examples/src/main/resources/users.parquet”) <br>
+usersDF.select(“name”, “favorite_color”).write.save(“namesAndFavColors.parquet”) <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SQLDataSourceExample.scala” 文件。</p>
+
+
+
+<h5 id="java-7">Java</h5>
+
+<p>Dataset usersDF = spark.read().load(“examples/src/main/resources/users.parquet”); <br>
+usersDF.select(“name”, “favorite_color”).write().save(“namesAndFavColors.parquet”); <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSQLDataSourceExample.java”文件。</p>
+
+
+
+<h5 id="python-6">Python</h5>
+
+<p>df = spark.read.load(“examples/src/main/resources/users.parquet”) <br>
+df.select(“name”, “favorite_color”).write.save(“namesAndFavColors.parquet”)</p>
+
+
+
+<h3 id="手动指定选项">手动指定选项</h3>
+
+<p>你也可以手动指定要使用的数据源，并设置一些你想传递给数据源的额外选项。数据源可由其全限定名指定（例如，org.apache.spark.sql.parquet），而对于内置数据源，你可以使用简写（json, parquet, jdbc）。使用下面的语法可以将从任意类型的数据源中加载的 DataFrame 转换成其它的类型。</p>
+
+
+
+<h5 id="scala-7">Scala</h5>
+
+<p>val peopleDF = spark.read.format(“json”).load(“examples/src/main/resources/people.json”) <br>
+peopleDF.select(“name”, “age”).write.format(“parquet”).save(“namesAndAges.parquet”) <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SQLDataSourceExample.scala” 文件。</p>
+
+
+
+<h5 id="java-8">Java</h5>
+
+<p>Dataset peopleDF = <br>
+  spark.read().format(“json”).load(“examples/src/main/resources/people.json”); <br>
+peopleDF.select(“name”, “age”).write().format(“parquet”).save(“namesAndAges.parquet”); <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSQLDataSourceExample.java” 文件。</p>
+
+
+
+<h5 id="python-7">Python</h5>
+
+<p>df = spark.read.load(“examples/src/main/resources/people.json”, format=”json”) <br>
+df.select(“name”, “age”).write.save(“namesAndAges.parquet”, format=”parquet”)</p>
+
+
+
+<h3 id="直接在文件上运行sql">直接在文件上运行SQL</h3>
+
+<p>除了使用读取 API 将文件加载到 DataFrame 然后执行查询，你还可以直接使用 SQL 查询文件。</p>
+
+
+
+<h5 id="scala-8">Scala</h5>
+
+<p>val sqlDF = spark.sql(“SELECT * FROM parquet.<code>examples/src/main/resources/users.parquet</code>“) <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SQLDataSourceExample.scala” 文件。</p>
+
+
+
+<h5 id="java-9">Java</h5>
+
+<p>Dataset sqlDF = <br>
+  spark.sql(“SELECT * FROM parquet.<code>examples/src/main/resources/users.parquet</code>“); <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSQLDataSourceExample.java” 文件。</p>
+
+
+
+<h4 id="python-8">Python</h4>
+
+<p>df = spark.sql(“SELECT * FROM parquet.<code>examples/src/main/resources/users.parquet</code>“)</p>
+
+
+
+<h3 id="保存模式">保存模式</h3>
+
+<p>Save 操作可以选择使用一个 SaveMode，它指定了如何处理数据已经存在的情况。很重要的一点我们需要意识到的是，这些保存模式都没有加锁并且都不是原子操作。另外，当执行 Overwrite 操作时，写入新数据之前原有的数据会被删除。</p>
+
+<p>| Scala/Java | 任何语言 | 含义 | | :——– |:——–|:———| | SaveMode.ErrorIfExists (默认) | “error” (默认) | 当保存 DataFrame 到数据源时，如果数据已经存在，将会抛出异常。| |SaveMode.Append |”append” | 当保存 DataFrame 到数据源时，如果数据或表已经存在，则将 DataFrame 内容追加到现有数据末尾。| |SaveMode.Overwrite|”overwrite”|Overwrite 模式意味着保存 DataFrame 到数据源时，如果数据或表已经存在，则使用 DataFrame 内容覆盖已有数据。| |SaveMode.Ignore|”ignore”|Ignore 模式意味着保存 DataFrame 到数据源时，如果数据已经存在，那么保存操作将不会保存 DataFrame 内容并且不会改变现有数据。这和 SQL 里的 CREATE TABLE IF NOT EXISTS 类似。|</p>
+
+
+
+<h3 id="保存到持久化表">保存到持久化表</h3>
+
+<p>可以使用 saveAsTable 命令将 DataFrame 作为持久化表保存在 Hive metastore 中。需要注意的是现有的 Hive 部署没必要使用这个特性。Spark 将会创建一个默认的本地 Hive metastore (使用 Derby)。不同于 createOrReplaceTempView 命令，saveAsTable 将会物化 DataFrame 内容并创建一个指向 Hive metastore 中数据的指针。即使 Spark 应用程序重启, 持久化表也会一直存在，只要你维持到同一个 metastore 的连接。通过调用 SparkSession 上带有表名参数的 table 方法就可以创建 DataFrame 的一个持久化表。</p>
+
+<p>默认情况下，saveAsTable 会创建一个 “managed table (托管表或内部表)”， 意味着数据的位置将由 metastore 控制。当表被删除时， 托管表(或内部表)也会自动删除它们的数据。</p>
+
+
+
+<h2 id="parquet文件">Parquet文件</h2>
+
+<p>Parquet 是一种列式存储格式，很多其它的数据处理系统都支持它。Spark SQL 提供了对能够自动保存原始数据的 schema 的 Parquet 文件的读写支持。写 Parquet 文件时，处于兼容性考虑，所有列都自动地转换为nullable。</p>
+
+
+
+<h3 id="编程方式加载数据">编程方式加载数据</h3>
+
+<p>仍然使用上面例子中的数据：</p>
+
+
+
+<h5 id="scala-9">Scala</h5>
+
+<p>// 引入spark.implicits._以自动提供用于大多数常用类型的Encoder <br>
+import spark.implicits._</p>
+
+<p>val peopleDF = spark.read.json(“examples/src/main/resources/people.json”)</p>
+
+<p>// DataFrame可以保存为Parquet文件,以维护schema信息 <br>
+peopleDF.write.parquet(“people.parquet”)</p>
+
+<p>// 读入上面创建的parquet文件 <br>
+// Parquet文件是自描述的，因此schema得以保存 <br>
+// Parquet文件的加载结果也是一个DataFrame <br>
+val parquetFileDF = spark.read.parquet(“people.parquet”)</p>
+
+<p>// Parquet文件也可以用于创建一个临时视图接着可以用在SQL语句中 <br>
+parquetFileDF.createOrReplaceTempView(“parquetFile”) <br>
+val namesDF = spark.sql(“SELECT name FROM parquetFile WHERE age BETWEEN 13 AND 19”) <br>
+namesDF.map(attributes =&gt; “Name: ” + attributes(0)).show() <br>
+// +————+ <br>
+// |       value| <br>
+// +————+ <br>
+// |Name: Justin| <br>
+// +————+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SQLDataSourceExample.scala” 文件。</p>
+
+
+
+<h5 id="java-10">Java</h5>
+
+<p>import org.apache.spark.api.java.function.MapFunction; <br>
+import org.apache.spark.sql.Encoders; <br>
+// import org.apache.spark.sql.Encoders; <br>
+import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Row; <br>
+Dataset peopleDF = spark.read().json(“examples/src/main/resources/people.json”); <br>
+// DataFrame可以保存为Parquet文件, 以维护schema信息 <br>
+peopleDF.write().parquet(“people.parquet”); <br>
+// 读入上面创建的parquet文件 <br>
+// Parquet文件是自描述的，因此schema得以保存 <br>
+// Parquet文件的加载结果也是一个DataFrame <br>
+Dataset parquetFileDF = spark.read().parquet(“people.parquet”); <br>
+// Parquet文件也可以用于创建一个临时视图接着可以用在SQL语句中 <br>
+parquetFileDF.createOrReplaceTempView(“parquetFile”); <br>
+Dataset namesDF = spark.sql(“SELECT name FROM parquetFile WHERE age BETWEEN 13 AND 19”); <br>
+Dataset namesDS = namesDF.map(new MapFunction</p>
+
+<h5 id="python-9">Python</h5>
+
+
+
+<h1 id="之前示例使用的spark变量用在这个示例中">之前示例使用的spark变量用在这个示例中</h1>
+
+<p>schemaPeople # 之前示例使用的 DataFrame</p>
+
+
+
+<h1 id="dataframe可以保存为parquet文件以维护schema信息">DataFrame可以保存为Parquet文件,以维护schema信息</h1>
+
+<p>schemaPeople.write.parquet(“people.parquet”)</p>
+
+
+
+<h1 id="读入上面创建的parquet文件">读入上面创建的parquet文件</h1>
+
+
+
+<h1 id="parquet文件是自描述的因此schema得以保存">Parquet文件是自描述的，因此schema得以保存</h1>
+
+
+
+<h1 id="parquet文件的加载结果也是一个dataframe">Parquet文件的加载结果也是一个DataFrame</h1>
+
+<p>parquetFile = spark.read.parquet(“people.parquet”)</p>
+
+
+
+<h1 id="parquet文件也可以用于创建一个临时视图接着可以用在sql语句中">Parquet文件也可以用于创建一个临时视图接着可以用在SQL语句中</h1>
+
+<p>parquetFile.createOrReplaceTempView(“parquetFile”); <br>
+teenagers = spark.sql(“SELECT name FROM parquetFile WHERE age &gt;= 13 AND age &lt;= 19”) <br>
+teenNames = teenagers.map(lambda p: “Name: ” + p.name) <br>
+for teenName in teenNames.collect(): <br>
+  print(teenName)</p>
+
+
+
+<h5 id="sql-1">Sql</h5>
+
+<p>CREATE TEMPORARY VIEW parquetTable <br>
+USING org.apache.spark.sql.parquet <br>
+OPTIONS ( <br>
+  path “examples/src/main/resources/people.parquet” <br>
+)</p>
+
+<p>SELECT * FROM parquetTable</p>
+
+
+
+<h3 id="分区发现partition-discovery">分区发现(Partition Discovery)</h3>
+
+<p>像 Hive 这样的系统中，表分区是一个常用的优化方法。在一个分区表中，数据通常存储在不同的目录下，分区列值编码于各个分区目录的路径中。Parquet 数据源现在可以自动地发现和推导分区信息。例如，我们可以使用下面的目录结构把之前使用的人口数据存储到一个分区表中，并使用2个额外的列gender和country来作为分区列：</p>
+
+<p>path <br>
+└── to <br>
+    └── table <br>
+        ├── gender=male <br>
+        │   ├── … <br>
+        │   │ <br>
+        │   ├── country=US <br>
+        │   │   └── data.parquet <br>
+        │   ├── country=CN <br>
+        │   │   └── data.parquet <br>
+        │   └── … <br>
+        └── gender=female <br>
+            ├── … <br>
+            │ <br>
+            ├── country=US <br>
+            │   └── data.parquet <br>
+            ├── country=CN <br>
+            │   └── data.parquet <br>
+            └── … <br>
+通过将 path/to/table 传递给 SparkSession.read.parquet 或 SparkSession.read.load 方法, Spark SQL 将会自动从路径中提取分区信息。现在返回的 DataFrame 的 schema 如下：</p>
+
+<p>root <br>
+|– name: string (nullable = true) <br>
+|– age: long (nullable = true) <br>
+|– gender: string (nullable = true) <br>
+|– country: string (nullable = true) <br>
+注意：分区列的数据类型是自动推导出来的。目前，分区列只支持数值类型和字符串类型。有时候用户可能不想要自动推导分区列的数据类型，对于这些使用案例，自动类型推导可以通过 spark.sql.sources.partitionColumnTypeInference.enabled 来配置是否开启，其默认值是true。当禁用类型推导后，字符串类型将用于分区列类型。</p>
+
+<p>从Spark 1.6.0 版本开始，分区发现(partition discovery)默认只查找给定路径下的分区。拿上面的例子来说，如果用户将 path/to/table/gender=male 传递给 SparkSession.read.parquet 或者 SparkSession.read.load 方法，那么 gender 将不会被当作分区列。如果用户想要指定分区发现(partition discovery)开始的基路径，可以在数据源选项中设置 basePath。例如，如果 path/to/table/gender=male 是数据路径，并且用户将 basePath 设置为 path/to/table，那么 gender 将是一个分区列。</p>
+
+
+
+<h3 id="schema合并schema-merging">Schema合并(Schema Merging)</h3>
+
+<p>和 ProtocolBuffer、Avro 以及 Thrift 一样，Parquet 也支持 schema 演变。用户可以从一个简单的 schema 开始，逐渐往 schema 中增加所需要的列。通过这种方式，用户最终可能会得到多个有着不同 schema 但互相兼容 的 Parquet 文件。Parquet 数据源现在能够自动检测这种情况并合并所有这些文件的 schema。</p>
+
+<p>因为 schema 合并相对来说是一个代价高昂的操作，并且在大多数情况下都不需要，所以从Spark 1.5.0 版本开始，默认关闭了Schema合并。你可以这样启用这一功能：</p>
+
+<p>读取 Parquet 文件时，将数据源选项 mergeSchema 设置为 true（见下面的示例代码） <br>
+或者，将全局的 SQL 选项 spark.sql.parquet.mergeSchema 设置为true。</p>
+
+
+
+<h5 id="scala-10">Scala</h5>
+
+<p>// 用于隐式地将RDD转换成DataFrame <br>
+import spark.implicits._</p>
+
+<p>// 创建一个简单的DataFrame，将其存储到一个分区目录下 <br>
+val squaresDF = spark.sparkContext.makeRDD(1 to 5).map(i =&gt; (i, i * i)).toDF(“value”, “square”) <br>
+squaresDF.write.parquet(“data/test_table/key=1”)</p>
+
+<p>// 在一个新的分区目录下创建另一个DataFrame， <br>
+// 增加一个新列并删除一个现有的列 <br>
+val cubesDF = spark.sparkContext.makeRDD(6 to 10).map(i =&gt; (i, i * i * i)).toDF(“value”, “cube”) <br>
+cubesDF.write.parquet(“data/test_table/key=2”)</p>
+
+<p>// 读取分区表 <br>
+val mergedDF = spark.read.option(“mergeSchema”, “true”).parquet(“data/test_table”) <br>
+mergedDF.printSchema()</p>
+
+<p>// 最终的schema由Parquet文件中所有3列以及出现在分区目录路径中的分区列组成 <br>
+// root <br>
+// |– value: int (nullable = true) <br>
+// |– square: int (nullable = true) <br>
+// |– cube: int (nullable = true) <br>
+// |– key : int (nullable = true) <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SQLDataSourceExample.scala” 文件。</p>
+
+
+
+<h5 id="java-11">Java</h5>
+
+<p>import java.io.Serializable; <br>
+import java.util.ArrayList; <br>
+import java.util.List;</p>
+
+<p>import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Row;</p>
+
+<p>public static class Square implements Serializable { <br>
+  private int value; <br>
+  private int square;</p>
+
+<p>// Getters and setters…</p>
+
+<p>}</p>
+
+<p>public static class Cube implements Serializable { <br>
+  private int value; <br>
+  private int cube;</p>
+
+<p>// Getters and setters…</p>
+
+<p>}</p>
+
+<p>List squares = new ArrayList&lt;&gt;(); <br>
+for (int value = 1; value &lt;= 5; value++) { <br>
+  Square square = new Square(); <br>
+  square.setValue(value); <br>
+  square.setSquare(value * value); <br>
+  squares.add(square); <br>
+}</p>
+
+<p>// 创建一个简单的DataFrame，将其存储到一个分区目录下 <br>
+Dataset squaresDF = spark.createDataFrame(squares, Square.class); <br>
+squaresDF.write().parquet(“data/test_table/key=1”);</p>
+
+<p>List cubes = new ArrayList&lt;&gt;(); <br>
+for (int value = 6; value &lt;= 10; value++) { <br>
+  Cube cube = new Cube(); <br>
+  cube.setValue(value); <br>
+  cube.setCube(value * value * value); <br>
+  cubes.add(cube); <br>
+}</p>
+
+<p>// 在一个新的分区目录下创建另一个DataFrame， <br>
+// 增加一个新列并删除一个现有的列 <br>
+Dataset cubesDF = spark.createDataFrame(cubes, Cube.class); <br>
+cubesDF.write().parquet(“data/test_table/key=2”);</p>
+
+<p>// 读取分区表 <br>
+Dataset mergedDF = spark.read().option(“mergeSchema”, true).parquet(“data/test_table”); <br>
+mergedDF.printSchema();</p>
+
+<p>// 最终的schema由Parquet文件中所有3列以及出现在分区目录路径中的分区列组成 <br>
+// root <br>
+// |– value: int (nullable = true) <br>
+// |– square: int (nullable = true) <br>
+// |– cube: int (nullable = true) <br>
+// |– key : int (nullable = true) <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSQLDataSourceExample.java” 文件。</p>
+
+
+
+<h5 id="python-10">Python</h5>
+
+
+
+<h1 id="之前示例使用的spark变量用在这个示例中-1">之前示例使用的spark变量用在这个示例中</h1>
+
+
+
+<h1 id="创建一个简单的dataframe将其存储到一个分区目录下">创建一个简单的DataFrame，将其存储到一个分区目录下</h1>
+
+<p>df1 = spark.createDataFrame(sc.parallelize(range(1, 6))\ <br>
+                                   .map(lambda i: Row(single=i, double=i * 2))) <br>
+df1.write.parquet(“data/test_table/key=1”)</p>
+
+
+
+<h1 id="在一个新的分区目录下创建另一个dataframe">在一个新的分区目录下创建另一个DataFrame，</h1>
+
+
+
+<h1 id="增加一个新列并删除一个现有的列">增加一个新列并删除一个现有的列</h1>
+
+<p>df2 = spark.createDataFrame(sc.parallelize(range(6, 11)) <br>
+                                   .map(lambda i: Row(single=i, triple=i * 3))) <br>
+df2.write.parquet(“data/test_table/key=2”)</p>
+
+
+
+<h1 id="读取分区表">读取分区表</h1>
+
+<p>df3 = spark.read.option(“mergeSchema”, “true”).parquet(“data/test_table”) <br>
+df3.printSchema()</p>
+
+
+
+<h1 id="最终的schema由parquet文件中所有3列以及出现在分区目录路径中的分区列组成">最终的schema由Parquet文件中所有3列以及出现在分区目录路径中的分区列组成</h1>
+
+
+
+<h1 id="root-1">root</h1>
+
+
+
+<h1 id="single-int-nullable-true">|– single: int (nullable = true)</h1>
+
+
+
+<h1 id="double-int-nullable-true">|– double: int (nullable = true)</h1>
+
+
+
+<h1 id="triple-int-nullable-true">|– triple: int (nullable = true)</h1>
+
+
+
+<h1 id="key-int-nullable-true">|– key : int (nullable = true)</h1>
+
+
+
+<h3 id="hive-metastore-parquet表转换">Hive metastore Parquet表转换</h3>
+
+<p>当读写 Hive metastore Parquet 表时，Spark SQL 会使用自带的 Parquet 支持而不是 Hive SerDe，以便获得更好的性能。这是由 spark.sql.hive.convertMetastoreParquet 配置项控制的，并且默认是开启的。</p>
+
+
+
+<h4 id="hiveparquet-schema调整">Hive/Parquet Schema调整</h4>
+
+<p>从表的 schema 处理的角度来看, Hive 和 Parquet 有2个关键的不同点：</p>
+
+<p>Hive 是非大小写敏感的，而 Parquet 是大小写敏感的。 <br>
+Hive 认为所有列都是 nullable，而 Parquet 中为空性是很重要的。 <br>
+由于这个原因，在将一个 Hive metastore Parquet 表转换成一个 Spark SQL Parquet 表时，必须要使 Hive metastore schema 和 Parquet schema 协调一致。调整规则如下：</p>
+
+<p>不管为空性如何, 如果两个 schema 中字段的名称相同，那么字段的数据类型也必须相同。调整后的字段应该使用Parquet schema 的数据类型，所以为空性需要重视。 <br>
+调整后的 schema 必须完全包含 Hive metastore schema 中定义的字段。 <br>
+只出现在 Parquet schema 中的字段将在调整后的 schema 中丢弃。 <br>
+只出现在 Hive metastore schema 中的字段将作为 nullable 字段添加到调整后的 schema 中。</p>
+
+
+
+<h4 id="元数据刷新metadata-refreshing">元数据刷新(Metadata Refreshing)</h4>
+
+<p>Spark SQL 会缓存 Parquet 元数据以提高性能。如果启用了Hive metastore Parquet表转换，那么那些转换后的表的 schema 也会被缓存起来。如果这些表被 Hive 或其它外部工具更新, 那么你需要手动地刷新它们以确保元数据的一致性。</p>
+
+
+
+<h5 id="scala-11">Scala</h5>
+
+<p>// spark是一个已存在的SparkSession对象</p>
+
+<p>spark.catalog.refreshTable(“my_table”)</p>
+
+
+
+<h5 id="java-12">Java</h5>
+
+<p>// spark是一个已存在的SparkSession对象 <br>
+spark.catalog().refreshTable(“my_table”);</p>
+
+
+
+<h5 id="python-11">Python</h5>
+
+
+
+<h1 id="spark是一个已存在的-hivecontext">spark是一个已存在的 HiveContext</h1>
+
+<p>spark.refreshTable(“my_table”)</p>
+
+
+
+<h5 id="sql-2">Sql</h5>
+
+<p>REFRESH TABLE my_table;</p>
+
+
+
+<h3 id="配置">配置</h3>
+
+<p>Parquet 配置可以使用 SparkSession 上的 setConf 方法或者通过使用 SQL语句运行 SET key=value 命令来进行设置。</p>
+
+<p>| 属性名 | 默认值 | 含义 | | :——– | :——–| :——–| | spark.sql.parquet.binaryAsString | false |其它一些使用 Parquet 的系统, 特别是 Impala，Hive 以及老版本的 Spark SQL，当写 Parquet schema 时都不区分二进制数据和字符串。这个标识告诉 Spark SQL 把二进制数据当字符串处理，以兼容这些系统。| | spark.sql.parquet.int96AsTimestamp | true |一些使用 Parquet 的系统, 特别是 Impala 和 Hive，将 Timestamp 存储成 INT96。这个标识告诉 Spark SQL 将 INT96 数据解析成 Timestamp，以兼容这些系统。| | spark.sql.parquet.cacheMetadata | true |开启 Parquet schema 元数据缓存。可以提升查询静态数据的速度。| | spark.sql.parquet.compression.codec| gzip |设置写 Parquet 文件使用的压缩编码格式。可接受的值有：uncompressed, snappy, gzip, lzo| | spark.sql.parquet.filterPushdown| true |设置为 true 时启用 Parquet 过滤器 push-down 优化| | spark.sql.hive.convertMetastoreParquet|true| 设置为false时，Spark SQL将使用 Hive SerDe 而不是内置的 parquet 表支持| | spark.sql.parquet.mergeSchema| false |如果设为 true，Parquet 数据源将会合并所有数据文件的 schema，否则，从汇总文件或随机选取一个数据文件（如果没有汇总文件）选取schema|</p>
+
+
+
+<h2 id="json数据集">JSON数据集</h2>
+
+
+
+<h5 id="scala-12">Scala</h5>
+
+<p>Spark SQL 可以自动推导一个 JSON 数据集的 schema 并将其加载为一个 Dataset[Row]。这种转换可以通过在一个 String 的 RDD 或一个 JSON 文件上使用 SparkSession.read.json() 方法来完成。</p>
+
+<p>注意: 作为<em>json文件</em>提供的文件并不是一个典型的JSON文件。JSON 文件的每一行必须包含一个独立的、完整有效的 JSON 对象。因此，一个常规的多行 json 文件经常会加载失败。</p>
+
+<p>// 由路径指向的JSON数据集，这个路径既可以是一个简单文本文件也可以是一个存储文本文件的目录 <br>
+val path = “examples/src/main/resources/people.json” <br>
+val peopleDF = spark.read.json(path)</p>
+
+<p>// 推导出的schema可以使用printSchema()方法可视化 <br>
+peopleDF.printSchema() <br>
+// root <br>
+//  |– age: long (nullable = true) <br>
+//  |– name: string (nullable = true)</p>
+
+<p>// 使用DataFrame创建一个临时视图 <br>
+peopleDF.createOrReplaceTempView(“people”)</p>
+
+<p>// 使用spark提供的sql方法可以运行SQL语句 <br>
+val teenagerNamesDF = spark.sql(“SELECT name FROM people WHERE age BETWEEN 13 AND 19”) <br>
+teenagerNamesDF.show() <br>
+// +——+ <br>
+// |  name| <br>
+// +——+ <br>
+// |Justin| <br>
+// +——+</p>
+
+<p>// 或者, 可以为JSON数据集创建一个由RDD[String]表示的DataFrame，每个字符串存储一个JSON对象 <br>
+val otherPeopleRDD = spark.sparkContext.makeRDD( <br>
+  “”“{“name”:”Yin”,”address”:{“city”:”Columbus”,”state”:”Ohio”}}”“” :: Nil) <br>
+val otherPeople = spark.read.json(otherPeopleRDD) <br>
+otherPeople.show() <br>
+// +—————+—-+ <br>
+// |        address|name| <br>
+// +—————+—-+ <br>
+// |[Columbus,Ohio]| Yin| <br>
+// +—————+—-+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SQLDataSourceExample.scala” 文件。</p>
+
+
+
+<h5 id="java-13">Java</h5>
+
+<p>Spark SQL 可以自动推导一个 JSON 数据集的 schema 并将其加载为一个 Dataset。这种转换可以通过在一个 String 的 RDD 或一个 JSON 文件上使用 SparkSession.read.json() 方法来完成。</p>
+
+<p>注意: 作为<em>json文件</em>提供的文件并不是一个典型的JSON文件。JSON 文件的每一行必须包含一个独立的、完整有效的 JSON 对象。因此，一个常规的多行 json 文件经常会加载失败。</p>
+
+<p>import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Row;</p>
+
+<p>// 由路径指向的JSON数据集，这个路径既可以是一个简单文本文件也可以是一个存储文本文件的目录 <br>
+Dataset people = spark.read().json(“examples/src/main/resources/people.json”);</p>
+
+<p>// 推导出的schema可以使用printSchema()方法可视化 <br>
+people.printSchema(); <br>
+// root <br>
+//  |– age: long (nullable = true) <br>
+//  |– name: string (nullable = true)</p>
+
+<p>// 使用DataFrame创建一个临时视图 <br>
+people.createOrReplaceTempView(“people”);</p>
+
+<p>// 使用spark提供的sql方法可以运行SQL语句 <br>
+Dataset namesDF = spark.sql(“SELECT name FROM people WHERE age BETWEEN 13 AND 19”); <br>
+namesDF.show(); <br>
+// +——+ <br>
+// |  name| <br>
+// +——+ <br>
+// |Justin| <br>
+// +——+ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/java/org/apache/spark/examples/sql/JavaSQLDataSourceExample.java” 文件。</p>
+
+
+
+<h5 id="python-12">Python</h5>
+
+<p>Spark SQL 可以自动推导一个 JSON 数据集的 schema 并将其加载为一个 DataFrame。这种转换可以通过在一个 JSON 文件上使用 SparkSession.read.json 方法来完成。</p>
+
+<p>注意: 作为<em>json文件</em>提供的文件并不是一个典型的JSON文件。JSON 文件的每一行必须包含一个独立的、完整有效的 JSON 对象。因此，一个常规的多行 json 文件经常会加载失败。</p>
+
+
+
+<h1 id="spark是一个已存在的sparksession对象-1">spark是一个已存在的SparkSession对象</h1>
+
+
+
+<h1 id="由路径指向的json数据集这个路径既可以是一个简单文本文件也可以是一个存储文本文件的目录">由路径指向的JSON数据集，这个路径既可以是一个简单文本文件也可以是一个存储文本文件的目录</h1>
+
+<p>people = spark.read.json(“examples/src/main/resources/people.json”)</p>
+
+
+
+<h1 id="推导出的schema可以使用printschema方法可视化">推导出的schema可以使用printSchema()方法可视化</h1>
+
+<p>people.printSchema()</p>
+
+
+
+<h1 id="root-2">root</h1>
+
+
+
+<h1 id="age-long-nullable-true-1">|– age: long (nullable = true)</h1>
+
+
+
+<h1 id="name-string-nullable-true-1">|– name: string (nullable = true)</h1>
+
+
+
+<h1 id="使用dataframe创建一个临时视图-1">使用DataFrame创建一个临时视图</h1>
+
+<p>people.createOrReplaceTempView(“people”)</p>
+
+
+
+<h1 id="使用spark提供的sql方法可以运行sql语句">使用spark提供的sql方法可以运行SQL语句</h1>
+
+<p>teenagers = spark.sql(“SELECT name FROM people WHERE age &gt;= 13 AND age &lt;= 19”)</p>
+
+<p>// 或者, 可以为JSON数据集创建一个由RDD[String]表示的DataFrame，每个字符串存储一个JSON对象 <br>
+anotherPeopleRDD = sc.parallelize([ <br>
+  ‘{“name”:”Yin”,”address”:{“city”:”Columbus”,”state”:”Ohio”}}’]) <br>
+anotherPeople = spark.jsonRDD(anotherPeopleRDD)</p>
+
+
+
+<h5 id="sql-3">Sql</h5>
+
+<p>CREATE TEMPORARY VIEW jsonTable <br>
+USING org.apache.spark.sql.json <br>
+OPTIONS ( <br>
+  path “examples/src/main/resources/people.json” <br>
+)</p>
+
+<p>SELECT * FROM jsonTable</p>
+
+
+
+<h2 id="hive表">Hive表</h2>
+
+<p>Spark SQL 还支持读写存储于 Apache Hive 中的数据。然而由于 Hive 的依赖项太多，在默认的 Spark 发行版本中并没有包含这些依赖。Spark 会自动加载 classpath 上的 Hive 依赖。注意：这些 Hive 依赖也必须放到所有的 worker 节点上，因为如果要访问 Hive 中的数据它们需要访问Hive 序列化和反序列化库（SerDes)。</p>
+
+<p>可以将 hive-site.xml，core-site.xml（用于安全配置）以及 hdfs-site.xml（用于HDFS配置）文件放置在 conf/ 目录下来完成 Hive 配置。</p>
+
+<p>使用 Hive 时, 你必须要实例化一个支持 Hive 的 SparkSession, 包括连接到一个持久化的 Hive metastore, Hive serdes 以及 Hive 用户自定义函数。即使用户没有安装部署 Hive 也仍然可以启用Hive支持。如果没有在 hive-site.xml 文件中配置, Spark应用程序启动之后，上下文会自动在当前目录下创建一个 metastore_db 目录并创建一个由 spark.sql.warehouse.dir 配置的、默认值是当前目录下的 spark-warehouse 目录的目录。注意: 从 Spark 2.0.0 版本开始, hive-site.xml 中的 hive.metastore.warehouse.dir 属性已经过时, 你可以使用 spark.sql.warehouse.dir 来指定 Hive仓库中数据库的默认存储位置。你可能还需要给启动 Spark 应用程序的用户赋予写权限。</p>
+
+
+
+<h5 id="scala-13">Scala</h5>
+
+<p>import org.apache.spark.sql.Row <br>
+import org.apache.spark.sql.SparkSession</p>
+
+<p>case class Record(key: Int, value: String)</p>
+
+<p>// warehouseLocation 指向用于管理数据库和表的默认路径 <br>
+val warehouseLocation = “file:${system:user.dir}/spark-warehouse”</p>
+
+<p>val spark = SparkSession <br>
+  .builder() <br>
+  .appName(“Spark Hive Example”) <br>
+  .config(“spark.sql.warehouse.dir”, warehouseLocation) <br>
+  .enableHiveSupport() <br>
+  .getOrCreate()</p>
+
+<p>import spark.implicits._ <br>
+import spark.sql</p>
+
+<p>sql(“CREATE TABLE IF NOT EXISTS src (key INT, value STRING)”) <br>
+sql(“LOAD DATA LOCAL INPATH ‘examples/src/main/resources/kv1.txt’ INTO TABLE src”)</p>
+
+<p>// HiveQL表示的查询语句 <br>
+sql(“SELECT * FROM src”).show() <br>
+// +—+——-+ <br>
+// |key|  value| <br>
+// +—+——-+ <br>
+// |238|val_238| <br>
+// | 86| val_86| <br>
+// |311|val_311| <br>
+// …</p>
+
+<p>// 还支持聚合查询 <br>
+sql(“SELECT COUNT(*) FROM src”).show() <br>
+// +——–+ <br>
+// |count(1)| <br>
+// +——–+ <br>
+// |    500 | <br>
+// +——–+</p>
+
+<p>// SQL查询结果本身就是DataFrame并支持所有标准函数 <br>
+val sqlDF = sql(“SELECT key, value FROM src WHERE key &lt; 10 ORDER BY key”)</p>
+
+<p>// DaraFrame中数据项的类型是Row，它允许你有序的访问每一列 <br>
+val stringsDS = sqlDF.map { <br>
+  case Row(key: Int, value: String) =&gt; s”Key: <span class="MathJax_Preview"></span><span class="MathJax" id="MathJax-Element-2-Frame" role="textbox" aria-readonly="true" style=""><nobr><span class="math" id="MathJax-Span-10" style="width: 6.349em; display: inline-block;"><span style="display: inline-block; position: relative; width: 5.069em; height: 0px; font-size: 125%;"><span style="position: absolute; clip: rect(1.869em 1000em 3.096em -0.424em); top: -2.717em; left: 0.003em;"><span class="mrow" id="MathJax-Span-11"><span class="mi" id="MathJax-Span-12" style="font-family: MathJax_Math-italic;">k</span><span class="mi" id="MathJax-Span-13" style="font-family: MathJax_Math-italic;">e</span><span class="mi" id="MathJax-Span-14" style="font-family: MathJax_Math-italic;">y<span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="mo" id="MathJax-Span-15" style="font-family: MathJax_Main;">,</span><span class="mi" id="MathJax-Span-16" style="font-family: MathJax_Math-italic; padding-left: 0.163em;">V<span style="display: inline-block; overflow: hidden; height: 1px; width: 0.163em;"></span></span><span class="mi" id="MathJax-Span-17" style="font-family: MathJax_Math-italic;">a</span><span class="mi" id="MathJax-Span-18" style="font-family: MathJax_Math-italic;">l</span><span class="mi" id="MathJax-Span-19" style="font-family: MathJax_Math-italic;">u</span><span class="mi" id="MathJax-Span-20" style="font-family: MathJax_Math-italic;">e</span><span class="mo" id="MathJax-Span-21" style="font-family: MathJax_Main; padding-left: 0.269em;">:</span></span><span style="display: inline-block; width: 0px; height: 2.723em;"></span></span></span><span style="border-left: 0.003em solid; display: inline-block; overflow: hidden; width: 0px; height: 1.27em; vertical-align: -0.33em;"></span></span></nobr></span><script type="math/tex" id="MathJax-Element-2">key, Value: </script>value” <br>
+} <br>
+stringsDS.show() <br>
+// +——————–+ <br>
+// |               value| <br>
+// +——————–+ <br>
+// |Key: 0, Value: val_0| <br>
+// |Key: 0, Value: val_0| <br>
+// |Key: 0, Value: val_0| <br>
+// …</p>
+
+<p>// 你也可以在HiveContext内部使用DataFrame来创建临时视图 <br>
+val recordsDF = spark.createDataFrame((1 to 100).map(i =&gt; Record(i, s”val_$i”))) <br>
+recordsDF.createOrReplaceTempView(“records”)</p>
+
+<p>// 可以关联查询DataFrame数据和存储在Hive中的数据 <br>
+sql(“SELECT * FROM records r JOIN src s ON r.key = s.key”).show() <br>
+// +—+——+—+——+ <br>
+// |key| value|key| value| <br>
+// +—+——+—+——+ <br>
+// |  2| val_2|  2| val_2| <br>
+// |  2| val_2|  2| val_2| <br>
+// |  4| val_4|  4| val_4| <br>
+// … <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/hive/SparkHiveExample.scala” 文件。</p>
+
+
+
+<h5 id="java-14">Java</h5>
+
+<p>import java.io.Serializable; <br>
+import java.util.ArrayList; <br>
+import java.util.List;</p>
+
+<p>import org.apache.spark.api.java.function.MapFunction; <br>
+import org.apache.spark.sql.Dataset; <br>
+import org.apache.spark.sql.Encoders; <br>
+import org.apache.spark.sql.Row; <br>
+import org.apache.spark.sql.SparkSession;</p>
+
+<p>public static class Record implements Serializable { <br>
+  private int key; <br>
+  private String value;</p>
+
+<p>public int getKey() { <br>
+    return key; <br>
+  }</p>
+
+<p>public void setKey(int key) { <br>
+    this.key = key; <br>
+  }</p>
+
+<p>public String getValue() { <br>
+    return value; <br>
+  }</p>
+
+<p>public void setValue(String value) { <br>
+    this.value = value; <br>
+  } <br>
+}</p>
+
+<p>// warehouseLocation 指向用于管理数据库和表的默认路径 <br>
+String warehouseLocation = “file:” + System.getProperty(“user.dir”) + “spark-warehouse”; <br>
+SparkSession spark = SparkSession <br>
+  .builder() <br>
+  .appName(“Java Spark Hive Example”) <br>
+  .config(“spark.sql.warehouse.dir”, warehouseLocation) <br>
+  .enableHiveSupport() <br>
+  .getOrCreate();</p>
+
+<p>spark.sql(“CREATE TABLE IF NOT EXISTS src (key INT, value STRING)”); <br>
+spark.sql(“LOAD DATA LOCAL INPATH ‘examples/src/main/resources/kv1.txt’ INTO TABLE src”);</p>
+
+<p>// HiveQL表示的查询语句 <br>
+spark.sql(“SELECT * FROM src”).show(); <br>
+// +—+——-+ <br>
+// |key|  value| <br>
+// +—+——-+ <br>
+// |238|val_238| <br>
+// | 86| val_86| <br>
+// |311|val_311| <br>
+// …</p>
+
+<p>// 还支持聚合查询 <br>
+spark.sql(“SELECT COUNT(*) FROM src”).show(); <br>
+// +——–+ <br>
+// |count(1)| <br>
+// +——–+ <br>
+// |    500 | <br>
+// +——–+</p>
+
+<p>// SQL查询结果本身就是DataFrame并支持所有标准函数 <br>
+Dataset sqlDF = spark.sql(“SELECT key, value FROM src WHERE key &lt; 10 ORDER BY key”);</p>
+
+<p>// DaraFrame中数据项的类型是Row，它允许你有序的访问每一列 <br>
+Dataset stringsDS = sqlDF.map(new MapFunction</p>
+
+<h5 id="python-13">Python</h5>
+
+
+
+<h1 id="spark是一个已存在的sparksession对象-2">spark是一个已存在的SparkSession对象</h1>
+
+<p>spark.sql(“CREATE TABLE IF NOT EXISTS src (key INT, value STRING)”) <br>
+spark.sql(“LOAD DATA LOCAL INPATH ‘examples/src/main/resources/kv1.txt’ INTO TABLE src”)</p>
+
+
+
+<h1 id="hiveql表示的查询语句">HiveQL表示的查询语句</h1>
+
+<p>results = spark.sql(“FROM src SELECT key, value”).collect()</p>
+
+
+
+<h3 id="与不同版本的hive-metastore交互">与不同版本的Hive Metastore交互</h3>
+
+<p>Spark SQL 对 Hive 最重要的一个支持就是可以和 Hive metastore 进行交互，这使得 Spark SQL 可以访问 Hive 表的元数据。从 Spark 1.4.0 版本开始，通过使用下面描述的配置, Spark SQL一个简单的二进制编译版本可以用来查询不同版本的 Hive metastore。注意：不管用于访问 metastore 的 Hive 是什么版本，Spark SQL 内部都使用 Hive 1.2.1 版本进行编译, 并且使用这个版本的一些类用于内部执行（serdes，UDFs，UDAFs等）。</p>
+
+<p>下面的选项可用来配置用于检索元数据的 Hive 版本：</p>
+
+<p>| 属性名 | 默认值 | 含义 | | :——– |:——–| :——–| | spark.sql.hive.metastore.version|1.2.1|Hive metastore版本，可用选项从0.12.0 到 1.2.1| | spark.sql.hive.metastore.jars|builtin|存放用于实例化 HiveMetastoreClient 的 jar 包位置。这个属性可以是下面三个选项之一：1. builtin。使用 Hive 1.2.1 版本，当启用 -Phive 时会和 Spark一起打包。如果使用了这个选项, 那么 spark.sql.hive.metastore.version 要么是1.2.1，要么就不定义。2. maven。使用从 Maven 仓库下载的指定版本的 Hive jar包。生产环境部署通常不建议使用这个选项。3. 标准格式的 JVM classpath。这个 classpath 必须包含所有 Hive 及其依赖的 jar包，包括正确版本的 Hadoop。这些 jar 包只需要部署在 driver 节点上，但是如果你使用 yarn cluster模式运行，那么你必须要确保这些 jar 包是和应用程序一起打包的。 | | spark.sql.hive.metastore.sharedPrefixes | com.mysql.jdbc,org.postgresql,com.microsoft.sqlserver,oracle.jdbc | 使用类加载器加载的一个逗号分隔的类名前缀列表，它可以在 Spark SQL 和特定版本的 Hive 间共享。一个共享类的示例就是用来访问 Hive metastore 的 JDBC driver。其它需要共享的类，是需要与已经共享的类进行交互的类。例如，log4j 使用的自定义 appender| | spark.sql.hive.metastore.barrierPrefixes | (empty) | 一个逗号分隔的类名前缀列表，对于 Spark SQL 访问的每个 Hive 版本都需要显式地重新加载这个列表。例如，在一个共享前缀列表（org.apache.spark.*）中声明的 Hive UDF通常需要被共享。 |</p>
+
+
+
+<h2 id="使用jdbc连接其它数据库">使用JDBC连接其它数据库</h2>
+
+<p>Spark SQL 还包括一个可以使用 JDBC 从其它数据库读取数据的数据源。该功能比使用 JdbcRDD 更好，因为它的返回结果是一个 DataFrame，这样可以很容易地在 Spark SQL 中进行处理或和其它数据源进行关联操作。JDBC 数据源在 Java 和 Python 中用起来很简单，因为不需要用户提供一个 ClassTag。（注意，这和 Spark SQL JDBC server 不同，Spark SQL JDBC server 允许其它应用程序使用 Spark SQL 执行查询）</p>
+
+<p>首先，你需要在 Spark classpath 中包含特定数据库的 JDBC driver。例如，为了从 Spark Shell连接到 postgres 数据库，你需要运行下面的命令：</p>
+
+<p>bin/spark-shell –driver-class-path postgresql-9.4.1207.jar –jars postgresql-9.4.1207.jar <br>
+通过使用数据源 API, 远程数据库的表可以加载为一个 DataFrame 或 Spark SQL 临时表。支持的一些选项如下：</p>
+
+<p>| 属性名 | 含义 | | :——– | :——–| | url | 连接的 JDBC URL | <br>
+| dbtable | 需要读取的 JDBC 表。注意：可以使用一个 SQL 查询语句的 FROM 子句中任何有效内容。例如, 除使用一个完整的表名之外，你还可以使用括号中的子查询。 | | driver |用来连接到 JDBC URL 的 JDBC driver 类名。 | | partitionColumn, lowerBound, upperBound, numPartitions | 这几个选项，如果指定了其中一个，那么其它选项必须全部指定。它们描述了从多个 worker 并行读入数据时如何进行表分区。partitionColumn 必须是所查询表中的一个数值类型的列。注意，lowerBound 和 upperBound 只是用来决定分区跨度的，而不是过滤表中的行。因此，表中所有的行都会被分区然后返回。 | | fetchSize | JDBC fetch size，用来限制每次获取多少行数据。默认设置成一个比较小的 fetch size （如，Oracle上设为10）有助于 JDBC驱动上的性能提升。 |</p>
+
+
+
+<h5 id="scala-14">Scala</h5>
+
+<p>val jdbcDF = spark.read.format(“jdbc”).options( <br>
+  Map(“url” -&gt; “jdbc:postgresql:dbserver”, <br>
+  “dbtable” -&gt; “schema.tablename”)).load()</p>
+
+
+
+<h5 id="java-15">Java</h5>
+
+<p>Map</p>
+
+<h5 id="python-14">Python</h5>
+
+<p>df = spark.read.format(‘jdbc’).options(url=’jdbc:postgresql:dbserver’, dbtable=’schema.tablename’).load()</p>
+
+
+
+<h5 id="sql-4">Sql</h5>
+
+<p>CREATE TEMPORARY VIEW jdbcTable <br>
+USING org.apache.spark.sql.jdbc <br>
+OPTIONS ( <br>
+  url “jdbc:postgresql:dbserver”, <br>
+  dbtable “schema.tablename” <br>
+)</p>
+
+
+
+<h2 id="故障排查">故障排查</h2>
+
+<p>在客户端会话以及所有的executor上，JDBC 驱动器类必须对启动类加载器可见，这是因为 Java 的 DriverManager 类在打开一个连接之前会做一个安全检查，这样就导致它忽略了对于启动类加载器不可见的所有驱动器。一种简单的方法就是修改所有 worker 节点上的 compute_classpath.sh 以包含你驱动器的 jar 包。</p>
+
+<p>有些数据库，比如H2，会把所有的名称转换成大写。在Spark SQL中你也需要使用大写来引用这些名称。</p>
+
+
+
+<h1 id="性能优化">性能优化</h1>
+
+<p>对于有些负载的 Spark 任务，可以将数据放入内存进行缓存或开启一些试验选项来提升性能。</p>
+
+
+
+<h2 id="在内存中缓存数据">在内存中缓存数据</h2>
+
+<p>通过调用 spark.cacheTable(“tableName”) 或者 dataFrame.cache() 方法, Spark SQL 可以使用一种内存列存储格式缓存表。然后 Spark SQL 只扫描必要的列，并且自动调整压缩比例，以最小化内存占用和GC压力。你可以调用 spark.uncacheTable(“tableName”) 方法删除内存中的表。</p>
+
+<p>可以使用 SparkSession 类中的 setConf 方法或通过 SQL 语句运行 SET key=value 命令来完成内存缓存配置。</p>
+
+<p>| 属性名 | 默认值 | 含义 | | :——– | :——–| :——-| | spark.sql.inMemoryColumnarStorage.compressed| true |如果设置为 true，Spark SQL 将会基于统计数据自动地为每一列选择一种压缩编码方式。| | spark.sql.inMemoryColumnarStorage.batchSize | 10000 | 控制列式缓存批处理大小。缓存数据时, 较大的批处理大小可以提高内存利用率和压缩率，但同时也会带来 OOM（Out Of Memory）的风险。|</p>
+
+
+
+<h2 id="其它配置选项">其它配置选项</h2>
+
+<p>下面的选项也可以用来提升执行的查询性能。随着 Spark 自动地执行越来越多的优化操作, 这些选项在未来的发布版本中可能会废弃。</p>
+
+<p>| 属性名 | 默认值 | 含义 | | :——– | :——–| :———| | spark.sql.files.maxPartitionBytes | 134217728 (128 MB) |读取文件时单个分区可容纳的最大字节数| | spark.sql.files.openCostInBytes | 4194304 (4 MB) | 打开文件的估算成本, 按照同一时间能够扫描的字节数来测量。当往一个分区写入多个文件的时候会使用。高估更好, 这样的话小文件分区将比大文件分区更快 (先被调度)。| | spark.sql.autoBroadcastJoinThreshold | 10485760 (10 MB) | 用于配置一个表在执行 join 操作时能够广播给所有 worker 节点的最大字节大小。通过将这个值设置为 -1 可以禁用广播。注意，当前数据统计仅支持已经运行了 ANALYZE TABLE  COMPUTE STATISTICS noscan 命令的 Hive Metastore 表。| | spark.sql.shuffle.partitions | 200 | 用于配置 join 或聚合操作混洗（shuffle）数据时使用的分区数。|</p>
+
+
+
+<h1 id="分布式sql引擎">分布式SQL引擎</h1>
+
+<p>通过使用 JDBC/ODBC 或者命令行接口，Spark SQL 还可以作为一个分布式查询引擎。在这种模式下，终端用户或应用程序可以运行 SQL 查询来直接与 Spark SQL 交互，而不需要编写任何代码。</p>
+
+
+
+<h2 id="运行thrift-jdbcodbc-server">运行Thrift JDBC/ODBC server</h2>
+
+<p>这里实现的Thrift JDBC/ODBC server 对应于 Hive 1.2.1 版本中的 HiveServer2。你可以使用Spark 或者 Hive 1.2.1 自带的 beeline 脚本来测试这个 JDBC server。</p>
+
+<p>要启动 JDBC/ODBC server， 需要在 Spark 安装目录下运行下面这个命令：</p>
+
+<p>./sbin/start-thriftserver.sh <br>
+这个脚本能接受所有 bin/spark-submit 命令行选项，外加一个用于指定 Hive 属性的 –hiveconf 选项。你可以运行 ./sbin/start-thriftserver.sh –help 来查看所有可用选项的一个完整列表。默认情况下，启动的 server 将会在 localhost:10000 上进行监听。你可以覆盖该行为, 比如使用以下环境变量：</p>
+
+<p>export HIVE_SERVER2_THRIFT_PORT= <br>
+export HIVE_SERVER2_THRIFT_BIND_HOST= <br>
+./sbin/start-thriftserver.sh \ <br>
+  –master  \ <br>
+  … <br>
+或者系统属性：</p>
+
+<p>./sbin/start-thriftserver.sh \ <br>
+  –hiveconf hive.server2.thrift.port= \ <br>
+  –hiveconf hive.server2.thrift.bind.host= \ <br>
+  –master  <br>
+  … <br>
+现在你可以使用 beeline 来测试这个 Thrift JDBC/ODBC server:</p>
+
+<p>./bin/beeline <br>
+在 beeline 中使用以下命令连接到 JDBC/ODBC server：</p>
+
+<p>beeline&gt; !connect jdbc:hive2://localhost:10000 <br>
+Beeline 会要求你输入用户名和密码。在非安全模式下，只需要输入你本机的用户名和一个空密码即可。对于安全模式，请参考 beeline 文档中的指示.</p>
+
+<p>将 hive-site.xml，core-site.xml 以及 hdfs-site.xml 文件放置在 conf/ 目录下可以完成 Hive 配置。</p>
+
+<p>你也可以使用Hive 自带的 beeline 的脚本。</p>
+
+<p>Thrift JDBC server 还支持通过 HTTP 传输来发送 Thrift RPC 消息。使用下面的设置来启用 HTTP 模式：</p>
+
+<p>hive.server2.transport.mode - Set this to value: http <br>
+hive.server2.thrift.http.port - HTTP port number fo listen on; default is 10001 <br>
+hive.server2.http.endpoint - HTTP endpoint; default is cliservice <br>
+为了测试，下面在 HTTP 模式中使用 beeline 连接到 JDBC/ODBC server:</p>
+
+<p>beeline&gt; !connect jdbc:hive2://:/?hive.server2.transport.mode=http;hive.server2.thrift.http.path=</p>
+
+
+
+<h2 id="运行spark-sql-cli">运行Spark SQL CLI</h2>
+
+<p>Spark SQL CLI 是一个很方便的工具，它可以在本地模式下运行 Hive metastore 服务，并且执行从命令行中输入的查询语句。注意：Spark SQL CLI 无法与 Thrift JDBC server 通信。</p>
+
+<p>要启动用Spark SQL CLI, 可以在Spark安装目录运行下面的命令:</p>
+
+<p>./bin/spark-sql <br>
+将 hive-site.xml，core-site.xml 以及 hdfs-site.xml 文件放置在 conf/ 目录下可以完成 Hive 配置。你可以运行 ./bin/spark-sql –help 来获取所有可用选项的一个完整列表。</p>
+
+
+
+<h1 id="迁移指南">迁移指南</h1>
+
+
+
+<h2 id="spark-sql从16版本升级到20版本">Spark SQL从1.6版本升级到2.0版本</h2>
+
+<p>SparkSession 现在是 Spark 新的切入点, 它替代了老的 SQLContext 和 HiveContext。注意：为了向下兼容, 老的 SQLContext 和 HiveContext 仍然保留。可以从 SparkSession 获取一个新的 catalog 接口- 现有的访问数据库和表的API, 如 listTables, createExternalTable, dropTempView, cacheTable 都被移到该接口。</p>
+
+<p>Dataset API 和 DataFrame API 进行了统一。在 Scala 中, DataFrame 变成了 Dataset[Row] 的一个类型别名, 而 Java API 使用者必须将 DataFrame 替换成 Dataset。Dataset 类既提供了强类型变换操作 (如 map, filter 以及 groupByKey) 也提供了非强类型变换操作 (如 select 和 groupBy) 。由于编译期的类型安全不是 Python 和 R 语言的一个特性, Dataset 的概念并不适用于这些语言的 API。相反, DataFrame 仍然是最基本的编程抽象, 就类似于这些语言中单节点数据帧的概念。</p>
+
+<p>Dataset 和 DataFrame API 中 unionAll 已经过时并且由union替代。</p>
+
+<p>Dataset 和 DataFrame API 中 explode 已经过时。或者 functions.explode() 可以结合 select 或 flatMap 一起使用。</p>
+
+<p>Dataset 和 DataFrame API 中 registerTempTable 已经过时并且由 createOrReplaceTempView替代。</p>
+
+
+
+<h2 id="spark-sql从15版本升级到16版本">Spark SQL从1.5版本升级到1.6版本</h2>
+
+<p>从 Spark 1.6 版本开始，Thrift server 默认运行于多会话模式下, 这意味着每个 JDBC/ODBC 连接都有独有一份 SQL 配置和临时函数注册表的拷贝。尽管如此, 缓存的表仍然可以共享。如果你更喜欢在老的单会话模式中运行 Thrift server，只需要将 spark.sql.hive.thriftServer.singleSession 选项设置为 true 即可。当然，你也可在 spark-defaults.conf 文件中添加这个选项，或者通过 –conf 将其传递给 start-thriftserver.sh：</p>
+
+<p>./sbin/start-thriftserver.sh  <br>
+–conf spark.sql.hive.thriftServer.singleSession=true  <br>
+… “`</p>
+
+<p>从1.6.1版本开始, sparkR 中的 withColumn 方法支持向 DataFrame 新增一列 或 替换已有的名称相同的列。</p>
+
+<p>从 Spark 1.6 版本开始, LongType 转换成 TimestampType 将源值以秒而不是毫秒作为单位处理。做出这个变更是为了的匹配 Hive 1.2 版本中从数值类型转换成TimestampType的这个行为以获得更一致的类型。更多细节请参见 SPARK-11724 。</p>
+
+
+
+<h2 id="spark-sql从14版本升级到15版本">Spark SQL从1.4版本升级到1.5版本</h2>
+
+<p>使用手动管理内存(Tungsten引擎)的执行优化以及用于表达式求值的代码自动生成现在默认是启用的。这些特性可以通过将 spark.sql.tungsten.enabled 的值设置为 false 来同时禁用。</p>
+
+<p>默认不启用 Parquet schema 合并。可以将 spark.sql.parquet.mergeSchema 的值设置为 true 来重新启用。</p>
+
+<p>Python 中对于列的字符串分解现在支持使用点号(.)来限定列或访问内嵌值，例如 df[‘table.column.nestedField’]。然而这也意味着如果你的列名包含任何点号(.)的话，你就必须要使用反引号来转义它们(例如：table.column.with.dots.nested)。</p>
+
+<p>默认启用内存中列式存储分区修剪。可以通过设置 spark.sql.inMemoryColumarStorage.partitionPruning 值为 false 来禁用它。</p>
+
+<p>不再支持无精度限制的 decimal，相反, Spark SQL 现在强制限制最大精度为38位。从 BigDecimal 对象推导 schema 时会使用（38，18）这个精度。如果在 DDL 中没有指定精度，则默认使用精度 Decimal(10，0)。</p>
+
+<p>存储的时间戳(Timestamp)现在精确到1us（微秒），而不是1ns（纳秒）</p>
+
+<p>在 sql 方言中，浮点数现在被解析成 decimal。HiveQL 的解析保持不变。</p>
+
+<p>SQL/DataFrame 函数的规范名称均为小写(例如：sum vs SUM)。</p>
+
+<p>JSON 数据源不会再自动地加载其他应用程序创建的新文件（例如，不是由 Spark SQL 插入到dataset中的文件）。对于一个 JSON 持久化表（例如：存储在 Hive metastore 中的表的元数据），用户可以使用 REFRESH TABLE 这个 SQL 命令或者 HiveContext 的 refreshTable 方法来把新文件添加进表。对于一个表示 JSON 数据集的 DataFrame, 用户需要重建这个 DataFrame, 这样新的 DataFrame 就会包含新的文件。</p>
+
+<p>pySpark 中的 DataFrame.withColumn 方法支持新增一列或是替换名称相同列。</p>
+
+
+
+<h2 id="spark-sql从13版本升级到14版本">Spark SQL从1.3版本升级到1.4版本</h2>
+
+
+
+<h3 id="dataframe数据读写接口">DataFrame数据读写接口</h3>
+
+<p>根据用户的反馈，我们提供了一个用于数据读入（SQLContext.read）和数据写出（DataFrame.write）的新的、更加流畅的API，同时老的API（如：SQLCOntext.parquetFile, SQLContext.jsonFile）将被废弃。</p>
+
+<p>有关 SQLContext.read ( Scala, Java, Python ) 和 DataFrame.write ( Scala, Java, Python ) 的更多信息，请参考API文档。</p>
+
+
+
+<h3 id="dataframegroupby保留分组列">DataFrame.groupBy保留分组列</h3>
+
+<p>根据用户的反馈，我们改变了 DataFrame.groupBy().agg() 的默认行为，就是在返回的 DataFrame 结果中保留分组的列。如果你想保持1.3版本中的行为，可以将 spark.sql.retainGroupColumns 设置为 false。</p>
+
+
+
+<h5 id="scala-15">Scala</h5>
+
+<p>// 在1.3.x版本中, 为了显示分组列 “department”, 它必须要作为 agg 函数调用的一部分显示地包含进来 <br>
+df.groupBy(“department”).agg($”department”, max(“age”), sum(“expense”))</p>
+
+<p>// 在1.4+版本中, 分组列 “department”自动包含进来 <br>
+df.groupBy(“department”).agg(max(“age”), sum(“expense”))</p>
+
+<p>// 要回滚到 1.3 的行为 (不包含分组列), 可以进行如下设置: <br>
+sqlContext.setConf(“spark.sql.retainGroupColumns”, “false”)</p>
+
+
+
+<h5 id="java-16">Java</h5>
+
+<p>// 在1.3.x版本中, 为了显示分组列 “department”, 它必须要作为 agg 函数调用的一部分显示地包含进来 <br>
+df.groupBy(“department”).agg(col(“department”), max(“age”), sum(“expense”));</p>
+
+<p>// 在1.4+版本中, 分组列 “department”自动包含进来 <br>
+df.groupBy(“department”).agg(max(“age”), sum(“expense”));</p>
+
+<p>// 要回滚到 1.3 的行为 (不包含分组列), 可以进行如下设置: <br>
+sqlContext.setConf(“spark.sql.retainGroupColumns”, “false”);</p>
+
+
+
+<h5 id="python-15">Python</h5>
+
+<p>import pyspark.sql.functions as func</p>
+
+
+
+<h1 id="在13x版本中-为了显示分组列-department-它必须要作为-agg-函数调用的一部分显示地包含进来">在1.3.x版本中, 为了显示分组列 “department”, 它必须要作为 agg 函数调用的一部分显示地包含进来</h1>
+
+<p>df.groupBy(“department”).agg(df[“department”], func.max(“age”), func.sum(“expense”))</p>
+
+
+
+<h1 id="在14版本中-分组列-department自动包含进来">在1.4+版本中, 分组列 “department”自动包含进来</h1>
+
+<p>df.groupBy(“department”).agg(func.max(“age”), func.sum(“expense”))</p>
+
+
+
+<h1 id="要回滚到-13-的行为-不包含分组列-可以进行如下设置">要回滚到 1.3 的行为 (不包含分组列), 可以进行如下设置:</h1>
+
+<p>sqlContext.setConf(“spark.sql.retainGroupColumns”, “false”)</p>
+
+
+
+<h3 id="dataframewithcolumn行为变更">DataFrame.withColumn行为变更</h3>
+
+<p>1.4版本之前, DataFrame.withColumn() 只支持新增一列。在 DataFrame 结果中指定名称的列总是作为一个新列添加进来，即使已经存在了相同名称的列。从1.4版本开始, DataFrame.withColumn() 支持新增一个和现有列名不重复的新列和替换有相同名称的列。</p>
+
+<p>注意：这个变更只针对 Scala API, 不针对 PySpark 和 SparkR。</p>
+
+
+
+<h2 id="spark-sql从10-12版本升级到13版本">Spark SQL从1.0-1.2版本升级到1.3版本</h2>
+
+<p>Spark 1.3 版本我们去掉了 Spark SQL 的 “Alpha” 标签并且清理了现有的API。从 Spark 1.3 版本开始，Spark SQL 将提供 1.x 系列中其它发行版本的二进制兼容。这个兼容性保证不包括显式地标注为不稳定（例如：DeveloperAPI 或 Experimental）的 API。</p>
+
+
+
+<h3 id="schemardd重命名为dataframe">SchemaRDD重命名为DataFrame</h3>
+
+<p>升级到 Spark SQL 1.3 后，用户将会注意到最大的改动就是 SchemaRDD 改名为 DataFrame。主要原因是 DataFrame 不再直接继承于 RDD，而是通过自己的实现来提供 RDD 中提供的绝大多数功能。通过调用 .rdd 方法 DataFrame 仍然可以转换成 RDD。</p>
+
+<p>在 Scala 中有一个从 SchemaRDD 到 DataFrame 的类型别名来提供某些使用场景下的代码兼容性。但仍然建议用户在代码中改用 DataFrame。Java 和 Python 用户必须要修改代码。</p>
+
+
+
+<h3 id="统一java和scala-api">统一Java和Scala API</h3>
+
+<p>Spark 1.3 之前的版本中有两个单独的 Java 兼容类（JavaSQLContext 和 JavaSchemaRDD）可以映射到 Scala API。Spark 1.3 版本将 Java API 和 Scala API 进行了统一。两种语言的用户都应该使用 SQLContext 和 DataFrame。通常情况下这些类都会使用两种语言中都支持的类型（例如：使用 Array 来取代语言特有的集合）。有些情况下没有通用的类型（例如：闭包或maps中用于传值），则会使用函数重载。</p>
+
+<p>另外，移除了 Java 特有的类型 API。Scala 和 Java 用户都应该使用 org.apache.spark.sql.types 包中的类来编程式地描述 schema。</p>
+
+
+
+<h3 id="隔离隐式转换并移除dsl包-只针对scala">隔离隐式转换并移除dsl包 (只针对Scala)</h3>
+
+<p>Spark 1.3 版本之前的很多示例代码都以 import sqlContext._ 语句作为开头，这样会引入 sqlContext的所有函数。在Spark 1.3 版本中我们隔离了 RDD 到 DataFrame的隐式转换，将其单独放到 SQLContext 内部的一个对象中。用户现在应该这样写：import sqlContext.implicits._。</p>
+
+<p>另外，隐式转换现在也只能使用 toDF 方法来增加由 Product（例如：case classes 或 元祖）组成的 RDD，而不是自动转换。</p>
+
+<p>使用 DSL（现在被 DataFrame API取代）的内部方法时，用户需要引入 import org.apache.spark.sql.catalyst.dsl。而现在应该要使用公用的 DataFrame 函数 API：import org.apache.spark.sql.functions._</p>
+
+
+
+<h3 id="移除orgapachesparksql包中datatype的类型别名-只针对scala">移除org.apache.spark.sql包中DataType的类型别名 (只针对Scala)</h3>
+
+<p>Spark 1.3 版本删除了基础 sql 包中 DataType 的类型别名。开发人员应该引入 org.apache.spark.sql.types 中的类。</p>
+
+
+
+<h3 id="udf注册迁移到sqlcontextudf中-针对java和scala">UDF注册迁移到sqlContext.udf中 (针对Java和Scala)</h3>
+
+<p>用于注册 UDF 的函数，不管是 DataFrame DSL 还是 SQL 中用到的，都被迁移到 SQLContext中的 udf 对象中。</p>
+
+
+
+<h5 id="scala-16">Scala</h5>
+
+<p>sqlContext.udf.register(“strLen”, (s: String) =&gt; s.length())</p>
+
+
+
+<h5 id="java-17">Java</h5>
+
+<p>sqlContext.udf().register(“strLen”, (String s) -&gt; s.length(), DataTypes.IntegerType); <br>
+Python UDF注册保持不变。</p>
+
+
+
+<h3 id="python的datatype不再是单例的">Python的DataType不再是单例的</h3>
+
+<p>在 Python 中使用 DataTypes 时，你需要先构造它们（如：StringType()），而不是引用一个单例对象。</p>
+
+
+
+<h2 id="兼容apache-hive">兼容Apache Hive</h2>
+
+<p>Spark SQL 在设计时就考虑到了和 Hive metastore，SerDes 以及 UDF 之间的兼容性。目前 Hive SerDes 和 UDF 都是基于 Hive 1.2.1 版本，并且 Spark SQL 可以连接到不同版本的 Hive metastore（从0.12.0到1.2.1，可以参考[与不同版本的Hive Metastore交互]）</p>
+
+
+
+<h3 id="在现有的hive仓库中部署">在现有的Hive仓库中部署</h3>
+
+<p>Spark SQL Thrift JDBC server 采用了开箱即用的设计以兼容已有的 Hive 安装版本。你不需要修改现有的 Hive Metastore , 或者改变数据的位置和表的分区。</p>
+
+
+
+<h3 id="支持的hive特性">支持的Hive特性</h3>
+
+<p>Spark SQL 支持绝大部分的 Hive 功能，如：</p>
+
+<p>Hive 查询语句, 包括： <br>
+SELECT <br>
+GROUP BY <br>
+ORDER BY <br>
+CLUSTER BY <br>
+SORT BY <br>
+所有的 Hive 运算符， 包括： <br>
+关系运算符 (=, ⇔, ==, &lt;&gt;, &lt;, &gt;, &gt;=, &lt;=, etc) <br>
+算术运算符 (+, -, *, /, %, etc) <br>
+逻辑运算符 (AND, &amp;&amp;, OR, ||, etc) <br>
+复杂类型构造器 <br>
+数学函数 (sign, ln, cos等) <br>
+String 函数 (instr, length, printf等) <br>
+用户自定义函数（UDF） <br>
+用户自定义聚合函数（UDAF） <br>
+用户自定义序列化格式（SerDes） <br>
+窗口函数 <br>
+Joins <br>
+JOIN <br>
+{LEFT|RIGHT|FULL} OUTER JOIN <br>
+LEFT SEMI JOIN <br>
+CROSS JOIN <br>
+Unions <br>
+子查询 <br>
+SELECT col FROM ( SELECT a + b AS col from t1) t2 <br>
+采样 <br>
+Explain <br>
+分区表，包括动态分区插入 <br>
+视图 <br>
+所有Hive DDL功能, 包括： <br>
+CREATE TABLE <br>
+CREATE TABLE AS SELECT <br>
+ALTER TABLE <br>
+绝大多数 Hive 数据类型，包括： <br>
+TINYINT <br>
+SMALLINT <br>
+INT <br>
+BIGINT <br>
+BOOLEAN <br>
+FLOAT <br>
+DOUBLE <br>
+STRING <br>
+BINARY <br>
+TIMESTAMP <br>
+DATE <br>
+ARRAY&lt;&gt; <br>
+MAP&lt;&gt; <br>
+STRUCT&lt;&gt;</p>
+
+
+
+<h3 id="不支持的hive功能">不支持的Hive功能</h3>
+
+<p>以下是目前还不支持的 Hive 功能列表。在Hive部署中这些功能大部分都用不到。</p>
+
+
+
+<h4 id="hive核心功能">Hive核心功能</h4>
+
+<p>bucket：bucket 是 Hive表分区内的一个哈希分区，Spark SQL 目前还不支持 bucket。</p>
+
+
+
+<h4 id="hive高级功能">Hive高级功能</h4>
+
+<p>UNION 类型 <br>
+Unique join <br>
+列统计数据收集：Spark SQL 目前不依赖扫描来收集列统计数据并且仅支持填充 Hive metastore 的 sizeInBytes 字段。</p>
+
+
+
+<h4 id="hive输入输出格式">Hive输入输出格式</h4>
+
+<p>CLI文件格式：对于回显到CLI中的结果，Spark SQL 仅支持 TextOutputFormat。 <br>
+Hadoop archive</p>
+
+
+
+<h4 id="hive优化">Hive优化</h4>
+
+<p>有少数Hive优化还没有包含在 Spark 中。其中一些（比如索引）由于 Spark SQL 的这种内存计算模型而显得不那么重要。另外一些在 Spark SQL 未来的版本中会持续跟踪。</p>
+
+<p>块级别位图索引和虚拟列（用来建索引） <br>
+自动为 join 和 groupBy 计算 reducer 个数：目前在 Spark SQL 中，你需要使用 “SET spark.sql.shuffle.partitions=[num_tasks];” 来控制后置混洗的并行程度。 <br>
+仅查询元数据：对于只需要使用元数据的查询请求，Spark SQL 仍需要启动任务来计算结果 <br>
+数据倾斜标志：Spark SQL 不遵循 Hive 中的数据倾斜标志 <br>
+STREAMTABLE join 操作提示：Spark SQL不遵循 STREAMTABLE 提示。 <br>
+对于查询结果合并多个小文件：如果返回的结果有很多小文件，Hive 有个选项设置，来合并小文件，以避免超过 HDFS 的文件数额度限制。Spark SQL 不支持这个。</p>
+
+
+
+<h1 id="参考">参考</h1>
+
+
+
+<h2 id="数据类型">数据类型</h2>
+
+<p>Spark SQL和 DataFrames 支持下面的数据类型：</p>
+
+<p>数值类型</p>
+
+<p>ByteType: 表示1字节长的有符号整型，数值范围：-128 到 127. <br>
+ShortType: 表示2字节长的有符号整型，数值范围：-32768 到 32767. <br>
+IntegerType: 表示4字节长的有符号整型，数值范围：-2147483648 到 2147483647. <br>
+LongType: 表示8字节长的有符号整型，数值范围： -9223372036854775808 to 9223372036854775807. <br>
+FloatType: 表示4字节长的单精度浮点数。 <br>
+DoubleType: 表示8字节长的双精度浮点数 <br>
+DecimalType: 表示任意精度有符号带小数的数值。内部使用java.math.BigDecimal, 一个BigDecimal 由一个任意精度的整数非标度值和一个32位的整数标度 (scale) 组成。 <br>
+字符串类型</p>
+
+<p>StringType: 表示字符串值 <br>
+二进制类型</p>
+
+<p>BinaryType: 表示字节序列值 <br>
+布尔类型</p>
+
+<p>BooleanType: 表示布尔值 <br>
+日期类型</p>
+
+<p>TimestampType: 表示包含年月日、时分秒等字段的日期值 <br>
+DateType: 表示包含年月日字段的日期值 <br>
+Complex types（复杂类型）</p>
+
+<p>ArrayType(elementType, containsNull)：数组类型，表示一个由类型为elementType的元素组成的序列，containsNull用来表示ArrayType中的元素是否能为null值。 <br>
+MapType(keyType, valueType, valueContainsNull)：映射类型，表示一个键值对的集合。键的类型由keyType表示，值的类型则由valueType表示。对于一个MapType值，键是不允许为null值。valueContainsNull用来表示一个MapType的值是否能为null值。 <br>
+StructType(fields)：表示由StructField序列描述的结构。</p>
+
+<p>StructField(name, datatype, nullable): 表示StructType中的一个字段，name表示字段名，datatype是字段的数据类型，nullable用来表示该字段是否可以为空值。</p>
+
+
+
+<h5 id="scala-17">Scala</h5>
+
+<p>Spark SQL 所有的数据类型都放在 org.apache.spark.sql.types 这个包下。你可以这样获取它们：</p>
+
+<p>import org.apache.spark.sql.types._ <br>
+完整示例代码参见 Spark 仓库中的 “examples/src/main/scala/org/apache/spark/examples/sql/SparkSQLExample.scala” 文件。</p>
+
+<p>| 数据类型 | Scala中值类型 | 用于获取或创建一个数据类型的API | | :——– | :——–| :———–| | ByteType | Byte | ByteType | | ShortType | Short | ShortType | | IntegerType | Int | IntegerType | | LongType |Long | LongType | | FloatType | Float | FloatType | | DoubleType | Double | DoubleType | | DecimalType | java.math.BigDecimal | DecimalType | | StringType | String | StringType | | BinaryType | Array[Byte] | BinaryType | | BooleanType | Boolean | BooleanType | | TimestampType | java.sql.Timestamp | TimestampType | | DateType | java.sql.Date | DateType | | ArrayType | scala.collection.Seq | ArrayType(elementType, [containsNull])注意：containsNull 的默认值是true | | MapType | scala.collection.Map | MapType(keyType, valueType, [valueContainsNull])注意：valueContainsNull 的默认值是true | | StructType |org.apache.spark.sql.Row | StructType(fields)注意：fields是一个StructField序列，另外不允许出现名称重复的字段。 | | StructField | Scala中该字段的数据类型对应的值类型（例如，如果StructField的数据类型为IntegerType，则Scala中其值类型为Int） | StructField(name, dataType, nullable) |</p>
+
+
+
+<h5 id="java-18">Java</h5>
+
+<p>Spark SQL所有的数据类型都放在 org.apache.spark.sql.types 这个包下。为了获取或创建一个数据类型, 请使用 org.apache.spark.sql.types.DataTypes 中提供的工厂方法。</p>
+
+<p>| 数据类型 | Java中值类型 | 用于获取或创建一个数据类型的API | | :——– | :——–| :———| | ByteType | byte 或 Byte | DataTypes.ByteType | | ShortType | short 或 Short | DataTypes.ShortType | | IntegerType | int 或 Integer | DataTypes.IntegerType | | LongType |long 或 Long | DataTypes.LongType | | FloatType | float 或 Float | DataTypes.FloatType | | DoubleType | double 或 Double | DataTypes.DoubleType | | DecimalType | java.math.BigDecimal | DataTypes.createDecimalType(),DataTypes.createDecimalType(precision, scale). | | StringType | String | DataTypes.StringType | | BinaryType | byte[] | DataTypes.BinaryType | | BooleanType | boolean 或 Boolean | DataTypes.BooleanType | | TimestampType | java.sql.Timestamp | DataTypes.TimestampType | | DateType | java.sql.Date | DataTypes.DateType | | ArrayType | java.util.List | DataTypes.createArrayType(elementType) 注意：containsNull 的默认值是true, DataTypes.createArrayType(elementType, containsNull) | | MapType | java.util.Map | DataTypes.createMapType(keyType, valueType) 注意：valueContainsNull 的默认值是true, DataTypes.createMapType(keyType, valueType,valueContainsNull) | | StructType |org.apache.spark.sql.Row | DataTypes.createStructType(fields) 注意：fields 是一个StructField 列表或数组，另外不允许出现名称重复的字段。 | | StructField | Java中该字段的数据类型对应的值类型 (例如，如果StructField的数据类型为IntegerType，则Java中其值类型为 int) | DataTypes.createStructField(name, dataType, nullable) |</p>
+
+
+
+<h5 id="python-16">Python</h5>
+
+<p>Spark SQL所有的数据类型都放在 pyspark.sql.types 这个包下. 你可以这样获取它们：</p>
+
+<p>from pyspark.sql.types import * <br>
+| 数据类型 | Python中值类型 | 用于获取或创建一个数据类型的API | | :——– | :——–| :——–| | ByteType | int 或 long，注意: 数字在运行时会被转化成1字节的有符号整数。请确保数字是在 -128 到 127这个范围内 | ByteType() | | ShortType | int 或 long，注意: 数字在运行时会被转化成2字节的有符号整数。请确保数字是在 -32768 到 32767这个范围内。 | ShortType() | | IntegerType | int 或 long | IntegerType() | | LongType |long，注意: 数字在运行时会被转化成8字节的有符号整数。请确保数字是在 -9223372036854775808 到 9223372036854775807这个范围内.否则, 请将数据转化成 decimal.Decimal 并使用 DecimalType | LongType() | | FloatType | float，注意: 数字在运行时会被转化成4字节的单精度浮点数。 | FloatType() | | DoubleType | float | DoubleType() | | DecimalType | decimal.Decimal | DecimalType()| | StringType | string | StringType() | | BinaryType | bytearray | BinaryType() | | BooleanType | bool | BooleanType() | | TimestampType | datetime.datetime | TimestampType() | | DateType | datetime.date | DateType() | | ArrayType |list, tuple 或 array | ArrayType(elementType, [containsNull]) 注意：containsNull 的默认值是true | | MapType | dict | MapType(keyType, valueType, [valueContainsNull]) 注意：valueContainsNull 的默认值是True | | StructType |list 或 tuple| StructType(fields) 注意：fields 是一个StructFields序列，另外不允许出现名称重复的字段。 | | StructField | Python中该字段的数据类型对应的值类型 (例如，如果StructField的数据类型为IntegerType，则Python中其值类型为 Int)| StructField(name, dataType, nullable) |</p>
+
+
+
+<h2 id="nan语义">NaN语义</h2>
+
+<p>当处理一些不符合标准浮点数语义的 float 或 double 类型时，对于 Not-a-Number(NaN) 需要做一些特殊处理。具体如下：</p>
+
+<p>NaN = NaN 返回 true。 <br>
+在聚合操作中，所有 NaN 值都被分到同一组。 <br>
+在join key中NaN可以当做一个普通的值。 <br>
+NaN值在升序排序中排到最后，比任何其他数值都大。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

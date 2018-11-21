@@ -1,0 +1,178 @@
+---
+layout:     post
+title:      hive安装过程全程解析、hive常规操作、说明
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/weixin_32265569/article/details/73921504				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1><span style="font-family:'Microsoft YaHei';color:#6666cc;">hive安装过程全程解析、hive常规操作、说明</span></h1>
+<h2><span style="font-size:14px;"><strong>hive相关说明：</strong></span></h2>
+<blockquote style="border:none;">
+<p><span style="font-size:12px;">1.创建表的操作（create talbe）包含两个步骤：表创建过程和数据加载步骤（这两个过程可以在同一语句中完成）</span></p>
+<p><span style="font-size:12px;">在数据加载过程中，实际数据会移动到数据仓库目录中。之后的数据访问将会直接在数据仓库目录中完成。删除</span></p>
+<p><span style="font-size:12px;">表时，表中的数据和元数据将会被同时删除。</span></p>
+<p><span style="font-size:12px;">2.外部表的创建只有一个步骤，加载数据和创建表同时完成，实际数据存储在创建语句LOCATION指定的HDFS路径中，并</span></p>
+<p><span style="font-size:12px;">不会移动到数据仓库目录中。如果删除一个外部表，仅会删除元数据，表中的数据不会被删除。</span></p>
+<p><span style="font-size:12px;">3.Hive的元数据存储</span></p>
+<p><span style="font-size:12px;">目前，hive将元数据存储在RDBMS中，比如MySQL、Derby中。为了支持多链接，我们使用MySQL存储元数据</span></p>
+</blockquote>
+<span style="font-size:14px;"><strong>使用场景:</strong></span>
+<blockquote style="border:none;">
+<p><span style="font-size:14px;">1.电影评分</span></p>
+<p><span style="font-size:14px;">2.网络日志数据(Weblog)</span></p>
+</blockquote>
+<p><span style="font-size:14px;"><strong>首先下载hive，我个人使用是的apache-hive-0.13.0-bin.tar.gz</strong></span></p>
+<h2><strong>一、hive安装步骤</strong></h2>
+<pre><code class="language-plain">1.上传hive到linux机器itcast03上
+2.解压到/itcast/目录下
+ tar -zxvf apache-hive-0.13.0-bin.tar.gz -C /itcast/
+3.执行hive
+ ./hive // 进入
+ show tables; // 显示表
+ show databases; // 显示数据库
+ create table student (id int,name string); // 创建student表
+ show create table student; // 显示创建student表信息
+ load data local inpath '/root/student.txt' into table student; // 从本地加载数据
+ select count(*) from student; // 查询记录数（此过程，hive将查询过程转化为map、reducer）
+	使用浏览器进行查看http://192.168.8.201:50070/dfshealth.jsp ---&gt;  user/hive/warehouse/student.txt</code></pre>
+<h2>二、hive工作原理</h2>
+<div><pre><code class="language-plain">hive工作原理，是将元数据信息存储在数据库中（metastore_db），hive元数据信息包括表的名字、表的列、分区及其
+属性，表的属性（是否为外部表等），表的数据所在目录等。真实数据存储在hdfs上。
+metastore_db默认使用内嵌的Derby数据库作为存储引擎，Derby引擎的缺点：
+一次只能打开一个会话。也就是说，如果你在另外一个目录打开hive，会产生新的metastore_db，并且两个metastore_db
+所存储的元数据信息不同，这就造成数据的不同，即只支持单链接</code></pre></div>
+<span></span>
+<h2>三、使用MySQL存储hive元数据信息</h2>
+<div><pre><code class="language-plain">解决方法：
+我们采用MySQL作为外置存储引擎,以支持多链接访问!!!
+解决步骤:
+1.查询以前安装mysql相关包(itcast05机器上进行)
+rpm -qa | grep mysql
+2.暴力删除这个包
+rpm -e mysql-libs-5.1.66-2.el6_3.i686 --nodeps
+3.重新安装MySQL 
+rpm -ivh MySQL-server-5.1.73-1.glibc23.i386.rpm
+rpm -ivh MySQL-client-5.1.73-1.glibc23.i386.rpm
+修改mysql的密码（这里设置为123）
+/usr/bin/mysql_secure_installation
+（注意：删除匿名用户，允许用户远程连接）
+登陆mysql
+mysql -uroot -p123</code></pre></div>
+<h2>四、hive分布式配置</h2>
+<div><pre><code class="language-plain">cp hive-default.xml.template hive-site.xml
+修改hive-site.xml（删除所有内容，只留一个&lt;property&gt;&lt;/property&gt;）
+添加如下内容：
+&lt;property&gt;
+ &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt;
+ &lt;value&gt;jdbc:mysql://itcast05:3306/hive?createDatabaseIfNotExist=true&lt;/value&gt;
+ &lt;description&gt;JDBC connect string for a JDBC metastore&lt;/description&gt;
+&lt;/property&gt;
+&lt;property&gt;
+ &lt;name&gt;javax.jdo.option.ConnectionDriverName&lt;/name&gt;
+ &lt;value&gt;com.mysql.jdbc.Driver&lt;/value&gt;
+ &lt;description&gt;Driver class name for a JDBC metastore&lt;/description&gt;
+&lt;/property&gt;
+&lt;property&gt;
+ &lt;name&gt;javax.jdo.option.ConnectionUserName&lt;/name&gt;
+ &lt;value&gt;root&lt;/value&gt;
+ &lt;description&gt;username to use against metastore database&lt;/description&gt;
+&lt;/property&gt;
+&lt;property&gt;
+ &lt;name&gt;javax.jdo.option.ConnectionPassword&lt;/name&gt;
+ &lt;value&gt;123&lt;/value&gt;
+ &lt;description&gt;password to use against metastore database&lt;/description&gt;
+&lt;/property&gt;
+5.安装hive和mysq完成后，将mysql的连接jar包拷贝到$HIVE_HOME/lib目录下
+cp mysql-connector-5.1.8.jar /itcast/apache-hive-0.13.0-bin/lib/
+如果出现没有权限的问题，在mysql授权(在安装mysql的机器上执行)
+mysql -uroot -p
+#(执行下面的语句 *.*:所有库下的所有表 %：任何IP地址或主机都可以连接)
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY '123' WITH GRANT OPTION;
+FLUSH PRIVILEGES;</code></pre> <strong><span style="font-size:14px;">测试hive分布式是否成功</span></strong></div>
+<div><pre><code class="language-plain"><span style="font-size:12px;">在A目录下，进入/hive先创建people表 create table people (id int, name string)
+在B目录下，进入/hive查看表信息，show tables; 如果可以看到people表，表明搭建成功！！！
+查看MySQL数据信息（ip:192.168.8.205， 用户名: root，密码: 123）:
+在windows下使用sqlyog工具，远程登录linux平台下的MySQL，并查看相关元数据信息。
+6.建表(默认是内部表)
+create table trade_detail(id bigint, account string, income double, expenses
+double, time string) row format delimited fields terminated by '\t';
+建分区表
+create table td_part(id bigint, account string, income double, expenses double,
+time string) partitioned by (logdate string) row format delimited fields terminated by
+'\t';
+建外部表
+create external table td_ext(id bigint, account string, income double, expenses
+double, time string) row format delimited fields terminated by '\t' location '/td_ext';
+7.创建分区表
+普通表和分区表区别：有大量数据增加的需要建分区表
+create table book (id bigint, name string) partitioned by (pubdate string) row
+format delimited fields terminated by '\t';
+分区表加载数据
+load data local inpath './book.txt' overwrite into table book partition
+(pubdate='2010-08-22');
+load data local inpath '/root/data.am' into table beauty partition (nation="USA");
+select nation, avg(size) from beauties group by nation order by avg(size);</span></code></pre></div>
+<h2>五、hive实操<span> </span></h2>
+<div><span></span><pre><code class="language-plain">1.创建一个hdfs目录
+hadoop fs -mkdir /data
+2.在linux本地创建student.txt文件，并添加如下内容
+101     xiaoming
+102     wangwu
+103     zhangli
+104     xiaodong
+3.向目录中传送数据
+hadoop fs -put student.txt /data/a.txt
+hadoop fs -put student.txt /data/b.txt
+4.创建一张外部表，指向data目录
+外部表：外部表是指向已经在HDFS中存在的数据，也可以创建分区。
+create external table ext_student (id int,name string) row format delimited fields terminated by '\t' location '/data';
+5.查询数据
+select * from ext_student;
+结果如下：
+101     xiaoming
+102     wangwu
+103     zhangli
+104     xiaodong
+101     xiaoming
+102     wangwu
+103     zhangli
+104     xiaodong
+101     xiaoming
+102     wangwu
+103     zhangli
+104     xiaodong
+6.在外部使用hadoop放入数据
+hadoop fs -put pep.avi /data 
+再执行查询，则会将数据查询到（不管是内部表，还是外部表）</code></pre></div>
+<span></span>
+<p>    <strong><span style="font-size:14px;">场景：数据量很大的情况下，使用分区表<br></span></strong></p>
+<p></p>
+<pre><code class="language-plain"><span style="font-size:12px;">1.创建一个外部分区表，存储美女信息
+create external table beauties (id bigint,name string,size double) partitioned by (nation string) row format delimited fields terminated by '\t' location '/beauty';
+2.从本地加载数据
+linux下创建文件/root/b.c，添加内容如下
+1       cls     30
+2       jingtian        45
+3       bingbing        50
+然后将数据加载到hive中
+load data local inpath '/root/b.c' into table beauties partition (nation='China');
+3.查询数据
+select * from beauties where nation ='China';
+4.创建一个分区
+alter table beauties add partition(nation='Japan') location "/beauty/natio location "/beauty/nation=Japan";
+5.查询刚刚创建的分区信息，查询无结果
+select * from beauties where nation="Japan";
+6.从linux上传一个数据到/beauty/nation=Japan/目录下
+hadoop fs -put b.c /beauty/nation=Japan/
+再次查询，有新结果。也就是说只要目录下有数据即可
+7.执行复杂一点的查询，如下：
+select * from beauties where size&gt;40;
+我们会看到此过程hive会将sql查询转化为mapreduce，所以特别适合大数据量的查询计算，其结查如下：
+2       jingtian        45.0    China
+3       bingbing        50.0    China
+2       jingtian        45.0    Japan
+3       bingbing        50.0    Japan</span></code></pre><br>            </div>
+                </div>

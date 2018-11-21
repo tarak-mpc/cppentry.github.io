@@ -1,0 +1,142 @@
+---
+layout:     post
+title:      spark 的HA模式
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hadoopsparkkafka交流群459898801">hadoop,spark,kafka交流群：459898801</h1>
+
+
+
+<h2 id="1ssh无密钥登录">1，ssh无密钥登录</h2>
+
+
+
+<h3 id="1生产一对公钥和密钥">1，生产一对公钥和密钥</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">$ ssh<span class="hljs-attribute">-keygen</span> <span class="hljs-attribute">-t</span> rsa</code></pre>
+
+
+
+<h3 id="2拷贝公钥到各个机器上">2，拷贝公钥到各个机器上</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">$ ssh-copy-id hadoop<span class="hljs-preprocessor">.learn</span><span class="hljs-preprocessor">.com</span></code></pre>
+
+
+
+<h3 id="3ssh连接">3，ssh连接</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">$ ssh spark<span class="hljs-preprocessor">.learn</span><span class="hljs-preprocessor">.com</span>
+$ ssh hadoop<span class="hljs-preprocessor">.learn</span><span class="hljs-preprocessor">.com</span>
+$ ssh tachyon<span class="hljs-preprocessor">.learn</span><span class="hljs-preprocessor">.com</span></code></pre>
+
+
+
+<h2 id="2配置zookeeper">2，配置zookeeper</h2>
+
+
+
+<h3 id="1在spark-envsh中添加如下配置">1，在spark-env.sh中添加如下配置</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-keyword">export</span> SPARK_DAEMON_JAVA_OPTS=<span class="hljs-string">"-Dspark.deploy.recoveryMode=ZOOKEEPER "</span>  
+<span class="hljs-keyword">export</span> SPARK_DAEMON_JAVA_OPTS=<span class="hljs-string">"<span class="hljs-variable">${SPARK_DAEMON_JAVA_OPTS}</span> -Dspark.deploy.zookeeper.url=spark.learn.com:2181,hadoop.learn.com:2181,tachyon.learn.com:2181"</span>  </code></pre>
+
+
+
+<h3 id="2各个参数的意义">2，各个参数的意义</h3>
+
+<table>
+<thead>
+<tr>
+  <th>参数</th>
+  <th>默认值</th>
+  <th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>spark.deploy.recoveryMode</td>
+  <td>NONE</td>
+  <td>恢复模式（Master重新启动的模式），有三种：1, ZooKeeper, 2， FileSystem, 3 NONE</td>
+</tr>
+<tr>
+  <td>spark.deploy.zookeeper.url</td>
+  <td></td>
+  <td>ZooKeeper的Server地址</td>
+</tr>
+<tr>
+  <td>spark.deploy.zookeeper.dir</td>
+  <td>/spark</td>
+  <td>ZooKeeper 保存集群元数据信息的文件目录，包括Worker，Driver和Application。</td>
+</tr>
+</tbody></table>
+
+
+<p>Master可以在任何时候添加或移除。如果发生故障切换，新的Master将联系所有以前注册的Application和Worker告知Master的改变。 <br>
+注意：不能将Master定义在conf/spark-env.sh里了，而是直接在Application中定义。涉及的参数是 export SPARK_MASTER_IP，这项不配置或者为空。否则，无法启动多个master。</p>
+
+
+
+<h2 id="1启动spark的ha">1，启动spark的HA</h2>
+
+
+
+<h3 id="1zookeeper集群已经启动">1.zookeeper集群已经启动。</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">bin/zkServer<span class="hljs-preprocessor">.sh</span> start
+bin/zkServer<span class="hljs-preprocessor">.sh</span> status</code></pre>
+
+
+
+<h3 id="2关闭集群后重新启动spark集群">2.关闭集群后，重新启动spark集群：</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs glsl">sbin/stop-<span class="hljs-built_in">all</span>.sh 
+sbin/start-<span class="hljs-built_in">all</span>.sh </code></pre>
+
+
+
+<h3 id="3在另一个节点上启动新的master">3.在另一个节点上，启动新的master：</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql">sbin/<span class="hljs-operator"><span class="hljs-keyword">start</span>-master.sh </span></code></pre>
+
+
+
+<h3 id="4运行applition">4.运行applition</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">MASTER=spark://spark<span class="hljs-preprocessor">.learn</span><span class="hljs-preprocessor">.com</span>:<span class="hljs-number">7077</span>,tachyon<span class="hljs-preprocessor">.learn</span><span class="hljs-preprocessor">.com</span>:<span class="hljs-number">7077</span> bin/spark-shell</code></pre>
+
+<p><img src="http://static.zybuluo.com/hadoopMan/jo773b6bd9md0ya0vyozvdz8/%E5%90%AF%E5%8A%A8%E6%88%90%E5%8A%9F%E4%B8%80.png" alt="启动成功一.png-61.6kB" title=""> <br>
+<img src="http://static.zybuluo.com/hadoopMan/o45s9o1vzuoeoz7uw2tlmfvj/%E5%90%AF%E5%8A%A8%E6%88%90%E5%8A%9F%E4%BA%8C.png" alt="启动成功二.png-66.6kB" title=""> <br>
+<img src="http://static.zybuluo.com/hadoopMan/dtoyk1o8ob3vihxcqnp87iz1/webapp2.png" alt="webapp2.png-62.7kB" title=""> <br>
+<img src="http://static.zybuluo.com/hadoopMan/fxlbh79jar9siejeoifdrm3u/webapp3.png" alt="webapp3.png-86.1kB" title=""></p>
+
+
+
+<h3 id="5kill-掉一个master">5,kill 掉一个master</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver"><span class="hljs-built_in">kill</span> -<span class="hljs-number">9</span> masterID</code></pre>
+
+<p><img src="http://static.zybuluo.com/hadoopMan/2z1rhk4d7ylcezxkfdmhm5nq/changeMaster.png" alt="changeMaster.png-87.5kB" title=""> <br>
+<img src="http://static.zybuluo.com/hadoopMan/ey46m26tg8f9ml1sqiwhjtru/kill%E5%90%8Ewebapp.png" alt="kill后webapp.png-91.6kB" title=""> <br>
+<img src="http://static.zybuluo.com/hadoopMan/j9ieakejhg9889j9xl7cggsp/%E9%87%8D%E5%90%AF%E5%90%8E.png" alt="重启后.png-61.3kB" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

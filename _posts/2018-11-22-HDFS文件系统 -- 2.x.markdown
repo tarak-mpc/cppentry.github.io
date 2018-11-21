@@ -1,0 +1,58 @@
+---
+layout:     post
+title:      HDFS文件系统 -- 2.x
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+一. HDFS理念 <br>
+hdfs把数据分布在多台机器中存储, 这些机器有namenode负责调度, 属于主从模式<br>
+namenode的本地磁盘上, 拥有整个hdfs的元数据(文件映射,  文件系统的属性), 这些元数据会完全被加载到内存<br>
+hdfs对流式读取做了性能优化, 使得其适合顺序读, 而不适合随机查找<br><br><br>
+二. hdfs启动流程及各大组件<br>
+(1)namenode : <br>
+      namenode启动后, 把本地的fsimage镜像文件按照editlog日志中记录的步骤执行一遍, 使得内存中的映射为最新映射. 更新fsimage文件为最新镜像, 并建立一个空的edit文件       记录基于该镜像的操作内容. hdfs进入安全模式(只读不写), 等待所有datanode汇报块信息以后, 退出安全模式, hdfs开启<br>
+      [注] : 影响edit文件大小的因素有2个 : 集群操作的频繁程度, 下次重启的时间间隔<br><br><br>
+(2) secondary namenode: <br>
+    a. 该节点会定期合并fsimage和editlog, 来确保editlog的大小控制在设置范围内. 该节开启checkpoint 进程下载namenode的 镜像和操作日志, 在本地合并为新的镜像然后等待          namenode来获取最新的fsimage镜像文件<br>
+    b. 控制checkpoint进程的两个参数<br>
+        dfs.namenode.checkpoint.period : 默认1小时的检查间隔<br>
+        dfs.namenode.checkpoint.txns : 默认100万, 当进行了100万条操作后, 及时editlog未超贵哦设置大小. secondary namenode也会发起一次合并<br>
+        datanode启动后, 会扫描本地磁盘, 吧磁盘信息发送给namenode, 使namenode在内存中拥有hdfs的映射<br><br><br>
+(3) 备用节点<br>
+    a. backup节点是namenode的备用节点, hdfs中只允许有1个backup节点. 备份节点和namenode同事接收editlogs文件, 自动在本地形成镜像文件, 而不用向                                         secondarynamenode一样需要下载镜像和操作日志<br>
+    b. 集群中如果有backup节点, secondarynamenode节点就没用<br>
+    c. 开启backup节点后, 可以设置namenode不去磁盘存储fsimage和editlog. 使持久化日志和镜像的任务交给backup节点<br>
+      (I) 设置dfs.namenode.name.dir为空<br>
+     (II) 设置dfs.namenode.checkpoint.dir的目录位置<br>
+    (III) hdfs namenode -importCheckpoint 开启节点<br><br><br>
+(4) balancer平衡器   (具体见HADOOP-1652)<br>
+    namenode在选择数据块发往哪个datanode时, 会议于以下几点 : <br>
+    a. 在同一个几点上 , 应该保存有一个数据块的副本<br>
+    b. 这些数据块的副本应该发往不同的机架. 及时有一个机架全体损坏, 也不会丢失数据<br>
+    c. 在datanode所处机架的其他节点, 应该接受一个数据块副本, 使得跨机架的网络io降低<br><br><br>
+(5) 机架感知 <br>
+   a. 用过脚本产生rackid, 用net.topology.script.file.name设置脚本位置<br>
+   b. 默认下, 所有机器同属一个机架<br><br><br>
+三. hdfs的高可用(QJM方式)<br>
+  (1) 硬件配置 : 2 个namenode , 3 个以上奇数个JournalNode(记录fsimage的更新日志), 不需要secondarynamenode<br>
+  (2) 配置 : <br>
+    dfs.nameservices :２个namenode组成的HA<br>
+    dfs.ha.namenodes.[nameservice ID] : 标识集群中的2个namenode的namenodeID<br>
+    dfs.namenode.rpc-address.[nameservice ID].[name node ID] : 配置每个namenode的rpc端口<br>
+    dfs.namenode.http-address.[nameservice ID].[name node ID] : 每个namenode的http访问端口<br>
+    dfs.namenode.shared.edits.dir = qjournal://node1.example.com:8485;node2.example.com:8485;node3.example.com:8485/mycluster <br>
+    配置JournalNodes 存储元数据的路径, 用于active namenode发送元数据, stand by获取元数据<br>
+   dfs.client.failover.proxy.provider.[nameservice ID] : 配置java类, 用来判断nemanode集群中哪一个是活跃的,哪一个是stand by<br>
+  (3) 自动发failover(增加zookeeper集群和zkfc进程)<br>
+    ZooKeeperFailController是zookeeper的客户端, 用来监控本地机器namenode的状态,每个namenode都有一个zkfc进程<br>
+   zkfc的职责 : <br>
+   1. Health monitoring : <br>
+       zkfc会每隔一段时间ping本地的namenode, 本地namenode及时返回当前状态, 如果Namenode失效，或者unhealthy，或者无响应，那么ZKFS将会标记其为“unhealthy”<br>
+   2. Zookeeper session manangement : <br>
+       当本地Nanenode运行良好时，ZKFC将会持有一个zookeeper session，如果本地Namenode为Active，它同时也持有一个“排他锁”(znode)；这个lock在zookeeper中                  为“ephemeral” znode(临时节点)，如果session过期，那么次lock所对应的znode也将被删除。<br>
+   3. Zookeeper-based election：<br>
+       如果本地Namenode运行良好，并且ZKFS没有发现其他的的Namenode持有lock(比如Active失效后，释放了lock)，它将尝试获取锁，如果获取成功，即“赢得了选举”，那         么此后将会把本地Namenode标记为Active，然后触发Failover：首先，调用fencing method，然后提升本地Namenode 为Active。<span></span>
+            </div>
+                </div>

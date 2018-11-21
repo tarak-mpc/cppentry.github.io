@@ -1,0 +1,483 @@
+---
+layout:     post
+title:      简明 HBase 入门教程（开篇）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>转载自： <a href="http://www.thebigdata.cn/HBase/35831.html" rel="nofollow">http://www.thebigdata.cn/HBase/35831.html</a></p>
+
+<p>一些常见的HBase新手问题</p>
+
+<ol><li>
+	<p>什么样的数据适合用HBase来存储？</p>
+	</li>
+	<li>
+	<p>既然HBase也是一个数据库，能否用它将现有系统中昂贵的Oracle替换掉？</p>
+	</li>
+	<li>
+	<p>存放于HBase中的数据记录，为何不直接存放于HDFS之上？</p>
+	</li>
+	<li>
+	<p>能否直接使用HBase来存储文件数据？</p>
+	</li>
+	<li>
+	<p>Region(HBase中的数据分片)迁移后，数据是否也会被迁移？</p>
+	</li>
+	<li>
+	<p>为何基于Spark/Hive分析HBase数据时性能较差？</p>
+	</li>
+</ol><p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983136.jpg" width="609"></p>
+
+<p>开篇</p>
+
+<p>用惯了Oracle/MySQL的同学们，心目中的 <strong>数据表</strong> ，应该是长成这样的：</p>
+
+<p><img alt="大数据" class="has" src="http://www.thebigdata.cn/upload/2018-03/1803221459831315.png" width="609"></p>
+
+<p>这种表结构规整，每一行都有固定的列构成，因此，非常适合结构化数据的存储。但在NoSQL领域，数据表的模样却往往换成了另外一种"画风"：</p>
+
+<p><img alt="大数据" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983133.png" width="609"></p>
+
+<p>行由看似"杂乱无章"的列组成，行与行之间也无须遵循一致的定义，而这种定义恰好符合半结构化数据或非结构化数据的特点。本文所要讲述的HBase，就属于该派系的一个典型代表。这些"杂乱无章"的列所构成的多行数据，被称之为一个" <strong>稀疏矩阵</strong> "，而上图中的每一个"黑块块"，在HBase中称之为一个KeyValue。</p>
+
+<p>Apache HBase官方给出了这样的定义：</p>
+
+<p>Apache HBase™ is the <a href="http://www.thebigdata.cn/Hadoop/10722.html" rel="nofollow">hadoop</a> database, a <strong>distributed</strong> , <strong>scalable</strong> , <strong>big data store</strong> .</p>
+
+<p>即：Apache HBase是基于Hadoop构建的一个 <strong>分布式</strong> 的、 <strong>可伸缩</strong> 的 <strong>海量数据存储系统</strong> 。</p>
+
+<p>HBase常被用来存放一些 <strong>海量的</strong> (通常在TB级别以上) <strong>结构比较简单</strong> 的数据，如历史订单记录，日志数据，监控Metris数据等等，HBase提供了 <strong>简单的基于Key值的快速查询能力</strong> 。</p>
+
+<p>HBase在国内市场已经取得了非常广泛的应用，在搜索引擎中，也可以看出来，HBase在国内呈现出了逐年上升的势态：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/1803221459831311.jpg" width="609"></p>
+
+<p>从Apache HBase所关联的github项目的commits统计信息来看，也可以看出来该项目非常活跃：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/1803221459831312.png" width="609"></p>
+
+<p>( <strong>需要说明的一点</strong> ：HBase中的每一次commit，都已经过社区Commiter成员严格的Review，在commit之前，一个Patch可能已经被修改了几十个版本)</p>
+
+<p>令人欣喜的是，国内的开发者也积极参与到了HBase社区贡献中，而且被社区接纳了 <strong>多名PMC以及Committer成员</strong> 。</p>
+
+<p>本文将以 <strong>一条数据在HBase中的“旅程”</strong> 为线索，介绍HBase的核心概念与流程，几乎每一部分都可以展开成一篇独立的长文，但本文旨在让读者能够快速的了解HBase的架构轮廓，所以很多特性/流程被被一言带过，但这些特性在社区中往往经历了漫长的开发过程。至于讲什么以及讲到什么程度，本文都做了艰难的取舍，在讲解的过程中，将会穿插解答本文开始所提出的针对初学者的一些常见问题。</p>
+
+<p>本文适用于HBase新手，而对于具备一定经验的HBase开发人员，相信本文也可以提供一些有价值的参考。本文内容基于HBase 2.0 beta 2版本，对比于1.0甚至是更早期的版本，2.0出现了大量变化，下面这些问题的答案将揭示部分关键的变化（新手可以直接跳过这些问题）：</p>
+
+<ol><li>
+	<p>HBase <strong>meta</strong> Region在哪里提供服务？</p>
+	</li>
+	<li>
+	<p>HBase是否可以保证 <strong>单行操作的原子性</strong> ？</p>
+	</li>
+	<li>
+	<p>Region中写WAL与写MemStore的顺序是怎样的？</p>
+	</li>
+	<li>
+	<p>你是否遇到过Region长时间处于 <strong>RIT</strong> 的状态？ 你认为旧版本中Assignment Manager的主要问题是什么？</p>
+	</li>
+	<li>
+	<p>在面对 <strong>Full GC</strong> 问题时，你尝试做过哪些优化？</p>
+	</li>
+	<li>
+	<p>你是否深究过HBase Compaction带来的“ <strong>写放大</strong> ”有多严重？</p>
+	</li>
+	<li>
+	<p>HBase的RPC框架存在什么问题？</p>
+	</li>
+	<li>
+	<p>导致 <strong>查询时延毛刺</strong> 的原因有哪些？</p>
+	</li>
+</ol><p>本系列文章的 <strong>整体行文思路</strong> 如下：</p>
+
+<ol><li>
+	<p>介绍HBase数据模型</p>
+	</li>
+	<li>
+	<p>基于数据模型介绍HBase的适用场景</p>
+	</li>
+	<li>
+	<p>快速介绍集群关键角色以及集群部署建议</p>
+	</li>
+	<li>
+	<p>示例数据介绍</p>
+	</li>
+	<li>
+	<p>写数据流程</p>
+	</li>
+	<li>
+	<p>读数据流程</p>
+	</li>
+	<li>
+	<p>数据更新</p>
+	</li>
+	<li>
+	<p>负载均衡机制</p>
+	</li>
+	<li>
+	<p>HBase如何存储小文件数据</p>
+	</li>
+</ol><p>这些内容将会被拆成几篇文章。至于集群服务故障的处理机制，集群工具，周边生态，性能调优以及最佳实践等进阶内容，暂不放在本系列文章范畴内。</p>
+
+<p>约定</p>
+
+<p>1. 本文范围内针对一些关键特性/流程，使用了加粗以及加下划线的方式做了强调，如" <strong>ProcedureV2 </strong>"。这些特性往往在本文中仅仅被粗浅提及，后续计划以独立的文章来介绍这些特性/流程。</p>
+
+<p>2. 术语缩写：对于一些进程/角色名称，在本文范围内可能通过缩写形式来表述：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983139.jpg" width="609"></p>
+
+<p>数据模型</p>
+
+<p><strong>RowKey</strong></p>
+
+<p>用来表示唯一一行记录的 <strong>主键</strong> ，HBase的数据是按照RowKey的 <strong>字典顺序</strong> 进行全局排序的，所有的查询都只能依赖于这一个排序维度。</p>
+
+<p>通过下面一个例子来说明一下" <strong>字典排序</strong> "的原理：</p>
+
+<p>RowKey列表{"abc", "a", "bdf", "cdf", "def"}按字典排序后的结果为{"a", "abc", "bdf", "cdf", "defg"}</p>
+
+<p>也就是说，当两个RowKey进行排序时，先对比两个RowKey的第一个字节，如果相同，则对比第二个字节，依次类推...如果在对比到第M个字节时，已经超出了其中一个RowKey的字节长度，那么，短的RowKey要被排在另外一个RowKey的前面。</p>
+
+<p><strong>稀疏矩阵</strong></p>
+
+<p>参考了Bigtable，HBase中一个表的数据是按照稀疏矩阵的方式组织的，"开篇"部分给出了一张关于HBase数据表的 <em>抽象图</em> ，我们再结合下表来加深大家关于"稀疏矩阵"的印象：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983135.jpg" width="609"></p>
+
+<p>看的出来： 每一行中，列的组成都是灵活的，行与行之间并不需要遵循相同的列定义 ， 也就是HBase数据表" <strong>schema-less</strong> "的特点。</p>
+
+<p><strong>Region</strong></p>
+
+<p>区别于Cassandra/DynamoDB的"Hash分区"设计，HBase中采用了"Range分区"，将Key的完整区间切割成一个个的"Key Range" ，每一个"Key Range"称之为一个Region。</p>
+
+<p>也可以这么理解：将HBase中拥有数亿行的一个大表， <strong>横向切割</strong> 成一个个" <strong>子表</strong> "，这一个个" <strong>子表</strong> "就是 <strong>Region</strong> ：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983132.jpg" width="609"></p>
+
+<p>Region是HBase中负载均衡的基本单元 ，当一个Region增长到一定大小以后，会自动分裂成两个。</p>
+
+<p><strong>Column Family</strong></p>
+
+<p>如果将Region看成是一个表的 <strong>横向切割</strong> ，那么，一个Region中的数据列的 <strong>纵向切割</strong> ，称之为一个 <strong>Column Family</strong> 。每一个列，都必须归属于一个Column Family，这个归属关系是在写数据时指定的，而不是建表时预先定义。</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/1803221459831310.jpg" width="609"></p>
+
+<p><strong>KeyValue</strong></p>
+
+<p>KeyValue的设计不是源自Bigtable，而是要追溯至论文"The log-structured merge-tree( <strong>LSM-Tree</strong> )"。每一行中的每一列数据，都被包装成独立的拥有 <strong>特定结构</strong> 的KeyValue，KeyValue中包含了丰富的自我描述信息:</p>
+
+<p>看的出来，KeyValue是支撑"稀疏矩阵"设计的一个关键点：一些Key相同的任意数量的独立KeyValue就可以构成一行数据。但这种设计带来的一个显而易见的缺点： 每一个KeyValue所携带的自我描述信息，会带来显著的数据膨胀 。</p>
+
+<p>适用场景</p>
+
+<p>在介绍完了HBase的数据模型以后，我们可以回答本文一开始的前两个问题：</p>
+
+<ol><li>
+	<p>什么样的数据适合用HBase来存储？</p>
+	</li>
+	<li>
+	<p>既然HBase也是一个数据库，能否用它将现有系统中昂贵的Oracle替换掉？</p>
+	</li>
+</ol><p>HBase的数据模型比较简单，数据按照RowKey排序存放，适合HBase存储的数据，可以简单总结如下：</p>
+
+<ul><li>
+	<p>以 <strong>实体</strong> 为中心的数据</p>
+
+	<p>实体可以包括但不限于如下几种：</p>
+
+	<p>描述这些实体的，可以有基础属性信息、实体关系(图数据)、所发生的事件(如交易记录、车辆轨迹点)等等。</p>
+
+	<ul><li>
+		<p>自然人／账户／手机号／车辆相关数据</p>
+		</li>
+		<li>
+		<p>用户画像数据（含标签类数据）</p>
+		</li>
+		<li>
+		<p>图数据（关系类数据）</p>
+		</li>
+	</ul></li>
+</ul><ul><li>
+	<p>以 <strong>事件</strong> 为中心的数据</p>
+
+	<ul><li>
+		<p>监控数据</p>
+		</li>
+		<li>
+		<p>时序数据</p>
+		</li>
+		<li>
+		<p>实时位置类数据</p>
+		</li>
+		<li>
+		<p>消息/日志类数据</p>
+		</li>
+	</ul></li>
+</ul><p>上面所描述的这些数据，有的是 <strong>结构化数据</strong> ，有的是 <strong>半结构化</strong> 或 <strong>非结构化数据</strong> 。HBase的“ <strong>稀疏矩阵</strong> ”设计，使其应对非结构化数据存储时能够得心应手，但在我们的实际用户场景中， <strong>结构化数据存储依然占据了比较重的比例</strong> 。由于HBase仅提供了基于RowKey的单维度索引能力，在应对一些具体的场景时，依然还需要基于HBase之上构建一些专业的能力，如：</p>
+
+<ul><li>
+	<p>OpenTSDB时序数据存储，提供基于Metrics+时间+标签的一些组合维度查询与聚合能力</p>
+	</li>
+	<li>
+	<p>GeoMesa时空数据存储，提供基于时间+空间范围的索引能力</p>
+	</li>
+	<li>
+	<p>JanusGraph图数据存储，提供基于属性、关系的图索引能力</p>
+	</li>
+</ul><p>HBase擅长于存储结构简单的海量数据但索引能力有限，而Oracle等传统关系型数据库(RDBMS)能够提供丰富的查询能力，但却疲于应对TB级别的海量数据存储， <strong>HBase对传统的RDBMS并不是取代关系，而是一种补充</strong> 。</p>
+
+<p>HBase与HDFS</p>
+
+<p>我们都知道HBase的数据是存储于HDFS里面的，相信大家也都有这么的认知：</p>
+
+<p>HBase是一个 <strong>分布式数据库</strong> ，HDFS是一个 <strong>分布式文件系统</strong></p>
+
+<p>理解了这一点，我们先来粗略回答本文已开始提出的其中两个问题：</p>
+
+<ol><li>
+	<p>HBase中的数据为何不直接存放于HDFS之上？</p>
+	</li>
+</ol><p>HBase中存储的海量数据记录，通常在几百Bytes到KB级别，如果将这些数据直接存储于HDFS之上，会导致大量的小文件产生，为HDFS的元数据管理节点(NameNode)带来沉重的压力。</p>
+
+<ol><li>
+	<p>文件能否直接存储于HBase里面？</p>
+	</li>
+</ol><p>如果是几MB的文件，其实也可以直接存储于HBase里面，我们暂且将这类文件称之为小文件，HBase提供了一个名为MOB的特性来应对这类小文件的存储。但如果是更大的文件，强烈不建议用HBase来存储，关于这里更多的原因，希望你在详细读完本系列文章所有内容之后能够自己解答。</p>
+
+<p>集群角色</p>
+
+<p>关于集群环境，你可以使用国内外<a href="http://www.thebigdata.cn/YeJieDongTai/7180.html" rel="nofollow">大数据</a>厂商的平台，如Cloudera，Hontonworks以及国内的华为，都发行了自己的企业版大数据平台，另外，华为云、阿里云中也均推出了全托管式的HBase服务。</p>
+
+<p>我们假设集群环境已经Ready了，先来看一下集群中的 <strong>关键角色</strong> ：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/1803221459831313.jpg" width="609"></p>
+
+<p>相信大部分人对这些角色都已经有了一定程度的了解，我们快速的介绍一下各个角色在集群中的 <strong>主要</strong> 职责：</p>
+
+<ul><li>
+	<p>ZooKeeper</p>
+
+	<p>在一个拥有多个节点的分布式系统中，假设，只能有一个节点是主节点，如何快速的选举出一个主节点而且让所有的节点都认可这个主节点？这就是HBase集群中存在的一个最基础命题。</p>
+
+	<p>利用ZooKeeper就可以非常简单的实现这类"仲裁"需求，ZooKeeper还提供了基础的事件通知机制，所有的数据都以 ZNode的形式存在，它也称得上是一个"微型数据库"。</p>
+	</li>
+	<li>
+	<p>NameNode</p>
+
+	<p>HDFS作为一个分布式文件系统，自然需要文件目录树的 <strong>元数据</strong> 信息，另外，在HDFS中每一个文件都是按照Block存储的，文件与Block的关联也通过 <strong>元数据</strong> 信息来描述。NameNode提供了这些 <strong>元数据信息的存储</strong> 。</p>
+	</li>
+	<li>
+	<p>DataNode</p>
+
+	<p>HDFS的数据存放节点。</p>
+	</li>
+	<li>
+	<p>RegionServer</p>
+
+	<p>HBase的 <strong>数据服务节点</strong> 。</p>
+	</li>
+	<li>
+	<p>Master</p>
+
+	<p>HBase的管理节点，通常在一个集群中设置一个主Master，一个备Master，主备角色的"仲裁"由ZooKeeper实现。 Master <strong>主要职责</strong> ：</p>
+
+	<p>① 负责管理所有的RegionServer。</p>
+
+	<p>②建表/修改表/删除表等DDL操作请求的服务端执行主体。</p>
+
+	<p>③管理所有的数据分片(Region)到RegionServer的分配。</p>
+
+	<p>④如果一个RegionServer宕机或进程故障，由Master负责将它原来所负责的Regions转移到其它的RegionServer上继续提供服务。</p>
+
+	<p>⑤Master自身也可以作为一个RegionServer提供服务，该能力是可配置的。</p>
+	</li>
+</ul><p>集群部署建议</p>
+
+<p>如果基于物理机/虚拟机部署，通常建议：</p>
+
+<p>1. RegionServer与DataNode联合部署，RegionServer与DataNode按1:1比例设置。</p>
+
+<p>这种部署的优势在于，RegionServer中的数据文件可以存储一个副本于本机的DataNode节点中，从而在读取时可以利用HDFS中的" <strong>短路径读取(Short Circuit) </strong>"来绕过网络请求，降低读取时延。</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983131.jpg" width="609"></p>
+
+<p>2. 管理节点独立于数据节点部署</p>
+
+<p>如果是基于物理机部署，每一台物理机节点上可以设置几个RegionServers/DataNodes来提升资源使用率。</p>
+
+<p>也可以选择基于容器来部署，如在HBaseCon Asia 2017大会知乎的演讲主题中，就提到了知乎基于Kubernetes部署HBase服务的实践。</p>
+
+<p>对于公有云HBase服务而言，为了降低总体拥有成本( <em>TCO</em> )，通常选择" <strong>计算与存储物理分离</strong>"的方式，从架构上来说，可能导致平均时延略有下降，但可以借助于共享存储底层的IO优化来做一些"弥补"。</p>
+
+<p>HBase集群中的RegionServers可以按逻辑划分为多个Groups，一个表可以与一个指定的Group绑定，可以将RegionServer Group理解成将一个大的集群划分成了多个逻辑子集群，借此可以实现多租户间的隔离，这就是HBase中的 <strong>RegionServer Group </strong>特性。</p>
+
+<p>示例数据</p>
+
+<p>以我们日常生活都熟悉的手机通话记录的存储为例，先简单给出示例数据的字段定义：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983137.jpg" width="609"></p>
+
+<p>如上定义与电信领域的通话记录字段定义相去甚远，本文力求简洁，仅给出了最简单的示例。如下是"虚构"的样例数据：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/1803221459831314.jpg" width="609"></p>
+
+<p>在本文大部分内容中所涉及的一条数据，是上面加粗的最后一行" <strong>MSISDN1</strong> "为" <strong>13400006666</strong>"这行记录。</p>
+
+<p>在本系列文章的流程图中，我们将会使用一个 <strong>红色的五角星</strong> 来表示该数据所在的位置。</p>
+
+<p>写数据之前：创建连接</p>
+
+<p><strong>Login</strong></p>
+
+<p>在启用了安全特性的前提下，Login阶段是为了完成 <strong>用户认证 </strong>(确定用户的合法身份)，这是后续一切 <strong>安全访问控制</strong> 的基础。</p>
+
+<p>当前Hadoop/HBase仅支持基于Kerberos的用户认证，ZooKeeper除了Kerberos认证，还能支持简单的用户名/密码认证，但都基于静态的配置，无法动态新增用户。如果要支持其它第三方认证，需要对现有的安全框架做出比较大的改动。</p>
+
+<p><strong>创建Connection</strong></p>
+
+<p>Connection可以理解为一个HBase集群连接的抽象，建议使用ConnectionFactory提供的工具方法来创建。因为HBase当前提供了两种连接模式：同步连接，异步连接，这两种连接模式下所创建的Connection也是不同的。我们给出Conn ectionFactory中关于获取这两种连接的典型方法定义：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983134.jpg" width="609"></p>
+
+<p>Connection中主要维护着 <strong>两类共享的资源</strong> ：</p>
+
+<ul><li>
+	<p>线程池</p>
+	</li>
+	<li>
+	<p>Socket连接</p>
+	</li>
+</ul><p>这些资源都是在真正使用的时候才会被创建，因此，此时的连接还只是一个"虚拟连接"。</p>
+
+<p>写数据之前：创建数据表</p>
+
+<p><strong>DDL操作的抽象接口 - Admin</strong></p>
+
+<p>Admin定义了常规的DDL接口，列举几个典型的接口：</p>
+
+<p><img alt="" class="has" src="http://www.thebigdata.cn/upload/2018-03/180322145983138.jpg" width="609"></p>
+
+<p>预设合理的数据分片 - Region</p>
+
+<p>分片数量会给读写吞吐量带来直接的影响，因此，建表时通常建议由用户主动指定划分 <strong>Region分割点</strong> ，来设定Region的数量。</p>
+
+<p>HBase中数据是按照RowKey的字典顺序排列的，为了能够划分出合理的Region分割点，需要依据如下几点信息：</p>
+
+<ul><li>
+	<p>Key的组成结构</p>
+	</li>
+	<li>
+	<p>Key的数据分布预估</p>
+
+	<p>如果不能基于Key的组成结构来预估数据分布的话，可能会导致数据在Region间的分布不均匀</p>
+	</li>
+	<li>
+	<p>读写并发度需求</p>
+
+	<p>依据读写并发度需求，设置合理的Region数量</p>
+	</li>
+</ul><p><strong>为表定义合理的Schema</strong></p>
+
+<p>既然HBase号称"schema-less"的数据存储系统，那何来的是"schema "？的确，在数据库范式的支持上，HBase非常弱，这里的"schema"，主要指如下一些信息的设置：</p>
+
+<p>1.  <strong>NameSpace </strong>设置</p>
+
+<p>2. Column Family的数量</p>
+
+<p>3. 每一个Column Family中所关联的一些 <strong>关键配置</strong> ：</p>
+
+<p>① Compression</p>
+
+<p>HBase当前可以支持Snappy，GZ，LZO，LZ4，Bzip2以及ZSTD压缩算法</p>
+
+<p><strong>② </strong><strong>DataBlock Encoding</strong></p>
+
+<p>HBase针对自身的特殊数据模型所做的一种压缩编码</p>
+
+<p><strong>③  </strong><strong>BloomFilter</strong></p>
+
+<p>可用来协助快速判断一条记录是否存在</p>
+
+<p>④ TTL</p>
+
+<p>指定数据的过期时间</p>
+
+<p><strong>⑤ </strong><strong>StoragePolicy</strong></p>
+
+<p>指定Column Family的存储策略，可选项有： "ALL_SSD"，"ONE_SSD"，"HOT"，"WARM"，"COLD"，"LAZY_PERSIST"</p>
+
+<p>HBase中并不需要预先设置Column定义信息，这就是HBase schema less设计的核心。</p>
+
+<p>Client发送建表请求到Master</p>
+
+<p>建表的请求是通过RPC的方式由Client发送到Master:</p>
+
+<ul><li>
+	<p>RPC接口基于 <strong>Protocol Buffer</strong> 定义</p>
+	</li>
+	<li>
+	<p>建表相关的描述参数，也由 <strong>Protocol Buffer</strong> 进行定义及序列化</p>
+	</li>
+</ul><p>Client端侧调用了Master服务的什么接口，参数是什么，这些信息都被通过RPC通信传输到Master侧，Master再依据这些接口\参数描述信息决定要执行的操作。2.0版本中，HBase目前已经支持基于Netty的 <strong>异步RPC框架 </strong>。</p>
+
+<p>关于HBase RPC框架</p>
+
+<p>早期的HBase RPC框架，完全借鉴了Hadoop中的实现，那时，Netty项目尚不盛行。</p>
+
+<p>Master侧接收到Client侧的建表请求以后，一些主要操作包括：</p>
+
+<p>1. 生成每一个Region的描述信息对象HRegionInfo，这些描述信息包括：Region ID, Region名称，Key范围，表名称等信息。</p>
+
+<p>2. 生成每一个Region在HDFS中的文件目录。</p>
+
+<p>3. 将HRegionInfo信息写入到记录元数据的hbase:meta表中。</p>
+
+<p>说明</p>
+
+<p>meta表位于名为"hbase"的namespace中，因此，它的全称为"hbase:meta"。 但在本系列文章范畴内，常将其缩写为"meta"。</p>
+
+<p>整个过程中，新表的状态也是记录在hbase:meta表中的，而不用再存储在ZooKeeper中。</p>
+
+<p>如果建表执行了一半，Master进程故障，如何处理？这里是由HBase自身提供的一个名为 <strong>Procedure(V2) </strong>的框架来保障操作的事务性的，备Master接管服务以后，将会继续完成整个建表操作。</p>
+
+<p>一个被创建成功的表，还可以被执行如下操作：</p>
+
+<ul><li>
+	<p>Disable 将所有的Region下线，该表暂停读写服务</p>
+	</li>
+	<li>
+	<p>Enable 将一个Disable过的表重新Enable，也就是上线所有的Region来正常提供读写服务</p>
+	</li>
+	<li>
+	<p><strong>Alter</strong> 更改表或列族的描述信息</p>
+	</li>
+</ul><p>Master分配Regions</p>
+
+<p>新创建的所有的Regions，通过 <strong>AssignmentManager </strong>将这些Region按照轮询(Round-Robin)的方式分配到每一个RegionServer中，具体的分配计划是由 <strong>LoadBalancer </strong>来提供的。</p>
+
+<p>AssignmentManager负责所有Regions的分配/迁移操作，Master中有一个定时运行的线程，来检查集群中的Regions在各个RegionServer之间的负载是否是均衡的，如果不均衡，则通过LoadBalancer生成相应的Region迁移计划，HBase中支持多种负载均衡算法，有最简单的仅考虑各RegionServer上的 <strong>Regions数目</strong> 的负载均衡算法，有基于 <strong>迁移代价</strong> 的负载均衡算法，也有 <strong>数据本地化率优先</strong> 的负载均衡算法，因为这一部分已经提供了插件化机制，用户也可以自定义负载均衡算法。</p>
+
+<p>总结</p>
+
+<p>本文主要介绍了如下内容：</p>
+
+<p>1. HBase项目概述，呈现了HBase社区的活跃度以及搜索引擎热度等信息</p>
+
+<p>2. HBase数据模型部分，讲到了RowKey，稀疏矩阵，Region，Column Family，KeyValue等概念</p>
+
+<p>3. 基于HBase的数据模型，介绍了HBase的适合场景（以 <strong>实体</strong> / <strong>事件</strong> 为中心的简单结构的数据）</p>
+
+<p>4. 介绍了HBase与HDFS的关系</p>
+
+<p>5. 介绍了集群的关键角色：ZooKeeper, Master, RegionServer，NameNode, DataNode</p>
+
+<p>6. 集群部署建议</p>
+
+<p>7. 给出了一些示例数据</p>
+
+<p>8. 写数据之前的准备工作：建立集群连接，建表（建表时应该定义合理的Schema以及设置合理的Region数量），建表由Master处理，新创建的Regions由Region AssignmentManager负责分配到各个RegionServer。</p>
+
+<p>下一篇文章将正式开始介绍 <strong>写数据</strong> 的流程。</p>            </div>
+                </div>

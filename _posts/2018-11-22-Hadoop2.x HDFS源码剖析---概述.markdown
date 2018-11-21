@@ -1,0 +1,147 @@
+---
+layout:     post
+title:      Hadoop2.x HDFS源码剖析---概述
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h1>一、HDFS概述</h1>
+
+<p>基于hadoop2.6<br>
+HDFS被设计能够运行在通用硬件上、提供<span style="color:#f33b45;"><strong>流式数据操作</strong></span>、能够处理超大文件的分布式文件系统。<br>
+特点：高容错和高吞吐量、易扩展、高可靠性<br>
+HDFS的四个核心模块：<span style="color:#f33b45;"><strong>namenode节点、datanode节点、客户端、HDFS协议</strong></span>（RPC协议、流式接口协议:HTTP和<span style="color:#f33b45;"><strong>TCP</strong></span>）</p>
+
+<p><strong>基本概念</strong></p>
+
+<h2>1、数据块（block）</h2>
+
+<p>数据块是HDFS文件处理（读和写）的最小单元，默认是128M。一个文件存储到HDFS上首先被切分成数据块，然后分别存储到不同的datanode节点上。</p>
+
+<h2>2、namenode节点</h2>
+
+<p>由于Hadoop是一个master/slave主从结构，namenode相当于主从的主节点，负责管理文件系统的命名空间，包括文件系统目录树、文件/目录信息以及文件的数据块的索引，这些信息以两个文件<br>
+的形式永久保存在namenode节点的本地磁盘，即命名空间镜像文件和边记日志文件。<br>
+同时namenode节点还保存着数据块与数据节点datanode的对应关系，这部分数据不报存在磁盘上而是在数据节点datanode启动的时候向namenode动态汇报，然后由namenode动态构建，保存在内存中。</p>
+
+<p>总结：namenode主要功能是保存着两个映射关系<br>
+数据文件到数据块的映射关系（保存在磁盘上）；<br>
+数据块和数据节点datanode的映射（保存在内存中）；</p>
+
+<h2>3、datanode节点</h2>
+
+<p>数据节点是HDFS的从节点，数据节点在namenode的调度下负责把数据写入本地或者读出本地存储上保存的数据块。<br>
+datanode节点会不断向namenode节点发送心跳、数据块汇报以及缓存汇报。</p>
+
+<h2>4、客户端</h2>
+
+<p>通过各种接口操作HDFS（命令行接口、API接口等），这些客户端接口都是建立在DFSClient类的基础上；</p>
+
+<h2>5、HDFS协议</h2>
+
+<p>HDFS节点间的接口主要有两种类型：<br>
+Hadoop RPC接口：基于Hadoop RPC框架实现的接口；<br>
+流式接口：基于TCP或者HTTP实现的接口；</p>
+
+<p><img alt="" class="has" height="91" src="https://img-blog.csdn.net/20180827200110982?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p>HDFS的RPC接口</p>
+
+<p><img alt="" class="has" height="350" src="https://img-blog.csdn.net/20180827200156584?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p><img alt="" class="has" height="99" src="https://img-blog.csdn.net/20180827200208239?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p><img alt="" class="has" height="209" src="https://img-blog.csdn.net/20180827200216310?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p> <img alt="" class="has" height="324" src="https://img-blog.csdn.net/20180827200222277?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p style="margin-left:0cm;"><span style="color:#f33b45;"><strong>总结</strong></span></p>
+
+<p style="margin-left:0cm;">RPC接口：客户端与namenode节点、datanode节点进行简单的信息交互；</p>
+
+<p style="margin-left:0cm;">TCP接口：用于读取或写入数据块；</p>
+
+<p style="margin-left:0cm;">HTTP接口：namenode进行同步元信息；</p>
+
+<p> </p>
+
+<p><span style="color:#f33b45;"><strong>HDFS主要操作流程</strong></span></p>
+
+<h3>1）、HDFS客户端读流程</h3>
+
+<p><img alt="" class="has" height="168" src="https://img-blog.csdn.net/2018082720030117?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p><img alt="" class="has" height="452" src="https://img-blog.csdn.net/20180827200836107?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p><img alt="" class="has" height="130" src="https://img-blog.csdn.net/20180827200852359?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p> </p>
+
+<h3>2）、HDFS客户端写流程</h3>
+
+<p><img alt="" class="has" height="287" src="https://img-blog.csdn.net/20180827200908149?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p><img alt="" class="has" height="393" src="https://img-blog.csdn.net/20180827202752496?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p> <img alt="" class="has" height="451" src="https://img-blog.csdn.net/20180827202820338?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<h3>3）、HDFS客户端追加流程</h3>
+
+<p><img alt="" class="has" height="149" src="https://img-blog.csdn.net/20180827202827668?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<h3><img alt="" class="has" height="211" src="https://img-blog.csdn.net/20180827202833138?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"><br>
+4）、datanode启动、心跳检测、以及namenode节点指令流程</h3>
+
+<p><img alt="" class="has" height="382" src="https://img-blog.csdn.net/20180827202843117?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<h3><img alt="" class="has" height="276" src="https://img-blog.csdn.net/20180827202849602?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"><br>
+5）、HA（namenode）切换流程</h3>
+
+<p><img alt="" class="has" height="330" src="https://img-blog.csdn.net/20180827202858175?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p><img alt="" class="has" height="382" src="https://img-blog.csdn.net/20180827202903965?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p><span style="color:#f33b45;"><strong>读取或者写入时是按照数据块为单位来进行的，每次读完或者写完一个数据块才和下一个数据块进行建立连接通道。</strong></span> </p>
+
+<p style="margin-left:0cm;">HA切换流程，保证两个一致性：</p>
+
+<ol><li>命名空间的一致性</li>
+	<li>数据块和数据节点datanode的一致性；</li>
+</ol><h1>二、Hadoop的RPC</h1>
+
+<p>Hadoop的RPC是基于IPC(inter-process communications ，进程间通信)模型实现的一套高效的轻量级RPC框架，采用了javanio、java动态代理以及protobuf等基础技术。</p>
+
+<p><img alt="" class="has" height="327" src="https://img-blog.csdn.net/2018082720300877?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="391"></p>
+
+<p><img alt="" class="has" height="498" src="https://img-blog.csdn.net/20180827203144412?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p> <img alt="" class="has" height="408" src="https://img-blog.csdn.net/20180827203153427?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p style="margin-left:0cm;">Hadoop RPC server端基于Reactor设计模式的设计实现：<span style="color:#f33b45;"><strong>基于多reactor多线程模式</strong></span></p>
+
+<p style="margin-left:0cm;"><img alt="" class="has" height="314" src="https://img-blog.csdn.net/20180827203246389?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="554"></p>
+
+<p> <img alt="" class="has" height="413" src="https://img-blog.csdn.net/20180827203303452?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="494"></p>
+
+<p><img alt="" class="has" height="528" src="https://img-blog.csdn.net/20180827203320752?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2wxMzk0MDQ5NjY0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="520"></p>
+
+<p> </p>
+
+<h1>三、namenode节点</h1>
+
+<p> </p>
+
+<h1><br>
+四、datanode节点</h1>
+
+<p> </p>
+
+<h1><br>
+五、HDFS客户端</h1>
+
+<p> </p>
+
+<p> </p>
+
+<p> </p>            </div>
+                </div>

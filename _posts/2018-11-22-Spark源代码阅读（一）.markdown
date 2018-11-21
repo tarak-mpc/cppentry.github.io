@@ -1,0 +1,379 @@
+---
+layout:     post
+title:      Spark源代码阅读（一）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>强烈推荐<br>
+<a href="https://blog.csdn.net/weixin_41705780/article/details/79273666" rel="nofollow">https://blog.csdn.net/weixin_41705780/article/details/79273666</a></p>
+<h2><a id="_3"></a>总体架构</h2>
+<p>Spark工程下的模块</p>
+<ul>
+<li>spark core, spark 内核</li>
+<li>spark streaming, spark流计算(基于batch方式)</li>
+<li>spark sql</li>
+<li>MLlib, 机器学习lib库</li>
+<li>GraphX, 图计算</li>
+<li>R, 与R语言结合</li>
+<li>Python，与Python语言结合，PySpark。基于PY4J</li>
+<li>external 与Kakfa，Flume等模块的整合</li>
+<li>resource-managers 对Yarn mesos等的支持</li>
+<li>其他（文档，实例，实例数据，工具，启动脚本，打包，授权协议）</li>
+</ul>
+<p>本系列文章将只涉及spark core的2.3.2版本。</p>
+<h2><a id="Spark_19"></a>Spark的单机运行</h2>
+<p>如果不能单机运行，我们对其原理理解将只能从阅读源代码获取。没有办法进行DEBUG。这对我们深入的理解和重构源代码都是非常不利的。</p>
+<h2><a id="SparkContext_24"></a>SparkContext</h2>
+<p>runJob和</p>
+<pre><code class="prism language-java"><span class="token keyword">class</span> <span class="token class-name">SparkContext</span><span class="token punctuation">(</span>config<span class="token operator">:</span> SparkConf<span class="token punctuation">)</span> <span class="token keyword">extends</span> <span class="token class-name">Logging</span> <span class="token punctuation">{</span>
+  <span class="token comment">/**
+   * Run a function on a given set of partitions in an RDD and pass the results to the given
+   * handler function. This is the main entry point for all actions in Spark.
+   *
+   * @param rdd target RDD to run tasks on
+   * @param func a function to run on each partition of the RDD
+   * @param partitions set of partitions to run on; some jobs may not want to compute on all
+   * partitions of the target RDD, e.g. for operations like `first()`
+   * @param resultHandler callback to pass each result to
+   */</span>
+  def runJob<span class="token punctuation">[</span>T<span class="token punctuation">,</span> U<span class="token operator">:</span> ClassTag<span class="token punctuation">]</span><span class="token punctuation">(</span>
+      rdd<span class="token operator">:</span> RDD<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">,</span>
+      func<span class="token operator">:</span> <span class="token punctuation">(</span>TaskContext<span class="token punctuation">,</span> Iterator<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> U<span class="token punctuation">,</span>
+      partitions<span class="token operator">:</span> Seq<span class="token punctuation">[</span>Int<span class="token punctuation">]</span><span class="token punctuation">,</span>
+      resultHandler<span class="token operator">:</span> <span class="token punctuation">(</span>Int<span class="token punctuation">,</span> U<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> Unit<span class="token punctuation">)</span><span class="token operator">:</span> Unit <span class="token operator">=</span> <span class="token punctuation">{</span>
+    <span class="token keyword">if</span> <span class="token punctuation">(</span>stopped<span class="token punctuation">.</span><span class="token function">get</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">IllegalStateException</span><span class="token punctuation">(</span><span class="token string">"SparkContext has been shutdown"</span><span class="token punctuation">)</span>
+    <span class="token punctuation">}</span>
+    val callSite <span class="token operator">=</span> getCallSite
+    val cleanedFunc <span class="token operator">=</span> <span class="token function">clean</span><span class="token punctuation">(</span>func<span class="token punctuation">)</span>
+    <span class="token function">logInfo</span><span class="token punctuation">(</span><span class="token string">"Starting job: "</span> <span class="token operator">+</span> callSite<span class="token punctuation">.</span>shortForm<span class="token punctuation">)</span>
+    <span class="token keyword">if</span> <span class="token punctuation">(</span>conf<span class="token punctuation">.</span><span class="token function">getBoolean</span><span class="token punctuation">(</span><span class="token string">"spark.logLineage"</span><span class="token punctuation">,</span> <span class="token boolean">false</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token function">logInfo</span><span class="token punctuation">(</span><span class="token string">"RDD's recursive dependencies:\n"</span> <span class="token operator">+</span> rdd<span class="token punctuation">.</span>toDebugString<span class="token punctuation">)</span>
+    <span class="token punctuation">}</span>
+    dagScheduler<span class="token punctuation">.</span><span class="token function">runJob</span><span class="token punctuation">(</span>rdd<span class="token punctuation">,</span> cleanedFunc<span class="token punctuation">,</span> partitions<span class="token punctuation">,</span> callSite<span class="token punctuation">,</span> resultHandler<span class="token punctuation">,</span> localProperties<span class="token punctuation">.</span>get<span class="token punctuation">)</span>
+    progressBar<span class="token punctuation">.</span><span class="token function">foreach</span><span class="token punctuation">(</span>_<span class="token punctuation">.</span><span class="token function">finishAll</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+    rdd<span class="token punctuation">.</span><span class="token function">doCheckpoint</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+  <span class="token punctuation">}</span>
+
+ <span class="token comment">/**
+   * Submit a job for execution and return a FutureJob holding the result.
+   *
+   * @param rdd target RDD to run tasks on
+   * @param processPartition a function to run on each partition of the RDD
+   * @param partitions set of partitions to run on; some jobs may not want to compute on all
+   * partitions of the target RDD, e.g. for operations like `first()`
+   * @param resultHandler callback to pass each result to
+   * @param resultFunc function to be executed when the result is ready
+   */</span>
+  def submitJob<span class="token punctuation">[</span>T<span class="token punctuation">,</span> U<span class="token punctuation">,</span> R<span class="token punctuation">]</span><span class="token punctuation">(</span>
+      rdd<span class="token operator">:</span> RDD<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">,</span>
+      processPartition<span class="token operator">:</span> Iterator<span class="token punctuation">[</span>T<span class="token punctuation">]</span> <span class="token operator">=</span><span class="token operator">&gt;</span> U<span class="token punctuation">,</span>
+      partitions<span class="token operator">:</span> Seq<span class="token punctuation">[</span>Int<span class="token punctuation">]</span><span class="token punctuation">,</span>
+      resultHandler<span class="token operator">:</span> <span class="token punctuation">(</span>Int<span class="token punctuation">,</span> U<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> Unit<span class="token punctuation">,</span>
+      resultFunc<span class="token operator">:</span> <span class="token operator">=</span><span class="token operator">&gt;</span> R<span class="token punctuation">)</span><span class="token operator">:</span> SimpleFutureAction<span class="token punctuation">[</span>R<span class="token punctuation">]</span> <span class="token operator">=</span>
+  <span class="token punctuation">{</span>
+    <span class="token function">assertNotStopped</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+    val cleanF <span class="token operator">=</span> <span class="token function">clean</span><span class="token punctuation">(</span>processPartition<span class="token punctuation">)</span>
+    val callSite <span class="token operator">=</span> getCallSite
+    val waiter <span class="token operator">=</span> dagScheduler<span class="token punctuation">.</span><span class="token function">submitJob</span><span class="token punctuation">(</span>
+      rdd<span class="token punctuation">,</span>
+      <span class="token punctuation">(</span>context<span class="token operator">:</span> TaskContext<span class="token punctuation">,</span> iter<span class="token operator">:</span> Iterator<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> <span class="token function">cleanF</span><span class="token punctuation">(</span>iter<span class="token punctuation">)</span><span class="token punctuation">,</span>
+      partitions<span class="token punctuation">,</span>
+      callSite<span class="token punctuation">,</span>
+      resultHandler<span class="token punctuation">,</span>
+      localProperties<span class="token punctuation">.</span>get<span class="token punctuation">)</span>
+    <span class="token keyword">new</span> <span class="token class-name">SimpleFutureAction</span><span class="token punctuation">(</span>waiter<span class="token punctuation">,</span> resultFunc<span class="token punctuation">)</span>
+  <span class="token punctuation">}</span>
+</code></pre>
+<h2><a id="DAGScheduler_88"></a>DAGScheduler</h2>
+<p>在这些RDD.Action操作中（如count,collect）会自动触发runJob提交作业，不需要用户显式的提交作业。<br>
+<img src="https://img-blog.csdnimg.cn/20181113103636558.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RlZmluZV91cw==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>
+作业调度的两个主要入口是<strong>submitJob</strong>和<strong>runJob</strong>，两者的区别在于前者返回一个Jobwaiter对象，可以用在异步调用中，用来判断作业完成或者取消作业，runJob在内部调用submitJob，等待waiter对象完成，保持阻塞直到作业完成（或失败）。</p>
+<pre><code class="prism language-java">  <span class="token comment">/**
+   * Run an action job on the given RDD and pass all the results to the resultHandler function as
+   * they arrive.
+   *
+   * @param rdd target RDD to run tasks on
+   * @param func a function to run on each partition of the RDD
+   * @param partitions set of partitions to run on; some jobs may not want to compute on all
+   *   partitions of the target RDD, e.g. for operations like first()
+   * @param callSite where in the user program this job was called
+   * @param resultHandler callback to pass each result to
+   * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
+   *
+   * @note Throws `Exception` when the job fails
+   */</span>
+  def runJob<span class="token punctuation">[</span>T<span class="token punctuation">,</span> U<span class="token punctuation">]</span><span class="token punctuation">(</span>
+      rdd<span class="token operator">:</span> RDD<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">,</span>
+      func<span class="token operator">:</span> <span class="token punctuation">(</span>TaskContext<span class="token punctuation">,</span> Iterator<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> U<span class="token punctuation">,</span>
+      partitions<span class="token operator">:</span> Seq<span class="token punctuation">[</span>Int<span class="token punctuation">]</span><span class="token punctuation">,</span>
+      callSite<span class="token operator">:</span> CallSite<span class="token punctuation">,</span>
+      resultHandler<span class="token operator">:</span> <span class="token punctuation">(</span>Int<span class="token punctuation">,</span> U<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> Unit<span class="token punctuation">,</span>
+      properties<span class="token operator">:</span> Properties<span class="token punctuation">)</span><span class="token operator">:</span> Unit <span class="token operator">=</span> <span class="token punctuation">{</span>
+    val start <span class="token operator">=</span> System<span class="token punctuation">.</span>nanoTime
+    val waiter <span class="token operator">=</span> <span class="token function">submitJob</span><span class="token punctuation">(</span>rdd<span class="token punctuation">,</span> func<span class="token punctuation">,</span> partitions<span class="token punctuation">,</span> callSite<span class="token punctuation">,</span> resultHandler<span class="token punctuation">,</span> properties<span class="token punctuation">)</span>
+    ThreadUtils<span class="token punctuation">.</span><span class="token function">awaitReady</span><span class="token punctuation">(</span>waiter<span class="token punctuation">.</span>completionFuture<span class="token punctuation">,</span> Duration<span class="token punctuation">.</span>Inf<span class="token punctuation">)</span>
+    waiter<span class="token punctuation">.</span>completionFuture<span class="token punctuation">.</span>value<span class="token punctuation">.</span>get match <span class="token punctuation">{</span>
+      <span class="token keyword">case</span> scala<span class="token punctuation">.</span>util<span class="token punctuation">.</span><span class="token function">Success</span><span class="token punctuation">(</span>_<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+        <span class="token function">logInfo</span><span class="token punctuation">(</span><span class="token string">"Job %d finished: %s, took %f s"</span><span class="token punctuation">.</span>format
+          <span class="token punctuation">(</span>waiter<span class="token punctuation">.</span>jobId<span class="token punctuation">,</span> callSite<span class="token punctuation">.</span>shortForm<span class="token punctuation">,</span> <span class="token punctuation">(</span>System<span class="token punctuation">.</span>nanoTime <span class="token operator">-</span> start<span class="token punctuation">)</span> <span class="token operator">/</span> <span class="token number">1e9</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+      <span class="token keyword">case</span> scala<span class="token punctuation">.</span>util<span class="token punctuation">.</span><span class="token function">Failure</span><span class="token punctuation">(</span>exception<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+        <span class="token function">logInfo</span><span class="token punctuation">(</span><span class="token string">"Job %d failed: %s, took %f s"</span><span class="token punctuation">.</span>format
+          <span class="token punctuation">(</span>waiter<span class="token punctuation">.</span>jobId<span class="token punctuation">,</span> callSite<span class="token punctuation">.</span>shortForm<span class="token punctuation">,</span> <span class="token punctuation">(</span>System<span class="token punctuation">.</span>nanoTime <span class="token operator">-</span> start<span class="token punctuation">)</span> <span class="token operator">/</span> <span class="token number">1e9</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+        <span class="token comment">// SPARK-8644: Include user stack trace in exceptions coming from DAGScheduler.</span>
+        val callerStackTrace <span class="token operator">=</span> Thread<span class="token punctuation">.</span><span class="token function">currentThread</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">.</span>getStackTrace<span class="token punctuation">.</span>tail
+        exception<span class="token punctuation">.</span><span class="token function">setStackTrace</span><span class="token punctuation">(</span>exception<span class="token punctuation">.</span>getStackTrace <span class="token operator">++</span> callerStackTrace<span class="token punctuation">)</span>
+        <span class="token keyword">throw</span> exception
+    <span class="token punctuation">}</span>
+  <span class="token punctuation">}</span>
+
+
+  <span class="token comment">/**
+   * Submit an action job to the scheduler.
+   *
+   * @param rdd target RDD to run tasks on
+   * @param func a function to run on each partition of the RDD
+   * @param partitions set of partitions to run on; some jobs may not want to compute on all
+   *   partitions of the target RDD, e.g. for operations like first()
+   * @param callSite where in the user program this job was called
+   * @param resultHandler callback to pass each result to
+   * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
+   *
+   * @return a JobWaiter object that can be used to block until the job finishes executing
+   *         or can be used to cancel the job.
+   *
+   * @throws IllegalArgumentException when partitions ids are illegal
+   */</span> 
+  def submitJob<span class="token punctuation">[</span>T<span class="token punctuation">,</span> U<span class="token punctuation">]</span><span class="token punctuation">(</span>
+      rdd<span class="token operator">:</span> RDD<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">,</span>
+      func<span class="token operator">:</span> <span class="token punctuation">(</span>TaskContext<span class="token punctuation">,</span> Iterator<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> U<span class="token punctuation">,</span>
+      partitions<span class="token operator">:</span> Seq<span class="token punctuation">[</span>Int<span class="token punctuation">]</span><span class="token punctuation">,</span>
+      callSite<span class="token operator">:</span> CallSite<span class="token punctuation">,</span>
+      resultHandler<span class="token operator">:</span> <span class="token punctuation">(</span>Int<span class="token punctuation">,</span> U<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> Unit<span class="token punctuation">,</span>
+      properties<span class="token operator">:</span> Properties<span class="token punctuation">)</span><span class="token operator">:</span> JobWaiter<span class="token punctuation">[</span>U<span class="token punctuation">]</span> <span class="token operator">=</span> <span class="token punctuation">{</span>
+    <span class="token comment">// Check to make sure we are not launching a task on a partition that does not exist.</span>
+    val maxPartitions <span class="token operator">=</span> rdd<span class="token punctuation">.</span>partitions<span class="token punctuation">.</span>length
+    partitions<span class="token punctuation">.</span><span class="token function">find</span><span class="token punctuation">(</span>p <span class="token operator">=</span><span class="token operator">&gt;</span> p <span class="token operator">&gt;=</span> maxPartitions <span class="token operator">||</span> p <span class="token operator">&lt;</span> <span class="token number">0</span><span class="token punctuation">)</span><span class="token punctuation">.</span>foreach <span class="token punctuation">{</span> p <span class="token operator">=</span><span class="token operator">&gt;</span>
+      <span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">IllegalArgumentException</span><span class="token punctuation">(</span>
+        <span class="token string">"Attempting to access a non-existent partition: "</span> <span class="token operator">+</span> p <span class="token operator">+</span> <span class="token string">". "</span> <span class="token operator">+</span>
+          <span class="token string">"Total number of partitions: "</span> <span class="token operator">+</span> maxPartitions<span class="token punctuation">)</span>
+    <span class="token punctuation">}</span>
+
+    val jobId <span class="token operator">=</span> nextJobId<span class="token punctuation">.</span><span class="token function">getAndIncrement</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+    <span class="token keyword">if</span> <span class="token punctuation">(</span>partitions<span class="token punctuation">.</span>size <span class="token operator">==</span> <span class="token number">0</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token comment">// Return immediately if the job is running 0 tasks</span>
+      <span class="token keyword">return</span> <span class="token keyword">new</span> <span class="token class-name">JobWaiter</span><span class="token punctuation">[</span>U<span class="token punctuation">]</span><span class="token punctuation">(</span><span class="token keyword">this</span><span class="token punctuation">,</span> jobId<span class="token punctuation">,</span> <span class="token number">0</span><span class="token punctuation">,</span> resultHandler<span class="token punctuation">)</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token keyword">assert</span><span class="token punctuation">(</span>partitions<span class="token punctuation">.</span>size <span class="token operator">&gt;</span> <span class="token number">0</span><span class="token punctuation">)</span>
+    val func2 <span class="token operator">=</span> func<span class="token punctuation">.</span>asInstanceOf<span class="token punctuation">[</span><span class="token punctuation">(</span>TaskContext<span class="token punctuation">,</span> Iterator<span class="token punctuation">[</span>_<span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> _<span class="token punctuation">]</span>
+    val waiter <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">JobWaiter</span><span class="token punctuation">(</span><span class="token keyword">this</span><span class="token punctuation">,</span> jobId<span class="token punctuation">,</span> partitions<span class="token punctuation">.</span>size<span class="token punctuation">,</span> resultHandler<span class="token punctuation">)</span>
+    <span class="token comment">//实际上是将JOB put进一个LinkedBlockingDeque。另一个线程负责将JOB取出。另一个线程将执行下面的方法</span>
+    eventProcessLoop<span class="token punctuation">.</span><span class="token function">post</span><span class="token punctuation">(</span><span class="token function">JobSubmitted</span><span class="token punctuation">(</span>
+      jobId<span class="token punctuation">,</span> rdd<span class="token punctuation">,</span> func2<span class="token punctuation">,</span> partitions<span class="token punctuation">.</span>toArray<span class="token punctuation">,</span> callSite<span class="token punctuation">,</span> waiter<span class="token punctuation">,</span>
+      SerializationUtils<span class="token punctuation">.</span><span class="token function">clone</span><span class="token punctuation">(</span>properties<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+    waiter
+  <span class="token punctuation">}</span>
+
+  <span class="token comment">//接收的上面JOB的事件</span>
+  <span class="token keyword">private</span> def <span class="token function">doOnReceive</span><span class="token punctuation">(</span>event<span class="token operator">:</span> DAGSchedulerEvent<span class="token punctuation">)</span><span class="token operator">:</span> Unit <span class="token operator">=</span> event match <span class="token punctuation">{</span>
+    <span class="token keyword">case</span> <span class="token function">JobSubmitted</span><span class="token punctuation">(</span>jobId<span class="token punctuation">,</span> rdd<span class="token punctuation">,</span> func<span class="token punctuation">,</span> partitions<span class="token punctuation">,</span> callSite<span class="token punctuation">,</span> listener<span class="token punctuation">,</span> properties<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleJobSubmitted</span><span class="token punctuation">(</span>jobId<span class="token punctuation">,</span> rdd<span class="token punctuation">,</span> func<span class="token punctuation">,</span> partitions<span class="token punctuation">,</span> callSite<span class="token punctuation">,</span> listener<span class="token punctuation">,</span> properties<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">MapStageSubmitted</span><span class="token punctuation">(</span>jobId<span class="token punctuation">,</span> dependency<span class="token punctuation">,</span> callSite<span class="token punctuation">,</span> listener<span class="token punctuation">,</span> properties<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleMapStageSubmitted</span><span class="token punctuation">(</span>jobId<span class="token punctuation">,</span> dependency<span class="token punctuation">,</span> callSite<span class="token punctuation">,</span> listener<span class="token punctuation">,</span> properties<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">StageCancelled</span><span class="token punctuation">(</span>stageId<span class="token punctuation">,</span> reason<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleStageCancellation</span><span class="token punctuation">(</span>stageId<span class="token punctuation">,</span> reason<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">JobCancelled</span><span class="token punctuation">(</span>jobId<span class="token punctuation">,</span> reason<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleJobCancellation</span><span class="token punctuation">(</span>jobId<span class="token punctuation">,</span> reason<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">JobGroupCancelled</span><span class="token punctuation">(</span>groupId<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleJobGroupCancelled</span><span class="token punctuation">(</span>groupId<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> AllJobsCancelled <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">doCancelAllJobs</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">ExecutorAdded</span><span class="token punctuation">(</span>execId<span class="token punctuation">,</span> host<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleExecutorAdded</span><span class="token punctuation">(</span>execId<span class="token punctuation">,</span> host<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">ExecutorLost</span><span class="token punctuation">(</span>execId<span class="token punctuation">,</span> reason<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      val workerLost <span class="token operator">=</span> reason match <span class="token punctuation">{</span>
+        <span class="token keyword">case</span> <span class="token function">SlaveLost</span><span class="token punctuation">(</span>_<span class="token punctuation">,</span> <span class="token boolean">true</span><span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> <span class="token boolean">true</span>
+        <span class="token keyword">case</span> _ <span class="token operator">=</span><span class="token operator">&gt;</span> <span class="token boolean">false</span>
+      <span class="token punctuation">}</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleExecutorLost</span><span class="token punctuation">(</span>execId<span class="token punctuation">,</span> workerLost<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">WorkerRemoved</span><span class="token punctuation">(</span>workerId<span class="token punctuation">,</span> host<span class="token punctuation">,</span> message<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleWorkerRemoved</span><span class="token punctuation">(</span>workerId<span class="token punctuation">,</span> host<span class="token punctuation">,</span> message<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">BeginEvent</span><span class="token punctuation">(</span>task<span class="token punctuation">,</span> taskInfo<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleBeginEvent</span><span class="token punctuation">(</span>task<span class="token punctuation">,</span> taskInfo<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">SpeculativeTaskSubmitted</span><span class="token punctuation">(</span>task<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleSpeculativeTaskSubmitted</span><span class="token punctuation">(</span>task<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">GettingResultEvent</span><span class="token punctuation">(</span>taskInfo<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleGetTaskResult</span><span class="token punctuation">(</span>taskInfo<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> completion<span class="token operator">:</span> CompletionEvent <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleTaskCompletion</span><span class="token punctuation">(</span>completion<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> <span class="token function">TaskSetFailed</span><span class="token punctuation">(</span>taskSet<span class="token punctuation">,</span> reason<span class="token punctuation">,</span> exception<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">handleTaskSetFailed</span><span class="token punctuation">(</span>taskSet<span class="token punctuation">,</span> reason<span class="token punctuation">,</span> exception<span class="token punctuation">)</span>
+
+    <span class="token keyword">case</span> ResubmitFailedStages <span class="token operator">=</span><span class="token operator">&gt;</span>
+      dagScheduler<span class="token punctuation">.</span><span class="token function">resubmitFailedStages</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+  <span class="token punctuation">}</span>
+</code></pre>
+<h2><a id="LiveListenerBus_235"></a>LiveListenerBus</h2>
+<p>在SparkContext中, 首先会创建LiveListenerBus实例,这个类主要功能如下:</p>
+<ul>
+<li>保存有消息队列,负责消息的缓存</li>
+<li>保存有注册过的listener,负责消息的分发<br>
+这是一个简单的监听器模型。</li>
+</ul>
+<h2><a id="TaskScheduler_241"></a>TaskScheduler</h2>
+<p>TaskScheduler是抽象类，目前Spark仅提供了TaskSchedulerImpl一种实现；其初始化是在SparkContext中</p>
+<pre><code>private[spark] class TaskSchedulerImpl(
+    val sc: SparkContext,
+    val maxTaskFailures: Int,
+    isLocal: Boolean = false)
+  extends TaskScheduler with Logging
+</code></pre>
+<p>TaskScheduler实际是SchedulerBackend(比如一种实现为YarnClientSchedulerBackend)的代理，本身处理一些通用逻辑，如不同Job间的调度顺序，将运行缓慢的task在空闲节点上重新提交(speculation)等</p>
+<pre><code class="prism language-java">  override def <span class="token function">submitTasks</span><span class="token punctuation">(</span>taskSet<span class="token operator">:</span> TaskSet<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+    val tasks <span class="token operator">=</span> taskSet<span class="token punctuation">.</span>tasks
+    <span class="token function">logInfo</span><span class="token punctuation">(</span><span class="token string">"Adding task set "</span> <span class="token operator">+</span> taskSet<span class="token punctuation">.</span>id <span class="token operator">+</span> <span class="token string">" with "</span> <span class="token operator">+</span> tasks<span class="token punctuation">.</span>length <span class="token operator">+</span> <span class="token string">" tasks"</span><span class="token punctuation">)</span>
+    <span class="token keyword">this</span><span class="token punctuation">.</span><span class="token keyword">synchronized</span> <span class="token punctuation">{</span>
+      val manager <span class="token operator">=</span> <span class="token function">createTaskSetManager</span><span class="token punctuation">(</span>taskSet<span class="token punctuation">,</span> maxTaskFailures<span class="token punctuation">)</span>
+      val stage <span class="token operator">=</span> taskSet<span class="token punctuation">.</span>stageId
+      val stageTaskSets <span class="token operator">=</span>
+        taskSetsByStageIdAndAttempt<span class="token punctuation">.</span><span class="token function">getOrElseUpdate</span><span class="token punctuation">(</span>stage<span class="token punctuation">,</span> <span class="token keyword">new</span> <span class="token class-name">HashMap</span><span class="token punctuation">[</span>Int<span class="token punctuation">,</span> TaskSetManager<span class="token punctuation">]</span><span class="token punctuation">)</span>
+      <span class="token function">stageTaskSets</span><span class="token punctuation">(</span>taskSet<span class="token punctuation">.</span>stageAttemptId<span class="token punctuation">)</span> <span class="token operator">=</span> manager
+      val conflictingTaskSet <span class="token operator">=</span> stageTaskSets<span class="token punctuation">.</span>exists <span class="token punctuation">{</span> <span class="token keyword">case</span> <span class="token punctuation">(</span>_<span class="token punctuation">,</span> ts<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span>
+        ts<span class="token punctuation">.</span>taskSet <span class="token operator">!=</span> taskSet <span class="token operator">&amp;&amp;</span> <span class="token operator">!</span>ts<span class="token punctuation">.</span>isZombie
+      <span class="token punctuation">}</span>
+      <span class="token keyword">if</span> <span class="token punctuation">(</span>conflictingTaskSet<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">IllegalStateException</span><span class="token punctuation">(</span>s<span class="token string">"more than one active taskSet for stage $stage:"</span> <span class="token operator">+</span>
+          s<span class="token string">" ${stageTaskSets.toSeq.map{_._2.taskSet.id}.mkString("</span><span class="token punctuation">,</span><span class="token string">")}"</span><span class="token punctuation">)</span>
+      <span class="token punctuation">}</span>
+      schedulableBuilder<span class="token punctuation">.</span><span class="token function">addTaskSetManager</span><span class="token punctuation">(</span>manager<span class="token punctuation">,</span> manager<span class="token punctuation">.</span>taskSet<span class="token punctuation">.</span>properties<span class="token punctuation">)</span>
+
+      <span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>isLocal <span class="token operator">&amp;&amp;</span> <span class="token operator">!</span>hasReceivedTask<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        starvationTimer<span class="token punctuation">.</span><span class="token function">scheduleAtFixedRate</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">TimerTask</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          override def <span class="token function">run</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+            <span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>hasLaunchedTask<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+              <span class="token function">logWarning</span><span class="token punctuation">(</span><span class="token string">"Initial job has not accepted any resources; "</span> <span class="token operator">+</span>
+                <span class="token string">"check your cluster UI to ensure that workers are registered "</span> <span class="token operator">+</span>
+                <span class="token string">"and have sufficient resources"</span><span class="token punctuation">)</span>
+            <span class="token punctuation">}</span> <span class="token keyword">else</span> <span class="token punctuation">{</span>
+              <span class="token keyword">this</span><span class="token punctuation">.</span><span class="token function">cancel</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+            <span class="token punctuation">}</span>
+          <span class="token punctuation">}</span>
+        <span class="token punctuation">}</span><span class="token punctuation">,</span> STARVATION_TIMEOUT_MS<span class="token punctuation">,</span> STARVATION_TIMEOUT_MS<span class="token punctuation">)</span>
+      <span class="token punctuation">}</span>
+      hasReceivedTask <span class="token operator">=</span> <span class="token boolean">true</span>
+    <span class="token punctuation">}</span>
+    backend<span class="token punctuation">.</span><span class="token function">reviveOffers</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+  <span class="token punctuation">}</span>
+</code></pre>
+<h2><a id="RDD_292"></a>RDD</h2>
+<pre><code class="prism language-java"><span class="token keyword">abstract</span> <span class="token keyword">class</span> <span class="token class-name">RDD</span><span class="token punctuation">[</span>T<span class="token operator">:</span> ClassTag<span class="token punctuation">]</span><span class="token punctuation">(</span>
+    @<span class="token keyword">transient</span> <span class="token keyword">private</span> var _sc<span class="token operator">:</span> SparkContext<span class="token punctuation">,</span>
+    @<span class="token keyword">transient</span> <span class="token keyword">private</span> var deps<span class="token operator">:</span> Seq<span class="token punctuation">[</span>Dependency<span class="token punctuation">[</span>_<span class="token punctuation">]</span><span class="token punctuation">]</span>
+  <span class="token punctuation">)</span> <span class="token keyword">extends</span> <span class="token class-name">Serializable</span> with Logging <span class="token punctuation">{</span>
+  
+  def map<span class="token punctuation">[</span>U<span class="token operator">:</span> ClassTag<span class="token punctuation">]</span><span class="token punctuation">(</span>f<span class="token operator">:</span> T <span class="token operator">=</span><span class="token operator">&gt;</span> U<span class="token punctuation">)</span><span class="token operator">:</span> RDD<span class="token punctuation">[</span>U<span class="token punctuation">]</span> <span class="token operator">=</span> withScope <span class="token punctuation">{</span>
+    val cleanF <span class="token operator">=</span> sc<span class="token punctuation">.</span><span class="token function">clean</span><span class="token punctuation">(</span>f<span class="token punctuation">)</span>
+    <span class="token keyword">new</span> <span class="token class-name">MapPartitionsRDD</span><span class="token punctuation">[</span>U<span class="token punctuation">,</span> T<span class="token punctuation">]</span><span class="token punctuation">(</span><span class="token keyword">this</span><span class="token punctuation">,</span> <span class="token punctuation">(</span>context<span class="token punctuation">,</span> pid<span class="token punctuation">,</span> iter<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> iter<span class="token punctuation">.</span><span class="token function">map</span><span class="token punctuation">(</span>cleanF<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">}</span>
+  def <span class="token function">reduce</span><span class="token punctuation">(</span>f<span class="token operator">:</span> <span class="token punctuation">(</span>T<span class="token punctuation">,</span> T<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> T<span class="token punctuation">)</span><span class="token operator">:</span> T <span class="token operator">=</span> withScope <span class="token punctuation">{</span>
+    val cleanF <span class="token operator">=</span> sc<span class="token punctuation">.</span><span class="token function">clean</span><span class="token punctuation">(</span>f<span class="token punctuation">)</span>
+    val reducePartition<span class="token operator">:</span> Iterator<span class="token punctuation">[</span>T<span class="token punctuation">]</span> <span class="token operator">=</span><span class="token operator">&gt;</span> Option<span class="token punctuation">[</span>T<span class="token punctuation">]</span> <span class="token operator">=</span> iter <span class="token operator">=</span><span class="token operator">&gt;</span> <span class="token punctuation">{</span>
+      <span class="token keyword">if</span> <span class="token punctuation">(</span>iter<span class="token punctuation">.</span>hasNext<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token function">Some</span><span class="token punctuation">(</span>iter<span class="token punctuation">.</span><span class="token function">reduceLeft</span><span class="token punctuation">(</span>cleanF<span class="token punctuation">)</span><span class="token punctuation">)</span>
+      <span class="token punctuation">}</span> <span class="token keyword">else</span> <span class="token punctuation">{</span>
+        None
+      <span class="token punctuation">}</span>
+    <span class="token punctuation">}</span>
+    var jobResult<span class="token operator">:</span> Option<span class="token punctuation">[</span>T<span class="token punctuation">]</span> <span class="token operator">=</span> None
+    val mergeResult <span class="token operator">=</span> <span class="token punctuation">(</span>index<span class="token operator">:</span> Int<span class="token punctuation">,</span> taskResult<span class="token operator">:</span> Option<span class="token punctuation">[</span>T<span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> <span class="token punctuation">{</span>
+      <span class="token keyword">if</span> <span class="token punctuation">(</span>taskResult<span class="token punctuation">.</span>isDefined<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        jobResult <span class="token operator">=</span> jobResult match <span class="token punctuation">{</span>
+          <span class="token keyword">case</span> <span class="token function">Some</span><span class="token punctuation">(</span>value<span class="token punctuation">)</span> <span class="token operator">=</span><span class="token operator">&gt;</span> <span class="token function">Some</span><span class="token punctuation">(</span><span class="token function">f</span><span class="token punctuation">(</span>value<span class="token punctuation">,</span> taskResult<span class="token punctuation">.</span>get<span class="token punctuation">)</span><span class="token punctuation">)</span>
+          <span class="token keyword">case</span> None <span class="token operator">=</span><span class="token operator">&gt;</span> taskResult
+        <span class="token punctuation">}</span>
+      <span class="token punctuation">}</span>
+    <span class="token punctuation">}</span>
+    sc<span class="token punctuation">.</span><span class="token function">runJob</span><span class="token punctuation">(</span><span class="token keyword">this</span><span class="token punctuation">,</span> reducePartition<span class="token punctuation">,</span> mergeResult<span class="token punctuation">)</span>
+    <span class="token comment">// Get the final result out of our Option, or throw an exception if the RDD was empty</span>
+    jobResult<span class="token punctuation">.</span><span class="token function">getOrElse</span><span class="token punctuation">(</span><span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">UnsupportedOperationException</span><span class="token punctuation">(</span><span class="token string">"empty collection"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">}</span>
+
+</code></pre>
+<h3><a id="RDDcheckpoint_328"></a>RDD的checkpoint机制</h3>
+<pre><code class="prism language-java">  <span class="token comment">/**
+   * Mark this RDD for checkpointing. It will be saved to a file inside the checkpoint
+   * directory set with `SparkContext#setCheckpointDir` and all references to its parent
+   * RDDs will be removed. This function must be called before any job has been
+   * executed on this RDD. It is strongly recommended that this RDD is persisted in
+   * memory, otherwise saving it on a file will require recomputation.
+   */</span>
+  def <span class="token function">checkpoint</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">:</span> Unit <span class="token operator">=</span> RDDCheckpointData<span class="token punctuation">.</span><span class="token keyword">synchronized</span> <span class="token punctuation">{</span>
+    <span class="token comment">// NOTE: we use a global lock here due to complexities downstream with ensuring</span>
+    <span class="token comment">// children RDD partitions point to the correct parent partitions. In the future</span>
+    <span class="token comment">// we should revisit this consideration.</span>
+    <span class="token keyword">if</span> <span class="token punctuation">(</span>context<span class="token punctuation">.</span>checkpointDir<span class="token punctuation">.</span>isEmpty<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">SparkException</span><span class="token punctuation">(</span><span class="token string">"Checkpoint directory has not been set in the SparkContext"</span><span class="token punctuation">)</span>
+    <span class="token punctuation">}</span> <span class="token keyword">else</span> <span class="token keyword">if</span> <span class="token punctuation">(</span>checkpointData<span class="token punctuation">.</span>isEmpty<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      checkpointData <span class="token operator">=</span> <span class="token function">Some</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">ReliableRDDCheckpointData</span><span class="token punctuation">(</span><span class="token keyword">this</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+    <span class="token punctuation">}</span>
+  <span class="token punctuation">}</span>
+</code></pre>
+<p>checkpoint 的使用方式如下</p>
+<pre><code class="prism language-java">val data <span class="token operator">=</span> sc<span class="token punctuation">.</span><span class="token function">textFile</span><span class="token punctuation">(</span><span class="token string">"/tmp/spark/1.data"</span><span class="token punctuation">)</span><span class="token punctuation">.</span><span class="token function">cache</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">// 注意要cache </span>
+sc<span class="token punctuation">.</span><span class="token function">setCheckpointDir</span><span class="token punctuation">(</span><span class="token string">"/tmp/spark/checkpoint"</span><span class="token punctuation">)</span>
+data<span class="token punctuation">.</span>checkpoint 
+data<span class="token punctuation">.</span>count
+</code></pre>
+<p>使用很简单， 就是设置一下 checkpoint 目录，然后再rdd上调用 checkpoint 方法， action 的时候就对数据进行了 checkpoint当checkpoint为当前RDD设置检查点的时候，该函数将会创建一个二进制的文件，并存储到checkpoint目录中，该目录是用SparkContext.setCheckpointDir()设置的。在checkpoint的过程中，该RDD的所有依赖于父RDD中的信息将全部被移出。对RDD进行checkpoint操作并不会马上被执行，必须执行Action操作才能触发。当需要checkpoint的数据的时候，通过ReliableCheckpointRDD的readCheckpointFile方法来从file路径里面读出已经Checkpoint的数据。</p>
+<h2><a id="Executor_358"></a>Executor</h2>
+<ol>
+<li>在Worker Actor中，每次LaunchExecutor会创建一个CoarseGrainedExecutorBackend进程，一个Executor对应一个CoarseGrainedExecutorBackend</li>
+<li>针对同一个App，每个Worker里只能有一个针对该App的Executor存在，切记。如果想让整个App的Executor变多，设置SPARK_WORKER_INSTANCES，让每个节点（机器上）的Worker变多。APP之间不公用Executor。</li>
+<li>Executor的资源分配有2种策略：</li>
+</ol>
+<ul>
+<li>SpreadOut ：一种以round-robin方式遍历集群所有可用Worker，分配Worker资源，来启动创建Executor的策略，好处是尽可能的将cores分配到各个节点，最大化负载均衡和高并行。</li>
+<li>非SpreadOut：会尽可能的根据每个Worker的剩余资源来启动Executor，这样启动的Executor可能只在集群的一小部分机器的Worker上。这样做对node较少的集群还可以，集群规模大了，Executor的并行度和机器负载均衡就不能够保证了。</li>
+</ul>
+<p><img src="https://img-blog.csdnimg.cn/20181113170456149.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RlZmluZV91cw==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdnimg.cn/2018111317062238.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2RlZmluZV91cw==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<h1><a id="Streaming_368"></a>Streaming</h1>
+<p><a href="https://blog.csdn.net/define_us/article/details/83109337" rel="nofollow">https://blog.csdn.net/define_us/article/details/83109337</a></p>
+<h2><a id="JavaStreamingContext_371"></a>JavaStreamingContext</h2>
+<p><a href="http://spark.apache.org/docs/0.8.1/api/streaming/org/apache/spark/streaming/api/java/JavaStreamingContext.html" rel="nofollow">http://spark.apache.org/docs/0.8.1/api/streaming/org/apache/spark/streaming/api/java/JavaStreamingContext.html</a><br>
+定义上下文后，您必须执行以下操作：</p>
+<ul>
+<li>通过创建输入DStreams定义输入源</li>
+<li>通过对DStreams应用转换操作（transformation）和输出操作（output）来定义流计算</li>
+<li>可以使用streamingContext.start()方法接收和处理数据</li>
+<li>可以使用streamingContext.awaitTermination()方法等待流计算完成（手动或由于任何错误），来防止应用退出</li>
+<li>可以使用streamingContext.stop（）手动停止处理。</li>
+</ul>
+<pre><code class="prism language-java"><span class="token keyword">class</span> <span class="token class-name">JavaStreamingContext</span><span class="token punctuation">(</span>val ssc<span class="token operator">:</span> StreamingContext<span class="token punctuation">)</span> <span class="token keyword">extends</span> <span class="token class-name">Closeable</span> <span class="token punctuation">{</span>
+  <span class="token comment">/**
+   * Start the execution of the streams.
+   */</span>
+  def <span class="token function">start</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token operator">:</span> Unit <span class="token operator">=</span> <span class="token punctuation">{</span>
+    ssc<span class="token punctuation">.</span><span class="token function">start</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+  <span class="token punctuation">}</span>
+</code></pre>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,230 @@
+---
+layout:     post
+title:      spark学习-31-spark2.2.0中Utils.getCallSite()的作用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主九师兄（QQ群:spark源代码 198279782 欢迎来探讨技术）原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_21383435/article/details/78559871				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-light">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>1。先看代码解析</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs coffeescript"> /**
+   * When called inside a <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">in</span> <span class="hljs-title">the</span> <span class="hljs-title">spark</span> <span class="hljs-title">package</span>, <span class="hljs-title">returns</span> <span class="hljs-title">the</span> <span class="hljs-title">name</span> <span class="hljs-title">of</span> <span class="hljs-title">the</span> <span class="hljs-title">user</span> <span class="hljs-title">code</span> <span class="hljs-title">class</span></span>
+   * (outside the spark package) that called into Spark, as well as which Spark method they called.
+   * This <span class="hljs-keyword">is</span> used, <span class="hljs-keyword">for</span> example, to tell users where <span class="hljs-keyword">in</span> their code each RDD got created.
+    *
+    * 当在spark包中调用类时，返回调用spark的用户代码类的名称，以及它们调用的spark方法。
+    * 例如，这是用来告诉用户在他们的代码中每个RDD被创建的地方。
+   *
+   * <span class="hljs-property">@param</span> skipClass Function that <span class="hljs-keyword">is</span> used to exclude non-user-code classes.
+    *                  用于排除非用户代码类的函数。
+    *
+    * 功能描述：获取当前SparkContext的当前调用栈，将栈中最靠近栈底的属于Spark或者Scala核心的类压入callStack的栈顶，
+    * 并将此类的方法存入lastSparkMethod;将栈里最靠近栈顶的用户类放入callStack,将此类的行号存入firstUserline，类名
+    * 存入firstUserFile，最终返回的样例类CallSite存储了最短栈和长度默认为<span class="hljs-number">20</span>的最长栈的样例类。
+    * 在JavaWordCount例子中，获得的数据如下：
+    *   最短栈：JavaSparkContext at JavaWordCount.<span class="hljs-attribute">java</span>:<span class="hljs-number">44</span>;
+    *   最长栈：org.apache.spark.api.java.JavaSparkContext&lt;init&gt;(JavaSparkContext.<span class="hljs-attribute">scala</span>:<span class="hljs-number">61</span>) org.apache.spark.
+    *          examples.JavaWordCount,main(JavaWordCount.<span class="hljs-attribute">java</span>:<span class="hljs-number">44</span>)
+    *
+    *  我把这个方法的内容写到eclipse中一个单独的类中，如下
+    *
+    * package scalaTest
+    *
+    * <span class="hljs-reserved">import</span> org.apache.spark.SparkConf
+    * <span class="hljs-reserved">import</span> org.apache.spark.SparkContext
+    * <span class="hljs-reserved">import</span> scala.collection.mutable.ArrayBuffer
+    *
+    * object Map {
+    *
+    *   def main(<span class="hljs-attribute">args</span>:Array[String]){
+    *
+    *     System.setProperty(<span class="hljs-string">"hadoop.home.dir"</span>, <span class="hljs-string">"F:\\02-hadoop\\hadoop-2.7.3\\"</span>);
+    *
+    *     val conf = <span class="hljs-keyword">new</span> SparkConf().setMaster(<span class="hljs-string">"local"</span>).setAppName(<span class="hljs-string">"lcc_map"</span>);
+    *     val sc = <span class="hljs-keyword">new</span> SparkContext(conf)
+    *
+    *   <span class="hljs-reserved">var</span> lastSparkMethod = <span class="hljs-string">"&lt;unknown&gt;"</span>
+    *     <span class="hljs-reserved">var</span> firstUserFile = <span class="hljs-string">"&lt;unknown&gt;"</span>
+    *     <span class="hljs-reserved">var</span> firstUserLine = <span class="hljs-number">0</span>
+    *     <span class="hljs-reserved">var</span> insideSpark = <span class="hljs-literal">true</span>
+    *     <span class="hljs-reserved">var</span> callStack = <span class="hljs-keyword">new</span> ArrayBuffer[String]() :+ <span class="hljs-string">"&lt;unknown&gt;"</span>
+    *     Thread.currentThread.getStackTrace().foreach { <span class="hljs-attribute">ste</span>: StackTraceElement<span class="hljs-function"> =&gt;</span>
+    *       println(<span class="hljs-string">"ste="</span>+ste);
+    *       println(<span class="hljs-string">"ste.getMethodName="</span>+ste.getMethodName);
+    *       println(<span class="hljs-string">"te.getMethodName.containse.="</span>+ste.getMethodName.contains(<span class="hljs-string">"getStackTrace"</span>));
+    *       println(<span class="hljs-string">"ste.getClassName="</span>+ste.getClassName);
+    *       println(<span class="hljs-string">"ste.getLineNumber="</span>+ste.getLineNumber);
+    *       println(<span class="hljs-string">"ste.getFileName="</span>+ste.getFileName);
+    *       <span class="hljs-keyword">if</span> (ste != <span class="hljs-literal">null</span> &amp;&amp; ste.getMethodName != <span class="hljs-literal">null</span>
+    *         &amp;&amp; !ste.getMethodName.contains(<span class="hljs-string">"getStackTrace"</span>)) {
+    *         <span class="hljs-keyword">if</span> (insideSpark) {
+    *           <span class="hljs-regexp">//i</span>f (skipClass(ste.getClassName)) {
+    *             lastSparkMethod = <span class="hljs-keyword">if</span> (ste.getMethodName == <span class="hljs-string">"&lt;init&gt;"</span>) {
+    *              <span class="hljs-regexp">//</span> Spark method <span class="hljs-keyword">is</span> a constructor; get its <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">name</span></span>
+    *               ste.getClassName.substring(ste.getClassName.lastIndexOf(<span class="hljs-string">'.'</span>) + <span class="hljs-number">1</span>)
+    *            <span class="hljs-regexp">//</span> } <span class="hljs-keyword">else</span> {
+    *            <span class="hljs-regexp">//</span>   ste.getMethodName
+    *            <span class="hljs-regexp">//</span> }
+    *             callStack(<span class="hljs-number">0</span>) = ste.toString <span class="hljs-regexp">//</span> Put last Spark method <span class="hljs-literal">on</span> top <span class="hljs-keyword">of</span> the stack trace.
+    *             println(<span class="hljs-string">"callStack(0)="</span>+callStack(<span class="hljs-number">0</span>));
+    *             <span class="hljs-literal">null</span>
+    *           } <span class="hljs-keyword">else</span> {
+    *             <span class="hljs-keyword">if</span> (ste.getFileName != <span class="hljs-literal">null</span>) {
+    *               firstUserFile = ste.getFileName
+    *               <span class="hljs-keyword">if</span> (ste.getLineNumber &gt;= <span class="hljs-number">0</span>) {
+    *                 firstUserLine = ste.getLineNumber
+    *              }
+    *            }
+    *             callStack += ste.toString
+    *             println(<span class="hljs-string">"callStack="</span>+callStack);
+    *             insideSpark = <span class="hljs-literal">false</span>
+    *             <span class="hljs-literal">null</span>
+    *           }
+    *         } <span class="hljs-keyword">else</span> {
+    *           callStack += ste.toString
+    *         }
+    *       }
+    *     }
+    *
+    *   }
+    *
+    * ste=java.lang.Thread.getStackTrace(Unknown Source)
+    * ste.getMethodName=getStackTrace
+    * te.getMethodName.containse.=<span class="hljs-literal">true</span>
+    * ste.getClassName=java.lang.Thread
+    * ste.getLineNumber=-<span class="hljs-number">1</span>
+    * ste.getFileName=<span class="hljs-literal">null</span>
+    *
+    * ste=scalaTest.Map$.main(Map.<span class="hljs-attribute">scala</span>:<span class="hljs-number">21</span>)
+    * ste.getMethodName=main
+    * te.getMethodName.containse.=<span class="hljs-literal">false</span>
+    * ste.getClassName=scalaTest.Map$
+    * ste.getLineNumber=<span class="hljs-number">21</span>
+    * ste.getFileName=Map.scala
+    *
+    * callStack=ArrayBuffer(&lt;unknown&gt;, scalaTest.Map$.main(Map.<span class="hljs-attribute">scala</span>:<span class="hljs-number">21</span>))
+    * ste=scalaTest.Map.main(Map.scala)
+    * ste.getMethodName=main
+    * te.getMethodName.containse.=<span class="hljs-literal">false</span>
+    * ste.getClassName=scalaTest.Map
+    * ste.getLineNumber=-<span class="hljs-number">1</span>
+    * ste.getFileName=Map.scala
+    *
+    *
+    *
+    *  调用步骤：
+    *     <span class="hljs-number">1.</span>
+   */
+  def getCallSite(<span class="hljs-attribute">skipClass</span>: String<span class="hljs-function"> =&gt;</span> Boolean = sparkInternalExclusionFunction): CallSite = {
+    <span class="hljs-regexp">//</span> Keep crawling up the stack trace <span class="hljs-keyword">until</span> we find the first <span class="hljs-reserved">function</span> <span class="hljs-keyword">not</span> inside <span class="hljs-keyword">of</span> the spark
+    <span class="hljs-regexp">//</span> package. We track the last (shallowest) contiguous Spark method. This might be an RDD
+    <span class="hljs-regexp">//</span> transformation, a SparkContext <span class="hljs-reserved">function</span> (such as parallelize), <span class="hljs-keyword">or</span> anything <span class="hljs-keyword">else</span> that leads
+    <span class="hljs-regexp">//</span> to instantiation <span class="hljs-keyword">of</span> an RDD. We also track the first (deepest) user method, file, <span class="hljs-keyword">and</span> line.\
+
+    <span class="hljs-regexp">//</span> 继续往上爬堆栈跟踪，直到我们发现第一个函数不在spark包内。我们跟踪最后一个(最浅的)连续的Spark方法。
+    <span class="hljs-regexp">//</span> 这可能是一个RDD转换，一个SparkContext函数(例如parallelize)，或者其他导致RDD实例化的东西。
+    <span class="hljs-regexp">//</span> 我们还跟踪第一个(最深的)用户方法、文件和行。
+    <span class="hljs-reserved">var</span> lastSparkMethod = <span class="hljs-string">"&lt;unknown&gt;"</span>
+    <span class="hljs-reserved">var</span> firstUserFile = <span class="hljs-string">"&lt;unknown&gt;"</span>
+    <span class="hljs-reserved">var</span> firstUserLine = <span class="hljs-number">0</span>
+    <span class="hljs-reserved">var</span> insideSpark = <span class="hljs-literal">true</span>
+    <span class="hljs-reserved">var</span> callStack = <span class="hljs-keyword">new</span> ArrayBuffer[String]() :+ <span class="hljs-string">"&lt;unknown&gt;"</span>
+
+    <span class="hljs-regexp">//</span>  Thread.currentThread 意思 Returns a reference to the currently executing thread object.
+    <span class="hljs-regexp">//</span> 返回当前正在执行的线程对象的引用。
+    Thread.currentThread.getStackTrace().foreach { <span class="hljs-attribute">ste</span>: StackTraceElement<span class="hljs-function"> =&gt;</span>
+      <span class="hljs-regexp">//</span> When running under some profilers, the current stack trace might contain some bogus
+      <span class="hljs-regexp">//</span> frames. This <span class="hljs-keyword">is</span> intended to ensure that we don<span class="hljs-string">'t crash in these situations by
+      // ignoring any frames that we can'</span>t examine.
+
+      <span class="hljs-regexp">//</span> 在某些profiler下运行时，当前堆栈跟踪可能包含一些假frames。
+      <span class="hljs-regexp">//</span> 这是为了确保我们在这些情况下不会忽略任何我们不能检查的框架。
+      <span class="hljs-keyword">if</span> (ste != <span class="hljs-literal">null</span> &amp;&amp; ste.getMethodName != <span class="hljs-literal">null</span>
+        &amp;&amp; !ste.getMethodName.contains(<span class="hljs-string">"getStackTrace"</span>)) {
+        <span class="hljs-keyword">if</span> (insideSpark) {
+          <span class="hljs-keyword">if</span> (skipClass(ste.getClassName)) {
+            lastSparkMethod = <span class="hljs-keyword">if</span> (ste.getMethodName == <span class="hljs-string">"&lt;init&gt;"</span>) {
+              <span class="hljs-regexp">//</span> Spark method <span class="hljs-keyword">is</span> a constructor; get its <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">name</span></span>
+              ste.getClassName.substring(ste.getClassName.lastIndexOf(<span class="hljs-string">'.'</span>) + <span class="hljs-number">1</span>)
+            } <span class="hljs-keyword">else</span> {
+              ste.getMethodName
+            }
+            callStack(<span class="hljs-number">0</span>) = ste.toString <span class="hljs-regexp">//</span> Put last Spark method <span class="hljs-literal">on</span> top <span class="hljs-keyword">of</span> the stack trace.
+          } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">if</span> (ste.getFileName != <span class="hljs-literal">null</span>) {
+              firstUserFile = ste.getFileName
+              <span class="hljs-keyword">if</span> (ste.getLineNumber &gt;= <span class="hljs-number">0</span>) {
+                firstUserLine = ste.getLineNumber
+              }
+            }
+            callStack += ste.toString
+            insideSpark = <span class="hljs-literal">false</span>
+          }
+        } <span class="hljs-keyword">else</span> {
+          callStack += ste.toString
+        }
+      }
+    }
+
+
+
+
+    val callStackDepth = System.getProperty(<span class="hljs-string">"spark.callstack.depth"</span>, <span class="hljs-string">"20"</span>).toInt
+    val shortForm =
+      <span class="hljs-keyword">if</span> (firstUserFile == <span class="hljs-string">"HiveSessionImpl.java"</span>) {
+        <span class="hljs-regexp">//</span> To be more user friendly, show a nicer string <span class="hljs-keyword">for</span> queries submitted from the JDBC
+        <span class="hljs-regexp">//</span> server.
+        <span class="hljs-string">"Spark JDBC Server Query"</span>
+      } <span class="hljs-keyword">else</span> {
+        s<span class="hljs-string">"$lastSparkMethod at $firstUserFile:$firstUserLine"</span>
+      }
+    val longForm = callStack.take(callStackDepth).mkString(<span class="hljs-string">"\n"</span>)
+
+    CallSite(shortForm, longForm)
+  }</code></pre>
+
+<p>2。首先这个方法返回的是一个CallSite对象,CallSite是Utils类的一个内部类，附上CallSite的源码</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-keyword">private</span>[spark] <span class="hljs-class"><span class="hljs-keyword">object</span> <span class="hljs-title">CallSite</span> {</span>
+  <span class="hljs-keyword">val</span> SHORT_FORM = <span class="hljs-string">"callSite.short"</span>
+  <span class="hljs-keyword">val</span> LONG_FORM = <span class="hljs-string">"callSite.long"</span>
+  <span class="hljs-keyword">val</span> empty = CallSite(<span class="hljs-string">""</span>, <span class="hljs-string">""</span>)
+}
+</code></pre>
+
+<p>3。这个对象是一个case class,case class 通常情况下被用做数据载体，也即是Java里面的VO，这个类里面保存了两个东西， <br>
+一个是SHORT_FORM,一个是LONG_FORM,字面上的意思是短格式和长格式，那么这两个东西究竟是什么东西呢？ <br>
+分析代码可知，这个方法是取当前线程的堆栈信息，遍历堆栈，将方法名符合一定规则的放入栈顶 <br>
+这个规则源码如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs scala"> <span class="hljs-javadoc">/** Default filtering function for finding call sites using `getCallSite`. */</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> sparkInternalExclusionFunction(className: String): Boolean = {
+    <span class="hljs-comment">// A regular expression to match classes of the internal Spark API's</span>
+    <span class="hljs-comment">// that we want to skip when finding the call site of a method.</span>
+    <span class="hljs-keyword">val</span> SPARK_CORE_CLASS_REGEX =
+      <span class="hljs-string">"""^org\.apache\.spark(\.api\.java)?(\.util)?(\.rdd)?(\.broadcast)?\.[A-Z]"""</span>.r
+    <span class="hljs-keyword">val</span> SPARK_SQL_CLASS_REGEX = <span class="hljs-string">"""^org\.apache\.spark\.sql.*"""</span>.r
+    <span class="hljs-keyword">val</span> SCALA_CORE_CLASS_PREFIX = <span class="hljs-string">"scala"</span>
+    <span class="hljs-keyword">val</span> isSparkClass = SPARK_CORE_CLASS_REGEX.findFirstIn(className).isDefined ||
+      SPARK_SQL_CLASS_REGEX.findFirstIn(className).isDefined
+    <span class="hljs-keyword">val</span> isScalaClass = className.startsWith(SCALA_CORE_CLASS_PREFIX)
+    <span class="hljs-comment">// If the class is a Spark internal class or a Scala class, then exclude.</span>
+    isSparkClass || isScalaClass
+  }</code></pre>
+
+<p>以上两个正则表达式的方法名，赋值给lastSparkMethod并且将该栈元素放入栈顶，记住是每一次都放入栈顶，也即是覆盖之前的，得到的是最后一个方法名。以官方提供的LogQuery为例子。最后得到的是这样的堆栈信息</p>
+
+<p>如果不符合上面两个正则表达式的则将调用SparkContext的文件名放入firstUserFile变量，堆栈里的行数放入firstUserLine变量，并且将insideSpark赋值为负数， <br>
+这样堆栈里的下一个元素则直接放入callStack变量的最后 <br>
+如果SparkContext是在HiveSessionImpl实例化的，则short_form标记为Spark JDBC Server Query</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,69 @@
+---
+layout:     post
+title:      Spark架构深入剖析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">本文转之P</span><span style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:12pt;line-height:1.5;">ivotal的一个工程师的博客。觉得极好。</span>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+作者本人经常在StackOverflow上回答一个关系Spark架构的问题，发现整个互联网都没有一篇文章能对Spark总体架构进行很好的描述，作者可怜我们这些菜鸟，写了这篇文章，太感动了。<span style="font-size:12pt;line-height:1.5;">本文读者需要一定的Spark的基础知识，至少了解Spark的RDD和DAG。</span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<img src="http://images2015.cnblogs.com/blog/331802/201512/331802-20151212204853966-653921837.png" alt="Spark-Architecture-Official.png (607×284)" style="border:0px;"><span style="font-size:12pt;line-height:1.5;"><br></span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+上图引入了很多术语："Executor","Task","Cache","Worker Node"等等，当我开始学习Spark的时候，这几乎是整个互联网上唯一一张关于Spark架构的图了，我个人觉得该图缺失了一些很重要的概念或者是描述的</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+任何Spark的进程都是一个JVM进程，既然是一个JVM进程，那么就可以配置它的堆大小（-Xmx和-Xms）,但是进程怎么使用堆内存和为什么需要它呢？下面是一个JVM堆空间下Spark的内存分配情况</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<img src="http://images2015.cnblogs.com/blog/331802/201512/331802-20151212204854497-267447524.png" border="0" alt="Spark-Heap-Usage.png" style="border:0px;"></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<span style="font-size:12pt;line-height:1.5;">默认情况下，Spark进程的堆空间是512mb，为了安全考虑同时避免OOM,Spark只允许利用90%的堆空间，spark中使用spark.storage.safetyFraction用来配置该值（默认是0.9). Spark作为一个内存计算工具，Spark可以在内存中存储数据，如果读过</span><a href="http://0x0fff.com/spark-misconceptions/" rel="nofollow" style="color:rgb(0,0,0);border:0px;font-size:14px;vertical-align:baseline;">http://0x0fff.com/spark-misconceptions/</a><span style="font-size:12px;"><span style="line-height:23.9946px;">， <span style="font-size:11pt;">就会明白Spark不是一个真的内存工具，它只是把内存作为他的LRU缓存，这样大量的内存被用来缓存正在计算的数据，该部分占safe堆的60%，Spark使用spark.storage.memoryFraction控制该值，如果想知道Spark中能缓存了多少数据，可以统计所有Executor的堆大小，乘上safeFraction和memoryFraction，默认是54%,这就是Spark可用缓存数据使用的堆大小，</span></span></span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<span style="font-size:12px;"><span style="line-height:23.9946px;"><span style="font-size:11pt;"><br></span></span></span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<span style="font-size:14.7826px;line-height:23.9946px;">该部分介绍shuffle的内存使用情况，它通过 堆大小 * spark.shuffle.safetyFraction * spark.shuffle.memoryFraction。 </span><span style="font-size:14.7826px;line-height:23.9946px;">spark.shuffle.safetyFraction的默认值是0.8， </span><span style="font-size:14.7826px;line-height:23.9946px;">spark.shuffle.memoryFraction的默认值是0.2，所以最终只能最多使堆空间的16%用于shuffle,关于怎么使用这块内存，参考<a href="https://github.com/apache/spark/blob/branch-1.3/core/src/main/scala/org/apache/spark/shuffle/ShuffleMemoryManager.scala" rel="nofollow" style="color:rgb(0,0,0);">https://github.com/apache/spark/blob/branch-1.3/core/src/main/scala/org/apache/spark/shuffle/ShuffleMemoryManager.scala</a> ，但是通常spark会使用这块内存用于shuffle中一些别的任务，当执行shuffle时，有时对数据进行排序，当进行排序时，需要缓冲排完序后的数据（注意不能改变LRU缓冲中的数据，因为后面可能要重用），这样就需要大量的RAM存储排完序后的数据块，当没有足够的内存用于排序，参考外排的实现，可以一块一块的排序，然后最终合并。</span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<span style="font-size:14.7826px;line-height:23.9946px;"><br></span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<span style="font-size:14.7826px;line-height:23.9946px;">最后要讲到的一块内存是"unroll",该快内存用于unroll计算如下：spark.storage.unrollFraction * spark.storage.memoryFraction * spark.storage.safetyFraction 。当我们需要在内存展开数据块的时候使用，那么为什么需要展开呢？因为spark允许以序列化和非序列化两种方式存储数据，序列化后的数据无法直接使用，所以使用时必须要展开。该部分内存占用缓存的内存，所以如果需要内存用于展开数据时，如果这个时候内存不够，那么Spark
+ LRU缓存中的数据会删除一些快。</span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+此时应该清楚知道spark怎么使用JVM中堆内存了，现在切换到集群模式，当你启动一个spark集群，如何看待它，下图是YARN模式下的</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<img src="http://images2015.cnblogs.com/blog/331802/201512/331802-20151212204855637-422830636.png" border="0" alt="Spark-Architecture-On-YARN.png" style="border:0px;"><br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+当运行在yarn集群上时，Yarn的ResourceMananger用来管理集群资源，集群上每个节点上的NodeManager用来管控所在节点的资源，从yarn的角度来看，每个节点看做可分配的资源池，当向ResourceManager请求资源时，它返回一些NodeManager信息，这些NodeManager将会提供execution container给你，每个<span style="font-size:12pt;line-height:1.5;">execution
+ container就是满足请求的堆大小的JVM进程，JVM进程的位置是由ResourceMananger管理的，不能自己控制，如果一个节点有64GB的内存被yarn管理（通过</span>yarn.nodemanager.resource.memory-mb配置),当请求10个4G内存的executors时，这些<span style="font-size:12pt;line-height:1.5;">executors可能运行在同一个节点上。</span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<span style="font-size:12pt;line-height:1.5;"><br></span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+当在yarn上启动spark集群上，可以指定executors的数量（-num-executors或者spark.executor.instances)，可以指定每个executor使用的内存（-executor-memory或者spark.executor.memory),可以指定每个executor使用的cpu核数（-executor-cores或者spark.executor.cores),指定每个task执行使用的core数（spark.task.cpus),也可以指定driver应用使用的内存（-driver-memory和spark.driver.memory)</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+当在集群上执行应用时，job会被切分成stages,每个stage切分成task,每个task单独调度，可以把executor的jvm进程看做task执行池，每个executor有 spark.executor.cores / spark.task.cpus execution 个执行槽，这里有个例子：集群有12个节点运行Yarn的NodeManager，每个节点有64G内存和32的cpu核，每个节点可以启动2个executor，每个executor的使用26G内存，剩下的内用系统和别的服务使用，每个executor有12个cpu核用于执行task,这样整个集群有12
+ machines * 2 executors per machine * 12 cores per executor / 1 core = 288 个task执行槽，这意味着spark集群可以同时跑288个task,整个集群用户缓存数据的内存有0.9 spark.storage.safetyFraction * 0.6 spark.storage.memoryFraction * 12 machines * 2 executors per machine * 26 GB per executor = 336.96
+ GB.</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<span style="font-size:12pt;line-height:1.5;"><br></span></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+到目前为止，我们已经了解了spark怎么使用JVM的内存以及集群上执行槽是什么，目前为止还没有谈到task的一些细节，这将在另一个文章中提高，基本上就是spark的一个工作单元，作为exector的jvm进程中的一个线程执行，这也是为什么spark的job启动时间快的原因，在jvm中启动一个线程比启动一个单独的jvm进程块（在hadoop中执行mapreduce应用会启动多个jvm进程）</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+下面将关注spark的另一个抽象：partition, spark处理的所有数据都会切分成partion,一个parition是什么以及怎么确定，partition的大小完全依赖数据源，spark中大部分用于读取数据的方法都可以指定生成的RDD中partition的个数，当从hdfs上读取一个文件时，会使用Hadoop的InputFormat来处理，默认情况下InputFormat返回每个InputSplit都会映射RDD中的一个Partition,大部分存储在HDFS上的文件每个数据块会生成一个InputSplit,每个数据块大小为64mb和128mb,因为HDFS上面的数据的块边界是按字节来算的（64mb一个块），但是当数据被处理是，它又要按记录进行切分，对于文本文件来说切分的字符就是换行符，对于sequence文件来说，他是块结束，如果是压缩文件，整个文件都被压缩了，它不能按行进行切分了，整个文件只有一个inputsplit,这样spark中也会只有一个parition,在处理的时候需要手动的repatition。</div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<br></div>
+<div style="font-family:Verdana, Arial, Helvetica, sans-serif;font-size:13.3333px;line-height:24px;">
+<br></div>
+            </div>
+                </div>
