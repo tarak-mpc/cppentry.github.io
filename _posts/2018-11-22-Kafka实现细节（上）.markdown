@@ -1,0 +1,71 @@
+---
+layout:     post
+title:      Kafka实现细节（上）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>转自：<a href="http://my.oschina.net/ielts0909/blog/94153" rel="nofollow">http://my.oschina.net/ielts0909/blog/94153</a></p>
+<p><br></p>
+<p></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+如果你第一次看kafka的文章，请先看<a href="http://my.oschina.net/ielts0909/blog/92972" rel="nofollow" style="color:rgb(0,114,187);">《分布式消息系统kafka初步》</a></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+之前有人问<span>kafka</span>和一般的<span>MQ</span>之间的区别，这个问题挺难回答，我觉得不如从<span>kafka</span>的实现原理来分析更为透彻，这篇将依据官网上给出的<span>design</span>来详细的分析，<span>kafka</span>是如何实现其高性能、高吞吐的。这一段应该会挺长的我想分两篇来写。今天这一篇主要从宏观上说<span>kafka</span>实现的细节，下一篇，在从具体的技术上去分析。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<a href="http://static.oschina.net/uploads/space/2012/1205/214815_lbyX_589742.png" rel="nofollow" style="color:rgb(0,114,187);"><img src="http://static.oschina.net/uploads/space/2012/1205/214815_lbyX_589742.png" alt="" style="border:0px;"></a></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+我们先看<span>kafka</span>的设计元素：<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>1. </span>通常来说，<span>kafka</span>的使用是为了消息的持久化（<span>persistent messages</span>）<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>2. </span>吞吐量是<span>kafka</span>设计的主要目标<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>3. </span>关于消费的状态被记录为<span>consumer</span>的一部分，而不是<span>server</span>。这点稍微解释下，这里的<span>server</span>还是只<span>broker</span>，谁消费了多少数据都记录在消费者自己手中，不存在<span>broker</span>中。按理说，消费记录也是一个日志，可以放在<span>broker</span>中，至于为什么要这么设计，我们写下去了再说。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>4. </span><span>Kafka</span>的分布式可以表现在<span>producer</span>、<span>broker</span>、<span>consumer</span>都可以分布在多台机器上。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+在讲实现原理之前，我们还得了解几个术语：<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+l  <span>Topic</span>：其实官网上没有单独提这个词，但<span>topic</span>其实才是理解的关键，在<span>kafka</span>中，不同的数据可以按照不同的<span>topic</span>存储。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+l  <span>Message</span>：消息是<span>kafka</span>处理的对象，在<span>kafka</span>中，消息是被发布到<span>broker</span>的<span>topic</span>中。而<span>consumer</span>也是从相应的<span>topic</span>中拿数据。也就是说，<span>message</span>是按<span>topic</span>存储的。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+l  <span>Consumer Group</span>：虽然上面的设计元素第四条，我们说三者都可以部署到多台机器上，三者分别并作为一个逻辑的<span>group</span>，但对于<span>consumer</span>来说这样的部署需要特殊的支持。<span>Consumer
+ Group</span>就是让多个（相关的）进程（机器）在逻辑上扮演一个<span>consumer</span>。这个<span>group</span>的定义其实是为了去支持<span>topic</span>这样的语义。在<span>JMS</span>中，大家最熟悉的是队列，我们将所有的<span>consumer</span>放到一个<span>group</span>中，这样就是队列。而<span>topic</span>则是将<span>consumer</span>放置到与它相关的<span>topic</span>中去。所以无论一个<span>topic</span>存在于多少个<span>consumer</span>中，<span> </span>a
+ message is stored only a single time。你可能会有疑问，备份怎么办，接着看下去。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+接下来，我们来看kafka的实现究竟依赖了哪些东西。</p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>1.  </span>硬件上，<span>kafka</span>选用了硬盘直接读写，当然这里也有策略。一个<span>67200rpm STAT RAID5</span>的阵列，线性读写速度是<span>300MB/sec</span>，如果是随机读写，速度则是<span>50K/sec</span>。差距很明显，所以<span>kafka</span>选的策略就是利用线性存储，至于怎么存，我们在存储中会说到。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>2.  </span>关于缓存，<span>kafka</span>没有使用内存作为缓存。操作系统用个特性，如果不用<span>direct I/O</span>，那些闲置的<span>memory</span>会去做<span>disk
+ caching</span>，如果<span> </span>a process maintains an in-process cache of the data，这样的情况下可能会产生双份的pagecache，会存储两遍。另外<span>Kafka</span>跑在<span>JVM</span>上，本身<span>JVM</span>垃圾回收、创建对象都非常的耗内存，所以不再依赖于内存做缓存。All
+ data is immediately written to a persistent log on the filesystem without any call to flush the data.<span> </span><span>当然内核自己的</span><span>flush</span><span>不算了。温泉做一次</span><span>32G</span><span>的内存缓存，需要大概</span><span>10</span><span>多分钟。</span><span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>3.    </span><span>Liner writer/reader</span>：这样做的虽然没有<span>B</span>树那样多样的变化，但却有<span>O</span>（<span>1</span>）的操作，而且读写不会相互影响。同时，线性的读写也解耦了数据规模的问题。用廉价的存储就可以达到很高的性价比。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>4.    </span><span>Zero-copy</span>：将数据从硬盘写到<span>socket</span>一般需要经过<span>…</span>你可以自己算一下，这是操作系统里的知识，答案在文章末尾，具体也可以看这里：<span><a href="http://my.oschina.net/ielts0909/blog/85147" rel="nofollow" style="color:rgb(0,114,187);">http://my.oschina.net/ielts0909/blog/85147</a></span>。一句话，<span>Zero-copy</span>减少了<span>IO</span>的操作步骤。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>5.   </span>GZIP and Snappy compression：考虑到传输最大的瓶颈就在于网络上，kafka提供了对数据压缩的各种协议。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>6.   </span>事务机制：虽然kafka对事务的处理比较薄弱，但是在message的分发上还是做了一定的策略来保证数据递送的准确性：<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>At most once</span>—this handles the first case described. Messages are immediately marked as consumed, so they can't be given out twice, but many failure scenarios may lead to losing messages.</p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>At least once</span>—this is the second case where we guarantee each message will be delivered at least once, but in failure cases may be delivered twice.</p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span>Exactly once</span>—this is what people actually want, each message is delivered once and only once.</p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+上述就是关于<span>kafka</span>的实现细节，主要写了关于<span>kafka</span>采用到的技术和使用技术的原因，在后面一篇中，我将主要讲述<span>producer</span>、<span>broker</span>、<span>consumer</span>之间的配合以及<span>kafka</span>的存储问题。<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span> --------------------------------------------------------------------------------</span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+<span></span></p>
+<p style="line-height:1.5;letter-spacing:1px;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">
+To understand the impact of sendfile, it is important to understand the common data path for transfer of data from file to socket:</p>
+<ol style="list-style-position:inside;font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;"><li>The operating system reads data from the disk into pagecache in kernel space</li><li>The application reads the data from kernel space into a user-space buffer</li><li>The application writes the data back into kernel space into a socket buffer</li><li>The operating system copies the data from the socket buffer to the NIC buffer where it is sent over the network</li></ol><span style="font-family:'微软雅黑', Verdana, sans-serif, '宋体';font-size:14px;">其实zero-copy这个技术我们已经在使用了，在NIO中的FileChannel中的transferTo就是采用这样的原理的。 </span><br>            </div>
+                </div>

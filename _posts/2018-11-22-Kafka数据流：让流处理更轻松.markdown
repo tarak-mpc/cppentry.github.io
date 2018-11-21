@@ -1,0 +1,324 @@
+---
+layout:     post
+title:      Kafka数据流：让流处理更轻松
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>  很高兴宣布，Apache Kafka的一项新功能预览叫Kafka Streams。Kafka Streams是一个使用Apache Kafka用于构建分布流处理应用的Java库。这将是即将更新Kafka-0.10版本的一部分，并且已经提供可以很容易试用的预览版。 <br>
+  使用Kafka Stream构建一个流处理应用如下所示: <br>
+</p><center><img src="http://i.imgur.com/UCjtJOI.png" alt="" title=""></center> <br>
+  尽管还是一个很简陋的库，但是Kafka　Stream解决了许多流处理棘手的问题：  <p></p>
+
+<blockquote>
+  <ul>
+  <li>具有毫秒级延迟的Event-at-a-time处理（不是小批量）  </li>
+  <li>状态处理，包括分布式Join和聚合  </li>
+  <li>方便的DSL  </li>
+  <li>使用DataFlow-like模型处理带有window的无序数据  </li>
+  <li>分布式处理和快速故障切换容错  </li>
+  <li>再处理能力，以便当你代码改动时，重新计算输出  </li>
+  <li>无停机时间滚动部署  </li>
+  </ul>
+</blockquote>
+
+<p>  对于想要跳过序言和刚刚深入到文档的人们，可以去看<a href="http://docs.confluent.io/2.1.0-alpha1/streams/index.html" rel="nofollow">Kafka Stream文档</a>。本博客主旨会少“是什么”，深度讲解“为什么”。</p>
+
+
+
+<h2 id="别急到底是什么">别急，到底是什么？</h2>
+
+<p>  Kafka Stream是构建流处理应用，尤其是转变Kafka输入topic为Kafka输出topic（或调用外部服务，更新数据库）应用的库。让你能够以分布式、容错和简洁的代码做到这一点。 <br>
+  流处理领域工作中有非常有趣的事情发生。从Apache Spark、Apache Storm、Apache Flink和Apache Samza到专有服务，例如Google的DataFlow和AWS Lambda。因此Kafka Stream和这些应用的异同是值得概述的。 <br>
+  坦率的讲，生态系统中有大量凌乱的创新，开源是其中重要的部分。对这些不同的处理层非常兴奋：即使它有时候有点混乱，技术发展水平迅速推进。努力让Kafka和这些开源软件工作一样好。我们发现Kafka Stream与专注于分析为重点领域的这些框架和更多的构建处理数据流的核心应用以及微服务差距很大。在下一节，我们将深入讲这些区别，现在让我们深入到Kafka Stream如何简化此类应用。  </p>
+
+
+
+<h2 id="时髦流处理kafka">时髦，流处理，Kafka</h2>
+
+<p>  真正了解现实世界一个系统设计工作的唯一方法是去建立、部署实际应用，并观察是否达到预期。在以往的角色，Linkedin中幸运的成为设想和构建流处理框架Apache Samza团队的一部分。推出一组内部应用程序，在生产中支持，并使其成为Apache的一个开源项目。 <br>
+  学到了什么？很多。曾经一个关键的误解是流处理在某种程度上以实时Mapreduce层使用。最总才意识到，流处理最引人瞩目的应用是与你通常使用Hive或Spark工作相当不同，更接近与一种异步微服务，而不是成为一个更快版本的批分析工作。 <br>
+  什么意思呢?是指这些流处理应用是实现业务核心功能的软件，而不是对业务计算分析。 <br>
+  建立这种类型的流处理应用需要解决的是与典型Mapreduce或Spark作业的分析或ETL领域不同的需求。他们需要经过和正常应用通过配置、部署、监控等方面相同的过程，他们更喜欢微服务而不是Mapreduce工作。这类型的流应用处理来自Kafka的异步事件流而不是HTTP请求。 <br>
+  如何用Kafka构建流处理应用，有两个选择：  </p>
+
+<blockquote>
+  <ol>
+  <li>只需要构建一个直接使用Kafka producer和consumer的API应用  </li>
+  <li>采用一个完整的流处理框架  </li>
+  </ol>
+</blockquote>
+
+<p>  对简单问题直接使用Kafka API工作非常好。不对应用程序添加任何本章的依赖。我们称之为“时髦流处理”，因为它是一种呼吁喜欢自己掌控的人们使用的低技术解决方案。对简单的同时处理一条信息表现非常好，但是当你想要做更多的工作，如计算聚合或Join流时，问题出现了。在这种情况下在Kafka consumer API上解决这个问题相当复杂的。 <br>
+  在一个完整的流处理框架中pull让你轻松访问更高级的操作。但是对于简单应用的成本是极其复杂的。这使得一切变得困难，从调试到性能优化到监控到部署。更糟糕的是，如果你的应用拥有同步和异步碎片然后最后在为实现服务或应用分割机制或者流处理框架的代码。以这种方式真的很难建立并操作业务的重要部分。  <br>
+  不是所有领域出现这个问题，毕竟如果你已经使用Spark构建一个批工作流，并且为了一些实时数位你希望向这个组合添加Spark Streaming工作，额外的复杂度相当低，它重新利用你已经拥有的技术。 <br>
+  然后如果为了这个新应用的唯一目的部署Spark集群，这将是非常复杂的。 <br>
+  因为在Kafka中已经设计了核心抽象是我们想要提供的流处理基元，为你提供你愿意拥有的流处理框架。但是有点超出了正常Kafka produce和consumer API的额外操作复杂度。 <br>
+  换句话说，我们的目的如下所示： <br>
+</p><center><img src="http://i.imgur.com/UgPuZJC.png" alt="" title=""></center>  <br>
+  和大多数此类图形相比，这是论点的概述而不是提出证据（不要问我坐标轴单位是什么），尽管如此，我认为复杂度降低是可以实现的。 <br>
+  目标是简化流处理足以使其作为异步服务的主流应用程序模型访问。有许多方式做到，但有三大方面我认为在本小节值得探索：  <p></p>
+
+<blockquote>
+  <ol>
+  <li>让Kafka Stream完全嵌入没有流处理集群的库，只是Kafka和你的应用程序</li>
+  <li>完全整合事件流和状态表的想法，使得二者可用在单一框架</li>
+  <li>赋予完全由Kafka提供的个新抽象处理模型，降低在流架构中移动碎片的总数  </li>
+  </ol>
+</blockquote>
+
+<p>  让我们深入到每个领域。  </p>
+
+<h2 id="简化1框架-自由流处理">简化1：框架-自由流处理</h2>
+
+<p>  Kafka Stream如何构建更简单的流服务的第一个方面是集群和框架自由，它只是一个库（而且是非常小的一个）。你不需要去搭建任何特殊的Kafka Stream集群，并且没有集群管理，nimbus，守护进程，或类似的东西。如果你拥有kafka，除了你自己的应用代码你不需要别的。你的应用代码将配合Kafka处理故障，瓜分实例中的处理负荷，若更多实例启动，并动态平衡负荷。 <br>
+  我会进一步讲解，为什么我认为这是重要的，通过介绍了解这种模式的重要。</p>
+
+
+
+<h3 id="固化mapreduce的后遗症">固化MapReduce的后遗症</h3>
+
+<p>  我已经涵盖搭建Samza经验以及搭建（实时MapReduce）和人们真正想要（简单流服务）的概念切割。我认为这种问题的误解是常见的，毕竟流处理所做的是从批世界获取的能力以及满足低延迟情况可用。同样的MapReduce传统影响了其他流处理平台(Storm,Spark),不亚于Samza。 <br>
+  在Linkedin发现，生产数据处理服务正处于低延迟领域：优先邮件，规范用户产生的内容，以及处理新闻推送等等。 <br>
+  这种异步服务对网络公司是几乎唯一的，物流公司需要实时管理、交付，零售商需要对销售产品重新订购、重新定价，在许多方面，实时数据是金融公司纷纷看好的核心。毕竟，许多业务是异步的，在呈现网页或更新手机应用的过程中并不发生。 <br>
+  为什么像Storm、Samza、Spark Streaming如此严峻的在流处理框架的顶端构建这种类型的核心应用？ <br>
+  类似MapReduce和Spark的批处理框架需要解决大量问题： <br>
+- 在大量的机器上不得不复用众多的瞬态工作，并有效的分配集群资源 <br>
+- 要做到这一点，需要动态打包代码、配置、库和你需要运行的其他东西，并完全的部署到执行机器上 <br>
+- 需要管理进程，并试图保证集群共享任务的隔离  <br>
+  不幸的是，解决这些问题使得框架相当复杂。为了换取容错和扩展性，他们想要控制代码如何部署、配置、监控和打包各个方面。 <br>
+  更现代化的处理框架在尝试包装这个方面做的非常好，但是你不能避免的事实是该框架试图以某种形式序列化你的代码，并发送到网络中。 </p>
+
+
+
+<h3 id="kafka-stream如何做的">Kafka Stream如何做的？</h3>
+
+<p>  Kafka Stream更加专注于解决问题，做了一下工作：    </p>
+
+<blockquote>
+  <ul>
+  <li><a href="http://docs.confluent.io/2.1.0-alpha1/streams/architecture.html#parallelism-model" rel="nofollow">平衡处理负荷</a>作为您应用添加或已有崩溃的新实例  </li>
+  <li><a href="http://docs.confluent.io/2.1.0-alpha1/streams/architecture.html#state" rel="nofollow">维持</a>表本地状态  </li>
+  <li><a href="http://docs.confluent.io/2.1.0-alpha1/streams/architecture.html#fault-tolerance" rel="nofollow">恢复故障</a></li>
+  </ul>
+</blockquote>
+
+<p>  通过使用完全相同的组管理协议，Kafka提供正常consumer完成这点。结果是，Kafka Stream应用就像任何其他服务。可能有一些磁盘上的本地状态，但是只是一个缓存，如果丢失或者应用实例移动到别处，可以重新创建。你只需要应用中的库，启动应用程序实例，并且在这些实例下Kafka会分区、平衡任务。 <br>
+  对于做一些简单的类似回滚重启或者无停机扩容是相当重要的，这些在现代软件引擎中是习以为常的，但是对于流处理来说仍然是遥不可及的。  </p>
+
+
+
+<h3 id="docker-mesos-and-kubernetes我的天呐">Docker, Mesos, and Kubernetes,我的天呐</h3>
+
+<p>  从流处理框架分离封装和部署如此重要的原因之一，是因为封装和部署正在复兴。Kafka Stream应用能够使用传统的ops工具部署，如Puppet,Chef,Salt或者从命令行启动进行。如果你还年轻，或者作为一个WAR文件，你可以打包你应用作为一个Docker镜像。 <br>
+  但是，对于寻找更弹性管理的人，有旨在是应用更动态的主机框架。部分名单包括：</p>
+
+<blockquote>
+  <ul>
+  <li>类似<a href="https://mesosphere.github.io/marathon/" rel="nofollow">Marathon</a>带有框架的<a href="http://mesos.apache.org/" rel="nofollow">Apache Mesos</a>  </li>
+  <li><a href="http://kubernetes.io/" rel="nofollow">Kubernetes</a>  </li>
+  <li><a href="http://hadoop.apache.org/docs/current/hadoop-yarn/hadoop-yarn-site/YARN.html" rel="nofollow">YARN</a>  </li>
+  <li>来自Dockers的<a href="https://www.docker.com/products/docker-swarm" rel="nofollow">Swarm</a>  </li>
+  <li>亚马逊各种托管容器服务，如<a href="https://aws.amazon.com/cn/ecs/" rel="nofollow">ECS</a>  </li>
+  <li><a href="http://pivotal.io/platform" rel="nofollow">Cloud Foundry</a>  </li>
+  </ul>
+</blockquote>
+
+<p>  几乎和流处理的生态系统一样混乱。 <br>
+  事实上，Mesos和Kubernetes正在试图解决机器进程位置，Storm集群同样在尝试解决，当你不是一个Storm工作到Storm集群。关键区别是，这个问题非常困难，这些通用框架，至少是不错的，能够让你可控并行的回滚重启、sticky host affinity、真正的基于cgroup隔离、封装dockers、华而不实的UI界面等等。 <br>
+  你可以在这些框架中使用Kafka Stream，和其他应用程序类似，这是一个简单的方法获取动态弹性管理。例如，如果你拥有Mesos和Marathon，你可以通过Marathon UI直接启动你的Kafka Stream应用，并无需停机的动态扩展，Mesos主要管理进程，Kafka采取负载均衡并维护你的作业处理状态。 <br>
+  采用其中一个框架的开销相当于类似Storm操作集群管理，但是优点是，这些框架完全是可选的（当然没有他们，Kafka Stream正常工作）。 </p>
+
+
+
+<h2 id="简化2-stream-meet-tables">简化2 Stream meet tables</h2>
+
+<p>  下一个Kafka Stream 简化流应用的关键是完全集成流贺彪的概念。我们在之前以<a href="http://www.confluent.io/blog/turning-the-database-inside-out-with-apache-samza/" rel="nofollow"> “turning the database inside out”</a>的方式讨论过这个想法，这句话捕获了所得系统如何重铸应用和数据关系，以及如何重铸数据变化的重点。为了明白这一点，我会解释我所认为table和stream的含义，以及为什么二者结合简化了异步通用模式一大堆东西。 <br>
+  传统数据库，存储表的全状态。数据库做不到的是响应数据流。什么是事件？事件是世界上发生的事情，可能是点击，销售等等。 <br>
+  类似Storm的流处理系统已经从另一个方向启动。他们构建处理事件流，但是计算流状态的想法是之后了。 <br>
+  我认为，异步应用问题的根本是结合带有正在发生事件流的表示世界当前状态的表。框架需要做好表示和来回转换它们。 <br>
+  如何关联这些概念？考虑一个简单零售商店模型。销售的核心流是销售产品，订购新产品并且送达产品。“现有库存”是从已经产品库存通过加减销售和物流得到的。对于零售店两个关键的流处理操作是当库存降低是再订购，当需求和供给改变是调整价格。一个真正的全球零售商会复杂的多，因为物流的出货量是由整个仓库和商店的全球网络和一台分析和库存调整的主机管理的，但是理解如何对实时事物作为表和流建模是关键。</p>
+
+
+
+<h2 id="表和流是对偶的">表和流是对偶的</h2>
+
+<p>  在我们深入流处理之前，先了解表和流之间的关系。我认为 Pat Helland对数据库和日志概括是最好的：</p>
+
+<blockquote>
+  <p>事物日志记录了所有数据库做出的改变。高速追加是对更改日志的唯一途径。从这个角度看，数据库保留日志中最新记录值的缓存。事实是日志。数据库是日志高速缓存的一个子集。缓存子集恰好是日志中每个记录和索引的最新值。   </p>
+</blockquote>
+
+<p>  这是什么意思呢？其实是表和流之间关系的核心。 <br>
+  先问一个问题：什么是流？这个很简单，流是一个记录的序列。Kafka将流模型化为一个日志，也就是永无休止的key-value对序列。</p>
+
+<blockquote>
+<pre><code>key1 =&gt; value1
+key2 =&gt; value2
+key1 =&gt; value3
+ .
+ .
+ .
+</code></pre>
+</blockquote>
+
+<p>  那什么是表呢？我想我们都知道，表类似下面的东西：</p>
+
+<blockquote>
+  <p><img src="http://i.imgur.com/NyqdtUH.jpg" alt="" title=""></p>
+</blockquote>
+
+<p>  value可以是非常复杂的，在这种情况下需要拆分为多个列，但是我们可以忽略细节，只是考虑key/value对（增加列不会改变这里讨论的任何东西）。 <br>
+  但是，尽管流随着时间新纪录出现而不断演变，只是这一个点表的快照。表如何演变？更新。表不是一个单一的东西，而更像一系列的事情。  </p>
+
+<blockquote>
+  <p><img src="http://i.imgur.com/bdzaY9H.jpg" alt="" title=""></p>
+</blockquote>
+
+<p>  但是序列有许多冗余。如果我们分解出的行没有改变，只是记录更新，然后以另一种方式可视化表作为有序序列的更新：</p>
+
+<blockquote>
+<pre><code>put(key1, value1)
+put(key2, value2)
+put(key1, value3)
+.
+.
+.
+</code></pre>
+</blockquote>
+
+<p>  或者，如果我们摆脱了put，因为他是隐含的，然后我们得到：</p>
+
+<blockquote>
+<pre><code>key1 =&gt; value1
+key2 =&gt; value2
+key1 =&gt; value3
+.
+.
+.
+</code></pre>
+</blockquote>
+
+<p>  这就是一个流！这种特殊形式的流通常称为更新日志。因为他表示更新的序列，以更新顺序记录每一条记录的最新值。 <br>
+  所以，表是流上的一个特殊视图。这样的想法似乎很奇怪，但我认为，这种形式的表是我们脑海中想象的长方形表的东西。也许实际上更自然，因为他捕获了时间上演化的概念（想想，什么样的数据你没有真的改变？）。 <br>
+  换句话说，正如Pat Helland指出，表其实是流中每个key的最新value的缓存。 <br>
+  数据库方面的另一种方式：一个pure流是其中变化被解释为INSERT语句（因为没有记录替换所有现有的记录），其中一个表是改变被解释为UPDATE的流（因为任何现有的行使用相同的Key将被覆盖） <br>
+  这种二重性构建为Kafka，并显示为<a href="http://kafka.apache.org/documentation.html#compaction" rel="nofollow">紧密的topic</a>。 <br>
+<img src="http://i.imgur.com/eyc8VRf.jpg" alt="" title=""></p>
+
+
+
+<h3 id="表和流处理">表和流处理</h3>
+
+<p>  Okay,这就是表和流，为什么会影响流处理？事实证明，流和表之间的关系是流处理的核心。 <br>
+  给出的零售的例子，产品发货和销售流影响受伤的库存表，库存的改变又重新触发流程依次重新排序和改变价格。 <br>
+  在本例中，表明显不知识流处理框架创建的东西，他们可能已经在数据库中。这很好，捕获流的改变到表中，称之为Change Capture，这是数据库所做的事情。更改捕获数据流的格式正式我们描述的更新日志的格式。这种更改捕获可以非常简单的使用Kafka链接，这是转为数据采集的框架，而且已经加入到最新的Apache Kafka 0.9版本。 <br>
+  以这种方式模型化表的概念，Kafka Stream让你使用改变的流计算表导出的value。换句话说让你处理数据库更改流就像点击流一样。 <br>
+  你能想到触发计算的功能是基于数据库改变作为类似触发器和数据库内置的物化视图功能，而不是被限制在单一数据库中，只有在PL/SQL中实验，它运行在数据中心的规模，并且能够处理各种数据源。</p>
+
+
+
+<h3 id="join-和聚合也是表">Join 和聚合也是表</h3>
+
+<p>  我们探索了如何使用表，转变为Kafka的更新流（更改日志），并使用Kafka Stream计算一些东西。但是表/流二者也可以反向工作。 <br>
+  比方说，我有用户进来的点击流，我想计算每个用户的总点击量。Kafka Stream能够让你计算这个聚合，毋庸置疑地，每个用户一个点击量表。 <br>
+  就Kafka Stream存储而言，这衍生出本地嵌入key-value存储（默认是RockDB，你可以使用任何接口）。作业输出实际上是此表的更新更改日志。更改日志用于计算的高可用，但是可以是由其他Kafka Stream处理或使用Kafka连接加载到其他系统消费转换的输出。 <br>
+  从架构上来讲，支持本地存储已经存在于Apache Samza，在之前从系统结构的角度叙述过。Kafka Stream中心的关键是表的概念不仅仅是一个低水平的设施。和流本身一样是一等公民。在编程DSL中流由Kafka Stream提供的KStream类表现，表由KTable表现。他们共享很多相同操作，并且可以来回转换，和表/流二元采样一样，但是，例如，一个KTable上的聚合会自动处理更新到底层值。这很重要，因为计算表更新和不可变流更新的语句是完全不同的，同样的join两个流的语句（比如点击和展示）和join流到表（比如点击对用户账户）的语句也是完全不同的。通过DSL模型话这两个概念，这些细节会自动解散。</p>
+
+
+
+<h3 id="窗口和表">窗口和表###</h3>
+
+<p>   窗口，时间和无序的事件是流处理的另一个棘手的问题。而事实证明，有些奇怪的是，一个非常简单的结论是非常相同的表的概念。密切关注流处理领域的人可能听说过Google Dataflow团队激烈讨论的“event time”这个想法。他们争论的问题是如果事件无序到达如何在流上做窗口操作。无序数据的问题在大多数分布式设置是不可避免的，因为不能保证在不同数据中心或不同设备保证的数据有序。 <br>
+  零售领域中这种窗口计算的一个例子是每10分钟的窗口计算一个产品的销量。你怎么知道一个窗口计算完成了，在这范围中带时间戳的销量数据到达了并且已经计算过了？如果你不知道这些，你怎么能对这些计算给出一个最总答案？当你选择你的结果作为答案可能太早，并且很多时间可能晚点到达导致你原始输出是错的。 <br>
+  Kafka Stream解决这个问题非常简单：窗口聚合的语句例如计数，代表窗口到目前为止的计数。持当新数据到达续不断更新，并有下游接收者决定完成时间。这个更新量的概念看起来有些熟悉：只不过是其中窗口正在更新表中key。自然地，下游操作知道这个流代表一个表，当他们到达，进行处理。 <br>
+  我认为它是优雅的，允许计算数据库变化顶端捕获流的机制和允许处理无序数据窗口聚合机制以一样的。表和流之间的关系不是我们发明的，在很多旧的流处理文献中如CQL被探索，但是没有捕获实时系统–数据库处理表，流处理系统处理流以及把二者的处理作为一等公民。 </p>
+
+
+
+<h3 id="表嵌入式库状态服务">表+嵌入式库=状态服务</h3>
+
+<p>  还有一些我刚描述特征可能不是特别明显。我讨论了Kafka Stream如何让你透明地维护RocksDB或其他本地数据结构的派生表。因为这种处理并创建物理状态驻留在你的应用，这开启了另一种令人着迷的使用途径：允许应用程序直接查询此派生状态。 <br>
+  我们还没有公开使用钩子可以做到这一点。我们正专注于稳定流处理的API，但是我认为对某些数据密集型的应用是非常有前途的架构。 <br>
+  这意味着你可以构建嵌入Kafka Stream和直接查询由流处理操作的出本地聚合的REST服务。这种状态服务的有点在这里讨论。并不是所有领域都有意义，通常你只想produce你的输出到你知道并新人的外部数据库。但某些情况每个请求你的服务需要访问大量数据，在本地内存或快速的本地RocksDB实例可以说是非常强大的。</p>
+
+
+
+<h2 id="简化3-简单是美">简化3： 简单是美</h2>
+
+<p>  我们的首要目标是让构建和操作流处理应用的过程简单。我们相信，流处理应该是构建应用程序的主流方式，相当大比例的公司工作内容是在构建流处理的异步领域。但是，为了实现这一点，我们需要让他足够简单去依赖这种方式。操作简单的一部分来自于摆脱外部集群的需要。 <br>
+  如果你看看人们构建流处理应用超过框架本身，他们往往是优秀架构的综合体。下面是一个典型的流处理应用架构图： <br>
+<img src="http://i.imgur.com/nvptzOT.jpg" alt="" title=""> <br>
+  这里有许多运行部件：</p>
+
+<blockquote>
+  <ul>
+  <li>Kafka本身  </li>
+  <li>一个Storm，Spark的流处理集群，通常是一组住进程和每个节点的守护进程  </li>
+  <li>实际流处理任务  </li>
+  <li>用户查找和聚合的side-数据库</li>
+  <li>通过应用查询和获取流处理任务输出的数据库</li>
+  <li>Hadoop集群（包含大量部件）用于再处理数据</li>
+  <li>服务用户和顾客正常请求的请求/响应应用</li>
+  </ul>
+</blockquote>
+
+<p>  Plunk下来这样怪异的东西不仅是不可取的，通常也是不可行的。即使你拥有所有这些，绑在一起形成以个两个的监督，充分实施这一切很难做到。 <br>
+  关于Kafka Stream最愉快的事情是核心概念很少，而且在整个系统中运行。 <br>
+  我们已经谈到几个重要的方面：摆脱额外的流处理集群；让表和状态处理完全整合到流处理本身。Kafka Stream架构可以缩小到如下： <br>
+<img src="http://i.imgur.com/GIuQl10.jpg" alt="" title=""> <br>
+  但是，让流简化并不止这两个东西。 <br>
+  因为它直接构建在Kafka的基元上，Kafka Stream其实相当小的。完整的代码库不到9K行代码。如果你愿意，你可以一个下午读完。这意味着你需要承担Kafka producer和consumer客户端额外的复杂度是可以接受的。 <br>
+  延伸出来实际中小方法：  </p>
+
+<blockquote>
+  <ul>
+  <li>输入输出都是Kafka topic  </li>
+  <li>数据模型处处都是Kafka带key的记录数据  </li>
+  <li>分区模型只是Kafka的分区模型，Kafka分区适用于流  </li>
+  <li>管理分区，分配和活跃度的组成员机制就是Kafka的组成员机制  </li>
+  <li>表和其他带状态的计算只需要log紧凑的topic  </li>
+  <li>度量在整个producer，consumer和流应用中是统一的，所以只有一种类型的度量捕获监控  </li>
+  <li>应用的位置由应用的偏移量维持，和Kafka consumer类似  </li>
+  <li>用于窗口的时间戳在0.10版本被添加到Kafka本身， 为你提供事件-时间处理  </li>
+  </ul>
+</blockquote>
+
+<p>  总之，在许多方面Kafka Stream应用看起来和其他Kafka producer和consumer类似，但他更简洁。 <br>
+  配置参数的数量超过Kafka客户端基本需要是非常少的。 <br>
+  如果你改变你的代码，需要用新的逻辑重新处理数据，并不需要一个完全不同的系统，你可以倒回应用程序的Kafka偏移量，并重新处理他的输出（你可以，用Hadoop或者其他来重新处理）。 <br>
+  最初的例子架构是一套独立的部分，只有部分一起工作。我们希望你认为是Kafka，Kafka Connect，Kafka Stream共同努力的结果。    </p>
+
+
+
+<h2 id="接下来是什么">接下来是什么？</h2>
+
+<p>  由于早期版本发现一些我们还没有解决的问题。下面即将完成的几件事。  </p>
+
+
+
+<h3 id="可查询状态">可查询状态</h3>
+
+<p>  正如早起提到的可嵌入库和存储分区随机访问表能力结合的优势之一是超出用于由应用嵌入处理查询表的能力。  </p>
+
+
+
+<h3 id="end-to-end-semantics">End-to-End Semantics</h3>
+
+<p>  当前版本的Kafka Streaming继承了Kafka的语句，通常被描述为“至少一次传递”。Kafka社区完成了许多对如何通过Kafka Connect，Kafka和Kafka Stream或其他带有派生表或状态计算引擎提供end-to-end的方式加强这些保证想法和探索。在未来几个月我们会深入这个领域，并得到一些建议。</p>
+
+
+
+<h3 id="支持其他语言">支持其他语言</h3>
+
+<p>  关于这方法一个很好的事情是代码的数量非常少，我们认为能够构建主流语言的实现，并且让他们感觉仍是自己生态系统的本地人。我们集中于让普通客户最先呈现，我们会在流处理支持不久后处理这个问题。  </p>
+
+
+
+<h2 id="试试看">试试看</h2>
+
+<p>  我们特别整理了Kafka Stream的下载预览版，以得到人们的反馈。这不是Kafka的完整版本，只是一个简单的方式，下载二进制包，阅读源码给予反馈。你可以在这<a href="http://www.confluent.io/developer" rel="nofollow">下载</a>。我们希望听到任何你觉得缺少或者可以改进的建议：附各种想法，反馈，Bug的<a href="http://kafka.apache.org/contact.html" rel="nofollow">Apache Kafka邮件列表</a>，我们希望和和紧密合作，别害羞：） <br>
+  另外，如果你对这类工作感兴趣，并愿意帮助构建，我们正在<a href="https://jobs.lever.co/confluent" rel="nofollow">招聘</a>。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

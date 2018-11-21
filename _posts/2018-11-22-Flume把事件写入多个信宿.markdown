@@ -1,0 +1,94 @@
+---
+layout:     post
+title:      Flume把事件写入多个信宿
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/caiandyong/article/details/44264025				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+1.创建agent配置文件<br>
+把下列内容存入agent7.conf,并保存到Flume的工作目录/opt/flume/bin下面<br><br>
+agent7.sources = netsource<br>
+agent7.sinks = hdfssink filesink<br>
+agent7.channels = memorychannel1 memorychannel2<br><br>
+agent7.sources.netsource.type = netcat<br>
+agent7.sources.netsource.bind = localhost<br>
+agent7.sources.netsource.port = 3000<br>
+agent7.sources.netsource.interceptors = ts<br><br>
+agent7.sources.netsource.interceptors.ts.type = org.apache.flume.interceptor.TimestampInterceptor$Builder<br><br>
+agent7.sinks.hdfssink.type = hdfs<br>
+agent7.sinks.hdfssink.hdfs.path = /flume2sink/ts-%Y-%m-%d<br>
+agent7.sinks.hdfssink.hdfs.filePrefix = log<br>
+agent7.sinks.hdfssink.hdfs.rollInterval = 0<br>
+agent7.sinks.hdfssink.hdfs.rollCount = 5<br>
+agent7.sinks.hdfssink.hdfs.fileType = DataStream<br><br>
+agent7.sinks.filesink.type = FILE_ROLL<br>
+agent7.sinks.filesink.sink.directory = /opt/flume/files2sink<br>
+agent7.sinks.filesink.sink.rollInterval = 0<br><br>
+agent7.channels.memorychannel1.type = memory<br>
+agent7.channels.memorychannel1.capacity = 1000<br>
+agent7.channels.memorychannel1.transactionCapacity = 100<br><br>
+agent7.channels.memorychannel2.type = memory<br>
+agent7.channels.memorychannel2.capacity = 1000<br>
+agent7.channels.memorychannel2.transactionCapacity = 100<br><br>
+agent7.sources.netsource.channels = memorychannel1 memorychannel2<br>
+agent7.sinks.hdfssink.channel = memorychannel1<br>
+agent7.sinks.filesink.channel = memorychannel2<br><br>
+agent7.sources.netsource.selector.type = replicating<br><br>
+(需要创建信宿目录：caiyong@caiyong:/opt/flume$ mkdir files2sink)<br><br>
+2.启动Flume代理<br>
+caiyong@caiyong:/opt/flume/bin$ <span style="color:#3366FF;">flume-ng agent --conf conf --conf-file agent7.conf --name agent7</span><br><br>
+3.在另一个窗口中开启一个远程连接并发送几个事件<br>
+caiyong@caiyong:~$ <span style="color:#3366FF;">telnet localhost 3000</span><br>
+Trying 127.0.0.1...<br>
+Connected to localhost.<br>
+Escape character is '^]'.<br><span style="color:#3366FF;">one</span><br>
+OK<br><span style="color:#3366FF;">source</span><br>
+OK<br><span style="color:#3366FF;">two</span><br>
+OK<br><span style="color:#3366FF;">sinks</span><br>
+OK<br><span style="color:#3366FF;">this</span><br>
+OK<br><span style="color:#3366FF;">is</span>   <br>
+OK<br><span style="color:#3366FF;">a</span><br>
+OK<br><span style="color:#3366FF;">test</span><br>
+OK<br><span style="color:#3366FF;">OK,byebye.</span><br>
+OK<br><br>
+4.检查结果<br>
+（1）检查file信宿内容<br>
+caiyong@caiyong:/opt/flume/files2sink$ <span style="color:#3366FF;">ls -alh</span><br>
+总用量 12K<br>
+drwxrwxr-x  2 caiyong caiyong 4.0K  3月 14 21:54 .<br>
+drwxr-xr-x 10 caiyong root    4.0K  3月 14 15:55 ..<br>
+-rw-rw-r--  1 caiyong caiyong   56  3月 14 21:54 <span style="color:#CC66CC;">1426341241611-1</span><br>
+caiyong@caiyong:/opt/flume/files2sink$ <span style="color:#3366FF;">cat *</span><br><span style="color:#CC66CC;">one<br>
+source<br>
+two<br>
+sinks<br>
+this<br>
+is<br>
+a<br>
+test<br>
+OK,byebye.</span><br><br>
+（2）检查HDFS信宿内容<br>
+caiyong@caiyong:/opt/hadoop$ <span style="color:#3366FF;">bin/hadoop fs -ls /flume2sink/</span><br>
+Found 1 items<br>
+drwxr-xr-x   - caiyong supergroup          0 2015-03-14 21:54 <span style="color:#CC66CC;">
+/flume2sink/ts-2015-03-14</span><br>
+caiyong@caiyong:/opt/hadoop$<span style="color:#3366FF;"> bin/hadoop fs -ls /flume2sink/*</span><br>
+Found 2 items<br>
+-rw-r--r--   1 caiyong supergroup         31 2015-03-14 21:54 /flume2sink/ts-2015-03-14/<span style="color:#CC66CC;">log.1426341252881</span><br>
+-rw-r--r--   1 caiyong supergroup          0 2015-03-14 21:54 /flume2sink/ts-2015-03-14/<span style="color:#CC66CC;">log.1426341252882.tmp</span><br>
+caiyong@caiyong:/opt/hadoop$ <span style="color:#3366FF;">bin/hadoop fs -cat /flume2sink/ts*/*2881</span><br><span style="color:#CC66CC;">one<br>
+source<br>
+two<br>
+sinks<br>
+this</span><br>
+caiyong@caiyong:/opt/hadoop$ <span style="color:#3366FF;">bin/hadoop fs -cat /flume2sink/ts*/*mp</span><br><span style="color:#CC66CC;">is<br>
+a<br>
+test<br>
+OK,byebye.</span><br><br>
+分析：创建的配置文件设置了一个Netcat信源和两个信宿（file信宿和HDFS信宿），设置了两个memory信道分别连接信源和两个信宿。设置信源选择器类型为replicating，这样所有事件都会发送给两个信道。<br><br><p><br></p>
+<p><br></p>
+            </div>
+                </div>

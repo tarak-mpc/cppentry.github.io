@@ -1,0 +1,68 @@
+---
+layout:     post
+title:      kafka初识
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主编写文章，未经博主允许转载，转载请注明出处。					https://blog.csdn.net/u012373815/article/details/52319093				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h3 id="简介">简介</h3>
+
+<p>Kafka 是 linkedin 用于日志处理的分布式消息队列,同时支持离 线和在线日志处理。kafka 对消息保存时根据 Topic 进行归类,发送 消息者成为 Producer,消息接受者成为 Consumer,此外 kafka 集群有 多个 kafka 实例组成,每个实例(server)称为 broker。无论是 kafka 集群,还是 producer 和 consumer 都依赖于 zookeeper 来保证系统可 用性,为集群保存一些 meta 信息。</p>
+
+<p><img src="https://img-blog.csdn.net/20160825235629989" alt="这里写图片描述" title=""></p>
+
+<h2 id="基本概念知识">基本概念知识</h2>
+
+
+
+<h3 id="topic">Topic</h3>
+
+<p>一个 Topic 可以认为是一类消息,每个 topic 将被分成多 个 partition(区),每个 partition 在存储层面是 append log 文件。任 何发布到此 partition 的消息都会被直接追加到 log 文件的尾部,每 条消息在文件中的位置称为 offset(偏移量),offset 为一个 long 型数字,它是唯一标记一条消息。kafka 并没有提供其他额外的索引 机制来存储 offset,因为在 kafka 中几乎不允许对消息进行 “随机 读写”。</p>
+
+<p><img src="https://img-blog.csdn.net/20160825235644067" alt="这里写图片描述" title=""></p>
+
+<p>在 kafka 中,<strong>即使消息被消费,消息仍然不会被立即删除。日志文 件将会根据 broker 中的配置要求 ,保留一定的时间之后删除</strong> ;比如 log 文件保留 2 天,那么两天后,文件会被清除,无论其中的消息是否 被消费。kafka 通过这种简单的手段,来释放磁盘空间,以及减少消息 消费之后对文件内容改动的磁盘 IO 开支。</p>
+
+<p>对于 consumer 而言,它需要保存消费消息的 offset,对于 offset的保存和使用 ,由 consumer 来控制 ;当 consumer 正常消费消息 时,offset 将会”线性”的向前驱动,即消息将依次顺序被消费 。事实 上 consumer 可以使用任意顺序消费消息,它只需要将 offset 重置为 任意值。(offset 将会保存在 zookeeper 中,参见下文)</p>
+
+<p>kafka 集群几乎不需要维护任何 consumer 和 producer 状态信息, 这些信息由 zookeeper 保存;因此 producer 和 consumer 的客户端实 现非常轻量级,它们可以随意离开,而不会对集群造成额外的影响。</p>
+
+<p>partitions 的设计目的有多个 。<strong>最根本原因是 kafka 基于文件 存储。通过分区,可以将日志内容分散到多个 server 上,来避免文件 尺寸达到单机磁盘的上限 ,每个 partiton 都会被当前 server(kafka 实例)保存;可以将一个 topic 切分多任意多个 partitions 来保存消 息。此外越多的 partitions 意味着可以容纳更多的 consumer,有效 提升并发消费的能力。</strong>(具体原理参见下文)。</p>
+
+<h3 id="分布">分布</h3>
+
+<p>一个 Topic 的多个 partitions,被分布在 kafka 集群中的多 个 server 上;每个 server(kafka 实例)负责 partitions 中消息的读写 操作;此外 kafka 还可以配置 partitions 需要备份的个数(replicas), 每个partition 将会被备份到多台机器上,以提高可用性。</p>
+
+<p><img src="https://img-blog.csdn.net/20160825235358050" alt="这里写图片描述" title=""></p>
+
+<p>基于 replicated(partition 的备份) 方案,那么就意味着需要对多个备份进行调度 ; 每个 partition 都有一个 server 为”leader”;<strong>leader 负责所有的读 写操作,如果 leader 失效,那么将会有其他 follower 来接管(成为新的leader);follower 只是单调的和 leader 跟进,同步消息即可。</strong>由 此可见作为 leader 的 server 承载了全部的请求压力,因此从集群的 整体考虑 ,有多少个 partitions 就意味着有多少个 “leader”,kafka 会将”leader”均衡的分散在每个实例上,来确保整体的性能稳定。</p>
+
+<p>1.发送到 partitions 中的消息将会按照它接收的顺序追加到日志 中。 <br>
+2.对于消费者而言,它们消费消息的顺序和日志中消息顺序一致。 <br>
+3. 如果 Topic 的”replication factor”为 N,那么允许 N-1 个 kafka <br>
+实例失效。<strong>（就是最低要有一个partitions存活，也就是partition可以没有备份）</strong></p>
+
+
+
+<h3 id="producers">Producers</h3>
+
+<p>Producer 将消息发布到指定的 Topic 中,同时 Producer 也能决 定将此消息归属于哪个 partition;比如基于”round-robin”方式或者 通过其他的一些算法等。</p>
+
+
+
+<h3 id="consumers">Consumers</h3>
+
+<p>本质上 kafka 只支持 Topic。每个 consumer 属于一个 consumer group;反过来说,每个 group 中可以有多个 consumer。发送到 Topic 的消息,只会被订阅此 Topic 的每个 group 中的一个 consumer 消费。</p>
+
+<p>如果所有的 consumer 都具有相同的 group,这种情况和 queue（队列） 模 式很像;消息将会在 consumers 之间负载均衡。</p>
+
+<p>如果所有的 consumer 都具有不同的 group,那这就是”发布-订阅 <br>
+“,消息将会广播给所有的消费者。</p>
+
+<p><strong>在 kafka 中,一个 partition 中的消息只会被 group 中的一 个consumer 消费;每个 group 中 consumer 消息消费互相独立;</strong>我们可以 认为一个 group 是一个”订阅”者,一个 Topic 中的每个 partions,只 会被一个”订阅者”中的一个 consumer 消费,不过一个 consumer 可以 消费多个 partitions 中的消息 。kafka 只能保证一个 partition 中 的消息被某个 consumer 消费时,消息是顺序的。事实上,从 Topic 角 度来说,消息仍不是有序的。 <br>
+kafka 的设计原理决定,对于一个 topic,同一个 group 中不能有 多于 partitions 个数的 consumer 同时消费 ,否则将意味着某 些 consumer 将无法得到消息。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

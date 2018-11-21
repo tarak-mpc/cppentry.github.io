@@ -1,0 +1,543 @@
+---
+layout:     post
+title:      Kafka全解析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：					https://blog.csdn.net/vinfly_li/article/details/79397201				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="kafka">kafka</h1>
+
+<p>标签（空格分隔）： Kafka</p>
+
+<hr>
+
+
+
+<h2 id="一-concepts">一. Concepts</h2>
+
+<p>Kafka is used for building real-time data pipelines and streaming apps</p>
+
+<ul>
+<li>分布式消息传递</li>
+<li>网站活跃数据跟踪</li>
+<li>日志聚合</li>
+<li>流式数据处理</li>
+<li>数据存储</li>
+<li>事件源</li>
+<li>……</li>
+</ul>
+
+<p><img src="http://static.zybuluo.com/vin123456/bmoyo3qo6p5my1lwixidqdan/image_1c41ppi4cefs1s25sg7aosjb79.png" alt="image_1c41ppi4cefs1s25sg7aosjb79.png-90.5kB" title=""></p>
+
+
+
+<h3 id="kafka-terminology-术语">Kafka terminology 术语</h3>
+
+
+
+<h4 id="1topics">1.Topics</h4>
+
+<p>Kafka maintains feeds of messages in categories called topics. <br>
+消息都归属于一个类别成为topic,在物理上不同Topic的消息分开存储,逻辑上一个Topic的消息对使用者透明 <br>
+<img src="http://static.zybuluo.com/vin123456/moymsc9l0gz3gpxznffs1jvz/image_1c41qimir1kmhh85pg5pnk3g16.png" alt="image_1c41qimir1kmhh85pg5pnk3g16.png-88.5kB" title=""></p>
+
+
+
+<h4 id="2partitions">2.Partitions</h4>
+
+<p>Topics are broken up into ordered commit logs called partitions <br>
+每个Topics划分为一个或者多个Partition,并且Partition中的每条消息都被标记了一个sequential id ,也就是offset,并且存储的数据是可配置存储时间的 <br>
+<img src="http://static.zybuluo.com/vin123456/isr66cz0getpcplu0brixhqm/image_1c41qsc4d1tr5gum1rg3s314991j.png" alt="image_1c41qsc4d1tr5gum1rg3s314991j.png-45.8kB" title=""></p>
+
+
+
+<h4 id="3message-ordering">3.Message Ordering</h4>
+
+<p>消息只保证在同一个Partition中有序,所以,如果要保证从Topic中拿到的数据有序,则需要做到:</p>
+
+<ul>
+<li>Group messages in a partition by key(producer)</li>
+<li>Configure exactly one consumer instance per partition within a consumer group</li>
+</ul>
+
+<p>kafka能保证的是:</p>
+
+<ul>
+<li>Message sent by a producer to a particular topic partition will be appended in the order they are sent</li>
+<li>A consumer instance sees messages in the order they are stored in the log</li>
+<li>For a topic with replication factor N, kafka can tolerate up to N-1 server failures without “losing” any messages committed to the log</li>
+</ul>
+
+
+
+<h4 id="4log">4.Log</h4>
+
+<p>Partition对应逻辑上的Log</p>
+
+
+
+<h4 id="5replication-副本">5.Replication 副本</h4>
+
+<ul>
+<li>Topics can (and should) be replicated</li>
+<li>The unit of replication is the partition</li>
+<li>Each partition in a topic has 1 leader and 0 or more replicas</li>
+<li><p>A replica is deemed to be “in-sync” if </p>
+
+<ul><li>The replica can communicate with Zookeeper</li>
+<li>The replica is not “too far” behind the leader(configurable) </li></ul></li>
+<li><p>The group of in-sync replicas for a partition is called the ISR(In-Sync-Replicas)</p></li>
+<li>The Replication factor cannot be lowered</li>
+</ul>
+
+
+
+<h4 id="6kafka-durability-可靠性">6.kafka durability 可靠性</h4>
+
+<p>Durability can be configured with the producer configuration <code>request.required.acks</code></p>
+
+<ul>
+<li>0 : The producer never waits for an ack</li>
+<li>1 : The producer gets an ack after the leader replica has received the data</li>
+<li>-1 : The producer gets an ack after all ISRs receive the data</li>
+</ul>
+
+<p>Minimum available ISR can also be configured such that an error is returned if enough replicas are not available to replicate data</p>
+
+<p>所以,kafka可以选择不同的durability来换取不同的吞吐量</p>
+
+<table>
+<thead>
+<tr>
+  <th>Durability</th>
+  <th>Behaviour</th>
+  <th>Per Event Latency</th>
+  <th>Required Acknowledgements(request.required.acks)</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>Hignest</td>
+  <td>ACK all ISRs have received</td>
+  <td>Higest</td>
+  <td>-1</td>
+</tr>
+<tr>
+  <td>Medium</td>
+  <td>ACK once the leader has received</td>
+  <td>Medium</td>
+  <td>1</td>
+</tr>
+<tr>
+  <td>Lowest</td>
+  <td>No ACKs required</td>
+  <td>Lowest</td>
+  <td>0</td>
+</tr>
+</tbody></table>
+
+
+<p>通用,kafka可以通过增加更多的Broker来提升吞吐量 <br>
+一个推荐的配置:</p>
+
+<table>
+<thead>
+<tr>
+  <th>Property</th>
+  <th>Value</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>replication</td>
+  <td>3</td>
+</tr>
+<tr>
+  <td>min.insync.replicas</td>
+  <td>2</td>
+</tr>
+<tr>
+  <td>request.required.acks</td>
+  <td>-1</td>
+</tr>
+</tbody></table>
+
+
+
+
+<h4 id="7broker">7.Broker</h4>
+
+<p>Kafka is run as a cluster comparised of one or more servers each of which is called broker <br>
+<img src="http://static.zybuluo.com/vin123456/me363cp6t3db90wsju5am9rr/image_1c43kfoau1r6lqq8k46moo1ijm9.png" alt="image_1c43kfoau1r6lqq8k46moo1ijm9.png-97.7kB" title=""></p>
+
+
+
+<h4 id="8producer">8.Producer</h4>
+
+<p>Processes that publish messages to a kafka topic are called producers</p>
+
+<ul>
+<li>Producers publish to a topic of their choosing(push) <br>
+数据载入kafka可以是分布式的,通常是通过”Round-Robin”算法策略,也可以根据message中的key来进行语义分割”semantic partitioning”来分布式载入,Brokers 通过分区来均衡载入</li>
+<li>kafka支持异步发送async,异步发送消息是less durable的,但是是高吞吐的</li>
+<li>Producer的载入平衡和ISRs <br>
+<img src="http://static.zybuluo.com/vin123456/axdch9v7jp3n9h4e93le6toe/image_1c43llqh611la1mkn18ir9tb1uh4m.png" alt="image_1c43llqh611la1mkn18ir9tb1uh4m.png-48.7kB" title=""></li>
+</ul>
+
+
+
+<h4 id="9consumer">9.Consumer</h4>
+
+<p>Processes that subscribe(订阅) to tpics and process the feed of published messages are called consumers</p>
+
+<ul>
+<li>Multiple Consumer can read from the same topic</li>
+<li>Each Consumer is responsible for managing it’s own offset</li>
+<li>Message stay on kafka… they are not removed after they consumed <br>
+<img src="http://static.zybuluo.com/vin123456/nv9uamqjno0d893c9ixagac0/image_1c43mc7fncp5ecstopm851fn913.png" alt="image_1c43mc7fncp5ecstopm851fn913.png-29.2kB" title=""></li>
+</ul>
+
+<p>Consumer可以从任一地方开始消费,然后又回到最大偏移量处,Consumers又可以被划分为Consumer Group</p>
+
+
+
+<h4 id="10consumer-group">10.Consumer Group</h4>
+
+<p>Consumer Group是显式分布式,多个Consumer构成组结构,Message只能传输给某个Group中的某一个Consumer</p>
+
+<ul>
+<li><p>常用的Consumer Group模式:</p>
+
+<ul><li>All consumer instances in one group  <br>
+Acts like a traditional queue with load balancing</li>
+<li>All consumer instances in different groups <br>
+All messages are broadcast to all consumer instances</li>
+<li>“Logical Subscriber” - Many consumer instances in a group <br>
+Consumers are added for scalability and fault tolerance,Each consumer instance reads from one or more partitions for a topic ,There cannot be more consumer instances than partitions</li></ul></li>
+</ul>
+
+<p><img src="http://static.zybuluo.com/vin123456/iuf3xoayxmuatoqff3l46jpv/image_1c43tgqo01278rom1p8t1hbi123h2t.png" alt="image_1c43tgqo01278rom1p8t1hbi123h2t.png-36.2kB" title=""> <br>
+Consumer Groups 提供了topics和partitions的隔离 <br>
+<img src="http://static.zybuluo.com/vin123456/k1xj39melbfgricvmf1h53wb/image_1c43tioh07thbap1mnlphdscj3a.png" alt="image_1c43tioh07thbap1mnlphdscj3a.png-44.7kB" title=""> <br>
+并且当某个Consumer挂掉后能够重新平衡</p>
+
+<ul>
+<li><p>Consumer Group的应用场景</p>
+
+<ul><li>点对点 <br>
+将所有消费者放到一个Consumer Group</li>
+<li>广播 <br>
+将每个消费者单独放到一个Consumer Group</li>
+<li>水平扩展 <br>
+向Consumer Group中添加消费者并进行Rebalance</li>
+<li>故障转移 <br>
+当某个Consumer发生故障时,Consumer Group重新分配分区</li></ul></li>
+</ul>
+
+
+
+<h2 id="二-kafka-核心原理">二. Kafka 核心原理</h2>
+
+
+
+<h3 id="kafka设计思想">Kafka设计思想</h3>
+
+<ul>
+<li>可持久化Message <br>
+持久化本地文件系统,设置有效期</li>
+<li>支持高流量处理 <br>
+面向特定的使用场景而不是通用功能</li>
+<li>消费状态保存在消费端而不是服务端 <br>
+减轻服务器负担和交互</li>
+<li>支持分布式 <br>
+生产者/消费者透明异步</li>
+<li>依赖磁盘文件系统做消息缓存 <br>
+不消耗内存</li>
+<li>高效的磁盘存取 <br>
+复杂度为O(1)</li>
+<li>强调减少数据的序列化和拷贝开销 <br>
+批量存储和发送、zero-copy</li>
+<li>支持数据并行加载到Hadoop <br>
+集成Hadoop</li>
+</ul>
+
+
+
+<h3 id="kafka原理分析">Kafka原理分析</h3>
+
+
+
+<h4 id="1存储">1.存储</h4>
+
+<ul>
+<li><p>Partition <br>
+topic物理上的分组，一个topic可以分为多个partition，每个partition是一个有序的队列。 <br>
+在Kafka文件存储中，同一个topic下有多个不同partition，每个partition为一个目录，partiton命名规则为topic名称+有序序号，第一个partiton序号从0开始，序号最大值为partitions数量减1 <br>
+<img src="http://static.zybuluo.com/vin123456/vtquk7n1ciwtb5hkltra0kvp/image_1c4480qvd11df1j1k8fhbeq9mm.png" alt="image_1c4480qvd11df1j1k8fhbeq9mm.png-228kB" title=""> <br>
+每个partion(目录)相当于一个巨型文件被平均分配到多个大小相等segment(段)数据文件中。但每个段segment file消息数量不一定相等，这种特性方便old segment file快速被删除。 <br>
+每个partiton只需要支持顺序读写就行了，segment文件生命周期由服务端配置参数决定。 <br>
+这样做的好处就是能快速删除无用文件，有效提高磁盘利用率。</p></li>
+<li><p>segment file</p>
+
+<ul><li>segment file组成：由2大部分组成，分别为index file和data file，此2个文件一一对应，成对出现，后缀”.index”和“.log”分别表示为segment索引文件、数据文件.</li>
+<li>segment文件命名规则：partion全局的第一个segment从0开始，后续每个segment文件名为上一个segment文件最后一条消息的offset值。数值最大为64位long大小，19位数字字符长度，没有数字用0填充。</li></ul></li>
+</ul>
+
+<p><img src="http://static.zybuluo.com/vin123456/zs0593gs569ajoj8rt7hmf0d/image_1c4486sih13qm937f0umam1trt13.png" alt="image_1c4486sih13qm937f0umam1trt13.png-34.2kB" title=""> <br>
+ 其中<code>.index</code>索引文件存储大量元数据，<code>.log</code>数据文件存储大量消息，索引文件中元数据指向对应数据文件中message的物理偏移地址。他们两个是一一对应的,对应关系如下 <br>
+ <img src="http://static.zybuluo.com/vin123456/dxcyzqfbfo56p2w1hpx7d682/image_1c448a5mqdom1rnk1ejcakj1c3k1g.png" alt="image_1c448a5mqdom1rnk1ejcakj1c3k1g.png-106.1kB" title=""></p>
+
+<ul>
+<li>Message <br>
+segment data file由许多message组成，message物理结构如下 <br>
+<img src="http://static.zybuluo.com/vin123456/ouqzcve82su479hzesj830th/image_1c448cn3rd81h8krbp1753h4m1t.png" alt="image_1c448cn3rd81h8krbp1753h4m1t.png-62.3kB" title=""></li>
+</ul>
+
+<p>参数说明:</p>
+
+<table>
+<thead>
+<tr>
+  <th align="center">关键字</th>
+  <th align="center">解释说明</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td align="center">8 byte offset</td>
+  <td align="center">在parition(分区)内的每条消息都有一个有序的id号，这个id号被称为偏移(offset),它可以唯一确定每条消息在parition(分区)内的位置。即offset表示partiion的第多少message</td>
+</tr>
+<tr>
+  <td align="center">4 byte message size</td>
+  <td align="center">message大小</td>
+</tr>
+<tr>
+  <td align="center">4 byte CRC32</td>
+  <td align="center">用crc32校验message</td>
+</tr>
+<tr>
+  <td align="center">1 byte “magic”</td>
+  <td align="center">表示本次发布Kafka服务程序协议版本号</td>
+</tr>
+<tr>
+  <td align="center">1 byte “attributes”</td>
+  <td align="center">表示为独立版本、或标识压缩类型、或编码类型。</td>
+</tr>
+<tr>
+  <td align="center">4 byte key length</td>
+  <td align="center">表示key的长度,当key为-1时，K byte key字段不填</td>
+</tr>
+<tr>
+  <td align="center">K byte key</td>
+  <td align="center">可选</td>
+</tr>
+<tr>
+  <td align="center">value bytes payload</td>
+  <td align="center">表示实际消息数据。</td>
+</tr>
+</tbody></table>
+
+
+
+
+<h4 id="2-consumer">2. Consumer</h4>
+
+<ul>
+<li>High Level Consumer <br>
+消费者保存消费状态：将从某个Partition读取的最后一条消息的offset存于ZooKeeper中</li>
+<li>Low Level Consumer：更好的控制数据的消费 <br>
+同一条消息读多次 <br>
+只读取某个Topic的部分Partition <br>
+管理事务，从而确保每条消息被处理一次，且仅被处理一次 <br>
+大量额外工作 <br>
+必须在应用程序中跟踪offset，从而确定下一条应该消费哪条消息 <br>
+应用程序需要通过程序获知每个Partition的Leader是谁 <br>
+必须处理Leader的变化</li>
+</ul>
+
+
+
+<h4 id="3消息传递语义delivery-semantics">3.消息传递语义Delivery Semantics</h4>
+
+<ul>
+<li>At least once <br>
+kafka的默认设置 <br>
+Messages are never lost but maybe redelivered</li>
+<li>At most once <br>
+Messages are lost but never redelivered</li>
+<li>Exactly once <br>
+比较难实现 <br>
+Messages are delivered once and only once <br>
+实现Exactly Once需要考虑: <br>
+<ul><li>Must consider two components <br>
+Durability guarantees when publishing a message <br>
+Durability guarantees when consuming a message</li>
+<li>Producer <br>
+What happens when a produce request was sent but a network error returned before an ack ? <br>
+RE:Use a single writer per partition and check the latest committed value after network errors</li></ul></li>
+<li>Consumer <br>
+include a unique ID(e.g.UUID) and de-duplicate <br>
+Consider storing offsets with data</li>
+</ul>
+
+<p>解释:</p>
+
+<ul>
+<li><p>消息传递语义: Producer 角度 <br>
+当Producer向broker发送消息时，一旦这条消息被commit，因为replication的存在，它就不会丢,但是如果Producer发送数据给broker后，遇到网络问题而造成通信中断，那Producer就无法判断该条消息是否已经commit <br>
+理想的解决方案：Producer可以生成一种类似于主键的东西，发生故障时幂等性的重试多次，这样就做到了Exactly once,目前默认情况下一条消息从Producer到broker是确保了At least once</p></li>
+<li><p>消息传递语义: Consumer : High Level API <br>
+Consumer在从broker读取消息后，可以选择commit，该操作会在Zookeeper中保存该Consumer在该Partition中读取的消息的offset <br>
+该Consumer下一次再读该Partition时会从下一条开始读取；如未commit，下一次读取的开始位置会跟上一次commit之后的开始位置相同 <br>
+现实的问题：到底是先处理消息再commit，还是先commit再处理消息？</p>
+
+<ul><li>先处理消息再commit <br>
+如果在处理完消息再进行commit之前Consumer发生宕机，下次重新开始工作时还会处理刚刚未commit的消息，实际上该消息已经被处理过了。这就对应于At least once <br>
+业务场景使用幂等性：消息都有一个主键，所以消息的处理往往具有幂等性，即多次处理这一条消息跟只处理一次是等效的，那就可以认为是Exactly once。</li>
+<li>先commit再处理消息 <br>
+如果Consumer在commit后还没来得及处理消息就宕机了，下次重新开始工作后就无法读到刚刚已提交而未处理的消息，这就对应于At most once</li></ul></li>
+<li><p>消息传递语义: Consumer : Lower Level API <br>
+Exactly once的实现思想：协调offset和消息数据 <br>
+经典做法是引入两阶段提交 <br>
+offset和消息数据放在同一个地方：Consumer拿到数据后可能把数据放到共享空间中，如果把最新的offset和数据本身一起写到共享空间，那就可以保证数据的输出和offset的更新要么都完成，要么都不完成，间接实现Exactly once <br>
+High level API而言，offset是存于Zookeeper中的，无法获取，而Low level API的offset是由自己去维护的，可以实现以上方案</p></li>
+</ul>
+
+
+
+<h4 id="4高可用性">4.高可用性</h4>
+
+<p>同一个Partition可能会有多个Replica，需要保证同一个Partition的多个Replica之间的数据一致性 <br>
+而这时需要在这些Replication之间选出一个Leader，Producer和Consumer只与这个Leader交互，其它Replica作为Follower从Leader中复制数据</p>
+
+<ul>
+<li><p>副本与高可用性：副本Leader Election算法</p>
+
+<ul><li>Zookeeper中的选举算法回顾 <br>
+少数服从多数：确保集群中一半以上的机器得到同步 <br>
+适合共享集群配置的系统中，而并不适合需要存储大量数据的系统，因为需要大量副本集。f个Replica失败情况下需要2f+1个副本</li>
+<li>Kafka的做法 <br>
+ISR(in-sync replicas)，这个ISR里的所有副本都跟上了Leader，只有ISR里的成员才有被选为Leader的可能 <br>
+在这种模式下，对于f+1个副本，一个Partition能在保证不丢失已经commit的消息的前提下容忍f个副本的失败 <br>
+ISR需要的总的副本的个数几乎是“少数服从多数”的一半</li></ul></li>
+<li><p>副本与高可用性：Replica分配算法 <br>
+将所有Replica均匀分布到整个集群 <br>
+将所有n个Broker和待分配的Partition排序 <br>
+将第i个Partition分配到第(i mod n)个Broker上 <br>
+将第i个Partition的第j个Replica分配到第((i + j) mode n)个Broker上</p></li>
+</ul>
+
+<p><img src="http://static.zybuluo.com/vin123456/aiutgg34qf6lg0bggpsc6opp/image_1c4493m12109413lledr5st8qo26.png" alt="image_1c4493m12109413lledr5st8qo26.png-97.5kB" title=""></p>
+
+
+
+<h4 id="5-零拷贝">5. 零拷贝</h4>
+
+<p>Kafka通过Message分组和Sendfile系统调用实现了zero-copy</p>
+
+<ul>
+<li><p>传统的socket发送文件拷贝 <br>
+<img src="http://static.zybuluo.com/vin123456/4gez1ywmgv07clx9hvzl40lm/image_1c4498jqa15nphsndjb1dtcn02j.png" alt="image_1c4498jqa15nphsndjb1dtcn02j.png-32kB" title=""> <br>
+1.内核态 <br>
+2.用户态 <br>
+3.内核态 <br>
+4.网卡缓存 <br>
+经历了内核态和用户态的拷贝</p></li>
+<li><p>sendfile系统调用 <br>
+<img src="http://static.zybuluo.com/vin123456/qih69uks7babu5dul6ucoxh2/image_1c449ampeh081628cd7ad717bb3g.png" alt="image_1c449ampeh081628cd7ad717bb3g.png-28.7kB" title=""> <br>
+避免了内核态与用户态的上下文切换动作</p></li>
+</ul>
+
+<blockquote>
+  <p>sendfile <br>
+  优点：大块文件传输效率高 <br>
+  缺点：小块文件效率较低、BIO而不是NIO <br>
+  mmap+write <br>
+  优点：使用小块文件传输时效率高 <br>
+  缺点：比sendfile多消耗CPU、内存安全控制复杂 <br>
+  应用 <br>
+  Kafka使用第一种，大块数据传输 <br>
+  RocketMQ使用第二种，小快数据传输</p>
+</blockquote>
+
+
+
+<h2 id="三-use-cases">三. Use Cases</h2>
+
+<ul>
+<li>Real-Time Stream Processing(combined with Spark Streaming)</li>
+<li>General purpose Message Bus</li>
+<li>Collecting User Activity Data</li>
+<li>Collecting Operational Metrics from applications,servers or devices</li>
+<li>Log Aggregation</li>
+<li>Change Data Capture</li>
+<li>Commit Log for distributed systems</li>
+</ul>
+
+<p><img src="http://static.zybuluo.com/vin123456/f2hmy13xmu1z3pg9bfb1jqe1/image_1c449qinbe82ha61tu21mmnn7p4q.png" alt="image_1c449qinbe82ha61tu21mmnn7p4q.png-112.5kB" title=""></p>
+
+
+
+<h2 id="四-development-with-kafka">四. Development with Kafka</h2>
+
+<p><img src="http://static.zybuluo.com/vin123456/pamuvdhu1irjd0mi1kny56ly/image_1c449sb6f16cm1ei5jt1mafhkf57.png" alt="image_1c449sb6f16cm1ei5jt1mafhkf57.png-110.8kB" title=""></p>
+
+
+
+<h2 id="五-administration">五. Administration</h2>
+
+<ul>
+<li>list &amp;&amp; describe</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">echo <span class="hljs-string">"此Kafka集群所有的Topic : "</span>
+kafka-topics --list --zookeeper dc226<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>, dc227<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>,dc229<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>/kafka
+
+echo <span class="hljs-string">"您要查看的Topic详细 : "</span>
+
+kafka-topics --describe --zookeeper dc226<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>, dc227<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>,dc229<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>/kafka --topic $topicName</code></pre>
+
+<ul>
+<li>create topic</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">kafka-topics --create --zookeeper dc226<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>,dc227<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>,dc229<span class="hljs-preprocessor">.dooioo</span><span class="hljs-preprocessor">.cn</span>:<span class="hljs-number">2181</span>/kafka --replication-factor <span class="hljs-number">1</span> --pa
+rtitions <span class="hljs-number">1</span> --topic $topicName</code></pre>
+
+<ul>
+<li>open producer</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">kafka<span class="hljs-attribute">-console</span><span class="hljs-attribute">-producer</span> <span class="hljs-subst">--</span>broker<span class="hljs-attribute">-list</span> <span class="hljs-number">10.22</span><span class="hljs-number">.253</span><span class="hljs-number">.227</span>:<span class="hljs-number">9092</span> <span class="hljs-subst">--</span>topic <span class="hljs-variable">$topicName</span> </code></pre>
+
+<ul>
+<li>open consumer</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">kafka<span class="hljs-attribute">-console</span><span class="hljs-attribute">-consumer</span> <span class="hljs-subst">--</span>zookeeper <span class="hljs-number">10.22</span><span class="hljs-number">.253</span><span class="hljs-number">.226</span>:<span class="hljs-number">2181</span>,<span class="hljs-number">10.22</span><span class="hljs-number">.253</span><span class="hljs-number">.227</span>:<span class="hljs-number">2181</span>,<span class="hljs-number">10.22</span><span class="hljs-number">.253</span><span class="hljs-number">.229</span>:<span class="hljs-number">2181</span>/kafka <span class="hljs-subst">--</span>topic <span class="hljs-variable">$topicName</span> <span class="hljs-subst">--</span>from<span class="hljs-attribute">-beginning</span></code></pre>
+
+
+
+<h2 id="六-cluster-planning">六. Cluster Planning</h2>
+
+
+
+<h2 id="七-compare">七. Compare</h2>
+
+<p><img src="http://static.zybuluo.com/vin123456/xawzcsa99x1qi70y2eyya2jz/image_1c44a7mec16tck74h6crf9ob5k.png" alt="image_1c44a7mec16tck74h6crf9ob5k.png-78.8kB" title=""> <br>
+<img src="http://static.zybuluo.com/vin123456/5vnh3k6sktoaym61whcvogvj/image_1c44a8aca12eb1ku713ra1lee183661.png" alt="image_1c44a8aca12eb1ku713ra1lee183661.png-72.7kB" title=""> <br>
+<img src="http://static.zybuluo.com/vin123456/09rekrb768bum0ji5on8ip78/image_1c44a93vu9fhibm1np41jdd1qto6e.png" alt="image_1c44a93vu9fhibm1np41jdd1qto6e.png-171.7kB" title=""></p>
+
+<h2 id="喜欢我的文章请关注微信公众号dtspider">喜欢我的文章请关注微信公众号<em>DTSpider</em></h2>
+
+<p><img src="https://img-blog.csdn.net/20180228102802894?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdmluZmx5X2xp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,97 @@
+---
+layout:     post
+title:      Kafka源码和文档阅读与体会(一)
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div align="center">新的一天，新的技术</div><p></p>
+
+<blockquote>
+  <p>这几天的技术，先讲解Kafka的内容，再结合源码细细品味 <br>
+  带着问题去理解 <br>
+  Kafka是什么、做什么、有什么特色 <br>
+  Kafka的设计 <br>
+  <br></p>
+</blockquote>
+
+<h4 id="kafka是什么做什么">Kafka是什么、做什么</h4>
+
+<blockquote>
+  <p>kafka是一个分布式、分区、副本提交的日志服务，它提供了一个消息系统的功能 , 但是有独特的设计 <br>
+  <b>(官方 ： Kafka is a distributed, partitioned, replicated commit log service. It provides the functionality of a messaging system, but with a unique design.)</b></p>
+</blockquote>
+
+
+
+<h4 id="kafka的设计">Kafka的设计</h4>
+
+<blockquote>
+  <p>先上图 <br>
+  <img src="https://img-blog.csdn.net/20150606121607932" alt="官方的图片" title=""></p>
+  
+  <p><br>
+  理解一下术语 ：</p>
+  
+  <ul>
+  <li>topic : 主题 , 分类的消息数据源(一个消息种类就是一个主题)</li>
+  <li>producers :   发布消息到kafka  topic 的进程</li>
+  <li>consumers ： 订阅主题并对发布的消息的数据源进行处理的进程</li>
+  <li>Kafka cluster： kafka以集群的方式进行运行，集群中的每一个server称为 broker <br>
+  其他的内容 ：</li>
+  <li>partition ：不可变的 、 有序的消息序列 , 只能通过提交日志(commited log)添加，一个主题可以有多个partition，可以实现集群负载 , 一个topic分成多个partition，producer根据相应的策略(round-robin或者key的哈希)提交到相应的partition上 , 不同的partition可以在不同的机器上，也可以在同一个机器上 ，显然，这样一个topic对应的机器数量显然小于或者等于partition数量。 </li>
+  <li>offset ： 分区中的消息的序列id号，每一个partition内部的消息的offset是唯一的，在一个分区中，不可能出现两个一样的offset 。</li>
+  </ul>
+</blockquote>
+
+<p>看一下topic的partition的图 ： <br>
+<br>
+<img src="https://img-blog.csdn.net/20150606124557146" alt="Topic的剖析" title=""> <br>
+<br></p>
+
+<blockquote>
+  <p>      图片中 , 所有partition 都属于 同一个topic , 写入方根据相应的策略写入不同的分区，在每一个分区内部 , 每一个消息都有一个offset作为标识符  , 是按序递增的，在partition0中从1-12 , 虚线的分区表示刚刚增加的消息 , 相应的offset 是递增1 ， 11+1 =12 。  <br>
+        已经讲了消息按区写入的过程 , 那么 消息最后是怎么消费的？ <br>
+  有图有真相 : <br>
+   <br>
+  <img src="https://img-blog.csdn.net/20150606130429840" alt="这里写图片描述" title=""></p>
+  
+  <p>     消费者编组成消费者组，但是，需要注意的是 , 一个消息可以被多个消费者组 “消费“, 但是，每一个消费者组中的消息只能被一个消费者消费，所以，在Kaka cluster中 , 消息是按 <b>消费者组标记 + 消费者标记</b> 来分发的 .  <br>
+  (ps: “消费”就是获取集群中的消息的行为) <br>
+       上图中还出现了Kafka Cluster的部分示意图 . Kafka 集群是由多个server组成，通过zookeeper进行管理负载均衡以及leader的选举 , 前面partition的论述中提及 ,  不同的partition可以在不同的机器上，也可以在同一个机器上 , 那么 , 一台机器/server 可以有一个到多个partition , 深入一下 ， 每一个partition都有一个leader 和 配置 的replica副本数量 ， 实现容灾 和 主从切换(zookeeper负责) , 为了配合zookeeper的主从切换和容灾处理 , consumer和producer 都可以向 brokers提交 元数据请求获取 此刻的 集群配置 , 如果由于网络等原因造成超时或者异常失败 , 可以采用退避法等待一段时间再进行请求(有请求上限)， 主从之间通过fetch线程交换数据 , 由从机fetch thread 发出网络请求 , 获取主机数据进行备份 . 注意 , 每一个server 都可以是 一个到多个partition的主机 ，也同时是 其他partition的副本从机 ,副本数量可以通过配置 .</p>
+</blockquote>
+
+
+
+<h4 id="kafka-和传统消息模型的对比">Kafka 和传统消息模型的对比</h4>
+
+<blockquote>
+  <p>     传统的消息队列在server端按序保留消息 , 如果有多个消费者对队列进行消费 ，  server 将按消息存储的顺序对消息进行处理 , 一个消息仅被消费一次。(  server 虽然按序处理消息 , 消息却是异步传递给consumer 的） <br>
+       相比传统消息队列 , kafka 有更好的性能 , 它通过topics中的partition实现并行 ， 同一个topic的不同的partition可以同时进行获取 .</p>
+  
+  <p>Kafka 消息的顺序保障 ： <br>
+  1、 由producer发送给 特定的主题分区 (topic partition) 的 消息（Messages） 将会按他们到达的顺序添加 , 也就是说 ， 如果消息M1 和M2 都是由同一个Producer发送的 ,并且M1 先到达 , 那么 , M1 相比M2的偏移量更低 , M1出现在日志的前面。 <br>
+  2、消费者实例(consumer instance)是按消息存储在日志中的顺序 看到的消息 <br>
+  3、对于有副本因子为N 的主题 （topic）, 我们会有N-1个容错节点 ， 达到不丢失任何提交到日志中的消息的目的</p>
+</blockquote>
+
+
+
+<h4 id="kafka做什么">Kafka做什么</h4>
+
+<blockquote>
+  <p>官方给处理这几个用户案例 : 消息系统 、 站点活动图 、性能监控 、日志聚合、流式处理。</p>
+</blockquote>
+
+
+
+<h4 id="kafka的特色">Kafka的特色</h4>
+
+<blockquote>
+  <p>除了上述的producer 、 brokers 、producer 、 topic 、 partition 、replica 、 zookeeper的设计外 ， Kafka还有一个特色 : 使用文件系统存储消息  “文件系统很慢，比缓存慢多了” , 在进行随机读写的时候确实如此 , 但是 ， 进行顺序读写的时候那就未必了 ，<a href="http://deliveryimages.acm.org/10.1145/1570000/1563874/jacobs3.jpg" rel="nofollow">性能甚至可能超过缓存</a> 。 </p>
+</blockquote>
+
+<div align="right">今天写到这里，有空继续</div>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

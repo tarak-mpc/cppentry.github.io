@@ -1,0 +1,103 @@
+---
+layout:     post
+title:      Kafka_基础和架构
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/Regan_Hoo/article/details/78743658				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>一、架构</p>
+
+<p>1、Kafka集群架构 <br>
+多个 broker 协同合作，producer 和 consumer 部署在各个业务逻辑中，三者通过 zookeeper管理协调请求和转发。</p>
+
+<p><img src="https://img-blog.csdn.net/20171207171317480?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+2、Kafka Stream架构 <br>
+Kafka Streams通过生产者和消费者，并利用kafka自有的能力来提供数据   平行性，分布式协调性，故障容错和操作简单性：</p>
+
+<p><img src="https://img-blog.csdn.net/20171207171341244?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+3、Kafka stream处理拓扑 <br>
+①流是Kafka Stream提出的最重要的抽象概念：它表示一个无限的，不断更新的数据集。流是一个有序的，可重放（反复的使用），不可变的容错序列，数据记录的格式是键值对（key-value）。 <br>
+②通过Kafka Streams编写一个或多个的计算逻辑的处理器拓扑。其中处理器拓扑是一个由流（边缘）连接的流处理（节点）的图。 <br>
+③流处理器是处理器拓扑中的一个节点；它表示一个处理的步骤，用来转换流中的数据（从拓扑中的上游处理器一次接受一个输入消息，并且随后产生一个或多个输出消息到其下游处理器中）。  <br>
+在拓扑中有两个特别的处理器： <br>
+④源处理器（Source Processor）：源处理器是一个没有任何上游处理器的特殊类型的流处理器。它从一个或多个kafka主题生成输入流。通过消费这些主题的消息并将它们转发到下游处理器。 <br>
+⑤Sink处理器：sink处理器是一个没有下游流处理器的特殊类型的流处理器。它接收上游流处理器的消息发送到一个指定的Kafka主题。</p>
+
+<p><img src="https://img-blog.csdn.net/20171207171410328?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+二、元素</p>
+
+<p>1、record <br>
+每个消息record是由一个key，一个value和时间戳构成。RecordBatch接口是用于批量读取和写入NIO通道的简化迭代器。 <br>
+消息是二进制格式并作为一个标准接口，可以在producerbroker，client之间传输，无需再copy或转换。</p>
+
+<p>2、topic <br>
+kafka集群存储的消息record是以topic为类别记录的。</p>
+
+<p>3、partition <br>
+每一个partition都是一个顺序的、不可变的消息队列，可以持续的添加。</p>
+
+<p>4、log <br>
+对每一个Topic，Kafka集群维护着partition级别的log： <br>
+2个分区的主题“speeches”，由2个目录构成（speeches-1和speeches-2），用于存放该主题的数据。每条消息都有一个64位整型的唯一标识offset，代表了topic分区所有消息流中该消息的起始字节位置。每条消息在磁盘上的格式如下：每个日志文件用第一条消息的offset来命名的，并且每个附加文件都将是上一个文件S字节的整数命名，其中S是配置中设置的最大日志文件大小。</p>
+
+<p><img src="https://img-blog.csdn.net/20171207171444184?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+①写： <br>
+日志允许串行的追加消息到最后一个文件。当它达到配置文件中设置的大小，就会滚动新的文件。日志采用了2个配置参数：M，定义了强制OS刷新文件到磁盘之前主动写入的消息数量。S，它定义了几秒后强制刷新。提供了耐久性保障。系统崩溃时候，丢失最多M消息，或S秒的数据。 <br>
+②读取： <br>
+读取是通过定义的64位逻辑消息和S-byte块大小的offset来完成。返回一个迭代器，它包含S-byte缓冲区的消息。S比单个消息大，但是在消息很大的情况下，读取可重试多次，每次的缓冲区大小加倍，直到消息被成功的读取。可以指定最大消息和缓冲区大小，使服务器拒绝超过这个大小的消息。 <br>
+从offset读取的实际过程，首先需要在存储的数据中找出日志段文件，然后通过全局offset计算找到日志段内的offset。然后从该文件的offset读取数据。搜索是通过二进制搜索每个文件在内存中的变化来完成的。 <br>
+③删除： <br>
+删除截止某个时间点的日志段。日志管理器允许插入删除策略来选择删除哪些文件，目前的策略删除N天以前日志。为了避免锁定读取，同时仍然允许删除和修改段列表，使用copy-on-write风格的段列表实现，提供一致的视图来允许一个二叉搜索进行一个不变的日志段的静态快照视图同时进行删除。</p>
+
+<p>5、offset <br>
+partition中的消息都被分了一个序列号，称之为偏移量(offset)，在每个分区中此偏移量都是唯一的。 <br>
+①消费者offset跟踪： <br>
+当offset manager接收一个OffsetCommitRequest，它额外的请求到一个特定的压缩名为__consumer_offsets的topic，当offset topic的所有副本接收offset之后，offset manager发送一个成功提交响应给消费者。万一offset无法在规定的时间内复制，offset将提交失败，消费者在回退之后可重试该提交。broker定期压缩offset topic，只需要保存每个分区最近的offset。offset manager也缓存offset在内存表中，以便offset快速获取。 <br>
+当offset manager接收一个offset的获取请求，将从offset缓存中返回最新的offset。如果offset manager刚启动或新的消费者组集刚成为offset manager（成为offset topic分区的leader），则需要加载offset topic的分区到缓存中，在这种情况下，offset将获取失败，并报出OffsetsLoadInProgress异常，消费者可重试OffsetFetchRequest。 <br>
+②迁移offset从zookeeper到kafka： <br>
+Kafka在早先的版本中offset默认存储在ZooKeeper。可通过下面的步骤迁  移这些消费者到Kafka。 <br>
+    ·在消费者配置设置offsets.storage=kafka和dual.commit.enabled=true。 <br>
+    ·消费者做滚动消费，验证你的消费者是健康的。 <br>
+    ·在消费者配置设置dual.commit.enabled=false <br>
+    ·消费者做滚动消费，验证你的消费者是健康的。 <br>
+    回滚（就是从kafka回到Zookeeper）也可以使用上面的步骤，通过设置  offsets.storage=zookeeper <br>
+    但是，这个机制在未来的版本将会弃用。因此，建议迁移数据到kafka。</p>
+
+<p><img src="https://img-blog.csdn.net/20171207171509302?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+6、生产者 <br>
+生产者往某个Topic发布消息，也负责选择发布到Topic上的哪一个分区。最简单的方式从分区列表中轮流选择，也可据某种算法选择分区 <br>
+①负载均衡 <br>
+Kafka所有节点都可应答给producer哪些服务器是正常的，哪些topic分区的leader允许producer在给定的时间内直接请求。 <br>
+②异步发送 <br>
+kafka生产者使用批处理试图在内存中积累数据，可以配置批处理积累不大于一定数量的消息数，并等待不超过配置时间的延迟。这将累积更多消息用于少数较大的I/O操作上</p>
+
+<p>7、消息模型 <br>
+队列：一条消息只能由消费者组中的一个消费者来处理 <br>
+发布-订阅：消息被广播给所有消费者，所有消费者都可以处理此消息 <br>
+队列的优点是允许多个消费者瓜分处理数据以扩展处理。但是，一旦消费者进程读取后故障了，那么消息就丢了。 <br>
+发布和订阅允许广播数据到多个消费者，由于每个订阅者都订阅了消息，所以没办法缩放处理。</p>
+
+<p>8、消费者组 <br>
+Kafka为以上两种模型提供了单一的消费者抽象模型：消费者组 <br>
+发布在Topic上的消息被分发给消费者组中的一个消费者。 当所有消费者都在一个组中，就变成了queue模型。 当所有消费者都在不同组中，就变成了发布-订阅模型。可以创建一些消费者组作为逻辑上的订阅者。每个组包含数目不等的消费者， 一个组内多个消费者可以用来扩展性能和容错：</p>
+
+<p><img src="https://img-blog.csdn.net/20171207171538527?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVnYW5fSG9v/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+传统的队列模型保证消息的先后顺序不变，但尽管服务器保证了消息的顺序，消息还是异步的发送给各个消费者，消费者收到消息的先后顺序不能保证，意味着并行消费将不能保证消息的先后顺序。如果只让一个消费者处理消息，又违背了并行处理的初衷。 <br>
+Kafka采用了分区。因为Topic每一个分区中消息只能由消费者组中的唯一一个消费者处理，所以同一个分区内的消息按照先后顺序进行处理。 想要顺序的处理Topic的所有消息，那就只提供一个分区。 <br>
+通过并行topic的parition —— kafka提供了顺序保证和负载均衡。每个partition仅由同一个消费者组中的一个消费者消费到。并确保消费者是该partition的唯一消费者，并按顺序消费数据。每个topic有多个分区，则需要对多个消费者做负载均衡，但注意，相同的消费者组中不能有比分区更多的消费者，否则多出的消费者一直处于空等待，不会收到消息 <br>
+消费者向broker的leader分区发起fetch请求。指定每次请求日志的偏移    量并收到那一块日志的起始位置。消费者可以重新指定位置，重新消费。 <br>
+①消费者定位 <br>
+topic被分为一组完全有序的分区，每个分区在任何给定的时间都由每个订阅消费者组中的一个消费者消费。这意味着消费者在每个分区中的位置只是一个整数，下一个消息消费的偏移量。 <br>
+消费者可以回到旧的偏移量并重新消费数据。这违反了一个队列的共同契约，但这被证明是许多消费者的基本特征。 <br>
+②离线数据加载 <br>
+可扩展持久性，以允许消费者周期性地消费批量数据，以便将数据定期批量加载到如Hadoop或关系数据仓库之类的离线系统中</p>
+
+<p>9、push or pull  <br>
+push模式很难适应消费速率不同的消费者，它目标是尽可能以最快速度传递消息，但很容易造成消费者来不及处理消息，导致拒绝服务及网络拥塞。 <br>
+pull模式则可据consumer的消费能力以适当的速率消费消息，有助于批量的将数据发送到消费者。但如果broker没有数据，消费者会轮询，直到数据到达。 <br>
+Kafka消费者采用pull模式，为避免轮询，Kafka允许消费者在pull请求时使用“long poll”进行阻塞，直到数据到达（并且设置等待时间可以积累消息，组成大数据块一并发送）</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

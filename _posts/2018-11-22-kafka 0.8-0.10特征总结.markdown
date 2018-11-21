@@ -1,0 +1,218 @@
+---
+layout:     post
+title:      kafka 0.8-0.10特征总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/xhpscdx/article/details/76263343				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="一前言">一.前言</h2>
+
+<ol>
+<li>介绍kafka的基本特征及概念。</li>
+<li>结合app设计需求介绍kafka实际应用与生产监控技巧。</li>
+<li>重点理解kafka的有序性的原理。</li>
+<li>kafka集群consumer和producer状态信息是如何保存的。</li>
+</ol>
+
+
+
+<h2 id="二kafka主要特征介绍">二.kafka主要特征介绍</h2>
+
+
+
+<h4 id="1-介绍">1. 介绍</h4>
+
+<p>Kafka is a distributed,partitioned,replicated commit logservice。它提供了类似于JMS的特性，但是在设计实现上完全不同，此外它并不是JMS规范的实现。kafka对消息保存时根据Topic进行归类，发送消息者成为Producer,消息接受者成为Consumer,此外kafka集群有多个kafka实例组成，每个实例(server)成为broker。无论是kafka集群，还是producer和consumer都依赖于zookeeper来保证系统可用性集群保存一些meta信息。如图： <br>
+ <img title="" alt="image" src="http://img.my.csdn.net/uploads/201707/04/1499138032_9083.png"></p>
+
+
+
+<h4 id="1-producers">1. Producers</h4>
+
+<pre><code>Producer将消息发布到指定的Topic中,同时Producer也能决定将此消息归属于哪个partition。
+</code></pre>
+
+
+
+<h4 id="2-consumers">2. Consumers</h4>
+
+<pre><code>本质上kafka只支持Topic.但是每个consumer属于一个consumer group;反过来说,每个group中可以有多个consumer.发送到Topic的消息,只会被订阅此Topic的每个group中的其中一个consumer消费。每个group的consumer是相互隔离的。
+如果所有的consumer都具有相同的group,这种情况和queue模式很像;消息将会在consumers之间负载均衡.
+如果所有的consumer都具有不同的group,那这就是"发布-订阅";消息将会广播给所有的消费者.理解为一个group就是一个订阅者。多个consumers只是group负载均衡方案.
+</code></pre>
+
+
+
+<h4 id="3-topic">3. topic</h4>
+
+<ol>
+<li>一个Topic可以认为是一类消息，每个topic将被分成多个partition(区),每个partition在存储层面是append log文件。任何发布到此partition的消息都会被直接追加到log文件的尾部，每条消息在文件中的位置称为offset（偏移量），offset为一个long型数字，它是唯一标记一条消息。它唯一的标记一条消息。kafka并没有提供其他额外的索引机制来存储offset. <br>
+++因为在kafka中几乎不允许对消息进行随机读写++。offset是存放在zookeeper中。</li>
+</ol>
+
+<p><img title="" alt="image" src="http://img.my.csdn.net/uploads/201707/04/1499138033_6128.png"></p>
+
+<ol>
+<li>kafka和JMS（Java Message Service）实现(activeMQ)不同的是:即使消息被消费,消息仍然不会被立即删除.日志文件将会根据broker中的配置要求,保留一定的时间之后删除;比如log文件保留2天,那么两天后,文件会被清除,无论其中的消息是否被消费.kafka通过这种简单的手段,来释放磁盘空间,以及减少消息消费之后对文件内容改动的磁盘IO开支.</li>
+<li>对于consumer而言,它需要保存消费消息的offset,对于offset的保存和使用,有consumer来控制;当consumer正常消费消息时,offset将会”线性”的向前驱动,即消息将依次顺序被消费.事实上consumer可以使用任意顺序消费消息,它只需要将offset重置为任意值..(offset将会保存在zookeeper中,这点我们在实验中验证) </li>
+<li>partitions的设计目的有多个.最根本原因是kafka基于文件存储.通过分区,可以将日志内容分散到多个server上,来避免文件尺寸达到单机磁盘的上限,每个partiton都会被当前server(kafka实例)保存;可以将一个topic切分多任意多个partitions,来消息保存/消费的效率.此外越多的partitions意味着可以容纳更多的consumer,有效提升并发消费的能力.</li>
+<li>
+</ol>
+
+<p>kafka-topics.bat –create –zookeeper localhost:2181 –replication-factor 1 –partitions 3 –topic page_visits</p>
+
+<p>replication-factor    节点  目录下执行如下命令(replication-factor设置为 kafka 节点数)： <br>
+partitions            –指的分片的数量 <br>
+上面这条建立topic的命令，创建一个3个partition，只放在一个replication节点下的topic。</p>
+
+
+
+<h4 id="4-distribution">4. Distribution</h4>
+
+<ol>
+<li>一个Topic的多个partitions,被分布在kafka集群中的多个server上;每个server(kafka实例)负责partitions中消息的读写操作;此外kafka还可以配置partitions需要备份的个数(replicas),每个partition将会被备份到多台机器上,以提高可用性.</li>
+<li>基于replicated方案,那么就意味着需要对多个备份进行调度;每个partition都有一个server为”leader”;leader负责所有的读写操作,如果leader失效,那么将会有其他follower来接管(成为新的leader);follower只是单调的和leader跟进,同步消息即可..由此可见作为leader的server承载了全部的请求压力,因此从集群的整体考虑,有多少个partitions就意味着有多少个”leader”,kafka会将”leader”均衡的分散在每个实例上,来确保整体的性能稳定.      </li>
+</ol>
+
+
+
+<h2 id="设计原理">设计原理</h2>
+
+<ol>
+<li>kafka的设计初衷是希望作为一个统一的信息收集平台,能够实时的收集反馈信息,并需要能够支撑较大的数据量,且具备良好的容错能力. 我来看下producer,broker,consumer三者 相互协同的关系，producer是主动把消息推送给中间存储陈列broker，consumer也是主要从consumer拉取消息进行消费。如图：可以看到producer,consumer与broker协助工作都是通过zookeeper来完成的。producer通过zookeeper找需要其中partition的其中partitionLeader发送消息给broker，consumer自己通过zookeeper获取自己的offset，主动向broker拉取数据。</li>
+</ol>
+
+<p><img title="" alt="image" src="http://img.my.csdn.net/uploads/201707/04/1499149714_2694.jpg"></p>
+
+
+
+<h4 id="1-持久性">1. 持久性</h4>
+
+<ol>
+<li>kafka使用文件存储消息,这就直接决定kafka在性能上严重依赖文件系统的本身特性.且无论任何OS下,对文件系统本身的优化几乎没有可能.文件缓存/直接内存映射等是常用的手段.因为kafka是对日志文件进行append操作,因此磁盘检索的开支是较小的;同时为了减少磁盘写入的次数,broker会将消息暂时buffer起来,当消息的个数(或尺寸)达到一定阀值时,再flush到磁盘,这样减少了磁盘IO调用的次数。</li>
+</ol>
+
+
+
+<h4 id="2-性能">2. 性能</h4>
+
+<ol>
+<li>需要考虑的影响性能点很多,除磁盘IO之外,我们还需要考虑网络IO,这直接关系到kafka的吞吐量问题.kafka并没有提供太多高超的技巧;对于producer端,可以将消息buffer起来,当消息的条数达到一定阀值时,批量发送给broker;对于consumer端也是一样,批量fetch多条消息.不过消息量的大小可以通过配置文件来指定.对于kafka broker端,似乎有个sendfile系统调用可以潜在的提升网络IO的性能:将文件的数据映射到系统内存中,socket直接读取相应的内存区域即可,而无需进程再次copy和交换. 其实对于producer/consumer/broker三者而言,CPU的开支应该都不大,因此启用消息压缩机制是一个良好的策略;压缩需要消耗少量的CPU资源,不过对于kafka而言,网络IO更应该需要考虑.可以将任何在网络上传输的消息都经过压缩.==kafka支持gzip/==snappy等多种压缩方式==.</li>
+</ol>
+
+
+
+<h4 id="3-生产者">3. 生产者</h4>
+
+<ol>
+<li>负载均衡: producer将会和Topic下所有partition leader保持socket连接;消息由producer直接通过socket发送到broker,中间不会经过任何”路由层”.事实上,消息被路由到哪个partition上,有producer客户端决定.比如可以采用”random”“key-hash”“轮询”等,如果一个topic中有多个partitions,那么在producer端实现”消息均衡分发”是必要的.</li>
+<li><p>其中partition leader的位置(host:port)注册在zookeeper中,producer作为zookeeper client,已经注册了watch用来监听partition leader的变更事件.</p></li>
+<li><p>异步发送：将多条消息暂且在客户端buffer起来，并将他们批量的发送到broker，小数据IO太多，会拖慢整体的网络延迟，批量延迟发送事实上提升了网络效率。不过这也有一定的隐患，比如说当producer失效时，那些尚未发送的消息将会丢失。</p></li>
+</ol>
+
+
+
+<h4 id="4-消费者">4. 消费者</h4>
+
+<ol>
+<li>consumer端向broker发送”fetch”请求,并告知其获取消息的offset;此后consumer将会获得一定条数的消息;consumer端也可以重置offset来重新消费消息. </li>
+<li>在JMS实现中,Topic模型基于push方式,即broker将消息推送给consumer端.不过在kafka中,采用了pull方式,即consumer在和broker建立连接之后,主动去pull(或者说fetch)消息;这中模式有些优点,首先consumer端可以根据自己的消费能力适时的去fetch消息并处理,且可以控制消息消费的进度(offset);此外,消费者可以良好的控制消息消费的数量,batch fetch.</li>
+<li>其他JMS实现,消息消费的位置是有prodiver保留,以便避免重复发送消息或者将没有消费成功的消息重发等,同时还要控制消息的状态.这就要求JMS broker需要太多额外的工作.在kafka中,partition中的消息只有一个consumer在消费,且不存在消息状态的控制,也没有复杂的消息确认机制,可见kafka broker端是相当轻量级的.当消息被consumer接收之后,consumer可以在本地保存最后消息的offset,并间歇性的向zookeeper注册offset.由此可见,consumer客户端也很轻量级.</li>
+</ol>
+
+
+
+<h4 id="5-消息传送机制">5. 消息传送机制</h4>
+
+<pre><code>对于JMS实现,消息传输担保非常直接:有且只有一次(exactly once).在kafka中稍有不同:
+1) at most once: 最多一次,这个和JMS中"非持久化"消息类似.发送一次,无论成败,将不会重发.
+2) at least once: 消息至少发送一次,如果消息未能接受成功,可能会重发,直到接收成功.
+3) exactly once: 消息只会发送一次.
+at most once: 消费者fetch消息,然后保存offset,然后处理消息;当client保存offset之后,但是在消息处理过程中出现了异常,导致部分消息未能继续处理.那么此后"未处理"的消息将不能被fetch到,这就是"at most once".
+at least once: 消费者fetch消息,然后处理消息,然后保存offset.如果消息处理成功之后,但是在保存offset阶段zookeeper异常导致保存操作未能执行成功,这就导致接下来再次fetch时可能获得上次已经处理过的消息,这就是"at least once"，原因offset没有及时的提交给zookeeper，zookeeper恢复正常还是之前offset状态.
+exactly once: kafka中并没有严格的去实现(基于2阶段提交,事务),我们认为这种策略在kafka中是没有必要的.
+通常情况下"at-least-once"是我们搜选.(相比at most once而言,重复接收数据总比丢失数据要好).
+</code></pre>
+
+
+
+<h2 id="总结">总结</h2>
+
+<ol>
+<li>了解kafka内部producer，broker，consumer的三个重要组成部分的协助关系，producer主动push消息给broker。consumer主动向broker拉去消息。broker的消息按照offset顺序进行持久化。</li>
+<li>producer通过zookeeper知道partition leader的位置，producer采用均衡分发发送消息给 不同的partitionLeader。 <br>
+3.知道一个topic可以拥有多个partition的作用。才kafka分布式集成中，partition leader的含义。 <br>
+4.zookeeper在kafka工作负责哪些工作。</li>
+</ol>
+
+
+
+<h2 id="监控命令">监控命令</h2>
+
+<ol>
+<li>这些命令用于kafka 10.0.0，其它版有变化</li>
+</ol>
+
+
+
+<h4 id="1-监控某个topic的分区情况">1. 监控某个topic的分区情况（）</h4>
+
+<p>1.10.0 老consumer代码监控，老api继续把group的offset存储在zookeeper</p>
+
+<p>./kafka-consumer-groups.sh –zookeeper localhost:2181/kafka –describe –group group-1</p>
+
+<p>通过上面命令指定自己的分组，topic的消息记录结果如下：</p>
+
+<table>
+<thead>
+<tr>
+  <th>GROUP</th>
+  <th>TOPIC</th>
+  <th>PID</th>
+  <th>OFFSET</th>
+  <th>LOGSIZE</th>
+  <th>LAG</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>消费者组</td>
+  <td>话题id</td>
+  <td>分区id</td>
+  <td>当前已消费的条数</td>
+  <td>总条数</td>
+  <td>未消费的条数</td>
+</tr>
+</tbody></table>
+
+
+<p>在生产环境，应用能够稳定的消费，比第一种方案更稳定，客户体验也更加及时。</p>
+
+<ol>
+<li>10.0 新api的consumer已把offset存储在broker了</li>
+</ol>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-built_in">.</span>/bin/kafka<span class="hljs-attribute">-consumer</span><span class="hljs-attribute">-groups</span><span class="hljs-built_in">.</span>sh   <span class="hljs-subst">--</span><span class="hljs-literal">new</span><span class="hljs-attribute">-consumer</span>  <span class="hljs-subst">--</span>bootstrap<span class="hljs-attribute">-server</span>  <span class="hljs-number">172.16</span><span class="hljs-number">.30</span><span class="hljs-number">.13</span>:<span class="hljs-number">9093</span> <span class="hljs-subst">--</span>describe <span class="hljs-subst">--</span><span class="hljs-keyword">group</span> <span class="hljs-keyword">group</span><span class="hljs-attribute">-new</span>
+
+<span class="hljs-built_in">.</span>/bin/kafka<span class="hljs-attribute">-run</span><span class="hljs-attribute">-class</span><span class="hljs-built_in">.</span>sh kafka<span class="hljs-built_in">.</span>tools<span class="hljs-built_in">.</span>ConsumerOffsetChecker <span class="hljs-subst">--</span>zookeeper <span class="hljs-number">172.16</span><span class="hljs-number">.30</span><span class="hljs-number">.13</span>:<span class="hljs-number">2181</span> <span class="hljs-subst">--</span><span class="hljs-keyword">group</span> <span class="hljs-keyword">group</span><span class="hljs-attribute">-new</span> <span class="hljs-subst">--</span>topic page_visits5
+</code></pre>
+
+<ol>
+<li>8.0 consumer offse监控</li>
+</ol>
+
+<p>./bin/kafka-run-class.sh kafka.tools.ConsumerOffsetChecker -zkconnect 127.0.0.1:2181/kafka08  –group group-2</p>
+
+
+
+<h4 id="2-监控某个topic的创建情况">2. 监控某个topic的创建情况</h4>
+
+<p>./bin/kafka-topics.sh –describe –zookeeper localhost:2181/kafka08 –topic page_visits2</p>
+
+<p>使用的时候请修改 zookeeper，topic参数</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

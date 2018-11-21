@@ -1,0 +1,94 @@
+---
+layout:     post
+title:      Kafka(二)：环境搭建&测试
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h3 style="color:rgb(51,51,51);font-family:Arial;line-height:25.99431800842285px;">
+本文基于Kafka 0.8</h3>
+<br>
+在一台机器上构建一个3个节点的kafka集群，并测试producer、consumer在正常情况下的行为，以及在lead broker/follow broker失效情况下的行为<br><br><strong>1.下载并解压kafka 0.8.0 release</strong><br>
+$ mkdir kafka<br>
+$ wget http://apache.dataguru.cn/kafka/0.8.0/kafka_2.8.0-0.8.0.tar.gz<br>
+$ tar -zxvf kafka_2.8.0-0.8.0.tar.gz<br>
+$ cd kafka_2.8.0-0.8.0<br>
+$ ll<br>
+total 2560<br>
+drwxr-xr-x 6 root root    4096 Dec 17 17:44 ./<br>
+drwxr-xr-x 4 root root    4096 Dec 17 18:20 ../<br>
+drwxr-xr-x 3 root root    4096 Dec 17 18:16 bin/<br>
+drwxr-xr-x 2 root root    4096 Dec 17 17:43 config/<br>
+-rw-r--r-- 1 root root 2520145 Nov 27 06:21 kafka_2.8.0-0.8.0.jar<br>
+drwxr-xr-x 2 root root    4096 Nov 27 06:21 libs/<br>
+-rw-r--r-- 1 root root   12932 Nov 27 06:21 LICENSE<br>
+drwxr-xr-x 2 root root    4096 Dec 17 18:00 logs/<br>
+-rw------- 1 root root   47165 Dec 17 18:10 nohup.out<br>
+-rw-r--r-- 1 root root     162 Nov 27 06:21 NOTICE<br><br><strong>2.启动一个单节点的zookeeper</strong><br>
+$ nohup bin/zookeeper-server-start.sh config/zookeeper.properties &amp;<br><br><strong>3. 准备启动一个3个broker节点的kafka集群，因此做如下配置</strong><br>
+$ cp config/server.properties config/server-1.properties <br>
+$ cp config/server.properties config/server-2.properties<br><p>并做如下修改：</p>
+<p>config/server-1.properties:<br>
+    broker.id=1<br>
+    port=9093<br>
+    log.dir=/tmp/kafka-logs-1<br>
+config/server-2.properties:<br>
+    broker.id=2<br>
+    port=9094<br>
+    log.dir=/tmp/kafka-logs-2</p>
+<p>说明：<br>
+broker.id: broker节点的唯一标识<br>
+port: broker节点使用端口号<br>
+log.dir: 消息目录位置<br><br><strong>4. 启动3个broker节点</strong><br>
+$ JMX_PORT=9997 bin/kafka-server-start.sh config/server-1.properties &amp;<br>
+$ JMX_PORT=9998 bin/kafka-server-start.sh config/server-2.properties &amp;<br>
+$ JMX_PORT=9999 bin/kafka-server-start.sh config/server.properties &amp;<br></p>
+<br><strong>5. 创建topic并查看</strong><br>
+$ bin/kafka-create-topic.sh --zookeeper localhost:2181 --replica 3 --partition 1 --topic 3test<br>
+creation succeeded!<br><br>
+$ bin/kafka-list-topic.sh --zookeeper localhost:2181<br><span style="color:#ff0000;">topic: 3test    partition: 0    leader: 2       replicas: 2,1,0 isr: 2,1,0</span><br>
+topic: test     partition: 0    leader: 0       replicas: 0     isr: 0<br>
+topic: test_topic       partition: 0    leader: 1       replicas: 0,1,2 isr: 1,2,0<br>
+说明：<br>
+partiton： partion id，由于此处只有一个partition，因此partition id 为0<br>
+leader：当前负责读写的lead broker id<br>
+relicas：当前partition的所有replication broker  list<br>
+isr：relicas的子集，只包含出于活动状态的broker<br><br><strong>6.启动consumer &amp; producer，并在producer启动后的console输入一些信息</strong><br>
+$ bin/kafka-console-consumer.sh --zookeeper localhost:2181 --from-beginning --topic 3test<br>
+message1<br>
+message3<br>
+message2<br><br>
+$ bin/kafka-console-producer.sh --broker-list localhost:9092,localhost:9093,localhost:9094 --topic 3test<br>
+message1<br>
+message3<br>
+message2<br><br>
+producer发送的数据consumer都能正常消费<br><br><strong>7. 干掉follow broker</strong><br>
+杀掉一个非lead broker（lead broker id为2）<br>
+$ pkill -9 -f server-1.properties<br><br>
+查看topic：<br>
+$ bin/kafka-list-topic.sh --zookeeper localhost:2181<br><span style="color:#ff0000;">topic: 3test    partition: 0    leader: 2       replicas: 2,1,0 isr: 2,0</span><br>
+topic: test     partition: 0    leader: 0       replicas: 0     isr: 0<br>
+topic: test_topic       partition: 0    leader: 2       replicas: 0,1,2 isr: 2,0<br><p>此时，存活的broker只有2,0<br>
+测试：produce发送消息，consumer能正常接收到<br><br><strong>8. 继续干掉leader broker</strong></p>
+干掉leader broker后，连续查看topic状态<br>
+$ pkill -9 -f server-2.properties                 <br>
+$ bin/kafka-list-topic.sh --zookeeper localhost:2181<br>
+topic: 3test    partition: 0    leader: 2       replicas: 2,1,0 isr: 2,0<br>
+topic: test     partition: 0    leader: 0       replicas: 0     isr: 0<br>
+topic: test_topic       partition: 0    leader: 2       replicas: 0,1,2 isr: 2,0<br>
+$ bin/kafka-list-topic.sh --zookeeper localhost:2181<br>
+topic: 3test    partition: 0    leader: 2       replicas: 2,1,0 isr: 2,0<br>
+topic: test     partition: 0    leader: 0       replicas: 0     isr: 0<br>
+topic: test_topic       partition: 0    leader: 2       replicas: 0,1,2 isr: 2,0<br>
+$ bin/kafka-list-topic.sh --zookeeper localhost:2181<br>
+topic: 3test    partition: 0    leader: 0       replicas: 2,1,0 isr: 0<br>
+topic: test     partition: 0    leader: 0       replicas: 0     isr: 0<br>
+topic: test_topic       partition: 0    leader: 0       replicas: 0,1,2 isr: 0<br>
+$ bin/kafka-list-topic.sh --zookeeper localhost:2181<br><span style="color:#ff0000;">topic: 3test    partition: 0    leader: 0       replicas: 2,1,0 isr: 0</span><br>
+topic: test     partition: 0    leader: 0       replicas: 0     isr: 0<br>
+topic: test_topic       partition: 0    leader: 0       replicas: 0,1,2 isr: 0<br>
+杀掉leader broker过了一会，broker 0成为新的leader broker<br>
+测试：produce发送消息，consumer能正常接收到<br><br>
+参考：<a href="https://kafka.apache.org/documentation.html#quickstart" rel="nofollow">Kafka QuickStart</a><br><br>            </div>
+                </div>

@@ -1,0 +1,249 @@
+---
+layout:     post
+title:      kafka剖析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主编写文章，未经博主允许转载，转载请注明出处。					https://blog.csdn.net/u012373815/article/details/52746910				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>本文讲解：</p>
+
+<p>kafka理念 <br>
+kafka与其它消息系统对比 <br>
+kafka特性 <br>
+kafka的存储 <br>
+Message持久化和缓存 <br>
+kafka 性能 <br>
+Consumer 状态－－消息交付语义 <br>
+拉取系统 <br>
+producer负载均衡 <br>
+producer异步发送</p>
+
+
+
+<h3 id="kafka的一些设计理念"><strong>kafka的一些设计理念：</strong></h3>
+
+<p>1、关注大吞吐量，而不是别的特性 <br>
+2、针对实时性场景 <br>
+3、关于消息被处理的状态是在consumer端维护，而不是由kafka server端维护。 <br>
+4、分布式，producer、broker和consumer都分布于多台机器上。</p>
+
+
+
+<h3 id="kafka与其它消息系统对比"><strong>kafka与其它消息系统对比</strong></h3>
+
+<p><img src="https://img-blog.csdn.net/20161009220648419" alt="这里写图片描述" title=""></p>
+
+
+
+<h3 id="kafka特性"><strong>kafka特性</strong></h3>
+
+<p>为何使用消息系统</p>
+
+<p>解耦 <br>
+在项目启动之初来预测将来项目会碰到什么需求，是极其困难的。消息系统在处理过程中间插入了一个隐含的、基于数据的接口层，两边的处理过程都要实现这一接口。这允许你独立的扩展或修改两边的处理过程，只要确保它们遵守同样的接口约束。</p>
+
+<p>冗余 <br>
+有些情况下，处理数据的过程会失败。除非数据被持久化，否则将造成丢失。消息队列把数据进行持久化直到它们已经被完全处理，通过这一方式规避了数据丢失风险。许多消息队列所采用的”插入-获取-删除”范式中，在把一个消息从队列中删除之前，需要你的处理系统明确的指出该消息已经被处理完毕，从而确保你的数据被安全的保存直到你使用完毕。</p>
+
+<p>扩展性 <br>
+因为消息队列解耦了你的处理过程，所以增大消息入队和处理的频率是很容易的，只要另外增加处理过程即可。不需要改变代码、不需要调节参数。扩展就像调大电力按钮一样简单。</p>
+
+<p>灵活性 &amp; 峰值处理能力 <br>
+在访问量剧增的情况下，应用仍然需要继续发挥作用，但是这样的突发流量并不常见；如果为以能处理这类峰值访问为标准来投入资源随时待命无疑是巨大的浪费。使用消息队列能够使关键组件顶住突发的访问压力，而不会因为突发的超负荷的请求而完全崩溃。</p>
+
+<p>可恢复性 <br>
+系统的一部分组件失效时，不会影响到整个系统。消息队列降低了进程间的耦合度，所以即使一个处理消息的进程挂掉，加入队列中的消息仍然可以在系统恢复后被处理。</p>
+
+<p>顺序保证 <br>
+在大多使用场景下，数据处理的顺序都很重要。大部分消息队列本来就是排序的，并且能保证数据会按照特定的顺序来处理。Kafka保证一个Partition内的消息的有序性。</p>
+
+<p>缓冲 <br>
+在任何重要的系统中，都会有需要不同的处理时间的元素。例如，加载一张图片比应用过滤器花费更少的时间。消息队列通过一个缓冲层来帮助任务最高效率的执行———写入队列的处理会尽可能的快速。该缓冲有助于控制和优化数据流经过系统的速度。</p>
+
+<p>异步通信 <br>
+很多时候，用户不想也不需要立即处理消息。消息队列提供了异步处理机制，允许用户把一个消息放入队列，但并不立即处理它。想向队列中放入多少消息就放多少，然后在需要的时候再去处理它们。</p>
+
+
+
+<h3 id="kafka的存储"><strong>kafka的存储</strong></h3>
+
+<p>Topic在逻辑上可以被认为是一个queue，每条消费都必须指定它的Topic，可以简单理解为必须指明把这条消息放进哪个queue里。为了使得Kafka的吞吐率可以线性提高，物理上把Topic分成一个或多个Partition，每个Partition在物理上对应一个文件夹，该文件夹下存储这个Partition的所有消息和索引文件。 <br>
+下面示意图形象说明了partition中文件存储方式:</p>
+
+<p><img src="https://img-blog.csdn.net/20161007013635914" alt="这里写图片描述" title=""></p>
+
+<ul>
+<li>每个partition(目录)相当于一个巨型文件被平均分配到多个大小相等segment(段)数据文件中。但每个段segment file消息数量不一定相等，这种特性方便old segment file快速被删除。</li>
+<li><p>每个partition只需要支持顺序读写就行了，segment文件生命周期由服务端配置参数决定。 <br>
+这样做的好处就是能快速删除无用文件，有效提高磁盘利用率。</p></li>
+<li><p>segment file组成：由2大部分组成，分别为index file和data file，此2个文件一一对应，成对出现，后缀”.index”和“.log”分别表示为segment索引文件、数据文件.</p></li>
+<li><strong>segment文件命名规则</strong>：partition全局的第一个segment从0开始，后续每个segment文件名为<strong>上一个</strong>全局partition的最大offset(偏移message数，也就是说新的segment的名字为当前partition中最大的offset)。数值最大为64位long大小(64字节的offset)，19位数字字符长度，没有数字用0填充。</li>
+</ul>
+
+<p>下面文件列表是前人在Kafka broker上做的一个实验，创建一个topicXXX包含1 partition，设置每个segment大小为500MB,并启动producer向Kafka broker写入大量数据,如下图所示segment文件列表形象说明了上述2个规则：</p>
+
+<p><img src="https://img-blog.csdn.net/20161007223326148" alt="这里写图片描述" title=""></p>
+
+<p>以上述图2中一对segment file文件为例，说明segment中index&lt;—-&gt;data file对应关系物理结构如下： <br>
+<img src="https://img-blog.csdn.net/20161007223402617" alt="这里写图片描述" title=""></p>
+
+<p>上述图中索引文件存储大量元数据，数据文件存储大量消息，索引文件中元数据指向对应数据文件中message的物理偏移地址。其中以索引文件中 元数据3,497为例，依次在数据文件中表示第3个message(在全局partiton表示第368772个message)、以及该消息的物理偏移 地址为497。 <br>
+从上述图了解到segment data file由许多message组成，下面详细说明message物理结构如下：</p>
+
+<p><img src="https://img-blog.csdn.net/20161007223609120" alt="这里写图片描述" title=""></p>
+
+<p><strong>参数说明：</strong> <br>
+关键字 解释说明 <br>
+8 byte offset   在parition(分区)内的每条消息都有一个有序的id号，这个id号被称为偏移(offset),它可以唯一确定每条消息在parition(分区)内的位置。即offset表示partiion的第多少message <br>
+4 byte message size message大小（也就是消息的length） <br>
+4 byte CRC32    用crc32校验message <br>
+1 byte “magic”  表示本次发布Kafka服务程序协议版本号 <br>
+1 byte “attributes” 表示为独立版本、或标识压缩类型、或编码类型。 <br>
+4 byte key length   表示key的长度,当key为-1时，K byte key字段不填 <br>
+K byte key  可选 <br>
+value bytes payload 表示实际消息数据（N个字节的消息体）。</p>
+
+
+
+<h3 id="在partition中如何通过offset查找message"><strong>在partition中如何通过offset查找message</strong></h3>
+
+<p>例如读取offset=368776的message，需要通过下面2个步骤查找。</p>
+
+<p>第一步查找segment file</p>
+
+<p>上图为例，其中00000000000000000000.index表示最开始的文件，起始偏移量(offset)为0.第二个文件 00000000000000368769.index的消息量起始偏移量为368770 = 368769 + 1.同样，第三个文件00000000000000737337.index的起始偏移量为737338=737337 + 1，其他后续文件依次类推，以起始偏移量命名并排序这些文件，只要根据offset <strong>二分查找</strong>文件列表，就可以快速定位到具体文件。</p>
+
+<p>当offset=368776时定位到00000000000000368769.index|log</p>
+
+<p>第二步通过segment file查找message通过第一步定位到segment file，当offset=368776时，依次定位到00000000000000368769.index的元数据物理位置和 00000000000000368769.log的物理偏移地址，然后再通过00000000000000368769.log顺序查找直到 offset=368776为止。</p>
+
+<p>从上图可知这样做的优点，segment index file采取稀疏索引存储方式，它减少索引文件大小，通过map可以直接内存操作，稀疏索引为数据文件的每个对应message设置一个元数据指针,它 比稠密索引节省了更多的存储空间，但查找起来需要消耗更多的时间。</p>
+
+
+
+<h3 id="message持久化和缓存"><strong>Message持久化和缓存</strong></h3>
+
+<p>（持久化就是文件系统＋页缓存）</p>
+
+<p>Kafka是依赖文件系统来存储和缓存消息的，（但是大家都觉得磁盘是比较慢的），磁盘不同用法会造成速度上的巨大差别。</p>
+
+<p>一个67200rpm SATA磁盘 线性写可达到300M/s，但是如果是随机写，只有50k/s并且，kafka是运行在JVM上的，JVM两个特性：</p>
+
+<ul>
+<li>object 的内存开销是非常大的，经常是要存储数据的两倍（或者更高）</li>
+<li>Java的内存回收机制随着堆内存的数据的增加变得频繁。</li>
+</ul>
+
+<p>作为这些因素的结果，使用 <strong>文件系统 </strong>和依赖于 <strong>页缓存</strong> 比维持一个内存的存储或者其他的结构有优势——我们至少通过自动访问所有的空闲内存使得可用的缓存加倍，而且可能通过存储一个紧凑的字节结构而不是单独的对象使得可用的缓存又增加一倍的大小。</p>
+
+<p>我们不是把数据尽量多的维持在内存中并只有当需要的时候在将数据刷到文件系统，我们是反其道而行之。   <strong>所有的数据不用进行任何的刷数据的调用就立刻被写入到文件系统的一个持久化的日志中记录</strong>   。事实上这只是意味着转移到了内核的 <strong>页缓存</strong> 中，OS将在之后将它刷出。接着我们添加一个配置驱动器刷数据策略来允许系统的用户控制数据被刷入物理磁盘的频率（每多少消息或者每多少秒）来设置一个在临界磁盘崩溃时数据量的一个限制。</p>
+
+
+
+<h4 id="满足长时间保存消息"><strong>满足长时间保存消息：</strong></h4>
+
+<p>一般消息系统持久化数据结构是用BTree，使得在消息系统中支持一个广泛的各种各样的事务性的和非事务性的语义。但是BTree的开销还是比较高的：B树操作的复杂度是O(log N)，这个开销貌似是固定的。但是对磁盘操作</p>
+
+<p>却不是这样的，因为需要考虑磁盘寻道的开销。此外，为满足事务性语义，BTree还要考虑row-lock，无疑这样的开销是非常大的。</p>
+
+<p>直观上一个持久化的队列可以进行简单读写和添加数据到文件。尽管不能支持B数的丰富语义，但是他的优势是：快！O(1)并且读写不相互阻塞。</p>
+
+<p>这样还有个好处，可以长时间存储消息，只要磁盘没有限制并且不出现损失，kafka可以存储相当长时间的消息（一周）。</p>
+
+
+
+<h3 id="kafka-性能"><strong>kafka 性能</strong></h3>
+
+<p>（总结：通过sendfile点对点压缩 保证网络性能）</p>
+
+<p>通常有两种原因造成效率低下： 太多的网络请求，过多的字节拷贝。 <br>
+为提供效率，kafka的API围绕 “message set”概念构建，这种方式是天然的将消息分组。这样可以允许一次请求 <strong>一组</strong> 消息，并且分摊了网络往返的开销。</p>
+
+<p>Lazily desialized ：<strong>MessageSet</strong>  实现本身是一个封装了字节 <strong>数组</strong> 或者文件的API。</p>
+
+<p>被broker维护的message的记录本身只是个被写入磁盘的message sets的目录。维护字节<strong>数组或者文件</strong>对网络传输是非常方便的，现代的unix操作系统提供了一个非常高效的方法将数据从页缓存发送到socket——  <em>sendfile</em>，java通过FileChannel.transferTo.api提供对这个系统调用的访问。</p>
+
+<p>通常的数据从file传输到socket的路径有：</p>
+
+<p>1、操作系统从磁盘读取文件到内核空间的pagecache。</p>
+
+<p>2、应用程序从内核空间读取数据到用户空间的缓存。</p>
+
+<p>3、应用程序将数据写回内核空间的socket buffer。</p>
+
+<p>4、操作系统将socket  buffer的数据拷贝到NIC buffer，数据从NIC被发送到网络。</p>
+
+<p>这样效率显然很低,因为里面涉及 4 次拷贝,2 次系统调用。使用 sendfile 就可以避免返 些重复的拷贝操作,讥 OS 直接将数据从页面缓存发送刡网络中,其中叧需最后一步中的将 数据拷贝刡 NIC 的缓冲区。</p>
+
+<p>kafka使用了zero copy技术： 数据只被拷贝到pagecache一次，每一次consumer请求都会重用，这就要求限制连接到服务器的consumer的数量。</p>
+
+
+
+<h4 id="点对点的批量压缩"><strong>点对点的批量压缩：</strong></h4>
+
+<p>高效的压缩需要将多个消息一起压缩而不是对单个消息单独压缩。</p>
+
+<p>点对点压缩：producer端：定期的对数据进行压缩，然后发送给服务端。服务端以压缩的形式存储数据，只有当consumer请求数据时进行解压。</p>
+
+<p>Kafka支持 GZIP 和 Snappy 压缩协议，详情请看这里 。</p>
+
+
+
+<h3 id="consumer-状态消息交付语义"><strong>Consumer 状态－－消息交付语义：</strong></h3>
+
+<p>对于一个消息系统来说，保持消耗消息的纪录，是一个必不可少的功能。</p>
+
+<p>一般的消息系统是将消息追踪纪录写在broker端，因此，broker可以及时的将发出消息从消息系统删除，从而保障消息系统存储的数据尽量的少。</p>
+
+<p>但是，如果consumer处理消息失败，此时broker已经把相应消息删除，会造成消息丢失。因此，许多消息系统引入 acknowledge机制，只有消息确认处理完成，broker再删除消息。</p>
+
+<p>这种机制虽然解决消息丢失问题，但它又引入了别的问题：</p>
+
+<p>1、如果consumer处理完一个消息，在发生确认之前fail掉，会造成消息被处理两次。</p>
+
+<p>2、在性能上，broker要记录每一个消息的多种状态，开销太大。</p>
+
+
+
+<h4 id="消息交付语义"><strong>消息交付语义：</strong></h4>
+
+<ul>
+<li><p>最多一次(at most once)：读完消息先commit再处理消息。这种模式下，如果Consumer在commit后还没来得及处理消息就crash了，下次重新开始工作后就无法读到刚刚已提交而未处理的消息，这就对应于At most once</p></li>
+<li><p>至少一次(at least once)：读完消息先处理再commit。这种模式下，如果在处理完消息之后commit之前Consumer crash了，下次重新开始工作时还会处理刚刚未commit的消息，实际上该消息已经被处理过了。这就对应于At least once</p></li>
+<li><p>恰好一次(exactly)：幂等一次 ，这正是我们想要的。</p></li>
+</ul>
+
+
+
+<h3 id="拉取系统"><strong>拉取系统</strong></h3>
+
+<p>作为一个messaging system，Kafka遵循了传统的方式，由producer向broker push消息并由consumer从broker pull消息。</p>
+
+<p>由于kafka broker会持久化数据，broker没有内存压力，因此，consumer非常适合采取pull的方式消费数据，具有以下几点好处： <br>
+简化kafka设计 <br>
+consumer根据消费能力自主控制消息拉取速度 <br>
+consumer根据自身情况自主选择消费模式，例如批量，重复消费，从尾端开始消费等</p>
+
+<h3 id="producer负载均衡"><strong>producer负载均衡</strong></h3>
+
+<p>producer根据用户指定的算法，将消息发送到指定的partition <br>
+存在多个partiiton，每个partition有自己的replica，每个replica分布在不同的Broker节点上 <br>
+多个partition需要选取出lead partition，lead partition负责读写，并由zookeeper负责fail over <br>
+通过zookeeper管理broker与consumer的动态加入与离开</p>
+
+
+
+<h3 id="producer异步发送"><strong>producer异步发送：</strong></h3>
+
+<p>异步非阻塞操作是一个可扩展消息系统的基本操作，kafka当然也提供这样一个操作（producer.type=async)。producer 可以在内存中缓存要发送的消息，然后等到触发时间或者缓存内容达到配置好的buffer的大小，就会批量发送消息。由于产生消息的机器一般都是异构的，产 生数据的速度是不同的，这种异步缓存机制会对broker产生统一的通信量，会更好的提高网络利用率和更高的吞吐量。</p>
+
+<p>若broker宕机，buffer 丢失，segment不完整，启动server时首先会检查segment 完整性</p>
+
+<p>参考资料： <br>
+<a href="http://www.open-open.com/lib/view/open1421150566328.html" rel="nofollow">http://www.open-open.com/lib/view/open1421150566328.html</a> <br>
+<a href="http://www.open-open.com/lib/view/open1395495451806.html" rel="nofollow">http://www.open-open.com/lib/view/open1395495451806.html</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

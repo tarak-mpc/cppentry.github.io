@@ -1,0 +1,71 @@
+---
+layout:     post
+title:      kafka简介，集群部署
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <strong>1、Kafka是什么</strong><br>    在流式计算中，Kafka一般用来缓存数据，Storm通过消费Kafka的数据进行计算。<br>    <span>	</span>Apache Kafka是一个开源消息系统，由Scala写成。是由Apache软件基金会开发的一个开源消息系统项目。<br>    <span>	</span>Kafka最初是由LinkedIn开发，并于2011年初开源。2012年10月从Apache Incubator毕业。该项目的目标是为处理实时    数    据提供一个统一、高通量、低等待的平台。<br>    <span>	</span>Kafka是一个分布式消息队列：生产者、消费者的功能。它提供了类似于JMS的特性，但是在设计实现上完全不同，此外它    并不是JMS规范的实现。<br>    <span>	</span>Kafka对消息保存时根据Topic进行归类，发送消息者称为Producer,消息接受者称为Consumer,此外kafka集群有多个kafka实例组成，每个实例(server)成为broker。<br><p>    <span>	</span>无论是kafka集群，还是producer和consumer都依赖于zookeeper集群保存一些meta信息，来保证系统可用性</p><p><br></p><p><strong>2、Kafka的核心组件</strong></p><p><strong><img src="https://img-blog.csdn.net/20180709204618434?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI1ODM4Nzc3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></strong></p><p>    kafka集群中的服务器都叫做broker<br>   kafka有两类客户端，一类叫producer（消息生产者），一类叫做consumer（消息消费者），客户端和broker服务器之间采用tcp协议连接<br>kafka中不同业务系统的消息可以通过topic进行区分，而且每一个消息topic都会被分区，以分担消息读写的负载<br>每一个分区都可以有多个副本，以防止数据的丢失<br>某一个分区中的数据如果需要更新，都必须通过该分区所有副本中的leader来更新<br>消费者可以分组，比如有两个消费者组A和B，共同消费一个topic：order_info,A和B所消费的消息不会重复<br>比如 order_info 中有100个消息，每个消息有一个id,编号从0-99，那么，如果A组消费0-49号，B组就消费50-99号<br>消费者在具体消费某个topic中的消息时，可以指定起始偏移量<br><br><strong>3 ，kafka 集群部署 (这里我们搞三台)</strong><br></p><p>        下载安装包、解压安装包、修改配置文件、分发安装包、启动集群</p><p>所有oracle分布式框架几乎都用到zookeeper，这里不解释,之前文档有介绍，自己在三台机器上分别配置并启动zookeeper </p><p>1、解压kafka安装包 ，不解释自己弄<br>2、修改server.properties  （在安装目录的config文件夹下面，自己找）<br>broker.id=1  （在每台分别配置对应的id, 如 weekend01上配置broker.id=1,  weekend02配置 broker.id=2,  week......）<br></p><p>将如下配置覆盖原来server.properties配置即可</p><pre><code class="language-html">#broker的全局唯一编号，不能重复
+broker.id=0
+
+#用来监听链接的端口，producer或consumer将在此端口建立连接
+port=9092
+
+#处理网络请求的线程数量
+num.network.threads=3
+
+#用来处理磁盘IO的线程数量
+num.io.threads=8
+
+#发送套接字的缓冲区大小
+socket.send.buffer.bytes=102400
+
+#接受套接字的缓冲区大小
+socket.receive.buffer.bytes=102400
+
+#请求套接字的缓冲区大小
+socket.request.max.bytes=104857600
+
+#kafka运行日志存放的路径
+log.dirs=/export/servers/logs/kafka
+
+#topic在当前broker上的分片个数
+num.partitions=2
+
+#用来恢复和清理data下数据的线程数量
+num.recovery.threads.per.data.dir=1
+
+#segment文件保留的最长时间，超时将被删除
+log.retention.hours=168
+
+#滚动生成新的segment文件的最大时间
+log.roll.hours=168
+
+#日志文件中每个segment的大小，默认为1G
+log.segment.bytes=1073741824
+
+#周期性检查文件大小的时间
+log.retention.check.interval.ms=300000
+
+#日志清理是否打开
+log.cleaner.enable=true
+
+#broker需要使用zookeeper保存meta数据
+zookeeper.connect=weekend01:2181,weekend02:2181,weekend03:2181
+
+#zookeeper链接超时时间
+zookeeper.connection.timeout.ms=6000
+
+#partion buffer中，消息的条数达到阈值，将触发flush到磁盘
+log.flush.interval.messages=10000
+
+#消息buffer的时间，达到阈值，将触发flush到磁盘
+log.flush.interval.ms=3000
+
+#删除topic需要server.properties中设置delete.topic.enable=true否则只是标记删除
+delete.topic.enable=true
+
+#此处的host.name为本机IP(重要),如果不改,则客户端会抛出:Producer connection to localhost:9092 unsuccessful 错误!
+host.name=weekend01
+advertised.host.name=192.168.2.101</code></pre><br><br>3、将zookeeper集群启动<br><br>4、在每一台节点上启动broker<br>bin/kafka-server-start.sh config/server.properties<br><br>5、在kafka集群中创建一个topic<br>bin/kafka-topics.sh --create --zookeeper weekend01:2181 --replication-factor 3 --partitions 1 --topic my-order<br>bin/kafka-topics.sh --list --zookeeper weekend01:2181  查看topic<br><br>6、用一个producer向某一个topic中写入消息<br>bin/kafka-console-producer.sh --broker-list weekend01:9092 --topic my-order<br><br>7、用一个comsumer从某一个topic中读取信息<br>bin/kafka-console-consumer.sh --zookeeper weekend01:2181 --from-beginning --topic my-order<br><br>8、查看一个topic的分区及副本状态信息<br><p>bin/kafka-topics.sh --describe --zookeeper weekend01:2181 --topic my-order</p><p>在启动提供者进程下面 随便输入点东西， 去消费者进程下面便可以看到了 。</p><p><br></p><p><strong>最后我们通过代码和图的关系解释下 borker , topic ，消息分区，分区副本四者关系 ：</strong></p><p>再创建一个提供者然后查看状态信息 ： </p><p><img src="https://img-blog.csdn.net/20180709205833750?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI1ODM4Nzc3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p>可以看到，我们将消息分了 2 个区， 每个区有 3 个副本 ，topic名字叫做 mysons , 分区副本位于不同broker, 并指出了同一分区副本leader所在服务器位置。</p><p>画个图片解释下： </p><p><img src="https://img-blog.csdn.net/20180709210013880?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI1ODM4Nzc3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""> </p><p>最后看下他的容错能力，我们把borker.0服务器 进程杀死 ， （ kill -9 进程号），看下原本再broker.0上的 part0, leader是否会自动转移到 broker.1或者 broker.2的part区副本上， 答案是肯定的，经我测试如图</p><p><img src="https://img-blog.csdn.net/2018070921093962?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzI1ODM4Nzc3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p><br></p><p><strong>好了，基本常用到且需理解的kafka概念其实也就这些，有什么需要补充的请大家评论下，谢谢！</strong></p><p><br></p><p><br></p><p><br></p><p><br></p><p><br></p><p><br></p><p><br></p><p><br></p><p><br></p><p><br></p><p><br></p><p><br></p><br><br>            </div>
+                </div>

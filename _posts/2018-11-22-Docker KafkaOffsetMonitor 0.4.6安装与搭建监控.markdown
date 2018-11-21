@@ -1,0 +1,23 @@
+---
+layout:     post
+title:      Docker KafkaOffsetMonitor 0.4.6安装与搭建监控
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/sinat_22767969/article/details/80550385				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h1>前言</h1><p>        近期在公司项目需要到kafka，但发现却没有监控，且是安装docker的kafka，想查看消息是否积压还得进容器查看。于是整了个这，有点坎坷，不过满满的成就。</p><p>        目前为止，国内外搜遍了，kafkaOffsetMonitor 都没发现有docker版本的kafka新版监控的镜像，算是个开山吧！<img alt="大笑" src="https://static-blog.csdn.net/xheditor/xheditor_emot/default/laugh.gif"></p><p>        gitHub地址：<a href="https://github.com/chenchaoyun0/docker-kafka-offset-monitor" rel="nofollow">https://github.com/chenchaoyun0/docker-kafka-offset-monitor</a><br></p><h1>主流kafka监控</h1><p></p><ul><li><strong>Kafka Web Conslole</strong><br></li></ul><p><span style="font-size:14px;font-weight:normal;">        </span><span style="font-weight:normal;"><span style="font-size:16px;">程序运行后，会定时去读取kafka集群分区的日志长度，读取完毕后，连接没有正常释放，一段时间后产生大量的socket连接，导致网络堵塞，所以不建议使用。</span></span></p><div><ul><li><span style="font-size:14px;"><strong>Kafka Manager</strong><br></span></li></ul>        <span style="font-size:16px;">这个我研究了很久，gitHub有两个项目很火，一个是yahoo开源的：<a href="https://github.com/yahoo/kafka-manager" rel="nofollow">https://github.com/yahoo/kafka-manager</a>，<br></span></div><div><span style="font-size:16px;">还有一个是：<a href="https://github.com/sheepkiller/kafka-manager-docker" rel="nofollow">https://github.com/sheepkiller/kafka-manager-docker</a>，这两款不知道是不是我安装的问题，消费组有时候读不到，看不到消费。在kafka-manager 上能对kafka做一些分区调整的操作，但想看消息消费的情况不是很方便</span></div><div><ul><li><strong>KafkaOffsetMonitor<br></strong></li></ul><strong>        </strong>这款界面就比较简单了，但是也有坑，原作者只做到0.21就不继续做了，后来有人继续从上面fork开发，才支持了kafka的新版本，但也有坑，项目引用的js与一些图片，都是在线国外的！！不能连google和不能上网都GG，离开公司后回家偶然发现的。于是我把他们在线引用的资源全都下载下来，自己fork了一版，用的版本是KafkaOffsetMonitor-assembly-0.4.6，并制作了docker。地址：<a href="https://github.com/chenchaoyun0/docker-kafka-offset-monitor" rel="nofollow">https://github.com/chenchaoyun0/docker-kafka-offset-monitor</a>。</div><div>源码：<a href="https://github.com/chenchaoyun0/kafka-offset-monitor" rel="nofollow">https://github.com/chenchaoyun0/kafka-offset-monitor</a>。其实也就是多提了十来个样式文件</div><div>        kafka新的版本offset存储在自己的一个topic，不像老版本是存在zookeeper里面，所以用KafkaOffsetMonitor2.x的版本监控会有问题，根本监控不到数据，所以最好在github上面下载最新的版本自己编译，注意jdk为1.8版本<br></div><p><br></p><h1>搭建步骤</h1><h2></h2><h3>1. 构建本地docker 镜像</h3><pre><code class="language-python">git clone https://github.com/chenchaoyun0/docker-kafka-offset-monitor.git</code></pre><p>进入到目录，修改docker-build.sh 脚本，为你自己想要命名的镜像，执行docker build脚本</p><p><img src="https://img-blog.csdn.net/20180602191515128?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NpbmF0XzIyNzY3OTY5/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><h3>2. 执行build脚本</h3><pre><code class="language-python">sh docker-build.sh</code></pre><pre><code class="language-python">docker images</code></pre><p>就会看到镜像构建完成</p><h3>3. 编写docker-compose.yml，需要配置环境变量为自己的kafka和zookeeper地址</h3><pre><code class="language-python">version: '2'
+services:
+  kafka-offset-monitor:
+    image: 39.105.33.58:5000/kafka-offset-monitor:1.0
+    volumes:
+     - "./logs/:/u01/app/kafka-offset-monitor/logs/"
+    ports:
+      - "8086:8086"
+    environment:
+     ZK_HOSTS: 39.105.33.58:2181
+     KAFKA_BROKERS: 39.105.33.58:23310
+     REFRESH_SECENDS: 10
+     RETAIN_DAYS: 2</code></pre><h3>4. 启动容器</h3><pre><code class="language-python">docker-compose up -d</code></pre><h3>5. 查看启动日志，本地logs也有个日志</h3><pre><code class="language-python">docker-compose logs -f</code></pre><h3>6. 访问 http://IP:8086 即可看到黑底色的监控页面啦</h3><p><img src="https://img-blog.csdn.net/20180602192339315?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NpbmF0XzIyNzY3OTY5/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p>点击 消费组名称即可看到消费详情</p><p><img src="https://img-blog.csdn.net/20180602192600472?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NpbmF0XzIyNzY3OTY5/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p>点击topic 名称可查看消息当前消费与写入的速度</p><p><img src="https://img-blog.csdn.net/20180602192726888?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NpbmF0XzIyNzY3OTY5/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""><br></p><p><br></p><h1>总结</h1><p>       待补充<br></p><p><br></p>            </div>
+                </div>

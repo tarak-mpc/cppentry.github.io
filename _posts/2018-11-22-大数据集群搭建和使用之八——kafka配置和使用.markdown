@@ -1,0 +1,493 @@
+---
+layout:     post
+title:      大数据集群搭建和使用之八——kafka配置和使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/moquancsdn/article/details/81700448				</div>
+								            <div id="content_views" class="markdown_views prism-github-gist">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc">
+<ul>
+<li><a href="#kafka" rel="nofollow">Kafka</a><ul>
+<li><a href="#%E9%85%8D%E7%BD%AE" rel="nofollow">配置</a></li>
+<li><a href="#%E5%90%AF%E5%8A%A8" rel="nofollow">启动</a></li>
+</ul>
+</li>
+<li><a href="#%E8%AE%B0%E4%B8%80%E6%AC%A1%E6%9C%8D%E5%8A%A1%E5%99%A8%E8%A2%AB%E9%BB%91%E5%AE%A2%E6%94%BB%E5%87%BB" rel="nofollow">记一次服务器被黑客攻击</a></li>
+<li><a href="#%E4%BD%BF%E7%94%A8kafka" rel="nofollow">使用KAFKA</a><ul>
+<li><a href="#%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5" rel="nofollow">基本概念</a></li>
+<li><a href="#kafka-shell" rel="nofollow">kafka shell</a></li>
+<li><a href="#kafka-java-demo" rel="nofollow">kafka java demo</a><ul>
+<li><a href="#%E7%94%9F%E4%BA%A7%E8%80%85%E6%A0%B7%E4%BE%8B" rel="nofollow">生产者样例</a></li>
+<li><a href="#%E6%B6%88%E8%B4%B9%E8%80%85%E6%A0%B7%E4%BE%8B" rel="nofollow">消费者样例</a></li>
+<li><a href="#%E8%BF%90%E8%A1%8C%E8%AF%B4%E6%98%8E" rel="nofollow">运行说明</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+
+
+<p><strong><code>这个系列指南使用真实集群搭建环境，不是伪集群，用了三台腾讯云服务器</code></strong></p>
+
+<p>或者访问我的个人博客站点，<a href="http://blog.leanote.com/moquan" rel="nofollow">链接</a></p>
+
+<h1 id="kafka"><strong>Kafka</strong></h1>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-8-15/49428965.jpg" alt="" title=""></p>
+
+
+
+<h2 id="配置"><strong>配置</strong></h2>
+
+<p><strong>kafka依赖zookeeper</strong>，所以先确保集群已经安装zookeeper并且能够正常启动。 <br>
+<strong>浪费了一整天的时间debug</strong>结果bug很简单（至少现在集群没有崩溃）</p>
+
+<p>建立目录树 /opt/kafka/kafka2.12 <br>
+在/root/kafka/kafka-logs/logs建立一个用于存放日志的文件 <br>
+配置环境变量/etc/profile，添加bin目录 <br>
+修改配置文件kafka/config/server.properties <br>
+1. 修改broker.id <strong>id和zookeeper的myid一致</strong>（应该是这样，这个bug我查了一天），每个主机的id都不一样，每次修改前，需要确认（或者干脆删除）kafka日志文件（/root/kafka/kafka-logs/metaxxxx中的id是否和broker.id一致） <br>
+2. 修改zookeeper.connect和zookeeper.connection.timeout.ms</p>
+
+<pre><code>zookeeper.connect=master:2181,slave1:2181,slave2:2181
+zookeeper.connection.timeout.ms=6000
+</code></pre>
+
+<p>3. 修改logdir（记得必须先创建文件，kafka不会自己创建文件夹） <br>
+4. 修改两处listener（vim使用/listener查找），手动添加hostname（例如master,slave1,slave2），其实按照文档，只需要修改一处即可。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"># Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# see kafka.server.KafkaConfig for additional details and defaults
+
+############################# Server Basics #############################
+
+# The id of the broker. This must be <span class="hljs-operator"><span class="hljs-keyword">set</span> <span class="hljs-keyword">to</span> a <span class="hljs-keyword">unique</span> <span class="hljs-keyword">integer</span> <span class="hljs-keyword">for</span> <span class="hljs-keyword">each</span> broker.
+broker.id=<span class="hljs-number">0</span>
+
+############################# Socket Server Settings #############################
+
+# The address the socket server listens <span class="hljs-keyword">on</span>. It will <span class="hljs-keyword">get</span> the <span class="hljs-keyword">value</span> returned <span class="hljs-keyword">from</span>
+# java.net.InetAddress.getCanonicalHostName() <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> configured.
+#   FORMAT:
+#     listeners = listener_name://host_name:port
+#   EXAMPLE:
+#     listeners = PLAINTEXT://your.host.name:<span class="hljs-number">9092</span>
+listeners=PLAINTEXT://master:<span class="hljs-number">9092</span>
+
+# Hostname <span class="hljs-keyword">and</span> port the broker will advertise <span class="hljs-keyword">to</span> producers <span class="hljs-keyword">and</span> consumers. <span class="hljs-keyword">If</span> <span class="hljs-keyword">not</span> <span class="hljs-keyword">set</span>,
+# it uses the <span class="hljs-keyword">value</span> <span class="hljs-keyword">for</span> <span class="hljs-string">"listeners"</span> <span class="hljs-keyword">if</span> configured.  Otherwise, it will use the <span class="hljs-keyword">value</span>
+# returned <span class="hljs-keyword">from</span> java.net.InetAddress.getCanonicalHostName().
+advertised.listeners=PLAINTEXT://master:<span class="hljs-number">9092</span>
+
+# Maps listener <span class="hljs-keyword">names</span> <span class="hljs-keyword">to</span> security protocols, the <span class="hljs-keyword">default</span> <span class="hljs-keyword">is</span> <span class="hljs-keyword">for</span> them <span class="hljs-keyword">to</span> be the same. See the config documentation <span class="hljs-keyword">for</span> more details
+#listener.security.protocol.map=PLAINTEXT:PLAINTEXT,SSL:SSL,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_SSL:SASL_SSL
+
+# The <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> threads that the server uses <span class="hljs-keyword">for</span> receiving requests <span class="hljs-keyword">from</span> the network <span class="hljs-keyword">and</span> sending responses <span class="hljs-keyword">to</span> the network
+num.network.threads=<span class="hljs-number">3</span>
+
+# The <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> threads that the server uses <span class="hljs-keyword">for</span> processing requests, which may include disk I/O
+num.io.threads=<span class="hljs-number">8</span>
+
+# The send buffer (SO_SNDBUF) used <span class="hljs-keyword">by</span> the socket server
+socket.send.buffer.bytes=<span class="hljs-number">102400</span>
+
+# The receive buffer (SO_RCVBUF) used <span class="hljs-keyword">by</span> the socket server
+socket.receive.buffer.bytes=<span class="hljs-number">102400</span>
+
+# The maximum <span class="hljs-keyword">size</span> <span class="hljs-keyword">of</span> a request that the socket server will accept (protection against OOM)
+socket.request.<span class="hljs-aggregate">max</span>.bytes=<span class="hljs-number">104857600</span>
+
+
+############################# Log Basics #############################
+
+# A comma separated list <span class="hljs-keyword">of</span> directories under which <span class="hljs-keyword">to</span> store log files
+log.dirs=/root/kafka/kafka-logs
+
+# The <span class="hljs-keyword">default</span> <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> log partitions per topic. More partitions allow greater
+# parallelism <span class="hljs-keyword">for</span> consumption, but this will also result <span class="hljs-keyword">in</span> more files across
+# the brokers.
+num.partitions=<span class="hljs-number">1</span>
+
+# The <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> threads per data directory <span class="hljs-keyword">to</span> be used <span class="hljs-keyword">for</span> log recovery <span class="hljs-keyword">at</span> startup <span class="hljs-keyword">and</span> flushing <span class="hljs-keyword">at</span> shutdown.
+# This <span class="hljs-keyword">value</span> <span class="hljs-keyword">is</span> recommended <span class="hljs-keyword">to</span> be increased <span class="hljs-keyword">for</span> installations <span class="hljs-keyword">with</span> data dirs located <span class="hljs-keyword">in</span> RAID array.
+num.recovery.threads.per.data.dir=<span class="hljs-number">1</span>
+
+############################# Internal Topic Settings  #############################
+# The replication factor <span class="hljs-keyword">for</span> the <span class="hljs-keyword">group</span> metadata internal topics <span class="hljs-string">"__consumer_offsets"</span> <span class="hljs-keyword">and</span> <span class="hljs-string">"__transaction_state"</span>
+# <span class="hljs-keyword">For</span> anything other than development testing, a <span class="hljs-keyword">value</span> greater than <span class="hljs-number">1</span> <span class="hljs-keyword">is</span> recommended <span class="hljs-keyword">for</span> <span class="hljs-keyword">to</span> ensure availability such <span class="hljs-keyword">as</span> <span class="hljs-number">3.</span>
+offsets.topic.replication.factor=<span class="hljs-number">1</span>
+<span class="hljs-keyword">transaction</span>.state.log.replication.factor=<span class="hljs-number">1</span>
+<span class="hljs-keyword">transaction</span>.state.log.<span class="hljs-aggregate">min</span>.isr=<span class="hljs-number">1</span>
+
+############################# Log Flush Policy #############################
+
+# Messages <span class="hljs-keyword">are</span> immediately written <span class="hljs-keyword">to</span> the filesystem but <span class="hljs-keyword">by</span> <span class="hljs-keyword">default</span> we <span class="hljs-keyword">only</span> fsync() <span class="hljs-keyword">to</span> sync
+# the OS cache lazily. The following configurations control the flush <span class="hljs-keyword">of</span> data <span class="hljs-keyword">to</span> disk.
+# There <span class="hljs-keyword">are</span> a few important trade-offs here:
+#    <span class="hljs-number">1.</span> Durability: Unflushed data may be lost <span class="hljs-keyword">if</span> you <span class="hljs-keyword">are</span> <span class="hljs-keyword">not</span> <span class="hljs-keyword">using</span> replication.
+#    <span class="hljs-number">2.</span> Latency: Very large flush intervals may lead <span class="hljs-keyword">to</span> latency spikes <span class="hljs-keyword">when</span> the flush does occur <span class="hljs-keyword">as</span> there will be a lot <span class="hljs-keyword">of</span> data <span class="hljs-keyword">to</span> flush.
+#    <span class="hljs-number">3.</span> Throughput: The flush <span class="hljs-keyword">is</span> generally the most expensive operation, <span class="hljs-keyword">and</span> a small flush <span class="hljs-keyword">interval</span> may lead <span class="hljs-keyword">to</span> excessive seeks.
+# The settings below allow one <span class="hljs-keyword">to</span> configure the flush policy <span class="hljs-keyword">to</span> flush data <span class="hljs-keyword">after</span> a period <span class="hljs-keyword">of</span> <span class="hljs-keyword">time</span> <span class="hljs-keyword">or</span>
+# every N messages (<span class="hljs-keyword">or</span> <span class="hljs-keyword">both</span>). This can be done globally <span class="hljs-keyword">and</span> overridden <span class="hljs-keyword">on</span> a per-topic basis.
+
+# The <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> messages <span class="hljs-keyword">to</span> accept <span class="hljs-keyword">before</span> forcing a flush <span class="hljs-keyword">of</span> data <span class="hljs-keyword">to</span> disk
+#log.flush.<span class="hljs-keyword">interval</span>.messages=<span class="hljs-number">10000</span>
+
+# The maximum amount <span class="hljs-keyword">of</span> <span class="hljs-keyword">time</span> a message can sit <span class="hljs-keyword">in</span> a log <span class="hljs-keyword">before</span> we force a flush
+#log.flush.<span class="hljs-keyword">interval</span>.ms=<span class="hljs-number">1000</span>
+
+############################# Log Retention Policy #############################
+
+# The following configurations control the disposal <span class="hljs-keyword">of</span> log segments. The policy can
+# be <span class="hljs-keyword">set</span> <span class="hljs-keyword">to</span> <span class="hljs-keyword">delete</span> segments <span class="hljs-keyword">after</span> a period <span class="hljs-keyword">of</span> <span class="hljs-keyword">time</span>, <span class="hljs-keyword">or</span> <span class="hljs-keyword">after</span> a given <span class="hljs-keyword">size</span> has accumulated.
+# A segment will be deleted <span class="hljs-keyword">whenever</span> *either* <span class="hljs-keyword">of</span> these criteria <span class="hljs-keyword">are</span> met. Deletion always happens
+# <span class="hljs-keyword">from</span> the <span class="hljs-keyword">end</span> <span class="hljs-keyword">of</span> the log.
+
+# The minimum age <span class="hljs-keyword">of</span> a log file <span class="hljs-keyword">to</span> be eligible <span class="hljs-keyword">for</span> deletion due <span class="hljs-keyword">to</span> age
+log.retention.hours=<span class="hljs-number">168</span>
+
+# A <span class="hljs-keyword">size</span>-based retention policy <span class="hljs-keyword">for</span> logs. Segments <span class="hljs-keyword">are</span> pruned <span class="hljs-keyword">from</span> the log unless the remaining
+# segments <span class="hljs-keyword">drop</span> below log.retention.bytes. Functions independently <span class="hljs-keyword">of</span> log.retention.hours.
+#log.retention.bytes=<span class="hljs-number">1073741824</span>
+
+# The maximum <span class="hljs-keyword">size</span> <span class="hljs-keyword">of</span> a log segment file. <span class="hljs-keyword">When</span> this <span class="hljs-keyword">size</span> <span class="hljs-keyword">is</span> reached a new log segment will be created.
+log.segment.bytes=<span class="hljs-number">1073741824</span>
+
+# The <span class="hljs-keyword">interval</span> <span class="hljs-keyword">at</span> which log segments <span class="hljs-keyword">are</span> checked <span class="hljs-keyword">to</span> see <span class="hljs-keyword">if</span> they can be deleted according
+# <span class="hljs-keyword">to</span> the retention policies
+log.retention.<span class="hljs-keyword">check</span>.<span class="hljs-keyword">interval</span>.ms=<span class="hljs-number">300000</span>
+
+############################# Zookeeper #############################
+
+# Zookeeper <span class="hljs-keyword">connection</span> string (see zookeeper docs <span class="hljs-keyword">for</span> details).
+# This <span class="hljs-keyword">is</span> a comma separated host:port pairs, <span class="hljs-keyword">each</span> <span class="hljs-keyword">corresponding</span> <span class="hljs-keyword">to</span> a zk
+# server. e.g. <span class="hljs-string">"127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002"</span>.
+# You can also append an optional chroot string <span class="hljs-keyword">to</span> the urls <span class="hljs-keyword">to</span> specify the
+# root directory <span class="hljs-keyword">for</span> <span class="hljs-keyword">all</span> kafka znodes.
+zookeeper.<span class="hljs-keyword">connect</span>=master:<span class="hljs-number">2181</span>,slave1:<span class="hljs-number">2181</span>,slave2:<span class="hljs-number">2181</span>/kafka
+
+# Timeout <span class="hljs-keyword">in</span> ms <span class="hljs-keyword">for</span> connecting <span class="hljs-keyword">to</span> zookeeper
+zookeeper.<span class="hljs-keyword">connection</span>.timeout.ms=<span class="hljs-number">6000</span>
+
+
+############################# <span class="hljs-keyword">Group</span> Coordinator Settings #############################
+
+# The following configuration specifies the <span class="hljs-keyword">time</span>, <span class="hljs-keyword">in</span> milliseconds, that the GroupCoordinator will delay the initial consumer rebalance.
+# The rebalance will be further delayed <span class="hljs-keyword">by</span> the <span class="hljs-keyword">value</span> <span class="hljs-keyword">of</span> <span class="hljs-keyword">group</span>.initial.rebalance.delay.ms <span class="hljs-keyword">as</span> new members <span class="hljs-keyword">join</span> the <span class="hljs-keyword">group</span>, up <span class="hljs-keyword">to</span> a maximum <span class="hljs-keyword">of</span> <span class="hljs-aggregate">max</span>.poll.<span class="hljs-keyword">interval</span>.ms.
+# The <span class="hljs-keyword">default</span> <span class="hljs-keyword">value</span> <span class="hljs-keyword">for</span> this <span class="hljs-keyword">is</span> <span class="hljs-number">3</span> seconds.
+# We override this <span class="hljs-keyword">to</span> <span class="hljs-number">0</span> here <span class="hljs-keyword">as</span> it makes <span class="hljs-keyword">for</span> a better out-<span class="hljs-keyword">of</span>-the-box experience <span class="hljs-keyword">for</span> development <span class="hljs-keyword">and</span> testing.
+# However, <span class="hljs-keyword">in</span> production environments the <span class="hljs-keyword">default</span> <span class="hljs-keyword">value</span> <span class="hljs-keyword">of</span> <span class="hljs-number">3</span> seconds <span class="hljs-keyword">is</span> more suitable <span class="hljs-keyword">as</span> this will help <span class="hljs-keyword">to</span> avoid unnecessary, <span class="hljs-keyword">and</span> potentially expensive, rebalances during application startup.
+<span class="hljs-keyword">group</span>.initial.rebalance.delay.ms=<span class="hljs-number">0</span>
+
+<span class="hljs-keyword">delete</span>.topic.enable=<span class="hljs-keyword">true</span></span></code></pre>
+
+
+
+<h2 id="启动"><strong>启动</strong></h2>
+
+<p>cd /${KAFKA_HOME}</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">bin/kafka<span class="hljs-attribute">-server</span><span class="hljs-attribute">-start</span><span class="hljs-built_in">.</span>sh config/server<span class="hljs-built_in">.</span>properties <span class="hljs-attribute">-daemon</span> <span class="hljs-subst">&gt;</span> /root/kafka/kafka<span class="hljs-attribute">-logs</span>/logs <span class="hljs-subst">&amp;</span></code></pre>
+
+<p>指定日志的存放地点为/root/kafka/kafka-logs/logs <br>
+使用jps命令查看kafka是否配置成功。</p>
+
+
+
+<h1 id="记一次服务器被黑客攻击"><strong>记一次服务器被黑客攻击</strong></h1>
+
+<p>起因：kafka启动总是异常（kafka进程启动一两分钟后自动退出），日志却没有记录</p>
+
+<ul>
+<li>[ ] 系统运行情况查看工具top，关于top的介绍点<a href="https://www.cnblogs.com/zhoug2020/p/6336453.html" rel="nofollow">这里</a> </li>
+<li>[ ] 重新配置kafka，检查各个配置项，仍然宕机</li>
+<li>[ ] 重新配置与kafka相关联的zookeeper，仍然宕机</li>
+<li>[ ] 关闭不需要的进程，例如hbase,yarn,storm,hdfs，重启kafka，仍然宕机</li>
+<li>[ ] 重启服务器，重新开启各个进程，顺序为hdfs,yarn,zookeeper,hbase,storm,kafka，仍然宕机</li>
+<li>[ ] 重启服务器，更换kafka版本，仍然宕机</li>
+<li>[ ] 发现kafka总是宕机的服务器cpu占用几乎100%，而master却正常，100%的cpu占用由java进程贡献，具体执行任务未知。</li>
+<li>[ ] google发现，hadoop集群有cpu占用过高的风险，参考<a href="https://linux.cn/article-3183-1.html?pr" rel="nofollow">这个</a>链接，怀疑datanode导致cpu占用过高，原因是linux内核内存申请优化对hadoop的副作用。</li>
+<li>[ ] 关闭hadoop相关进程（只剩jps）cpu占用仍然是100%，但是master节点cpu正常，100%的cpu占用由java进程贡献，具体执行任务未知。</li>
+<li>[ ] 尝试启动kafka，master正常，slave失败，slave节点cpu占用仍然是100%</li>
+<li>[ ] 重启所有集群服务器，实时检测cpu动态(top命令），先启动zookeeper，正常，再启动kafka，所有节点正常</li>
+<li>[ ] 挨个启动其他服务。hdfs无影响，yarn无影响，zookeeper无影响，hive无影响,hbase启动后cpu飙升100%，导致kafka宕机,具体导致宕机的进程为regionserver。</li>
+<li>[ ] 启动除了hbase其他所有服务，一切正常。原因未知。</li>
+<li>[ ] 第二天一早服务器宕机</li>
+<li>[ ] 百度重新配置了yarn框架参数</li>
+<li>[ ] 重启服务器仍然宕机</li>
+<li>[ ] 参考<a href="https://community.cloudera.com/t5/Cloudera-Manager-Installation/Yarn-consumes-all-the-CPU-Running-tmp-java-c-tmp-w-conf/td-p/67053" rel="nofollow">这里</a>和<a href="https://labitacoranet.wordpress.com/2018/05/16/forensic-analysis-of-a-cryptocurrency-mining-attack-in-a-big-data-cluster/" rel="nofollow">这里</a>的链接有理由相信云服务器被黑了。</li>
+<li>[ ] 暂时的解决方案<img src="http://pbpkien9l.bkt.clouddn.com/18-7-24/63105509.jpg" alt="" title=""></li>
+<li>[ ] 咨询腾讯云客服，修改了安全组配置，关闭了8088端口。 <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-7-24/71953340.jpg" alt="" title=""></li>
+<li>[ ] 所有组件运行正常，之前怀疑是hbase的原因是，病毒文件的执行需要一定的时间，而在这段时间里，我刚好启动了hbase，也有可能是病毒文件需要依赖hbase作为数据库？</li>
+</ul>
+
+
+
+<h1 id="使用kafka"><strong>使用KAFKA</strong></h1>
+
+
+
+<h2 id="基本概念">基本概念</h2>
+
+<ul>
+<li>kafka是一个分布式的消息缓存系统</li>
+<li>kafka集群中的服务器叫做broker</li>
+<li>kafka有两种客户端，producer（消息生产者），consumer（消息消费者），客户端（两种）与kafka服务器之间使用tcp通信</li>
+<li>kafka中不同业务系统的消息可以通过topic进行区分，而且每一个消息topic都会被分区，以分担消息读写的负载</li>
+<li>每一个分区可以有多个副本，防止数据的丢失</li>
+<li>如果某个分区中的数据需要更新，必须通过该分区所有副本中的leader来更新</li>
+<li>消费者可以分组，比如有两个消费者AB，共同消费一个topic:testTopic，AB所消费的消息不会重复，比如testTopic中有100个消息，编号为0-99，如果A消费0-49，那么B就消费50-99。消费者在消费时可以指定消息的起始偏移量</li>
+<li><p>kafka架构图： <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-7-23/9446417.jpg" alt="" title=""> <br>
+producer是数据源，比如flume架构，consumer是数据的输出，例如storm架构。</p></li>
+<li><p>kafka服务器支持消息的分主题、分区。不同的子系统可以使用不同的主题。分区的意义在于负载均衡。 <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-7-23/72996702.jpg" alt="" title=""></p></li>
+</ul>
+
+
+
+<h2 id="kafka-shell">kafka shell</h2>
+
+<ul>
+<li>创建话题</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-comment">bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">topics</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">create</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">master:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">replication</span><span class="hljs-literal">-</span><span class="hljs-comment">factor</span> <span class="hljs-comment">3</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">partitions</span> <span class="hljs-comment">1</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">mytopics</span></code></pre>
+
+<p>创建的话题名称是有要求的<code>Due to limitations in metric names, topics with a period ('.') or underscore ('_') could collide. To avoid issues it is best to use either, but not both.</code></p>
+
+<ul>
+<li><p>如果在zookeeper里指定了kafka的目录，例如/kafka，那么在用shell进行topic操作的时候，需要指定被操作的topic所属的zookeeper目录，例如bin/kafka-topics.sh –create –zookeeper master:2181 <strong><code>/kafka</code></strong> –replication-factor 3 –partitions 1 –topic mytopics。（因为<strong><code>kafka的集群化是归zookeeper管的</code></strong>）</p></li>
+<li><p>列出当前话题</p></li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-comment">bin/</span> <span class="hljs-comment">kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">topics</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">list</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">master:2181</span><span class="hljs-string">,</span><span class="hljs-comment">slave1:2181</span><span class="hljs-string">,</span><span class="hljs-comment">slave2:2181</span></code></pre>
+
+<ul>
+<li>删除话题</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-comment">kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">topics</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">delete</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">master:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">mytopics</span></code></pre>
+
+<p>注意由控制台的提示：<code>Note: This will have no impact if delete.topic.enable is not set to true.</code>可知，需要修改一下server.properties文件，在最后一行加上delete.topic.enable=true</p>
+
+<ul>
+<li>创建一个生产者</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">kafka<span class="hljs-attribute">-console</span><span class="hljs-attribute">-producer</span><span class="hljs-built_in">.</span>sh <span class="hljs-subst">--</span>broker<span class="hljs-attribute">-list</span> master:<span class="hljs-number">9092</span> <span class="hljs-subst">--</span>topic t_test</code></pre>
+
+<ul>
+<li>创建一个消费者</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-comment">kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">console</span><span class="hljs-literal">-</span><span class="hljs-comment">consumer</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">master:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">from</span><span class="hljs-literal">-</span><span class="hljs-comment">beginning</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">t_test</span></code></pre>
+
+<ul>
+<li>查看话题状态信息</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-comment">kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">topics</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">describe</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">master:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">t_test</span></code></pre>
+
+<p><img src="http://pbpkien9l.bkt.clouddn.com/18-7-24/57483869.jpg" alt="" title=""> <br>
+isr表示现在处于同步状态的broker，如果杀掉某一台服务器，例如杀掉leader:0的服务器，也就是0号服务器：master中的kafka进程。执行kill -9 pid <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-7-24/99270596.jpg" alt="" title=""> <br>
+kafka会立即进行容灾处理，同时，生产和消费并不受影响。 <br>
+再次恢复kafka进程，三台服务器又会立即同步。 <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-7-24/66970256.jpg" alt="" title=""></p>
+
+
+
+<h2 id="kafka-java-demo">kafka java demo</h2>
+
+<p>推荐使用maven来构建项目，如果没有使用maven，导入kafka压缩包里的libs中的jar包即可 <br>
+<img src="http://pbpkien9l.bkt.clouddn.com/18-7-24/62834406.jpg" alt="" title=""></p>
+
+
+
+<h3 id="生产者样例">生产者样例</h3>
+
+<p>配置说明</p>
+
+<ul>
+<li>bootstrap.servers： kafka的地址。</li>
+<li>acks:消息的确认机制，默认值是0。</li>
+<li>acks=0 ：如果设置为0，生产者不会等待kafka的响应。</li>
+<li>acks=1 ：这个配置意味着kafka会把这条消息写到本地日志文件中，但是不会等待集群中其他机器的成功响应。 </li>
+<li>acks=all ：这个配置意味着leader会等待所有的follower同步完成。这个确保消息不会丢失，除非kafka集群中所有机器挂掉。这是最强的可用性保证。</li>
+<li>retries：配置为大于0的值的话，客户端会在消息发送失败时重新发送。</li>
+<li>batch.size:当多条消息需要发送到同一个分区时，生产者会尝试合并网络请求。这会提高client和生产者的效率。</li>
+<li>key.serializer: 键序列化，默认org.apache.kafka.common.serialization.StringDeserializer。</li>
+<li>value.deserializer:值序列化，默认org.apache.kafka.common.serialization.StringDeserializer。</li>
+</ul>
+
+<p>添加完配置之后，producer就可以生产数据，使用producer.send()方法。传入的参数为topic,key,value。如果topic在kafka集群中还没有被创建，那么便会自动创建一个新的topic（新建的topic各个属性我不知道）</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">package cn<span class="hljs-preprocessor">.colony</span><span class="hljs-preprocessor">.cloudhadoop</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-comment">;</span>
+
+import java<span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.Properties</span><span class="hljs-comment">;</span>
+
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.producer</span><span class="hljs-preprocessor">.KafkaProducer</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.producer</span><span class="hljs-preprocessor">.ProducerRecord</span><span class="hljs-comment">;</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.common</span><span class="hljs-preprocessor">.serialization</span><span class="hljs-preprocessor">.StringSerializer</span><span class="hljs-comment">;</span>
+
+public class ProducerDemo {
+
+    public static void main(String[] args) throws InterruptedException{
+        Properties props = new Properties()<span class="hljs-comment">;//配置项</span>
+        props<span class="hljs-preprocessor">.put</span>(<span class="hljs-string">"bootstrap.servers"</span>, <span class="hljs-string">"master:9092,slave1:9092,slave2:9092"</span>)<span class="hljs-comment">;//使用新的API指定kafka集群位置</span>
+        props<span class="hljs-preprocessor">.put</span>(<span class="hljs-string">"acks"</span>, <span class="hljs-string">"all"</span>)<span class="hljs-comment">;</span>
+        props<span class="hljs-preprocessor">.put</span>(<span class="hljs-string">"retries"</span>, <span class="hljs-number">0</span>)<span class="hljs-comment">;</span>
+        props<span class="hljs-preprocessor">.put</span>(<span class="hljs-string">"batch.size"</span>, <span class="hljs-number">16384</span>)<span class="hljs-comment">;</span>
+        props<span class="hljs-preprocessor">.put</span>(<span class="hljs-string">"key.serializer"</span>, StringSerializer<span class="hljs-preprocessor">.class</span><span class="hljs-preprocessor">.getName</span>())<span class="hljs-comment">;</span>
+        props<span class="hljs-preprocessor">.put</span>(<span class="hljs-string">"value.serializer"</span>, StringSerializer<span class="hljs-preprocessor">.class</span><span class="hljs-preprocessor">.getName</span>())<span class="hljs-comment">;</span>
+        KafkaProducer&lt;String, String&gt; producer = new KafkaProducer&lt;String, String&gt;(props)<span class="hljs-comment">;</span>
+
+        String messageStr = null<span class="hljs-comment">;</span>
+        for (int i = <span class="hljs-number">1</span><span class="hljs-comment">;i&lt;1000;i++){</span>
+            Thread<span class="hljs-preprocessor">.sleep</span>(<span class="hljs-number">50</span>)<span class="hljs-comment">;</span>
+            messageStr = <span class="hljs-string">"hello, this is "</span>+i+<span class="hljs-string">"th message"</span><span class="hljs-comment">;</span>
+            producer<span class="hljs-preprocessor">.send</span>(new ProducerRecord&lt;String, String&gt;(<span class="hljs-string">"t_topic"</span>,<span class="hljs-string">"Message"</span>,messageStr))<span class="hljs-comment">;</span>
+        }
+        producer<span class="hljs-preprocessor">.close</span>()<span class="hljs-comment">;</span>
+    }
+}</code></pre>
+
+
+
+<h3 id="消费者样例">消费者样例</h3>
+
+<p>配置说明</p>
+
+<ul>
+<li>bootstrap.servers： kafka的地址。</li>
+<li>group.id：组名 不同组名可以重复消费。例如你先使用了组名A消费了kafka的1000条数据，但是你还想再次进行消费这1000条数据，并且不想重新去产生，那么这里你只需要更改组名就可以重复消费了。</li>
+<li>enable.auto.commit：是否自动提交，默认为true。</li>
+<li>auto.commit.interval.ms: 从poll(拉)的回话处理时长。</li>
+<li>session.timeout.ms:超时时间。</li>
+<li>max.poll.records:一次最大拉取的条数。</li>
+<li>auto.offset.reset：消费规则，默认earliest 。 </li>
+<li>earliest: 当各分区下有已提交的offset时，从提交的offset开始消费；无提交的offset时，从头开始消费 。 </li>
+<li>latest: 当各分区下有已提交的offset时，从提交的offset开始消费；无提交的offset时，消费新产生的该分区下的数据 。 </li>
+<li>none: topic各分区都存在已提交的offset时，从offset后开始消费；只要有一个分区不存在已提交的offset，则抛出异常。</li>
+<li>key.serializer: 键序列化，默认org.apache.kafka.common.serialization.StringDeserializer。</li>
+<li>value.deserializer:值序列化，默认org.apache.kafka.common.serialization.StringDeserializer。</li>
+</ul>
+
+<p>首先订阅一个topic，consumer就可以开始消费数据。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">package</span> cn.colony.cloudhadoop.kafka;
+
+<span class="hljs-keyword">import</span> java.util.Arrays;
+<span class="hljs-keyword">import</span> java.util.Properties;
+
+<span class="hljs-keyword">import</span> org.apache.kafka.clients.consumer.ConsumerRecord;
+<span class="hljs-keyword">import</span> org.apache.kafka.clients.consumer.ConsumerRecords;
+<span class="hljs-keyword">import</span> org.apache.kafka.clients.consumer.KafkaConsumer;
+<span class="hljs-keyword">import</span> org.apache.kafka.common.errors.InterruptException;
+<span class="hljs-keyword">import</span> org.apache.kafka.common.serialization.StringDeserializer;
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ConsumerDemo</span> <span class="hljs-keyword">implements</span> <span class="hljs-title">Runnable</span>{</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> KafkaConsumer&lt;String, String&gt; consumer;
+    <span class="hljs-keyword">private</span> ConsumerRecords&lt;String, String&gt; msgList;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> String topic;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String GROUDID = <span class="hljs-string">"groupA"</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-title">ConsumerDemo</span>(String topicName){
+        Properties props = <span class="hljs-keyword">new</span> Properties();
+        props.put(<span class="hljs-string">"bootstrap.servers"</span>, <span class="hljs-string">"master:9092,slave1:9092,slave2:9092"</span>);
+        props.put(<span class="hljs-string">"group.id"</span>, GROUDID);
+        props.put(<span class="hljs-string">"enable.auto.commit"</span>, <span class="hljs-string">"true"</span>);
+        props.put(<span class="hljs-string">"auto.commit.interval.ms"</span>, <span class="hljs-string">"1000"</span>);
+        props.put(<span class="hljs-string">"session.timeout.ms"</span>, <span class="hljs-string">"30000"</span>);
+        props.put(<span class="hljs-string">"auto.offset.reset"</span>, <span class="hljs-string">"earliest"</span>);
+        props.put(<span class="hljs-string">"key.deserializer"</span>, StringDeserializer.class.getName());
+        props.put(<span class="hljs-string">"value.deserializer"</span>, StringDeserializer.class.getName());
+        <span class="hljs-keyword">this</span>.consumer = <span class="hljs-keyword">new</span> KafkaConsumer&lt;String, String&gt;(props);
+        <span class="hljs-keyword">this</span>.topic = topicName;
+        <span class="hljs-keyword">this</span>.consumer.subscribe(Arrays.asList(topic));
+    }
+
+    <span class="hljs-annotation">@Override</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">run</span>(){
+        <span class="hljs-keyword">int</span> messageNum = <span class="hljs-number">1</span>;
+        <span class="hljs-keyword">try</span>{
+            <span class="hljs-keyword">for</span> (;;){
+                msgList = consumer.poll(<span class="hljs-number">500</span>);
+                <span class="hljs-keyword">if</span> (msgList!=<span class="hljs-keyword">null</span> &amp;&amp; msgList.count()&gt;<span class="hljs-number">0</span>){
+                    <span class="hljs-keyword">for</span> (ConsumerRecord&lt;String, String&gt; record : msgList){
+                        <span class="hljs-keyword">if</span> (messageNum % <span class="hljs-number">50</span> ==<span class="hljs-number">0</span>){
+                            System.out.println(messageNum+<span class="hljs-string">"=receive: key = "</span> + record.key() + <span class="hljs-string">", value = "</span> + record.value()+<span class="hljs-string">" offset==="</span>+record.offset());
+                        }
+                        <span class="hljs-keyword">if</span> (messageNum % <span class="hljs-number">1000</span> == <span class="hljs-number">0</span>)
+                            <span class="hljs-keyword">break</span>;
+                        messageNum++;
+                    }
+                }
+                <span class="hljs-keyword">else</span>{
+                    Thread.sleep(<span class="hljs-number">1000</span>);
+                }
+            }
+        }
+        <span class="hljs-keyword">catch</span> (InterruptedException e){
+            e.printStackTrace();
+        }
+        <span class="hljs-keyword">finally</span>{
+            consumer.close();
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args){
+        ConsumerDemo demo = <span class="hljs-keyword">new</span> ConsumerDemo(<span class="hljs-string">"t_topic"</span>);
+        Thread thread = <span class="hljs-keyword">new</span> Thread(demo);
+        thread.start();
+    }
+}</code></pre>
+
+
+
+<h3 id="运行说明">运行说明</h3>
+
+<p>在eclipse中使用两个控制台查看输出，由于先前的配置，可以在本地通过代码来监测云服务器集群中的运行情况。生产者生产出的消息可以被消费者消费。 <br>
+两个控制台分别对应不同Java程序输出的方法点<a href="https://blog.csdn.net/dear_alice_moon/article/details/78274538" rel="nofollow">这里</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

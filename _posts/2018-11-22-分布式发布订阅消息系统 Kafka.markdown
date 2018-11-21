@@ -1,0 +1,96 @@
+---
+layout:     post
+title:      分布式发布订阅消息系统 Kafka
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/HoldonWithYourGoal/article/details/56841582				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>现有消息队列（MessageQueue）比较：</p>
+<p><img src="https://img-blog.csdn.net/20170301204851017?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvSG9sZG9uV2l0aFlvdXJHb2Fs/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p>网站系统 &lt;-- Flume集群 --&gt; Kafka集群 --&gt; strom集群 --&gt; redis集群</p>
+<p>Flume用于获取数据，Kafka用于缓存数据，strom用于处理，redis用于存储。</p>
+<p><span style="font-size:12px;">Kafka类似于JMS中间件，但是设计完全不一样，此外Kafka并不是JMS规范的实现。</span></p>
+<p><span style="font-size:12px;">Kafka对消息保存时根据Topic进行归类，发送者为Producer，接受者为Consumer。一个Kafka集群由多个Kafka实例（Server）组成，每个Server称为broker。<br></span></p>
+<p><span style="font-size:12px;">Kafka集群、Producer和Consumer都依赖于zookeeper保存元数据信息（meta信息），以保证系统可用性。</span></p>
+<p><span style="font-size:12px;">Kafka特性：</span></p>
+<p><span style="font-size:12px;">1. 同时为发布和订阅提供高吞吐量（每秒生产25万条数据（50M），每秒处理55万条数据（110M））。</span></p>
+<p><span style="font-size:12px;">2. 可持久化数据。可持久化到磁盘，所以可用于批量消费，如ETL、实时应用程序，防止数据丢失。</span></p>
+<p><span style="font-size:12px;">3. 易于向外拓展。所有的Producer、consumer和broker都是分布式的，无需停机即可拓展机器。</span></p>
+<p><span style="font-size:12px;">4. 消息被处理状态在consumer中维护，而不是Server。</span></p>
+<p><span style="font-size:12px;">5. Kafka会将topic中的消息进行分区（partition），不同的consumer可以同时消费不同分区的数据（但是若consumer数大于partition数，就会有consumer获取不到数据），提高数据传输速度。一个 topic 可以分为多个 partition，每个 partition 是一个有序的队列。partition 中的每条消息都会被分配一个有序的 id（offset）。</span></p>
+<p><span style="font-size:12px;">6. Consumer Group 消费者组，可以并行消费Topic中partition的消息<br></span></p>
+<p><span style="font-size:12px;"><br></span></p>
+<p><span style="font-size:12px;">message是通信的基本单位，包含三个属性：</span></p>
+<p><span style="font-size:12px;">offset  对应类型：long</span></p>
+<p><span style="font-size:12px;">messageSize<span> </span>
+对应类型：int32 </span></p>
+<p><span style="font-size:12px;">data  <span> </span>message的具体内容</span></p>
+<p><span style="font-size:12px;"><img src="https://img-blog.csdn.net/20170305201146368?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvSG9sZG9uV2l0aFlvdXJHb2Fs/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p><span style="font-size:12px;">Producer</span></p>
+<p><span style="font-size:12px;"></span></p><pre><code class="language-java">public class Producer extends Thread {
+	private String topic;
+	private kafka.javaapi.producer.Producer&lt;Integer, String&gt; producer;
+	private Properties props = new Properties();
+	public Producer(String topic) { 
+		this.topic = topic;
+		props.put("serializer.class", "kafka.serializer.StringEncoder");
+        props.put("metadata.broker.list", "localhost:9092");
+        producer = new kafka.javaapi.producer.Producer&lt;Integer, String&gt;(new ProducerConfig(props));
+	}
+	@Override
+	public void run() {
+		int messageNo = 1;
+		String messageStr = new String ("Message_" + messageNo);
+		System.out.println("Send:"+messageStr);
+		producer.send(new KeyedMessage&lt;Integer, String&gt;(topic, messageStr));
+		messageNo ++;
+		try {
+			sleep(3000);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+	}
+}</code></pre><br><br><p><span style="font-size:12px;">Consumer</span></p>
+<p><span style="font-size:12px;"></span></p>
+<pre><code class="language-java">public class Consumer extends Thread {
+	private ConsumerConnector consumer;<span>	</span>//通过properties设置Consumer参数，并且创建了连接器，连接到Kafka
+	private String topic;
+	public Consumer(String topic) {
+		consumer = kafka.consumer.Consumer.createJavaConsumerConnector(createConsumerConfig());
+		this.topic = topic;
+	}
+	private ConsumerConfig createConsumerConfig() {
+		Properties props = new Properties();
+		props.put("zookeeper.connect", KafkaProperties.zkConnect);
+        props.put("group.id", KafkaProperties.groupId);
+        props.put("zookeeper.session.timeout.ms", "40000");
+        props.put("zookeeper.sync.time.ms", "200");
+        props.put("auto.commit.interval.ms", "1000");
+        return new ConsumerConfig(props);
+	}
+	
+	@Override
+	public void run() {
+<span>		</span>//Map用于存topic及具体的partition
+<span>		</span>Map&lt;String, Integer&gt; topicCountMap = new HashMap&lt;String, Integer&gt;();
+        topicCountMap.put(topic, 1);
+        //consumerMap为broker发出来的消息，KafkaSteam为partition中的数据
+        Map&lt;String, List&lt;KafkaStream&lt;byte[], byte[]&gt;&gt;&gt; consumerMap = consumer.createMessageStreams(topicCountMap);
+        KafkaStream&lt;byte[], byte[]&gt; stream = consumerMap.get(topic).get(0);
+        ConsumerIterator&lt;byte[], byte[]&gt; it = stream.iterator();
+        while (it.hasNext()) {
+            System.out.println("receive：" + new String(it.next().message()));
+            try {
+                sleep(3000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+<span>	</span>}
+<span>	</span>}
+}</code></pre><br><br><p></p>
+            </div>
+                </div>

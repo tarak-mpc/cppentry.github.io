@@ -1,0 +1,356 @@
+---
+layout:     post
+title:      Spark2.x 快速入门教程 7
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1 id="spark-streaming-kafka" style="font-size:2.25em;margin-left:0px;line-height:1.2;color:rgb(51,51,51);border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+Spark Streaming 整合 Kafka</h1>
+<h2 id="-" style="line-height:1.225;color:rgb(51,51,51);font-size:1.75em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+一、实验介绍</h2>
+<h3 id="1-1-" style="line-height:1.43;color:rgb(51,51,51);font-size:1.5em;">
+1.1 实验内容</h3>
+<p style="font-size:15px;color:rgb(51,51,51);">
+Kafka是一个分布式的发布-订阅式的消息系统，可以作为 DStream 的高级数据源，本部分以单击统计为例介绍 Spark Streaming 程序从 kafka 中消费数据，包括两部分（基于 Kafka Receiver 方式，基于Kafka Direct方式)。</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+1.2 先学课程</p>
+<h3 id="1-2-" style="line-height:1.43;color:rgb(51,51,51);font-size:1.5em;">
+1.2 先学课程</h3>
+<p style="font-size:15px;color:rgb(51,51,51);">
+Hadoop 入门进阶课程：<a href="https://www.shiyanlou.com/courses/237" rel="nofollow" style="color:rgb(64,120,192);text-decoration:none;background-color:transparent;">https://www.shiyanlou.com/courses/237</a></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+Kafka 快速上手教程：<a href="https://www.shiyanlou.com/teacher/courses/785" rel="nofollow" style="color:rgb(64,120,192);text-decoration:none;background-color:transparent;">https://www.shiyanlou.com/teacher/courses/785</a></p>
+<h3 id="1-3-" style="line-height:1.43;color:rgb(51,51,51);font-size:1.5em;">
+1.3 实验知识点</h3>
+<ul style="color:rgb(51,51,51);font-size:16px;line-height:25.6px;"><li style="font-size:15px;">Kafka Receiver</li><li style="font-size:15px;">Kafka Direct</li><li style="font-size:15px;">Spark Streaming</li><li style="font-size:15px;">Maven</li></ul><h3 id="1-4-" style="line-height:1.43;color:rgb(51,51,51);font-size:1.5em;">
+1.4 实验环境</h3>
+<ul style="color:rgb(51,51,51);font-size:16px;line-height:25.6px;"><li style="font-size:15px;">Hadoop-2.6.1</li><li style="font-size:15px;">kafka_2.10-0.10.0.0</li><li style="font-size:15px;">Xfce 终端
+<h3 id="1-5-" style="font-family:inherit;line-height:1.43;color:inherit;font-size:1.5em;">
+1.5 适合人群</h3>
+本课程属于初级难度级别，适合具有 Kafka 基础的用户，如果对 Streaming 了解能够更好的上手本课程。</li></ul><h2 style="line-height:1.225;color:rgb(51,51,51);font-size:1.75em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+二、实验步骤</h2>
+<h3 id="2-1-spark-streaming-" style="line-height:1.43;color:rgb(51,51,51);font-size:1.5em;">
+2.1 Spark Streaming设计设计思想</h3>
+<p style="font-size:15px;color:rgb(51,51,51);">
+Spark Streaming 是 Spark 的核心组件之一，为 Spark 提供了可拓展、高吞吐、容错的流计算能力。如下图所示，Spark Streaming 可整合多种输入数据源，如 Kafka、Flume、HDFS等，经处理后的数据可存储至文件系统、数据库，或显示在仪表盘里。</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493286663150.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+Spark Streaming 最主要的抽象是 DStream（Discretized Stream，离散化数据流），表示连续不断的数据流。在内部实现上，Spark Streaming 的输入数据按照时间片（如1秒）分成一段一段的 DStream，每一段数据转换为 Spark 中的 RDD，并且对 DStream 的操作都最终转变为对相应的 RDD 的操作。例如，下图展示了进行单词统计时，每个时间片的数据（存储句子的 RDD）经 flatMap 操作，生成了存储单词的 RDD。整个流式计算可根据业务的需求对这些中间的结果进一步处理，或者存储到外部设备中。</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493286769558.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<h3 id="2-2-" style="line-height:1.43;color:rgb(51,51,51);font-size:1.5em;">
+2.2 准备工作</h3>
+<p style="font-size:15px;color:rgb(51,51,51);">
+我们已经在实验楼环境里下载并配置启动 hadoop-2.6.1 所需的文件，免除您配置文件的麻烦，您可以在 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">/opt</code> 找到，只需格式化并启动
+ hadoop 进程即可。</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+双击打开桌面上的 Xfce 终端，用 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">sudo</code> 命令切换到 hadoop 用户，hadoop 用户密码为 hadoop，用 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">cd</code> 命令进入 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">/opt</code>目录。</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="hljs ruby" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);">$ su hadoop
+$ cd /opt/
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2657timestamp1491894012889.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+在 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">/opt</code> 目录下格式化 hadoop。</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="hljs perl" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);">$ hadoop-<span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">2.6</span>.<span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1</span>/bin/hdfs namenode -<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">format</span>
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2657timestamp1491894114007.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+在 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">/opt</code> 目录下启动 hadoop 进程。</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="hljs ruby" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);">$ hadoop-<span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">2.6</span>.<span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1</span>/sbin/start-all.sh
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2657timestamp1491894286864.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+用 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">jps</code> 查看 hadoop 进程是否启动。</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2657timestamp1491894495396.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<h3 id="2-3-kafka" style="line-height:1.43;color:rgb(51,51,51);font-size:1.5em;">
+2.3 下载配置 Kafka</h3>
+<p style="font-size:15px;color:rgb(51,51,51);">
+在 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">/opt</code> 目录下，用 hadoop 用户通过 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">wget</code> 命令下载，并用 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">tar</code> 解压。</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="lang-bash hljs" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);">
+$ sudo wget http://labfile.oss.aliyuncs.com/courses/785/kafka_2.10-0.10.0.0.tgz
+$ sudo tar -zxf kafka_2.10-0.10.0.0.tgz
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493280844577.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+分别启动 zookeeper，kafka。</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="lang-bash hljs" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);"><span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">#权限不足，授权</span>
+$ sudo chmod 777 -R kafka_2.10-0.10.0.0
+$ <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">cd</span>  kafka_2.10-0.10.0.0
+<span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">#启动zookeeper</span>
+$ bin/zookeeper-server-start.sh  config//zookeeper.properties &amp;
+
+<span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">#启动kafka</span>
+$ bin/kafka-server-start.sh  config/server.properties  &amp;
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493281036174.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493281042234.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+用 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">jps</code>命令查看进程。</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493281092663.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+用 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">kafka-topics.sh</code> 脚本创建主题。</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="hljs sql" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);">bin/kafka-topics.sh  <span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">--create --zookeeper localhost:2181  --replication-factor 1 --partitions 1 --topic wc1</span>
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493281255488.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<h2 style="line-height:1.225;color:rgb(51,51,51);font-size:1.75em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+三、代码实现及测试</h2>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">注意:本节课实验是沿用上节课的 scala IDE 环境，pom.xml 不需要修改，需要的 spark-streaming-kafka_2.10
+ jar 依赖已经添加在里面。</code></p>
+<h4 id="1-kafka-receiver-" style="line-height:1.4;color:rgb(51,51,51);font-size:1.25em;">
+1). 基于Kafka Receiver方式</h4>
+<p style="font-size:15px;color:rgb(51,51,51);">
+选中 cn.com.syl.spark 包 -&gt; 用快捷键 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">Ctrl+N</code> -&gt;搜索 class -&gt; 选中 java class
+ -&gt; Next</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2875timestamp1493194944418.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+输入类名 -&gt; Finish</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid18510labid2885timestamp1493972217075.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">KafkaReceiverSpark.java</code> 代码如下：</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="hljs java" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);"><span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">package</span> cn.com.syl.spark;
+
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> java.util.Arrays;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> java.util.HashMap;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> java.util.Map;
+
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.SparkConf;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.api.java.function.FlatMapFunction;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.api.java.function.Function2;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.api.java.function.PairFunction;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.Durations;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.api.java.JavaPairReceiverInputDStream;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.api.java.JavaStreamingContext;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.kafka.KafkaUtils;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.api.java.JavaDStream;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.api.java.JavaPairDStream;
+
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> scala.Tuple2;
+
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">public</span> <span class="hljs-class" style="font-size:15px;"><span class="hljs-keyword" style="color:rgb(249,38,114);">class</span> <span class="hljs-title">KafkaReceiverSpark</span> </span>{
+
+    <span class="hljs-function" style="font-size:15px;"><span class="hljs-keyword" style="color:rgb(249,38,114);">public</span> <span class="hljs-keyword" style="color:rgb(249,38,114);">static</span> <span class="hljs-keyword" style="color:rgb(249,38,114);">void</span> <span class="hljs-title" style="color:rgb(166,226,46);">main</span><span class="hljs-params">(String[] args)</span> </span>{
+        SparkConf conf = <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> SparkConf()
+                .setMaster(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"local[2]"</span>)
+                .setAppName(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"KafkaReceiverSpark"</span>);  
+        JavaStreamingContext jsc = <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> JavaStreamingContext(conf, Durations.seconds(<span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">6</span>));
+
+        <span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">// 使用KafkaUtils.createStream()方法，创建 Kafka 的输入数据流</span>
+        Map&lt;String, Integer&gt; topicThreadMap = <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> HashMap&lt;String, Integer&gt;();
+        topicThreadMap.put(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"wc1"</span>, <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1</span>);
+
+        JavaPairReceiverInputDStream&lt;String, String&gt; lines = KafkaUtils.createStream(
+                jsc, 
+                <span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"localhost:2181"</span>, 
+                <span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"DefaultConsumerGroup"</span>, 
+                topicThreadMap);
+
+
+
+        <span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">// wordcount code</span>
+        JavaDStream&lt;String&gt; words = lines.flatMap(
+
+                <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> FlatMapFunction&lt;Tuple2&lt;String,String&gt;, String&gt;() {
+
+                    <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">private</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">static</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">final</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">long</span> serialVersionUID = <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1L</span>;
+
+                    <span class="hljs-meta" style="color:rgb(117,113,94);font-size:15px;">@Override</span>
+                    <span class="hljs-function" style="font-size:15px;"><span class="hljs-keyword" style="color:rgb(249,38,114);">public</span> Iterable&lt;String&gt; <span class="hljs-title" style="color:rgb(166,226,46);">call</span><span class="hljs-params">(Tuple2&lt;String, String&gt; tuple)</span>
+                            <span class="hljs-keyword" style="color:rgb(249,38,114);">throws</span> Exception </span>{
+                        <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">return</span> Arrays.asList(tuple._2.split(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">" "</span>));  
+                    }
+
+                });
+
+        JavaPairDStream&lt;String, Integer&gt; pairs = words.mapToPair(
+
+                <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> PairFunction&lt;String, String, Integer&gt;() {
+
+                    <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">private</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">static</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">final</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">long</span> serialVersionUID = <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1L</span>;
+
+                    <span class="hljs-meta" style="color:rgb(117,113,94);font-size:15px;">@Override</span>
+                    <span class="hljs-function" style="font-size:15px;"><span class="hljs-keyword" style="color:rgb(249,38,114);">public</span> Tuple2&lt;String, Integer&gt; <span class="hljs-title" style="color:rgb(166,226,46);">call</span><span class="hljs-params">(String word)</span>
+                            <span class="hljs-keyword" style="color:rgb(249,38,114);">throws</span> Exception </span>{
+                        <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">return</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> Tuple2&lt;String, Integer&gt;(word, <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1</span>);
+                    }
+
+                });
+
+        JavaPairDStream&lt;String, Integer&gt; wordCounts = pairs.reduceByKey(
+
+                <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> Function2&lt;Integer, Integer, Integer&gt;() {
+
+                    <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">private</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">static</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">final</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">long</span> serialVersionUID = <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1L</span>;
+
+                    <span class="hljs-meta" style="color:rgb(117,113,94);font-size:15px;">@Override</span>
+                    <span class="hljs-function" style="font-size:15px;"><span class="hljs-keyword" style="color:rgb(249,38,114);">public</span> Integer <span class="hljs-title" style="color:rgb(166,226,46);">call</span><span class="hljs-params">(Integer v1, Integer v2)</span> <span class="hljs-keyword" style="color:rgb(249,38,114);">throws</span> Exception </span>{
+                        <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">return</span> v1 + v2;
+                    }
+
+                });
+
+        wordCounts.print();  
+
+        jsc.start();
+        jsc.awaitTermination();
+        jsc.close();
+    }
+
+}
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+启动 Spark Streaming。</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493281584540.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+打开 Xfce 终端启动 kafka Producer。</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="hljs coffeescript" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);">$ bin/kafka-<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">console</span>-producer.sh  --broker-list localhost:<span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">9092</span> --topic wc1
+<span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">#输入任意</span>
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493282195117.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+快速切换到scala IDE Console 控制台，屏幕上会显示程序运行的相关信息，并会每隔6秒钟刷新一次信息，大量信息中会包含如下重要信息，默认只显示前十条：</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493282344429.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+同样地，您也可以再另外开启 consume 终端。</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="hljs coffeescript" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);">$ bin/kafka-<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">console</span>-consumer.sh  --zookeeper localhost:<span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">2181</span> --<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">from</span>-beginning --topic wc1
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<img src="https://dn-anything-about-doc.qbox.me/document-uid214292labid2885timestamp1493282549119.png/wm" alt="此处输入图片的描述" style="border:0px none;vertical-align:middle;"></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+至此基于 Kafka Receiver 方式整哈Spark Streaming 顺利完成。实验结束后，要关闭各个终端，只要切换到该终端窗口，然后按键盘的 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">Ctrl+C</code> 组合键，就可以结束程序运行。</p>
+<h4 id="2-kafka-direct-" style="line-height:1.4;color:rgb(51,51,51);font-size:1.25em;">
+2). 基于Kafka Direct 方式</h4>
+<p style="font-size:15px;color:rgb(51,51,51);">
+关于 基于 Kafka Direct 方式，只需要新建一个类 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">KafkaDirectSpark</code>，具体代码如下：</p>
+<pre style="overflow:auto;font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13px;line-height:1.42857;color:rgb(51,51,51);border:1px solid rgb(204,204,204);background-color:rgb(245,245,245);"><code class="hljs javascript" style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;color:rgb(248,248,242);display:block;background:rgb(35,36,31);">package cn.com.syl.spark;
+
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> java.util.Arrays;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> java.util.HashMap;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> java.util.HashSet;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> java.util.Map;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> java.util.Set;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> kafka.serializer.StringDecoder;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.SparkConf;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.api.java.function.FlatMapFunction;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.api.java.function.Function2;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.api.java.function.PairFunction;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.Durations;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.api.java.JavaDStream;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.api.java.JavaPairDStream;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.api.java.JavaPairInputDStream;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.api.java.JavaStreamingContext;
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> org.apache.spark.streaming.kafka.KafkaUtils;
+
+<span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">import</span> scala.Tuple2;
+
+
+public <span class="hljs-class" style="font-size:15px;"><span class="hljs-keyword" style="color:rgb(249,38,114);">class</span> <span class="hljs-title">KafkaDirectSpark</span></span>{
+
+    public <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">static</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">void</span> main(<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>[] args) {
+        SparkConf conf = <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> SparkConf()
+                .setMaster(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"local[2]"</span>)
+                .setAppName(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"KafkaDirectSpark"</span>);  
+        JavaStreamingContext jssc = <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> JavaStreamingContext(conf, Durations.seconds(<span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">6</span>));
+
+        <span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">// 创建map，添加参数</span>
+        <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">Map</span>&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt; kafkaParams = <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> HashMap&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt;();
+        kafkaParams.put(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"metadata.broker.list"</span>, 
+                <span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"localhost:9092"</span>);
+
+        <span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">// 创建一个集合set，添加读取的topic</span>
+
+        <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">Set</span>&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt; topics = <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> HashSet&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt;();
+        topics.add(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">"wc1"</span>);
+
+        <span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">// 创建输入DStream</span>
+        JavaPairInputDStream&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt; lines = KafkaUtils.createDirectStream(
+                jssc, 
+                <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>.class, 
+                <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>.class, 
+                StringDecoder.class, 
+                StringDecoder.class, 
+                kafkaParams, 
+                topics);
+
+        <span class="hljs-comment" style="color:rgb(117,113,94);font-size:15px;">// 单词统计</span>
+        JavaDStream&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt; words = lines.flatMap(
+
+                <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> FlatMapFunction&lt;Tuple2&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>,<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt;, <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt;() {
+
+                    private <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">static</span> final long serialVersionUID = <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1</span>L;
+
+                    @Override
+                    public Iterable&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt; call(Tuple2&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>&gt; tuple)
+                            throws Exception {
+                        <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">return</span> Arrays.asList(tuple._2.split(<span class="hljs-string" style="color:rgb(230,219,116);font-size:15px;">" "</span>));  
+                    }
+
+                });
+
+        JavaPairDStream&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, Integer&gt; pairs = words.mapToPair(
+
+                <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> PairFunction&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, <span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, Integer&gt;() {
+
+                    private <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">static</span> final long serialVersionUID = <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1</span>L;
+
+                    @Override
+                    public Tuple2&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, Integer&gt; call(<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span> word) throws Exception {
+                        <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">return</span> <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> Tuple2&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, Integer&gt;(word, <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1</span>);
+                    }
+
+                });
+
+        JavaPairDStream&lt;<span class="hljs-built_in" style="color:rgb(230,219,116);font-size:15px;">String</span>, Integer&gt; wordCounts = pairs.reduceByKey(
+
+                <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">new</span> Function2&lt;Integer, Integer, Integer&gt;() {
+
+                    private <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">static</span> final long serialVersionUID = <span class="hljs-number" style="color:rgb(174,129,255);font-size:15px;">1</span>L;
+
+                    @Override
+                    public Integer call(Integer v1, Integer v2) throws Exception {
+                        <span class="hljs-keyword" style="color:rgb(249,38,114);font-size:15px;">return</span> v1 + v2;
+                    }
+
+                });
+
+        wordCounts.print();
+
+        jssc.start();
+        jssc.awaitTermination();
+        jssc.close();
+    }
+
+}
+</code></pre>
+<p style="font-size:15px;color:rgb(51,51,51);">
+执行方式和上述基于 Kafka Receiver 方式一模一样，在此就不演示了，请您完成。</p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+<code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">补充知识：</code></p>
+<p style="font-size:15px;color:rgb(51,51,51);">
+假定您是在 windows 平台写的代码 ，对于上面的代码，您完全可以用打 <code style="font-family:Menlo, Monaco, Consolas, 'Courier New', monospace;font-size:13.5px;color:rgb(199,37,78);background-color:rgb(249,242,244);">jar</code> 包的方式运行，具体参考上节<a href="http://www.shiyanlou/" rel="nofollow" style="color:rgb(64,120,192);text-decoration:none;background-color:transparent;"> Streaming
+ 整合 Flume</a><a href="http://www.shiyanlou/" rel="nofollow" style="color:rgb(64,120,192);text-decoration:none;background-color:transparent;"></a></p>
+<h2 style="line-height:1.225;color:rgb(51,51,51);font-size:1.75em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+四、实验总结</h2>
+<p style="font-size:15px;color:rgb(51,51,51);">
+本节课主要介绍了 Spark Streaming 与 Kafka 的整合的两种方式，并就 Windows 平台如何打 jar 包提交到远程服务器进行讲解，希望学完本节课，能帮助您理解 Spark Streaming，并能很快上手。</p>
+<h2 style="line-height:1.225;color:rgb(51,51,51);font-size:1.75em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+五、参考阅读</h2>
+<ul style="color:rgb(51,51,51);font-size:16px;line-height:25.6px;"><li style="font-size:15px;"><a href="http://spark.apache.org/docs/latest/streaming-programming-guide.html" rel="nofollow" style="color:rgb(64,120,192);text-decoration:none;background-color:transparent;">http://spark.apache.org/docs/latest/streaming-programming-guide.html</a></li></ul>            </div>
+                </div>

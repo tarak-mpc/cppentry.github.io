@@ -1,0 +1,162 @@
+---
+layout:     post
+title:      架构设计：系统间通信（30）——Kafka及场景应用（中3）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2 id="4-5kafka原理消费者">4-5、Kafka原理：消费者</h2>
+<p>作为Apache Kafka消息队列，它的性能指标相当一部分取决于消费者们的性能——只要消息能被快速消费掉不在Broker端形成拥堵，整个Apache Kafka就不会出现性能瓶颈问题。</p>
+<h3 id="4-5-1基本使用"><a name="t1"></a>4-5-1、基本使用</h3>
+<p>我们首先使用Kafka Client For JAVA API为各位读者演示一下最简单的Kafka消费者端的使用。以下示例代码可以和上文中所给出的生产者代码相对应，形成一个完整的消息创建——接收——发送过程：</p>
+<pre class="prettyprint"><code class="hljs java has-numbering"><span class="hljs-keyword">package</span> kafkaTQ;
+
+<span class="hljs-keyword">import</span> java.util.HashMap;
+<span class="hljs-keyword">import</span> java.util.List;
+<span class="hljs-keyword">import</span> java.util.Map;
+<span class="hljs-keyword">import</span> java.util.Properties;
+
+<span class="hljs-keyword">import</span> kafka.consumer.Consumer;
+<span class="hljs-keyword">import</span> kafka.consumer.ConsumerConfig;
+<span class="hljs-keyword">import</span> kafka.consumer.ConsumerIterator;
+<span class="hljs-keyword">import</span> kafka.consumer.KafkaStream;
+<span class="hljs-keyword">import</span> kafka.javaapi.consumer.ConsumerConnector;
+<span class="hljs-keyword">import</span> kafka.message.MessageAndMetadata;
+
+<span class="hljs-javadoc">/**
+ * 这是Kafka的topic消费者
+ *<span class="hljs-javadoctag"> @author</span> yinwenjie
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">KafkaConsumer_GroupOne</span> {</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) <span class="hljs-keyword">throws</span> RuntimeException {
+        <span class="hljs-comment">// ==============首先各种连接属性</span>
+        <span class="hljs-comment">// Kafka消费者的完整连接属性在Apache Kafka官网http://kafka.apache.org/documentation.html#consumerconfigs</span>
+        <span class="hljs-comment">// 有详细介绍（请参看Old Consumer Configs。New Consumer Configs是给Kafka V0.9.0.0+使用的）</span>
+        <span class="hljs-comment">// 这里我们设置几个关键属性</span>
+        Properties props = <span class="hljs-keyword">new</span> Properties();
+        <span class="hljs-comment">// zookeeper相关的，如果有多个zk节点，这里以“,”进行分割</span>
+        props.put(<span class="hljs-string">"zookeeper.connect"</span>, <span class="hljs-string">"192.168.61.140:2181"</span>);
+        props.put(<span class="hljs-string">"zookeeper.connection.timeout.ms"</span>, <span class="hljs-string">"10000"</span>);
+        <span class="hljs-comment">// 还记得上文的说明吗：对于一个topic而言，同一用户组内的所有用户只被允许访问一个分区。</span>
+        <span class="hljs-comment">// 所以要让多个Consumer实现对一个topic的负载均衡，每个groupid的名称都要一样</span>
+        String groupname = <span class="hljs-string">"group2"</span>;
+        props.put(<span class="hljs-string">"group.id"</span>, groupname);
+
+        <span class="hljs-comment">//==============</span>
+        ConsumerConfig consumerConfig = <span class="hljs-keyword">new</span> ConsumerConfig(props);
+        ConsumerConnector consumerConnector = Consumer.createJavaConsumerConnector(consumerConfig);
+
+        <span class="hljs-comment">// 我们只创建一个消费者</span>
+        HashMap&lt;String, Integer&gt; map = <span class="hljs-keyword">new</span> HashMap&lt;String, Integer&gt;();
+        map.put(<span class="hljs-string">"my_topic2"</span>, <span class="hljs-number">1</span>);
+        Map&lt;String, List&lt;KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt;&gt;&gt; topicMessageStreams = consumerConnector.createMessageStreams(map);
+
+        <span class="hljs-comment">// 获取并启动消费线程，注意看关键就在这里，一个消费线程可以负责消费一个topic中的多个partition</span>
+        <span class="hljs-comment">// 但是一个partition只能分配到一个消费线程去</span>
+        KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt; stream = topicMessageStreams.get(<span class="hljs-string">"my_topic2"</span>).get(<span class="hljs-number">0</span>);
+        <span class="hljs-keyword">new</span> Thread(<span class="hljs-keyword">new</span> ConsumerThread(stream)).start();
+
+        <span class="hljs-comment">// 接着锁住主线程，让其不退出</span>
+        <span class="hljs-keyword">synchronized</span> (KafkaConsumer_GroupTwo.class) {
+            <span class="hljs-keyword">try</span> {
+                KafkaConsumer_GroupTwo.class.wait();
+            } <span class="hljs-keyword">catch</span> (InterruptedException e) {
+                e.printStackTrace(System.out);
+            }
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     *<span class="hljs-javadoctag"> @author</span> yinwenjie
+     */</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ConsumerThread</span> <span class="hljs-keyword">implements</span> <span class="hljs-title">Runnable</span> {</span>
+
+        <span class="hljs-keyword">private</span> KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt; stream;
+
+        <span class="hljs-javadoc">/**
+         *<span class="hljs-javadoctag"> @param</span> stream
+         */</span>
+        <span class="hljs-keyword">public</span> <span class="hljs-title">ConsumerThread</span>(KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt; stream) {
+            <span class="hljs-keyword">this</span>.stream = stream;
+        }
+
+        <span class="hljs-annotation">@Override</span>
+        <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">run</span>() {
+            ConsumerIterator&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt; iterator =  <span class="hljs-keyword">this</span>.stream.iterator();
+            <span class="hljs-comment">//============这个消费者获取的数据在这里</span>
+            <span class="hljs-keyword">while</span>(iterator.hasNext()){  
+                MessageAndMetadata&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt; message = iterator.next();
+                <span class="hljs-keyword">int</span> partition = message.partition();
+                String topic = message.topic();
+                String messageT = <span class="hljs-keyword">new</span> String(message.message());
+                System.out.println(<span class="hljs-string">"接收到: "</span> + messageT + <span class="hljs-string">"来自于topic：["</span> + topic + <span class="hljs-string">"] + 第partition["</span> + partition + <span class="hljs-string">"]"</span>); 
+            }
+        }
+    }
+}</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li><li>31</li><li>32</li><li>33</li><li>34</li><li>35</li><li>36</li><li>37</li><li>38</li><li>39</li><li>40</li><li>41</li><li>42</li><li>43</li><li>44</li><li>45</li><li>46</li><li>47</li><li>48</li><li>49</li><li>50</li><li>51</li><li>52</li><li>53</li><li>54</li><li>55</li><li>56</li><li>57</li><li>58</li><li>59</li><li>60</li><li>61</li><li>62</li><li>63</li><li>64</li><li>65</li><li>66</li><li>67</li><li>68</li><li>69</li><li>70</li><li>71</li><li>72</li><li>73</li><li>74</li><li>75</li><li>76</li><li>77</li><li>78</li><li>79</li><li>80</li><li>81</li><li>82</li><li>83</li><li>84</li><li>85</li></ul><p>以上代码片段有几个关键点需要进行一下说明：</p>
+<ul><li>“map.put(“my_topic2”, 1);” 这句代码表示将会为名叫“my_topic2”的队列创建数量为1的消费者。在一个进程的连接中，您可以指定创建多个topic的消费者数量。例如：</li></ul><pre class="prettyprint"><code class="hljs asciidoc has-numbering"><span class="hljs-code">......
+# 为my_topic2的队列创建数量为1的消费者
+# 并且为my_topic3的队列创建数量为4的消费者
+map.put("my_topic2", 1);
+map.put("my_topic3", 4);
+......</span></code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li></ul><ul><li>每一个消费者都需要一个独立的线程进行工作。您可以将工作任务放入已经创建好的线程池（推荐这样做），也可以像以上代码示例中那样创建一个线程并运行任务。</li></ul><pre class="prettyprint"><code class="hljs asciidoc has-numbering"><span class="hljs-code">......
+# 使用线程池
+# 这里的参数就是消费者的总数量
+ExecutorService threadPool = Executors.newFixedThreadPool(1);
+threadPool.execute(new ConsumerThread(stream));
+......</span></code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li></ul><ul><li>在开发过程中，消费者端无需知道任何一个Broker的位置。但是必须至少知道一个zookeeper服务节点的位置。通过这个位置，消费者端首先会去zookeeper服务上查找指定的topic的分区情况和已有的消费者情况。</li></ul><h3 id="4-5-2分区与消费者负载"><a name="t2"></a>4-5-2、分区与消费者负载</h3>
+<p><strong>Apache Kafka集群中的消费者以线程为单位</strong>，如在上一小节代码段所示：我们在一个进程中，为Topic为“my_topic2”的队列创建了一个线程，这个线程就是一个消费者——属于名为“group2”的用户组。这时，Topic中所有分区的消息都会交给这个消费线程进行消费。如下图所示：</p>
+<p><img src="https://img-blog.csdn.net/20160508113315100" alt="这里写图片描述" title=""></p>
+<p>虽然一个消费者可以同时消费Topic中多个分区（Partition）的消息，但在生产环境下为了获得更优的消费性能并不建议这样做。由于单个消费者线程的处理能力是有限的，一旦出现数据洪峰，消息就会堆积在Broker端无法被处理（如果消费者端使用了线程池，则可能堆积在消费者端，这要看您怎么编写代码）。所以上一个小节那样的消费者编码方式，最多就是用来做做“Hello World”那样的示例，没有更多的使用价值了。</p>
+<h3 id="4-5-3优化-一"><a name="t3"></a>4-5-3、优化 一：</h3>
+<p>第一种改进方法，就是让<strong>一个消费者只消费一个分区（Partition）中的消息，且整个系统中的消费者大于等于Topic中的分区数量</strong>。设计方案如下：</p>
+<p><img src="https://img-blog.csdn.net/20160508120904838" alt="这里写图片描述" title=""></p>
+<p>如上图所示，这个Topic下一共有四个分区（Partition），对应的消费者数量也有四个，但是这四个消费者同属于一个进程，存在于同一个物理节点上。我们根据这个设计方案，更改之前消费者端的代码，如下（为了节约篇幅，只给出主要的更改位置）：</p>
+<pre class="prettyprint"><code class="hljs cs has-numbering">......
+<span class="hljs-comment">// 后续创建的所有消费者线程，都是属于group2的消费组</span>
+String groupname = <span class="hljs-string">"group2"</span>;
+props.put(<span class="hljs-string">"group.id"</span>, groupname);
+
+......
+<span class="hljs-comment">// 在这个进程中，为topic名为my_topic2的队列创建了四个消费者</span>
+HashMap&lt;String, Integer&gt; map = <span class="hljs-keyword">new</span> HashMap&lt;String, Integer&gt;();
+map.put(<span class="hljs-string">"my_topic2"</span>, <span class="hljs-number">4</span>);
+Map&lt;String, List&lt;KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt;&gt;&gt; topicMessageStreams = consumerConnector.createMessageStreams(map);
+
+......
+<span class="hljs-comment">// 为这四个消费者分配四个不同的线程</span>
+<span class="hljs-comment">// 消费者线程1</span>
+KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt; stream = topicMessageStreams.<span class="hljs-keyword">get</span>(<span class="hljs-string">"my_topic2"</span>).<span class="hljs-keyword">get</span>(<span class="hljs-number">0</span>);
+<span class="hljs-keyword">new</span> Thread(<span class="hljs-keyword">new</span> ConsumerThread(stream)).start();
+
+<span class="hljs-comment">// 消费者线程2</span>
+stream = topicMessageStreams.<span class="hljs-keyword">get</span>(<span class="hljs-string">"my_topic2"</span>).<span class="hljs-keyword">get</span>(<span class="hljs-number">1</span>);
+<span class="hljs-keyword">new</span> Thread(<span class="hljs-keyword">new</span> ConsumerThread(stream)).start();
+
+<span class="hljs-comment">// 消费者线程3</span>
+stream = topicMessageStreams.<span class="hljs-keyword">get</span>(<span class="hljs-string">"my_topic2"</span>).<span class="hljs-keyword">get</span>(<span class="hljs-number">2</span>);
+<span class="hljs-keyword">new</span> Thread(<span class="hljs-keyword">new</span> ConsumerThread(stream)).start();
+
+<span class="hljs-comment">// 消费者线程4</span>
+stream = topicMessageStreams.<span class="hljs-keyword">get</span>(<span class="hljs-string">"my_topic2"</span>).<span class="hljs-keyword">get</span>(<span class="hljs-number">3</span>);
+<span class="hljs-keyword">new</span> Thread(<span class="hljs-keyword">new</span> ConsumerThread(stream)).start();
+
+......
+<span class="hljs-comment">// 接着锁住主线程，让其不退出</span>
+synchronized (KafkaConsumer_GroupTwo.class) {
+    <span class="hljs-keyword">try</span> {
+        KafkaConsumer_GroupTwo.class.wait();
+    } <span class="hljs-keyword">catch</span> (InterruptedException e) {
+        e.printStackTrace(System.<span class="hljs-keyword">out</span>);
+    }
+}
+......</code></pre><ul class="pre-numbering"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li><li>19</li><li>20</li><li>21</li><li>22</li><li>23</li><li>24</li><li>25</li><li>26</li><li>27</li><li>28</li><li>29</li><li>30</li><li>31</li><li>32</li><li>33</li><li>34</li><li>35</li><li>36</li><li>37</li><li>38</li><li>39</li></ul><h3 id="4-5-4优化-二"><a name="t4"></a>4-5-4、优化 二：</h3>
+<p>显然“优化方案一”中的做法虽然实现了4消费者分别对应4个分区的负载均衡方案，但是受限于单个物理节点的处理性能，所以这种方案的处理性能还有进一步优化的可能。我们可以在多个节点物理节点上均匀散步这些消费者，对Topic分区中的消息进行一一对应的消费，如下图所示：</p>
+<p><img src="https://img-blog.csdn.net/20160508124218458" alt="这里写图片描述" title=""></p>
+<p>上图所示的设计思路中，我们使用了2个物理节点完成消息的消费任务，每个服务节点上开启的消费进程上有两个消费者线程。这样Topic中4个分区的消息就会被均匀分布到2个物理节点中，且每一个物理节点处理两个分区中的消息。</p>
+<blockquote>
+<p>注意：可能您在分别启动这些消费进程的时候，由于时间上存在差异，某一台服务节点上的消费进程将暂时被分配多个分区进行消息接收。但没有关系，当这个消费者性能到达瓶颈，分区中的消息出现拥堵的时候，这个分区就会被新的消费者所代替，直到10个消费者线程分别和10个分区建立一一对应关系为止</p>
+</blockquote>
+            </div>
+                </div>

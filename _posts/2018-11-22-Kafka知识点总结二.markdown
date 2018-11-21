@@ -1,0 +1,48 @@
+---
+layout:     post
+title:      Kafka知识点总结二
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u012050154/article/details/78319299				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-size:18px;">        上一节从各概念入手总结了Kafka的知识，这里从系统结构展开，进一步总结Kafka的知识点。</span></p>
+<p><span style="font-size:18px;">        Kafka以集群的方式部署，集群由多个服务器（Broker）组成，每个Broker的Kafka由哪些层组成呢？答案是：SocketServer（Socket服务层）、KafkaRequestHandlerPool（请求转发层）、Kafka api（业务逻辑层）、Control（集群状态控制层）、Kafka Healthcheck Broker （Broker健康检测层）、TopicConfigManager（topic配置信息监控层）组成。</span></p>
+<p></p>
+<p><span style="font-size:14px;">Broker共处理10种不同的Request：</span></p>
+<p><span style="font-size:14px;">         （1）ProducerRequest：消息生产者向Kafka集群发送消息，或者消息消费者向Kafka集群提交偏移量Offset的值；</span></p>
+<p><span style="font-size:14px;">         （2）TopicMetadataRequest：生产者或者消费者发送获取Topic元数据信息的请求；</span></p>
+<p><span style="font-size:14px;">         （3）FetchRequest：消费者发送ReplicaFetcherThread获取message的请求；</span></p>
+<p><span style="font-size:14px;">         （4）OffsetRequest： 消费者发送获取某个Topic的偏移量的请求；</span></p>
+<p><span style="font-size:14px;">         （5）OffsetCommitRequest：消费者提交偏移量至KAFKA（集群根据配置提交至ZK或者log) ；</span></p>
+<p><span style="font-size:14px;">          （6）OffsetFetchRequest： 消费者发送获取自己提交到KAFKA上的偏移量(如果是ZK上，则消费者自己获取)的请求；</span></p>
+<p><span style="font-size:14px;">          （7）LeaderAndIsrRequest：当某个Topic的Partition的Leader和Isr发生改变时，Controller发送通知给相应的Broker(比如说Leader挂了)的请求；</span></p>
+<p><span style="font-size:14px;">          （8）StopReplicaRequest： 当Broker停止时或者删除某个Topic的分区的Replica时，Controller发送通知相应的Broker停止拷贝副本的请求；</span></p>
+<p><span style="font-size:14px;">          （9）UpdateMetadataRequest：当Topic的元数据信息发生变化时，Controller发送通知给相应的Broker的请求；</span></p>
+<p><span style="font-size:14px;">          （10）BrokerControlledShutdownRequest：当集群内某个Broker关机的时候，Broker(作为Leader的Controller)接收到的对应的Broker准备关机的请求 ；</span></p>
+<br><p><span style="font-size:18px;">1、SocketServer（Socket服务层）</span></p>
+<p><span style="font-size:18px;">        SocketSever内部开启一个Acceptor（一个独立的线程）接收Sock的网络请求，以轮询的方式将请求转发给N个处理线程Processor，<span style="font-size:18px;">Processor将接受到的Request存放至阻塞队列RequestQueue中</span>。</span><span style="font-size:18px;">M个处理线程从RequestChannel的请求阻塞队列</span><span style="font-size:18px;">RequestQueue</span><span style="font-size:18px;">中获取请求，调用Kafka
+ Api处理，然后Processor从ResponseQueue[i]中取回对应的处理结果</span><span style="font-size:18px;">（每个Processor都有一个对应的编号i）</span><span style="font-size:18px;">；</span></p>
+<p><span style="font-size:18px;">        SocketServer与KafkaRequestHandlerPool之间通过RequestChannel通信，Request与Response通过该通道传输数据。这样Processor就负责接收Connection的Request并发送处理的结果Response，即Processor将各自对应的Connection的Request存 进RequestQueue中，然后对ResponseQueue[i]中取出对应的Response。</span></p>
+<p><span style="font-size:18px;">2、<span style="font-size:18px;">KafkaRequestHandlerPool（请求转发层）</span></span></p>
+<p><span style="font-size:18px;">         开启M个处理线程，从RequestChannel.RequestQueue中拿到具体的Request，然后把处理后的结果放到ResponseQueue[i]中。</span></p>
+<p><span style="font-size:18px;"></span></p>
+<p><span style="font-size:18px;">3、Kafka Api（业务逻辑处理层）</span></p>
+<p><span style="font-size:18px;">        由Replica Manager（副本管理模块）、Log Manager（日志管理模块）、Offset Manager（偏移量管理模块）共同实现正常的业务逻辑。</span></p>
+<p><span style="font-size:18px;">        （1）Replica Manager（副本管理模块）：负责接收Controller的Command以完成Replica的管理工作，Command主要有两种LeaderAndISRCommand和StopReplicaCommand，主要完成三件事：1）接受LeaderAndISRCommand命令 2）接受StopReplicaCommand命令 3）开启定时线程maybeShrinkIsr发现那些已经没有进行同步的复本；</span></p>
+<p><span style="font-size:18px;">        （2）Log Manager（日志管理模块）：Partition在存储层面都是Log文件，每个Log由多个LogSegment组成，每个LogSegment以本LogSegment的第一条为索引进行Segment的管理；</span></p>
+<p><span style="font-size:18px;">        （3）Offset Manager（偏移量管理模块）：提供对Offset的保存和读取，Kafka的Topic的偏移量有2种方式：1）由Zookeeper统一维护；2）Kafka内部的Offsets.storage参数保存。OffestsCache的更新机制分3种情况：1）produceRequest.requiredAcks == 0时，即不需要ack，则立刻调用putOffsets更新偏移量；2）produceRequest.requiredAcks
+ == 1时，即需要立即返回response时，则立刻调用putOffsets更新偏移量；3）produceRequest.requiredAcks == -1时，即只有此批消息达到最小副本数的时候，通过ProducerRequestPurgatory<br>
+触发调用putOffsets更新偏移量；</span></p>
+<p><span style="font-size:18px;">4、Controller（集群状态控制层）</span></p>
+<p><span style="font-size:18px;">        与Zookeeper对接，进行Leader的选举，Leader负责Topic的创建与删除、Topic的分区变化、Topic分区内部的副本变化、Broker的热备份。</span></p>
+<p><span style="font-size:18px;"><br></span></p>
+<p><span style="font-size:18px;"><br></span></p>
+<p><span style="font-size:18px;"><br></span></p>
+<p><span style="font-size:18px;">参考资料：</span></p>
+<p><span style="font-size:18px;">1、《Learning Apache Kafka, 2nd Edition》</span></p>
+<p><span style="font-size:18px;">2、http://blog.csdn.net/wl044090432/article/category/6123025/2</span></p>
+            </div>
+                </div>

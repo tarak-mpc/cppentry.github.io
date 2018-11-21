@@ -1,0 +1,37 @@
+---
+layout:     post
+title:      Kafka集群平滑重启
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-size:18px;">最近修改公司线上kafka集群配置然后直接kill掉进程来重启集群发现所有生产者都无法写入数据导致丢了数据，栽了一个大坑，接下来的工作肯定是补坑找原因，就分享一下。</span></p>
+<p><span style="font-size:18px;">系统环境说明：kafka版本为0.8.1.1，kafka集群配置为10.12.0.23:2181,10.12.0.24:2181,10.12.0.25:2181/kafka,因此在zookeeper中的根路径为：/kafka<br><strong>1.先决条件，kafka启动必须加上JMX_PORT=9999(自己选一个空闲端口)</strong><br>
+在zookeeper的客户端使用get  /kafka/brokers/ids/[0,1,2](一个数字代表你的brokerid),如果返回信息中的jmx_port 值为-1就说明启动时没有指定JMX_PORT，这样不需要进行下面步骤，请直接重启集群加上配置,并且server.properties需要设置<strong>auto.create.topics.enable=false</strong>。<br>
+2.观察状态<br>
+使用命令./bin/kafka-topics.sh --zookeeper 10.12.0.23:2181,10.12.0.24:2181,10.12.0.25:2181/kafka  --describe  --topic checkall<br>
+观察当前topic的partition分布状况，以单个topic作为说明，此时状态如下：<br>
+Topic:checkall<span> </span>PartitionCount:2<span></span>ReplicationFactor:2<span>
+</span>Configs:<br><span></span>Topic: checkall<span></span>Partition: 0<span>
+</span>Leader: 1<span></span> Replicas: 1,0<span>
+</span>Isr: 0,1<br><span></span>Topic: checkall<span></span>Partition: 1<span>
+</span>Leader: 0   Replicas: 0,1<span></span>Isr: 0,1<br>
+3.让某台机器下线<br>
+./bin/kafka-run-class.sh kafka.admin.ShutdownBroker --zookeeper 10.12.0.23:2181,10.12.0.24:2181,10.12.0.25:2181/kafka --broker 1 --num.retries 3 --retry.interval.ms 600<br>
+如出错：java.io.IOException: Failed to retrieve RMIServer stub: javax.naming.ServiceUnavailableException [Root exception is java.rmi.ConnectException: Connection refused to host: XXXXXXXX; nested exception is  <strong>请回到步骤1</strong><br>
+如成功：再次观察状态可以看到：<br>
+Topic:checkall<span> </span>PartitionCount:2<span></span>ReplicationFactor:2<span>
+</span>Configs:<br><span></span>Topic: checkall<span></span>Partition: 0<span>
+</span>Leader: 0<span></span>Replicas: 1,0<span>
+</span>Isr: 0,1<br><span></span>Topic: checkall<span></span>Partition: 1<span>
+</span>Leader: 0<span></span>Replicas: 0,1<span>
+</span>Isr: 0,1<br>
+此时leader已经全部切到brokerid为 0的机器上了<br>
+4.JPS找到kafka进程号并kill掉<br>
+5.leader重新均衡<br>
+./bin/kafka-preferred-replica-election.sh --zookeeper 10.12.0.23:2181,10.12.0.24:2181,10.12.0.25:2181/kafka<br>
+成功后重新观察状态会发现恢复到原来正常情况了。</span><br></p>
+<p><span style="font-size:18px;"><strong><span style="color:#ff0000;">转载请注明来自：http://blog.csdn.net/clarencezi/article/details/42271037</span></strong><br></span></p>
+            </div>
+                </div>

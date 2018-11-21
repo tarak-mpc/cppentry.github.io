@@ -1,0 +1,53 @@
+---
+layout:     post
+title:      kafka的模型诠释
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/liweisnake/article/details/51682129				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>kafka是目前市场上比较流行的消息框架。本篇文章尽力去诠释kafka模型背后的设计原理，从而更加深刻的理解kafka，在使用过程中尽可能少的入坑。</p>
+<p><span style="font-size:18px;"><strong>三个角色</strong></span>：</p>
+<p><strong>producer</strong>：生产者。负责发送消息到kafka集群<br></p>
+<p><strong>broker</strong>：kafka集群。负责保存消息<br></p>
+<p><strong>consumer</strong>：消费者。负责消费kafka集群的消息<br></p>
+<p><img src="http://xstarcd.github.io/wiki/img/kafka/kafka_cluster.png" alt=""><br></p>
+<p><span style="font-size:18px;"><strong>模型</strong></span>：</p>
+<p><strong>topic</strong>：一个topic即一个逻辑上的主题，生产者可以生产消息到该主题，消费者则从该主题下消费消息。对于生产者和消费者而言，并不需要关心某个topic是怎么存的，存在哪台机器这些物理信息。<br></p>
+<p><strong>partition</strong>：partition是物理上的，每个topic可以有多个partition。这里引出一个问题，对于外界而言，一个topic已经足够，<strong>为什么还要设计partition这个模型</strong>？</p>
+<p>这是因为，利用partition可以做水平扩张，负载均衡。假设一个topic消息量巨大，单机支撑这个topic就会出现IO瓶颈，如果要想法去掉这个瓶颈，最简单能想到的就是将一个topic分散在多台机器，用多台机器来分散IO。所以partition的目的就是将同一个topic分散到不同机器上，从而实现水平扩展的利器。</p>
+<p><img src="http://xstarcd.github.io/wiki/img/kafka/kafka_cluster_2.png" alt=""><br></p>
+<p>借用知乎上的一个例子：</p>
+<p>kafka正是借用生活中的例子来设计的topic和partition。其中，不同的topic就是不同的高速公路，partition就是某条高速公路上面的车道，如果车流量大，则拓宽车道，反之，减少车道；而消费者就好比收费站，收费站越多，则通过速度越快。</p>
+<p><img src="https://img-blog.csdn.net/20170713104153716?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl3ZWlzbmFrZQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p><strong>consumer group</strong>：consumer group实际上就是一组consumer的集合。它的出现是基于两个需求。一，在应用消费kafka消息时，希望不会重复消费。二，有时应用需要并行消费。对于这两个看似矛盾的需求，kafka通过引入consumer group来解决了。</p>
+<p>先看第一，如果kafka不能解决重复投递，而由每个应用去解决，则每个应用自己去实现幂等，显然是一种重复造轮子的行为。对于第二，有时数据既需要传递给离线计算又需要给在线计算。kafka规定了，同一个consumer group内部，只能有一个consumer消费某条消息；而不同的consumer group，可以同时消费某条消息。简单说，如果同一个应用有100台机器，这100台机器属于同一个consumer group，则同一条消息在100台机器中只有一台能得到。而另一个应用如果也需要同时消费同一个topic的消息，则新建一个consumer
+ group并消费同一个topic消息。</p>
+<p><strong>partition和consumer group之间的关系</strong>：partition的设计初衷是通过增加partition让consumer能够并发消费，但是kafka的设计是在同一个partition上不允许并发，因此，如果consumer group中的consumer线程数量比partition多，则有的线程将得不到消息；反之，如果consumer线程数量比partition少，则有的线程将会收到多个消息，多个partition间的消息并不能保证顺序，只有同一个partition上的数据是有序的。</p>
+<p><br></p>
+<p><span style="font-size:18px;"><strong>消息顺序</strong></span>：<br></p>
+<p>如果topic中仅分配了一个partition，kafka能够保证消息的顺序投递，并且由于同一个consumer group只有一个consumer，在消费时也能保证消息的顺序，实际上就是串行的处理消息。而如果想要保证消息的处理顺序又想要并行化的进行消息投递处理，就不得不自行在consumer端处理。当然，还有个办法，即因为可以保证局部partition消息的顺序性，只要将需要保持顺序的消息通过特定的hash编码放到特定的partition中，则该组partition消息即可保证顺序访问。<br></p>
+<p><br></p>
+<p><span style="font-size:18px;"><strong>消息队列需要解决的几个难题</strong></span>：</p>
+<p><strong>1. 消息的顺序性</strong></p>
+<p><br></p>
+<p><strong>2. 消息的重复性</strong></p>
+<p><br></p>
+<p><strong>3. 事务消息</strong></p>
+<p><br></p>
+<p>(待续)</p>
+<p><br></p>
+<p>kafka与unix管道 http://zqhxuyuan.github.io/2016/01/05/2016-01-05-Kafka-Unix/</p>
+<p>Kafka是个奇葩！ http://www.csdn123.com/html/topnews201408/21/1021.htm<br></p>
+<p>Kafka——分布式发布订阅消息系统 https://www.zybuluo.com/sasaki/note/268115</p>
+<p>kafka入门介绍 http://orchome.com/5<br></p>
+<p>kafka设计原理介绍 https://www.dexcoder.com/dexcoder/article/2194<br></p>
+<p>Kafka 指南 http://wdxtub.com/2016/08/15/kafka-guide/</p>
+<p>Kafka史上最详细原理总结 http://blog.csdn.net/u013573133/article/details/48142677</p>
+<p>apache kafka技术分享系列(目录索引) http://blog.csdn.net/lizhitao/article/details/39499283</p>
+<p>阿里RocketMQ如何解决消息的顺序&amp;重复两大硬伤？ http://dbaplus.cn/news-21-1123-1.html<br></p>
+<p>如何做到“恰好一次”地传递数十亿条消息 http://blog.jobbole.com/111809/?utmsource=blog.jobbole.com&amp;utmmedium=relatedPosts</p>
+            </div>
+                </div>

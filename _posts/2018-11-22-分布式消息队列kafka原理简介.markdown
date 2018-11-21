@@ -1,0 +1,400 @@
+---
+layout:     post
+title:      分布式消息队列kafka原理简介
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u014427391/article/details/74436298				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-light">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc">
+<ul>
+<li><ul>
+<li><a href="#kafka%E5%8E%9F%E7%90%86%E7%AE%80%E4%BB%8B" rel="nofollow">kafka原理简介</a><ul>
+<li><a href="#producer" rel="nofollow">Producer</a></li>
+<li><a href="#broker" rel="nofollow">Broker</a></li>
+<li><a href="#consumer" rel="nofollow">Consumer</a></li>
+<li><a href="#zookeeper" rel="nofollow">Zookeeper</a></li>
+</ul>
+</li>
+<li><a href="#kafka%E4%BC%98%E7%82%B9" rel="nofollow">Kafka优点</a></li>
+<li><a href="#%E5%8D%95%E6%9C%BA%E7%89%88%E5%AE%89%E8%A3%85%E6%95%99%E7%A8%8B" rel="nofollow">单机版安装教程</a><ul>
+<li><a href="#1%E5%85%B3%E9%97%ADselinux" rel="nofollow">1关闭SELINUX</a></li>
+<li><a href="#2%E9%85%8D%E7%BD%AE%E9%98%B2%E7%81%AB%E5%A2%99" rel="nofollow">2配置防火墙</a></li>
+<li><a href="#3%E5%AE%89%E8%A3%85jdk" rel="nofollow">3安装JDK</a></li>
+<li><a href="#4%E4%B8%8B%E8%BD%BD%E5%AE%89%E8%A3%85kafka" rel="nofollow">4下载安装Kafka</a></li>
+<li><a href="#5%E9%85%8D%E7%BD%AEkafka" rel="nofollow">5配置Kafka</a></li>
+<li><a href="#6zookeeper%E9%85%8D%E7%BD%AE" rel="nofollow">6Zookeeper配置</a></li>
+<li><a href="#7%E8%84%9A%E6%9C%AC%E7%BC%96%E5%86%99" rel="nofollow">7脚本编写</a></li>
+<li><a href="#8%E9%85%8D%E7%BD%AE%E8%84%9A%E6%9C%AC%E5%BC%80%E6%9C%BA%E8%87%AA%E8%A1%8C%E5%90%AF%E5%8A%A8" rel="nofollow">8配置脚本开机自行启动</a></li>
+<li><a href="#9%E5%90%AF%E5%8A%A8kafka" rel="nofollow">9启动kafka</a></li>
+<li><a href="#10%E5%88%9B%E5%BB%BAtopic" rel="nofollow">10创建topic</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+
+
+
+
+<h2 id="kafka原理简介">kafka原理简介</h2>
+
+<p>Kafka是由LinkedIn开发的一个分布式的消息系统，使用Scala编写，它以可水平扩展和高吞吐率而被广泛使用。目前越来越多的开源分布式处理系统如Cloudera、Apache Storm、Spark都支持与Kafka集成。 <br>
+消息的发布描述为producer，消息的订阅描述为consumer，将中间的存储阵列称作broker(代理)。kafka是linkedin用于日志处理的分布式消息队列，同时支持离线和在线日志处理。kafka对消息保存时根据Topic进行归类，发送消息者就是Producer，消息接受者就是Consumer，每个kafka实例称为broker。然后三者都通过Zookeeper进行协调。 <br>
+也即：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs axapta"><span class="hljs-number">1</span>、启动zookeeper的<span class="hljs-keyword">server</span>
+<span class="hljs-number">2</span>、启动kafka的<span class="hljs-keyword">server</span>
+<span class="hljs-number">3</span>、Producer生产数据，然后通过zookeeper找到broker，再讲数据push到broker进行保存
+<span class="hljs-number">4</span>、Consumer通过zookeeper找到broker，然后再主动pull数据</code></pre>
+
+<p>kafka存储是基于硬盘存储的，然而却有着快速的读写效率，一个 67200rpm STAT RAID5 的阵列，线性读写速度是 300MB/sec，如果是随机读写，速度则是 50K/sec。 <br>
+虽然都知道内存读取速度会明显快于硬盘读写速度，但是kafka却通过线性读写的方式实现快速地读写。 <br>
+<img src="https://img-blog.csdn.net/20170712161517067?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxNDQyNzM5MQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+
+
+<h3 id="producer">Producer</h3>
+
+<p>学习kafka一定要理解好Topic，每个Topic被分成多个partition(区)。每条消息在partition中的位置称为offset(偏移量)，类型为long型数字。消息即使被消费了，也不会被立即删除，而是根据broker里的设置，保存一定时间后再清除，比如log文件设置存储两天，则两天后，不管消息是否被消费，都清除。</p>
+
+<p><img src="https://img-blog.csdn.net/20170712150728482?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxNDQyNzM5MQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+
+
+<h3 id="broker">Broker</h3>
+
+<p>broker也即中间的存储队列。我们将消息的収布（publish）暂时称作 producer，将消息的订阅（subscribe）表述为consumer，将中间的存储阵列称作 broker(代理)。</p>
+
+
+
+<h3 id="consumer">Consumer</h3>
+
+<p>每个consumer属于一个consumer group。在kafka中，一个partition的消息只会被group中的一个consumer消费；可以认为一个group就是一个“订阅者”。一个Topic中的每个partition只会被一个“订阅者”中的一个consumer消费。</p>
+
+
+
+<h3 id="zookeeper">Zookeeper</h3>
+
+<p>kafka集群几乎不需要维护任何Consumer和Producer的信息。这些信息由Zookeeper保存。发送到Topic的消息，只会被订阅此Topic的每个group中的一个consumer消费。</p>
+
+
+
+<h2 id="kafka优点">Kafka优点</h2>
+
+<p>Kafka好处：转自<a href="http://www.infoq.com/cn/articles/kafka-analysis-part-1" rel="nofollow">InfoQ：Kafka剖析</a></p>
+
+<ul>
+<li><p>解耦 <br>
+在项目启动之初来预测将来项目会碰到什么需求，是极其困难的。消息系统在处理过程中间插入了一个隐含的、基于数据的接口层，两边的处理过程都要实现这一接口。这允许你独立的扩展或修改两边的处理过程，只要确保它们遵守同样的接口约束。</p></li>
+<li><p>冗余 <br>
+有些情况下，处理数据的过程会失败。除非数据被持久化，否则将造成丢失。消息队列把数据进行持久化直到它们已经被完全处理，通过这一方式规避了数据丢失风险。许多消息队列所采用的”插入-获取-删除”范式中，在把一个消息从队列中删除之前，需要你的处理系统明确的指出该消息已经被处理完毕，从而确保你的数据被安全的保存直到你使用完毕。</p></li>
+<li><p>扩展性 <br>
+因为消息队列解耦了你的处理过程，所以增大消息入队和处理的频率是很容易的，只要另外增加处理过程即可。不需要改变代码、不需要调节参数。扩展就像调大电力按钮一样简单。</p></li>
+<li><p>灵活性 &amp; 峰值处理能力 <br>
+在访问量剧增的情况下，应用仍然需要继续发挥作用，但是这样的突发流量并不常见；如果为以能处理这类峰值访问为标准来投入资源随时待命无疑是巨大的浪费。使用消息队列能够使关键组件顶住突发的访问压力，而不会因为突发的超负荷的请求而完全崩溃。</p></li>
+<li><p>可恢复性 <br>
+系统的一部分组件失效时，不会影响到整个系统。消息队列降低了进程间的耦合度，所以即使一个处理消息的进程挂掉，加入队列中的消息仍然可以在系统恢复后被处理。</p></li>
+<li><p>顺序保证 <br>
+在大多使用场景下，数据处理的顺序都很重要。大部分消息队列本来就是排序的，并且能保证数据会按照特定的顺序来处理。Kafka保证一个Partition内的消息的有序性。</p></li>
+<li><p>缓冲 <br>
+在任何重要的系统中，都会有需要不同的处理时间的元素。例如，加载一张图片比应用过滤器花费更少的时间。消息队列通过一个缓冲层来帮助任务最高效率的执行。写入队列的处理会尽可能的快速。该缓冲有助于控制和优化数据流经过系统的速度。</p></li>
+<li><p>异步通信 <br>
+很多时候，用户不想也不需要立即处理消息。消息队列提供了异步处理机制，允许用户把一个消息放入队列，但并不立即处理它。想向队列中放入多少消息就放多少，然后在需要的时候再去处理它们。</p></li>
+</ul>
+
+
+
+<h2 id="单机版安装教程">单机版安装教程</h2>
+
+
+
+<h3 id="1关闭selinux">1、关闭SELINUX</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs ">vi /etc/selinux/config</code></pre>
+
+<p>对配置文件进行修改，然后按ESC键，:wq保存退出</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby"><span class="hljs-comment">#SELINUX=enforcing </span>
+
+<span class="hljs-comment">#SELINUXTYPE=targeted</span>
+
+<span class="hljs-constant">SELINUX</span>=disabled <span class="hljs-comment">#增加</span>
+
+<span class="hljs-symbol">:wq!</span> <span class="hljs-comment">#保存退出</span></code></pre>
+
+
+
+<h3 id="2配置防火墙">2、配置防火墙</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs ">vi /etc/sysconfig/iptables</code></pre>
+
+<p>可以看到配置文件，然后按I键，insert一行</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-attribute">-A</span> INPUT <span class="hljs-attribute">-m</span> state <span class="hljs-subst">--</span>state <span class="hljs-literal">NEW</span> <span class="hljs-attribute">-m</span> tcp <span class="hljs-attribute">-p</span> tcp <span class="hljs-subst">--</span>dport <span class="hljs-number">9092</span> <span class="hljs-attribute">-j</span> ACCEPT</code></pre>
+
+<p>然后按ESC键，:wq保存退出</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs asciidoc"># Firewall configuration written by system-config-firewall
+
+# Manual customization of this file is not recommended.
+
+<span class="hljs-strong">*filter
+
+</span><span class="hljs-attribute">:INPUT ACCEPT [0:0]</span>
+
+<span class="hljs-attribute">:FORWARD ACCEPT [0:0]</span>
+
+<span class="hljs-attribute">:OUTPUT ACCEPT [0:0]</span>
+
+-A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+-A INPUT -p icmp -j ACCEPT
+
+-A INPUT -i lo -j ACCEPT
+
+-A INPUT -m state --state NEW -m tcp -p tcp --dport 22 -j ACCEPT
+
+-A INPUT -m state --state NEW -m tcp -p tcp --dport 9092 -j ACCEPT
+
+-A INPUT -j REJECT --reject-with icmp-host-prohibited
+
+-A FORWARD -j REJECT --reject-with icmp-host-prohibited
+
+COMMIT
+
+:wq! #保存退出</code></pre>
+
+
+
+<h3 id="3安装jdk">3、安装JDK</h3>
+
+<p>如果有安装yum的话，一般可以使用yum安装，下面给出网上一篇很不错的jdk安装教程，建议Linux安装的可以去linux公社找找教程 <br>
+<a href="http://www.linuxidc.com/Linux/2013-04/83520.htm" rel="nofollow">CentOS6安装JDK</a></p>
+
+
+
+<h3 id="4下载安装kafka">4、下载安装Kafka</h3>
+
+<p>cd进入相应文件夹，一般安装到/usr/local/src</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-built_in">cd</span> /usr/local/src</code></pre>
+
+<p>wget下载文件</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">wget http://archive<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.org</span>/dist/kafka/<span class="hljs-number">0.8</span><span class="hljs-number">.2</span><span class="hljs-number">.1</span>/kafka_2<span class="hljs-number">.11</span>-<span class="hljs-number">0.8</span><span class="hljs-number">.2</span><span class="hljs-number">.1</span><span class="hljs-preprocessor">.tgz</span></code></pre>
+
+<p>解压</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs autohotkey">tar -xzvf kafk<span class="hljs-built_in">a_2</span>.<span class="hljs-number">11</span>-<span class="hljs-number">0.8</span>.<span class="hljs-number">2.1</span>.tgz</code></pre>
+
+<p>移动到安装目录</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lua">mv kafka_2<span class="hljs-number">.11</span>-<span class="hljs-number">0.8</span><span class="hljs-number">.2</span><span class="hljs-number">.1</span> /usr/<span class="hljs-keyword">local</span>/kafka</code></pre>
+
+
+
+<h3 id="5配置kafka">5、配置Kafka</h3>
+
+<p>创建Kafka日志文件存放文件夹</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs perl"><span class="hljs-keyword">mkdir</span> /usr/<span class="hljs-keyword">local</span>/kafka/logs/kafka</code></pre>
+
+<p>cd配置文件目录</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-built_in">cd</span> /usr/local/kafka/config</code></pre>
+
+<p>VI编辑</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs axapta">vi <span class="hljs-keyword">server</span>.properties</code></pre>
+
+<p>修改配置</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">broker<span class="hljs-preprocessor">.id</span>=<span class="hljs-number">0</span>
+
+port=<span class="hljs-number">9092</span> <span class="hljs-preprocessor">#端口号</span>
+
+host<span class="hljs-preprocessor">.name</span>=<span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span> <span class="hljs-preprocessor">#服务器IP地址，修改为自己的服务器IP</span>
+
+log<span class="hljs-preprocessor">.dirs</span>=/usr/local/kafka/logs/kafka <span class="hljs-preprocessor">#日志存放路径，上面创建的目录</span>
+
+zookeeper<span class="hljs-preprocessor">.connect</span>=localhost:<span class="hljs-number">2181</span> <span class="hljs-preprocessor">#zookeeper地址和端口，单机配置部署，localhost:2181</span>
+
+:wq! <span class="hljs-preprocessor">#保存退出</span></code></pre>
+
+
+
+<h3 id="6zookeeper配置">6、Zookeeper配置</h3>
+
+<p>创建一个目录安装</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs perl"><span class="hljs-keyword">mkdir</span> /usr/<span class="hljs-keyword">local</span>/kafka/zookeeper</code></pre>
+
+<p>创建一个Zookeeper日志存放目录</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs perl"><span class="hljs-keyword">mkdir</span> /usr/<span class="hljs-keyword">local</span>/kafka/logs/zookeeper</code></pre>
+
+<p>配置文件</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-built_in">cd</span> /usr/local/kafka/config</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">vi zookeeper<span class="hljs-preprocessor">.properties</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs makefile"><span class="hljs-constant">dataDir</span>=/usr/local/kafka/zookeeper #zookeeper数据目录
+
+<span class="hljs-constant">dataLogDir</span>=/usr/local/kafka/log/zookeeper #zookeeper日志目录
+
+<span class="hljs-constant">clientPort</span>=2181
+
+<span class="hljs-constant">maxClientCnxns</span>=100
+
+<span class="hljs-constant">tickTime</span>=2000
+
+<span class="hljs-constant">initLimit</span>=10
+
+<span class="hljs-constant">syncLimit</span>=5
+
+:wq! <span class="hljs-comment">#保存退出</span></code></pre>
+
+
+
+<h3 id="7脚本编写">7、脚本编写</h3>
+
+<p>编写kafka的start脚本</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-built_in">cd</span> /usr/local/kafka</code></pre>
+
+<p>使用vi创建脚本</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">vi kafkastart<span class="hljs-preprocessor">.sh</span> </code></pre>
+
+<p>加入脚本代码，&amp;符号表示在后台执行，然后:wq保存退出</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-shebang">#!/bin/sh
+</span>
+<span class="hljs-comment">#启动zookeeper</span>
+
+/usr/local/kafka/bin/zookeeper-server-start.sh /usr/local/kafka/config/zookeeper.properties &amp;
+
+sleep <span class="hljs-number">3</span> <span class="hljs-comment">#等3秒后执行</span>
+
+<span class="hljs-comment">#启动kafka</span>
+
+/usr/local/kafka/bin/kafka-server-start.sh /usr/local/kafka/config/server.properties &amp;
+</code></pre>
+
+<p>编写kafka的stop脚本</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">vi kafkastop<span class="hljs-preprocessor">.sh</span></code></pre>
+
+<p>脚本代码如，同样是:wq保存退出</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-shebang">#!/bin/sh
+</span>
+<span class="hljs-comment">#关闭zookeeper</span>
+
+/usr/local/kafka/bin/zookeeper-server-stop.sh /usr/local/kafka/config/zookeeper.properties &amp;
+
+sleep <span class="hljs-number">3</span> <span class="hljs-comment">#等3秒后执行</span>
+
+<span class="hljs-comment">#关闭kafka</span>
+
+/usr/local/kafka/bin/kafka-server-stop.sh /usr/local/kafka/config/server.properties &amp;</code></pre>
+
+<p>添加脚本执行权限</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs perl"><span class="hljs-keyword">chmod</span> +<span class="hljs-keyword">x</span> kafkastart.sh
+
+<span class="hljs-keyword">chmod</span> +<span class="hljs-keyword">x</span> kafkastop.sh</code></pre>
+
+
+
+<h3 id="8配置脚本开机自行启动">8、配置脚本开机自行启动</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">vi /etc/rc<span class="hljs-preprocessor">.d</span>/rc<span class="hljs-preprocessor">.local</span></code></pre>
+
+<p>设置开机时脚本在后台执行，使用&amp;符号 <br>
+将如下代码添加到rc.local里，同样使用VI编辑器</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lua">sh /usr/<span class="hljs-keyword">local</span>/kafka/kafkastart.sh &amp;</code></pre>
+
+<p>：wq保存退出</p>
+
+
+
+<h3 id="9启动kafka">9、启动kafka</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">sh /usr/<span class="hljs-built_in">local</span>/kafka/kafkastart.sh <span class="hljs-comment">#启动kafka</span></code></pre>
+
+
+
+<h3 id="10创建topic">10、创建topic</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">usr/<span class="hljs-built_in">local</span>/kafka/bin/kafka<span class="hljs-attribute">-topics</span><span class="hljs-built_in">.</span>sh <span class="hljs-subst">--</span>create <span class="hljs-subst">--</span>zookeeper localhost:<span class="hljs-number">2181</span> <span class="hljs-subst">--</span>replication<span class="hljs-attribute">-factor</span> <span class="hljs-number">1</span> <span class="hljs-subst">--</span>partitions <span class="hljs-number">1</span> <span class="hljs-subst">--</span>topic test
+
+/usr/<span class="hljs-built_in">local</span>/kafka/bin/kafka<span class="hljs-attribute">-topics</span><span class="hljs-built_in">.</span>sh <span class="hljs-subst">--</span><span class="hljs-built_in">list</span> <span class="hljs-subst">--</span>zookeeper localhost:<span class="hljs-number">2181</span> test
+
+/usr/<span class="hljs-built_in">local</span>/kafka/bin/kafka<span class="hljs-attribute">-console</span><span class="hljs-attribute">-producer</span><span class="hljs-built_in">.</span>sh <span class="hljs-subst">--</span>broker<span class="hljs-attribute">-list</span> localhost:<span class="hljs-number">9092</span> <span class="hljs-subst">--</span>topic test <span class="hljs-subst">--</span>from<span class="hljs-attribute">-beginning</span></code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

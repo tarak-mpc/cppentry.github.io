@@ -1,0 +1,206 @@
+---
+layout:     post
+title:      kafka相关操作及问题汇总
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/warrah/article/details/78909798				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p><strong>1. kafka查看队列的消费情况</strong> <br>
+可以通过kafka-mamager来跟进。 <br>
+<strong>2 kafka常用命令</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs nginx"><span class="hljs-comment">#启动kafka</span>
+<span class="hljs-title">cd</span> /usr/hadoop/application/kafka/bin
+./kafka-server-start.sh -daemon ../config/server.properties
+<span class="hljs-comment">#创建Topic</span>
+./kafka-topics.sh --create --zookeeper <span class="hljs-number">192.168.5.172:2181</span>,<span class="hljs-number">192.168.5.173:2181</span>,<span class="hljs-number">192.168.5.174:2181</span> --replication-factor <span class="hljs-number">1</span> --partitions <span class="hljs-number">1</span> --topic test
+<span class="hljs-comment">#查看topic</span>
+./kafka-topics.sh --list --zookeeper <span class="hljs-number">192.168.5.172:2181</span>,<span class="hljs-number">192.168.5.173:2181</span>,<span class="hljs-number">192.168.5.174:2181</span>
+<span class="hljs-comment">#创建一个broker，发布者</span>
+./kafka-console-producer.sh --broker-list <span class="hljs-number">192.168.5.185:19092</span> --topic test1
+<span class="hljs-comment">#在一台服务器上创建一个订阅者</span>
+./kafka-console-consumer.sh --zookeeper <span class="hljs-number">192.168.5.172:2181</span>,<span class="hljs-number">192.168.5.173:2181</span>,<span class="hljs-number">192.168.5.174:2181</span> --topic test1 --from-beginning
+<span class="hljs-comment">#topic清单</span>
+list topic
+./kafka-topics.sh --zookeeper <span class="hljs-number">192.168.5.172:2181</span>,<span class="hljs-number">192.168.5.173:2181</span>,<span class="hljs-number">192.168.5.174:2181</span> --list
+<span class="hljs-comment"># 删除topic</span>
+./kafka-topics.sh -delete -zookeeper <span class="hljs-number">192.168.5.172:2181</span>,<span class="hljs-number">192.168.5.173:2181</span>,<span class="hljs-number">192.168.5.174:2181</span> -topic test</code></pre>
+
+<p><strong>3 kafka-mamager相关命令</strong> <br>
+参考<a href="http://blog.csdn.net/lsshlsw/article/details/47300145" rel="nofollow">kafka管理器kafka-manager部署安装</a></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">rm -fr /usr/hadoop/<span class="hljs-type">application</span>/kafka-manager-<span class="hljs-number">1.3</span><span class="hljs-number">.3</span><span class="hljs-number">.8</span>/RUNNING_PID
+cd /usr/hadoop/<span class="hljs-type">application</span>/kafka-manager/bin
+<span class="hljs-comment"># 如果端口改了，可以在下面的命令中添加-Dhttp.port=7778,默认端口为9000</span>
+nohup ./kafka-manager -Dconfig.<span class="hljs-type">file</span>=/usr/hadoop/<span class="hljs-type">application</span>/kafka-manager/conf/<span class="hljs-type">application</span>.conf &amp;
+tail -fn <span class="hljs-number">100</span> nohup.out</code></pre>
+
+<p><strong>4 python生产kafka数据的实例</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vala"><span class="hljs-preprocessor"># kafka</span>
+SCRAPY_KAFKA_HOSTS = <span class="hljs-string">'192.168.5.150:19092'</span>
+SCRAPY_KAFKA_SPIDER_CONSUMER_GROUP = <span class="hljs-string">'myGroup'</span>
+SCRAPY_KAFKA_TOPIC = <span class="hljs-string">'customer'</span>
+SCRAPY_KAFKA_TOPIC_DISK = <span class="hljs-string">'customerDisk'</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class="language-py hljs python"><span class="hljs-keyword">from</span> scrapy.utils.serialize <span class="hljs-keyword">import</span> ScrapyJSONEncoder
+<span class="hljs-keyword">from</span> pykafka <span class="hljs-keyword">import</span> KafkaClient
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ItemKfkProducers</span><span class="hljs-params">(object)</span>:</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">__init__</span><span class="hljs-params">(self)</span>:</span>
+        self.khost = settings.SCRAPY_KAFKA_HOSTS
+        self.topic = settings.SCRAPY_KAFKA_TOPIC
+        self.disk = settings.SCRAPY_KAFKA_TOPIC_DISK
+        self.encoder = ScrapyJSONEncoder()
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">producers</span><span class="hljs-params">(self,item)</span>:</span>
+        <span class="hljs-comment"># item = dict(item)</span>
+        client = KafkaClient(hosts=self.khost)
+        topic = client.topics[self.topic]
+        <span class="hljs-keyword">with</span>  topic.get_producer(delivery_reports=<span class="hljs-keyword">True</span>) <span class="hljs-keyword">as</span> producer:
+            msg = self.encoder.encode(item)
+            <span class="hljs-comment"># producer.produce("send item")</span>
+            producer.produce(msg)</code></pre>
+
+<p><strong>4 pykafka产生消息速度极慢</strong> <br>
+我遇到和<a href="https://www.v2ex.com/t/304545" rel="nofollow">pykafka 写消息时速度极慢,只有 10 mgs / s 正常么?</a>，仔细看代码，发现原来开发工程师的代码是按照这个copy[PyKafka producer.get_delivery_report throwing Queue.empty when block=false</p>
+
+<p>](<a href="https://stackoverflow.com/questions/35298796/pykafka-producer-get-delivery-report-throwing-queue-empty-when-block-false" rel="nofollow">https://stackoverflow.com/questions/35298796/pykafka-producer-get-delivery-report-throwing-queue-empty-when-block-false</a>)，</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python">    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">producersDisk</span><span class="hljs-params">(self,item)</span>:</span>
+        <span class="hljs-comment"># item = dict(item)</span>
+        client = KafkaClient(hosts=self.khost)
+        topic = client.topics[self.disk]
+        <span class="hljs-keyword">with</span>  topic.get_producer(delivery_reports=<span class="hljs-keyword">True</span>) <span class="hljs-keyword">as</span> producer:
+            msg = self.encoder.encode(item)
+            producer.produce(msg)</code></pre>
+
+<p>在<a href="https://www.cnblogs.com/dplearning/p/7722712.html" rel="nofollow">【kafka】生产者速度测试</a>找到了答案。需要使用rdkafka，只是windows下面没法安装rdkafka.按照<a href="http://chenxiuheng.iteye.com/blog/2265887" rel="nofollow">afka python client：PyKafka vs kafka-python</a>中的数据，真没觉得他有多快，我8万条数据执行了好久，也没看到变化。 <br>
+按照[PyKafka producer.get_delivery_report throwing Queue.empty when block=false</p>
+
+<p>](<a href="https://stackoverflow.com/questions/35298796/pykafka-producer-get-delivery-report-throwing-queue-empty-when-block-false" rel="nofollow">https://stackoverflow.com/questions/35298796/pykafka-producer-get-delivery-report-throwing-queue-empty-when-block-false</a>)，使用<code>get_producer(min_queued_messages=1) 时间由原来的10s产生一条消息，降到了5s中产生一条消息。</code> <br>
+<strong>5 异步处理</strong> <br>
+一边要把数据写入到mysql中，一边要把数据利用pykafka写入到kafka中，而写kafka中暂时没有找到方法降低到5s以下，那么是否可以考虑这两个io相关的操作，做成异步呢。 <br>
+<a href="https://www.cnblogs.com/earendil/p/7411115.html" rel="nofollow">深入理解 Python 异步编程(上)</a> <br>
+<a href="http://blog.csdn.net/screaming/article/details/51377870" rel="nofollow">Python异步并发框架</a> <br>
+<a href="https://www.cnblogs.com/zcqdream/p/6196040.html" rel="nofollow">协程–gevent模块(单线程高并发)</a> <br>
+这几篇文章都讲的不错， <br>
+<strong>6 windows命令窗口执行的问题</strong> <br>
+在一线工作有时候会遇到莫名其妙秒的问题，不过很有意思。只是10年前我不知道天天写csdn，要不然估计也会就是现在的水平。我通过cmd窗口跑我的python脚本，用鼠标点了一下cmd窗口自身，10分钟都没有打日志，好像夯住了。觉得很奇怪使用Ctrl+C，居然又开始跑了。虽然Ctrl+C是杀进程的命令，但是你不能执行多次，多次就真的删掉了。请教了一下SE，SE说以前使用oracle的命令窗口跑批处理的时候也遇到这个问题，鼠标不能点，点就有这样的bug，按一下Enter键就可以了。有意思。 <br>
+<strong>7 时区问题</strong> <br>
+从数据库中得到时间稍作处理,比如<code>end_active_date = time.strftime("%Y-%m-%d", time.localtime(kpjxx['endActiveDate']/1000))</code>,我再将这个时间写入到kafka中时间会往后增加8个小时 <br>
+<img src="https://img-blog.csdn.net/20180104133207245?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd2FycmFo/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="1" title=""> <br>
+下面要注意的是时间往数据库和往kafka中写，是有区别的。看代码不详细解释了。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">    <span class="hljs-function"><span class="hljs-keyword">def</span> </span>insert(<span class="hljs-keyword">self</span>,kpjxx)<span class="hljs-symbol">:</span>
+        crmCustomer = <span class="hljs-keyword">self</span>.crmCustomerService.get_by_tax_no(kpjxx[<span class="hljs-string">'xxxx'</span>])
+        exist = <span class="hljs-keyword">self</span>.is_exist(kpjxx[<span class="hljs-string">'Jxx_NO'</span>][<span class="hljs-number">0</span><span class="hljs-symbol">:</span><span class="hljs-number">11</span>])
+        <span class="hljs-keyword">if</span> crmCustomer <span class="hljs-keyword">and</span> <span class="hljs-keyword">not</span> <span class="hljs-symbol">exist:</span>
+            active_date = datetime.fromtimestamp(kpjxx[<span class="hljs-string">'FXSJ'</span>]/<span class="hljs-number">1000</span>)
+            end_active_date = active_date.replace(year=<span class="hljs-number">2018</span>)
+            <span class="hljs-comment"># create_time = time.strftime("%Y-%m-%d %H:%M", time.localtime(kpjxx['FXSJ']/1000))</span>
+            item = {<span class="hljs-string">'id'</span><span class="hljs-symbol">:kpjxx</span>[<span class="hljs-string">'JSK_NO'</span>][<span class="hljs-number">0</span><span class="hljs-symbol">:</span><span class="hljs-number">11</span>],<span class="hljs-string">'product_id'</span><span class="hljs-symbol">:<span class="hljs-string">'2.05'</span></span>, <span class="hljs-string">'device_status'</span><span class="hljs-symbol">:<span class="hljs-string">'03'</span></span>, <span class="hljs-string">'customer_id'</span><span class="hljs-symbol">:crmCustomer</span>[<span class="hljs-string">'id'</span>],<span class="hljs-string">'active_date'</span><span class="hljs-symbol">:active_date</span>.strftime(<span class="hljs-string">'%Y-%m-%d'</span>)
+                    ,<span class="hljs-string">'device_no'</span><span class="hljs-symbol">:kpjxx</span>[<span class="hljs-string">'JSK_NO'</span>],<span class="hljs-string">'is_makeup'</span><span class="hljs-symbol">:<span class="hljs-string">'1'</span></span>, <span class="hljs-string">'service_charge'</span><span class="hljs-symbol">:<span class="hljs-string">'280'</span></span>, <span class="hljs-string">'end_active_date'</span><span class="hljs-symbol">:end_active_date</span>.strftime(<span class="hljs-string">'%Y-%m-%d'</span>)
+                    ,<span class="hljs-string">'create_time'</span><span class="hljs-symbol">:active_date</span>.strftime(<span class="hljs-string">'%Y-%m-%d %H:%M:%S'</span>)}
+
+            depot_id = <span class="hljs-keyword">self</span>.crmXXXService.get_depot_id(crmCustomer[<span class="hljs-string">'tax_auth_id'</span>])
+            item[<span class="hljs-string">'depot_id'</span>] = depot_id
+            df = pd.<span class="hljs-constant">DataFrame</span>([item])
+            <span class="hljs-symbol">try:</span>
+                df.to_sql(<span class="hljs-string">'pss_product_item'</span>, <span class="hljs-keyword">self</span>.engine, if_exists=<span class="hljs-string">'append'</span>, index=<span class="hljs-constant">False</span>)
+                m_time_str = end_active_date.strftime(<span class="hljs-string">'%Y-%m-%d %H:%M:%S'</span>)
+                m_seconds = time.strptime(m_time_str,<span class="hljs-string">'%Y-%m-%d %H:%M:%S'</span> )
+                m_seconds = long(time.mktime(m_seconds)*<span class="hljs-number">1000</span>)
+                customerDisk = {<span class="hljs-string">'customerId'</span><span class="hljs-symbol">:crmCustomer</span>[<span class="hljs-string">'id'</span>], <span class="hljs-string">'customerName'</span><span class="hljs-symbol">:crmCustomer</span>[<span class="hljs-string">'cust_name'</span>], <span class="hljs-string">'diskNo'</span><span class="hljs-symbol">:item</span>[<span class="hljs-string">'device_no'</span>]
+                    , <span class="hljs-string">'taxNo'</span><span class="hljs-symbol">:crmCustomer</span>[<span class="hljs-string">'tax_no'</span>], <span class="hljs-string">'effectiveDate'</span><span class="hljs-symbol">:kpjxx</span>[<span class="hljs-string">'FXSJ'</span>], <span class="hljs-string">'expirationDate'</span><span class="hljs-symbol">:m_seconds</span>
+                    , <span class="hljs-string">'serviceCharge'</span><span class="hljs-symbol">:item</span>[<span class="hljs-string">'service_charge'</span>], <span class="hljs-string">'category'</span><span class="hljs-symbol">:<span class="hljs-string">'00'</span></span>, <span class="hljs-string">'diskType'</span><span class="hljs-symbol">:<span class="hljs-string">'01'</span></span>}
+                <span class="hljs-keyword">self</span>.itemKfkProducers.producersDisk(customerDisk)
+            except <span class="hljs-constant">Exception</span>, <span class="hljs-symbol">e:</span>
+                print e</code></pre>
+
+<p><strong>8 kafka无法消费数据</strong> <br>
+很久没有动kafka，突然一个紧急上线版本，居然kafka无法消费消息，重启kafka没法解决</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-number">20</span>:<span class="hljs-number">14</span>:<span class="hljs-number">16.063</span> ERROR c<span class="hljs-preprocessor">.g</span><span class="hljs-preprocessor">.l</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.EventReporter</span>$ReportingJob - Could not submit events to Flume
+<span class="hljs-number">20</span>:<span class="hljs-number">14</span>:<span class="hljs-number">40.649</span> WARN  org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.NetworkClient</span> - Error while fetching metadata with correlation id <span class="hljs-number">131</span> : {customer=INVALID_REPLICATION_FACTOR}
+<span class="hljs-number">20</span>:<span class="hljs-number">14</span>:<span class="hljs-number">40.804</span> WARN  org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.NetworkClient</span> - Error while fetching metadata with correlation id <span class="hljs-number">132</span> : {customer=LEADER_NOT_AVAILABLE}</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[<span class="hljs-number">2018</span>-<span class="hljs-number">04</span>-<span class="hljs-number">19</span> <span class="hljs-number">20</span>:<span class="hljs-number">11</span>:<span class="hljs-number">03</span>,<span class="hljs-number">683</span>] WARN Connection to node -<span class="hljs-number">1</span> could not be established. Broker may not be available. (org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.NetworkClient</span>)
+[<span class="hljs-number">2018</span>-<span class="hljs-number">04</span>-<span class="hljs-number">19</span> <span class="hljs-number">20</span>:<span class="hljs-number">11</span>:<span class="hljs-number">03</span>,<span class="hljs-number">784</span>] WARN Connection to node -<span class="hljs-number">1</span> could not be established. Broker may not be available. (org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.NetworkClient</span>)
+[<span class="hljs-number">2018</span>-<span class="hljs-number">04</span>-<span class="hljs-number">19</span> <span class="hljs-number">20</span>:<span class="hljs-number">11</span>:<span class="hljs-number">03</span>,<span class="hljs-number">884</span>] WARN Connection to node -<span class="hljs-number">1</span> could not be established. Broker may not be available. (org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.NetworkClient</span>)
+[<span class="hljs-number">2018</span>-<span class="hljs-number">04</span>-<span class="hljs-number">19</span> <span class="hljs-number">20</span>:<span class="hljs-number">11</span>:<span class="hljs-number">03</span>,<span class="hljs-number">985</span>] WARN Connection to node -<span class="hljs-number">1</span> could not be established. Broker may not be available. (org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.NetworkClient</span>)
+[<span class="hljs-number">2018</span>-<span class="hljs-number">04</span>-<span class="hljs-number">19</span> <span class="hljs-number">20</span>:<span class="hljs-number">11</span>:<span class="hljs-number">04</span>,<span class="hljs-number">035</span>] WARN Connection to node -<span class="hljs-number">1</span> could not be established. Broker may not be available. (org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.clients</span><span class="hljs-preprocessor">.NetworkClient</span>)</code></pre>
+
+<p>看了<a href="https://blog.csdn.net/jiaotongqu6470/article/details/78495147" rel="nofollow">zookeeper删除kafka元数据，解决kafka无法消费数据的问题</a>这篇文章 <br>
+执行下面的命令</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs axapta"> zkCli.sh -<span class="hljs-keyword">server</span> <span class="hljs-number">192.168</span><span class="hljs-number">.4</span><span class="hljs-number">.61</span>:<span class="hljs-number">2181</span>
+ ls /brokers/topics
+ rmr /brokers/topics/customerDisk <span class="hljs-preprocessor"># 这个customerDisk是自己kafka中的文档，根据每个系统设置的，重启后这些文件将会再生成</span></code></pre>
+
+<p>接着先重启zookeeper，再重启kafka问题解决。 <br>
+<strong>9 创建topic</strong> <br>
+./kafka-topics.sh –create –zookeeper 10.101.3.177:2181,10.101.3.178:2181,10.101.3.179:2181 –replication-factor 1 –partitions 1 –topic testTopic <br>
+<strong>10 java.lang.IllegalArgumentException: requirement failed: No jmx port but jmx polling enabled!</strong> <br>
+详细异常信息如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[error] k<span class="hljs-preprocessor">.m</span><span class="hljs-preprocessor">.a</span><span class="hljs-preprocessor">.c</span><span class="hljs-preprocessor">.BrokerViewCacheActor</span> - Failed to get broker topic segment metrics for BrokerIdentity(<span class="hljs-number">0</span>,<span class="hljs-number">192.168</span><span class="hljs-number">.5</span><span class="hljs-number">.185</span>,<span class="hljs-number">19092</span>,-<span class="hljs-number">1</span>,false)
+<span class="hljs-label">java.lang.IllegalArgumentException:</span> requirement failed: No jmx port but jmx polling enabled!
+        at scala<span class="hljs-preprocessor">.Predef</span>$<span class="hljs-preprocessor">.require</span>(Predef<span class="hljs-preprocessor">.scala</span>:<span class="hljs-number">224</span>) ~[org<span class="hljs-preprocessor">.scala</span>-lang<span class="hljs-preprocessor">.scala</span>-library-<span class="hljs-number">2.11</span><span class="hljs-number">.8</span><span class="hljs-preprocessor">.jar</span>:na]
+        at kafka<span class="hljs-preprocessor">.manager</span><span class="hljs-preprocessor">.jmx</span><span class="hljs-preprocessor">.KafkaJMX</span>$<span class="hljs-preprocessor">.doWithConnection</span>(KafkaJMX<span class="hljs-preprocessor">.scala</span>:<span class="hljs-number">39</span>) ~[kafka-manager<span class="hljs-preprocessor">.kafka</span>-manager-<span class="hljs-number">1.3</span><span class="hljs-number">.3</span><span class="hljs-number">.8</span>-sans-externalized<span class="hljs-preprocessor">.jar</span>:na]
+        at kafka<span class="hljs-preprocessor">.manager</span><span class="hljs-preprocessor">.actor</span><span class="hljs-preprocessor">.cluster</span><span class="hljs-preprocessor">.BrokerViewCacheActor</span>$$anonfun$kafka$manager$actor$cluster$BrokerViewCacheActor$$updateBrokerTopicPartitionsSize$1$$anonfun$apply$29$$anonfun$apply$4<span class="hljs-preprocessor">.apply</span>$mcV$sp(BrokerViewCacheActor<span class="hljs-preprocessor">.scala</span>:<span class="hljs-number">382</span>) ~[kafka-manager<span class="hljs-preprocessor">.kafka</span>-manager-<span class="hljs-number">1.3</span><span class="hljs-number">.3</span><span class="hljs-number">.8</span>-sans-externalized<span class="hljs-preprocessor">.jar</span>:na]
+        at kafka<span class="hljs-preprocessor">.manager</span><span class="hljs-preprocessor">.actor</span><span class="hljs-preprocessor">.cluster</span><span class="hljs-preprocessor">.BrokerViewCacheActor</span>$$anonfun$kafka$manager$actor$cluster$BrokerViewCacheActor$$updateBrokerTopicPartitionsSize$1$$anonfun$apply$29$$anonfun$apply$4<span class="hljs-preprocessor">.apply</span>(BrokerViewCacheActor<span class="hljs-preprocessor">.scala</span>:<span class="hljs-number">379</span>) ~[kafka-manager<span class="hljs-preprocessor">.kafka</span>-manager-<span class="hljs-number">1.3</span><span class="hljs-number">.3</span><span class="hljs-number">.8</span>-sans-externalized<span class="hljs-preprocessor">.jar</span>:na]
+        at kafka<span class="hljs-preprocessor">.manager</span><span class="hljs-preprocessor">.actor</span><span class="hljs-preprocessor">.cluster</span><span class="hljs-preprocessor">.BrokerViewCacheActor</span>$$anonfun$kafka$manager$actor$cluster$BrokerViewCacheActor$$updateBrokerTopicPartitionsSize$1$$anonfun$apply$29$$anonfun$apply$4<span class="hljs-preprocessor">.apply</span>(BrokerViewCacheActor<span class="hljs-preprocessor">.scala</span>:<span class="hljs-number">379</span>) ~[kafka-manager<span class="hljs-preprocessor">.kafka</span>-manager-<span class="hljs-number">1.3</span><span class="hljs-number">.3</span><span class="hljs-number">.8</span>-sans-externalized<span class="hljs-preprocessor">.jar</span>:na]
+        at scala<span class="hljs-preprocessor">.concurrent</span><span class="hljs-preprocessor">.impl</span><span class="hljs-preprocessor">.Future</span>$PromiseCompletingRunnable<span class="hljs-preprocessor">.liftedTree</span>1$1(Future<span class="hljs-preprocessor">.scala</span>:<span class="hljs-number">24</span>) ~[org<span class="hljs-preprocessor">.scala</span>-lang<span class="hljs-preprocessor">.scala</span>-library-<span class="hljs-number">2.11</span><span class="hljs-number">.8</span><span class="hljs-preprocessor">.jar</span>:na]
+        at scala<span class="hljs-preprocessor">.concurrent</span><span class="hljs-preprocessor">.impl</span><span class="hljs-preprocessor">.Future</span>$PromiseCompletingRunnable<span class="hljs-preprocessor">.run</span>(Future<span class="hljs-preprocessor">.scala</span>:<span class="hljs-number">24</span>) ~[org<span class="hljs-preprocessor">.scala</span>-lang<span class="hljs-preprocessor">.scala</span>-library-<span class="hljs-number">2.11</span><span class="hljs-number">.8</span><span class="hljs-preprocessor">.jar</span>:na]
+        at java<span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.concurrent</span><span class="hljs-preprocessor">.ThreadPoolExecutor</span><span class="hljs-preprocessor">.runWorker</span>(ThreadPoolExecutor<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">1149</span>) ~[na:<span class="hljs-number">1.8</span><span class="hljs-number">.0</span>_141]
+        at java<span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.concurrent</span><span class="hljs-preprocessor">.ThreadPoolExecutor</span>$Worker<span class="hljs-preprocessor">.run</span>(ThreadPoolExecutor<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">624</span>) ~[na:<span class="hljs-number">1.8</span><span class="hljs-number">.0</span>_141]
+        at java<span class="hljs-preprocessor">.lang</span><span class="hljs-preprocessor">.Thread</span><span class="hljs-preprocessor">.run</span>(Thread<span class="hljs-preprocessor">.java</span>:<span class="hljs-number">748</span>) ~[na:<span class="hljs-number">1.8</span><span class="hljs-number">.0</span>_141]</code></pre>
+
+<p>解决方案，参考<a href="https://blog.csdn.net/czmacd/article/details/55212919" rel="nofollow">kafka_0.10.1.0监控及管理</a> <br>
+以及<a href="https://blog.csdn.net/czmacd/article/details/55212919" rel="nofollow">如何使用JMX监控Kafka</a></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">JMX_PORT<span class="hljs-subst">=</span><span class="hljs-number">9999</span> <span class="hljs-built_in">.</span>/kafka<span class="hljs-attribute">-server</span><span class="hljs-attribute">-start</span><span class="hljs-built_in">.</span>sh <span class="hljs-attribute">-daemon</span> <span class="hljs-built_in">..</span>/config/server<span class="hljs-built_in">.</span>properties</code></pre>
+
+<p>或者在kafka-server-start.sh中添加</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash"><span class="hljs-keyword">export</span> JMX_PORT=<span class="hljs-number">9999</span></code></pre>
+
+<p><strong>11 java.io.FileNotFoundException: application.home_IS_UNDEFINED/logs/application.log</strong> </p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-number">10</span>:<span class="hljs-number">13</span>:<span class="hljs-number">34</span>,<span class="hljs-number">777</span> |-INFO <span class="hljs-keyword">in</span> ch<span class="hljs-preprocessor">.qos</span><span class="hljs-preprocessor">.logback</span><span class="hljs-preprocessor">.core</span><span class="hljs-preprocessor">.rolling</span><span class="hljs-preprocessor">.RollingFileAppender</span>[FILE] - Active log file name: application<span class="hljs-preprocessor">.home</span>_IS_UNDEFINED/logs/application<span class="hljs-preprocessor">.log</span>
+<span class="hljs-number">10</span>:<span class="hljs-number">13</span>:<span class="hljs-number">34</span>,<span class="hljs-number">777</span> |-INFO <span class="hljs-keyword">in</span> ch<span class="hljs-preprocessor">.qos</span><span class="hljs-preprocessor">.logback</span><span class="hljs-preprocessor">.core</span><span class="hljs-preprocessor">.rolling</span><span class="hljs-preprocessor">.RollingFileAppender</span>[FILE] - File property is <span class="hljs-keyword">set</span> to [application<span class="hljs-preprocessor">.home</span>_IS_UNDEFINED/logs/application<span class="hljs-preprocessor">.log</span>]
+<span class="hljs-number">10</span>:<span class="hljs-number">13</span>:<span class="hljs-number">34</span>,<span class="hljs-number">778</span> |-ERROR <span class="hljs-keyword">in</span> ch<span class="hljs-preprocessor">.qos</span><span class="hljs-preprocessor">.logback</span><span class="hljs-preprocessor">.core</span><span class="hljs-preprocessor">.rolling</span><span class="hljs-preprocessor">.RollingFileAppender</span>[FILE] - Failed to create parent directories for [/usr/hadoop/application/kafka-manager-<span class="hljs-number">1.3</span><span class="hljs-number">.3</span><span class="hljs-number">.8</span>/application<span class="hljs-preprocessor">.home</span>_IS_UNDEFINED/logs/application<span class="hljs-preprocessor">.log</span>]
+<span class="hljs-number">10</span>:<span class="hljs-number">13</span>:<span class="hljs-number">34</span>,<span class="hljs-number">778</span> |-ERROR <span class="hljs-keyword">in</span> ch<span class="hljs-preprocessor">.qos</span><span class="hljs-preprocessor">.logback</span><span class="hljs-preprocessor">.core</span><span class="hljs-preprocessor">.rolling</span><span class="hljs-preprocessor">.RollingFileAppender</span>[FILE] - openFile(application<span class="hljs-preprocessor">.home</span>_IS_UNDEFINED/logs/application<span class="hljs-preprocessor">.log</span>,true) <span class="hljs-keyword">call</span> failed. java<span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.FileNotFoundException</span>: application<span class="hljs-preprocessor">.home</span>_IS_UNDEFINED/logs/application<span class="hljs-preprocessor">.log</span> (No such file <span class="hljs-keyword">or</span> directory)
+    at java<span class="hljs-preprocessor">.io</span><span class="hljs-preprocessor">.FileNotFoundException</span>: application<span class="hljs-preprocessor">.home</span>_IS_UNDEFINED/logs/application<span class="hljs-preprocessor">.log</span> (No such file <span class="hljs-keyword">or</span> directory)</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

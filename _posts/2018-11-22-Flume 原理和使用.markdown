@@ -1,0 +1,192 @@
+---
+layout:     post
+title:      Flume 原理和使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1 id="1.-介绍">1. 介绍</h1>
+<p>Flume 是 Cloudera 提供的日志收集系统，具有分布式、高可靠、高可用性等特点，对海量日志采集、聚合和传输，Flume 支持在日志系统中定制各类数据发送方，同时，Flume提供对数据进行简单处理，并写到各种数据接受方的能力。</p>
+<p>Flume 使用 java 编写，其需要运行在 Java1.6 或更高版本之上。</p>
+<ul><li>官方网站：<a href="http://flume.apache.org/" rel="nofollow">http://flume.apache.org/</a></li><li>用户文档：<a href="http://flume.apache.org/FlumeUserGuide.html" rel="nofollow">http://flume.apache.org/FlumeUserGuide.html</a></li><li>开发文档：<a href="http://flume.apache.org/FlumeDeveloperGuide.html" rel="nofollow">http://flume.apache.org/FlumeDeveloperGuide.html</a></li></ul><h1 id="2.-架构">2. 架构</h1>
+<h2 id="2.1-数据流">2.1 数据流</h2>
+<p>Flume 的核心是把数据从数据源收集过来，再送到目的地。为了保证输送一定成功，在送到目的地之前，会先缓存数据，待数据真正到达目的地后，删除自己缓存的数据。</p>
+<p>Flume 传输的数据的基本单位是 Event，如果是文本文件，通常是一行记录，这也是事务的基本单位。Event 从 Source，流向 Channel，再到 Sink，本身为一个 byte 数组，并可携带 headers 信息。Event 代表着一个数据流的最小完整单元，从外部数据源来，向外部的目的地去。</p>
+<p>Flume 运行的核心是 Agent。它是一个完整的数据收集工具，含有三个核心组件，分别是 source、channel、sink。通过这些组件，Event 可以从一个地方流向另一个地方，如下图所示。</p>
+<p><img src="https://img-blog.csdn.net/20141021234041359?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcm9tYXRpY2p1bjIwMTE=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""></p>
+<p></p>
+<ul><li>source 可以接收外部源发送过来的数据。不同的 source，可以接受不同的数据格式。比如有目录池(spooling directory)数据源，可以监控指定文件夹中的新文件变化，如果目录中有文件产生，就会立刻读取其内容。</li><li>channel 是一个存储地，接收 source 的输出，直到有 sink 消费掉 channel 中的数据。channel 中的数据直到进入到下一个channel中或者进入终端才会被删除。当 sink 写入失败后，可以自动重启，不会造成数据丢失，因此很可靠。</li><li>sink 会消费 channel 中的数据，然后送给外部源或者其他 source。如数据可以写入到 HDFS 或者 HBase 中。</li></ul><p></p>
+<p>flume 允许多个 agent 连在一起，形成前后相连的多级跳。</p>
+<p><img src="https://img-blog.csdn.net/20141021234125500?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcm9tYXRpY2p1bjIwMTE=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt=""></p>
+<p></p>
+<h2 id="2.2-核心组件">2.2 核心组件</h2>
+<h3 id="2.2.1-source">2.2.1 source</h3>
+<p></p>
+<p>Client端操作消费数据的来源，Flume 支持 Avro，log4j，syslog 和 http post(body为json格式)。可以让应用程序同已有的Source直接打交道，如AvroSource，SyslogTcpSource。也可以 写一个 Source，以 IPC 或 RPC 的方式接入自己的应用，Avro和 Thrift 都可以(分别有 NettyAvroRpcClient 和 ThriftRpcClient 实现了 RpcClient接口)，其中 Avro 是默认的 RPC 协议。具体代码级别的
+ Client 端数据接入，可以参考官方手册。</p>
+<p>对现有程序改动最小的使用方式是使用是直接读取程序原来记录的日志文件，基本可以实现无缝接入，不需要对现有程序进行任何改动。 <br>
+对于直接读取文件 Source,有两种方式： </p>
+<ul><li>ExecSource: 以运行 Linux 命令的方式，持续的输出最新的数据，如 <code class="prettyprint">tail -F 文件名</code> 指令，在这种方式下，取的文件名必须是指定的。 ExecSource 可以实现对日志的实时收集，但是存在Flume不运行或者指令执行出错时，将无法收集到日志数据，无法保证日志数据的完整性。</li><li>SpoolSource: 监测配置的目录下新增的文件，并将文件中的数据读取出来。需要注意两点：拷贝到 spool 目录下的文件不可以再打开编辑；spool 目录下不可包含相应的子目录。</li></ul><p>SpoolSource 虽然无法实现实时的收集数据，但是可以使用以分钟的方式分割文件，趋近于实时。</p>
+<p>如果应用无法实现以分钟切割日志文件的话， 可以两种收集方式结合使用。 在实际使用的过程中，可以结合 log4j 使用，使用 log4j的时候，将 log4j 的文件分割机制设为1分钟一次，将文件拷贝到spool的监控目录。
+</p>
+<p>log4j 有一个 TimeRolling 的插件，可以把 log4j 分割文件到 spool 目录。基本实现了实时的监控。Flume 在传完文件之后，将会修改文件的后缀，变为 .COMPLETED（后缀也可以在配置文件中灵活指定）</p>
+<h3 id="2.2.2-channel">2.2.2 Channel</h3>
+<p>当前有几个 channel 可供选择，分别是 Memory Channel, JDBC Channel , File Channel，Psuedo Transaction Channel。比较常见的是前三种 channel。</p>
+<ul><li>MemoryChannel 可以实现高速的吞吐，但是无法保证数据的完整性。</li><li>MemoryRecoverChannel 在官方文档的建议上已经建义使用FileChannel来替换。</li><li>FileChannel保证数据的完整性与一致性。在具体配置FileChannel时，建议FileChannel设置的目录和程序日志文件保存的目录设成不同的磁盘，以便提高效率。
+</li></ul><p>File Channel 是一个持久化的隧道（channel），它持久化所有的事件，并将其存储到磁盘中。因此，即使 Java 虚拟机当掉，或者操作系统崩溃或重启，再或者事件没有在管道中成功地传递到下一个代理（agent），这一切都不会造成数据丢失。Memory Channel 是一个不稳定的隧道，其原因是由于它在内存中存储所有事件。如果 java 进程死掉，任何存储在内存的事件将会丢失。另外，内存的空间收到 RAM大小的限制,而 File Channel 这方面是它的优势，只要磁盘空间足够，它就可以将所有事件数据存储到磁盘上。</p>
+<h3 id="2.2.3-sink">2.2.3 sink</h3>
+<p>Sink在设置存储数据时，可以向文件系统、数据库、hadoop存数据，在日志数据较少时，可以将数据存储在文件系中，并且设定一定的时间间隔保存数据。在日志数据较多时，可以将相应的日志数据存储到Hadoop中，便于日后进行相应的数据分析.</p>
+<p>更多sink的内容可以参考<a href="http://flume.apache.org/FlumeDeveloperGuide.html#sink" rel="nofollow">官方手册</a>。</p>
+<h2 id="2.3-可靠性">2.3 可靠性</h2>
+<p>Flume 的核心是把数据从数据源收集过来，再送到目的地。为了保证输送一定成功，在送到目的地之前，会先缓存数据，待数据真正到达目的地后，删除自己缓存的数据。</p>
+<p>Flume 使用事务性的方式保证传送Event整个过程的可靠性。Sink 必须在 Event 被存入 Channel 后，或者，已经被传达到下一站agent里，又或者，已经被存入外部数据目的地之后，才能把 Event 从 Channel 中 remove 掉。这样数据流里的 event 无论是在一个 agent 里还是多个 agent 之间流转，都能保证可靠，因为以上的事务保证了 event 会被成功存储起来。而 Channel 的多种实现在可恢复性上有不同的保证。也保证了 event 不同程度的可靠性。比如
+ Flume 支持在本地保存一份文件 channel 作为备份，而memory channel 将 event 存在内存 queue 里，速度快，但丢失的话无法恢复。</p>
+<h1>3. 应用</h1>
+<p></p>
+<h2>3.1 单节点写入HDFS</h2>
+<p></p>
+<p></p><pre><code class="language-html"># Define a memory channel called ch1 on agent1
+agent1.channels.ch1.type = memory
+agent1.channels.ch1.capacity = 100000
+agent1.channels.ch1.transactionCapacity = 100000
+agent1.channels.ch1.keep-alive = 30
+ 
+# Define an Avro source called avro-source1 on agent1 and tell it
+# to bind to 0.0.0.0:41414. Connect it to channel ch1.
+#agent1.sources.avro-source1.channels = ch1
+#agent1.sources.avro-source1.type = avro
+#agent1.sources.avro-source1.bind = 0.0.0.0
+#agent1.sources.avro-source1.port = 41414
+#agent1.sources.avro-source1.threads = 5
+ 
+#define source monitor a file
+agent1.sources.avro-source1.type = exec
+agent1.sources.avro-source1.shell = /bin/bash -c
+agent1.sources.avro-source1.command = tail -n +0 -F /home/storm/tmp/id.txt
+agent1.sources.avro-source1.channels = ch1
+agent1.sources.avro-source1.threads = 5
+ 
+# Define a logger sink that simply logs all events it receives
+# and connect it to the other end of the same channel.
+agent1.sinks.log-sink1.channel = ch1
+agent1.sinks.log-sink1.type = hdfs
+agent1.sinks.log-sink1.hdfs.path = hdfs://192.168.1.111:8020/flumeTest
+agent1.sinks.log-sink1.hdfs.writeFormat = Text
+agent1.sinks.log-sink1.hdfs.fileType = DataStream
+agent1.sinks.log-sink1.hdfs.rollInterval = 0
+agent1.sinks.log-sink1.hdfs.rollSize = 1000000
+agent1.sinks.log-sink1.hdfs.rollCount = 0
+agent1.sinks.log-sink1.hdfs.batchSize = 1000
+agent1.sinks.log-sink1.hdfs.txnEventMax = 1000
+agent1.sinks.log-sink1.hdfs.callTimeout = 60000
+agent1.sinks.log-sink1.hdfs.appendTimeout = 60000
+ 
+# Finally, now that we've defined all of our components, tell
+# agent1 which ones we want to activate.
+agent1.channels = ch1
+agent1.sources = avro-source1
+agent1.sinks = log-sink1</code></pre>
+<p>启动如下命令，就可以在 hdfs 上看到效果了。 </p>
+<p>../bin/flume-ngagent --conf ../conf/ -f flume_directHDFS.conf -n agent1-Dflume.root.logger=INFO,console</p>
+<p>PS：实际环境中有这样的需求，通过在多个agent端tail日志，发送给collector，collector再把数据收集，统一发送给HDFS存储起来，当HDFS文件大小超过一定的大小或者超过在规定的时间间隔会生成一个文件。<br>
+Flume 实现了两个Trigger，分别为SizeTriger（在调用HDFS输出流写的同时，count该流已经写入的大小总和，若超过一定大小，则创建新的文件和输出流，写入操作指向新的输出流，同时close以前的输出流）和TimeTriger（开启定时器，当到达该点时，自动创建新的文件和输出流，新的写入重定向到该流中，同时close以前的输出流）。</p>
+<br><h2>3.1 多Agent汇聚写入HDFS</h2>
+<p></p>
+<h3>3.1.1 各个webserv日志机上配置 Flume Client</h3>
+<p></p>
+<p></p><pre><code class="language-html"># clientMainAgent
+clientMainAgent.channels = c1
+clientMainAgent.sources  = s1
+clientMainAgent.sinks    = k1 k2
+# clientMainAgent sinks group
+clientMainAgent.sinkgroups = g1
+# clientMainAgent Spooling Directory Source
+clientMainAgent.sources.s1.type = spooldir
+clientMainAgent.sources.s1.spoolDir  =/dsap/rawdata/
+clientMainAgent.sources.s1.fileHeader = true
+clientMainAgent.sources.s1.deletePolicy =immediate
+clientMainAgent.sources.s1.batchSize =1000
+clientMainAgent.sources.s1.channels =c1
+clientMainAgent.sources.s1.deserializer.maxLineLength =1048576
+# clientMainAgent FileChannel
+clientMainAgent.channels.c1.type = file
+clientMainAgent.channels.c1.checkpointDir = /var/flume/fchannel/spool/checkpoint
+clientMainAgent.channels.c1.dataDirs = /var/flume/fchannel/spool/data
+clientMainAgent.channels.c1.capacity = 200000000
+clientMainAgent.channels.c1.keep-alive = 30
+clientMainAgent.channels.c1.write-timeout = 30
+clientMainAgent.channels.c1.checkpoint-timeout=600
+# clientMainAgent Sinks
+# k1 sink
+clientMainAgent.sinks.k1.channel = c1
+clientMainAgent.sinks.k1.type = avro
+# connect to CollectorMainAgent
+clientMainAgent.sinks.k1.hostname = flume115
+clientMainAgent.sinks.k1.port = 41415
+# k2 sink
+clientMainAgent.sinks.k2.channel = c1
+clientMainAgent.sinks.k2.type = avro
+# connect to CollectorBackupAgent
+clientMainAgent.sinks.k2.hostname = flume116
+clientMainAgent.sinks.k2.port = 41415
+# clientMainAgent sinks group
+clientMainAgent.sinkgroups.g1.sinks = k1 k2
+# load_balance type
+clientMainAgent.sinkgroups.g1.processor.type = load_balance
+clientMainAgent.sinkgroups.g1.processor.backoff   = true
+clientMainAgent.sinkgroups.g1.processor.selector  = random</code></pre>
+<p>../bin/flume-ngagent --conf ../conf/ -f flume_Consolidation.conf -n clientMainAgent-Dflume.root.logger=DEBUG,console</p>
+<p></p>
+<h3>3.1.2 在汇聚节点配置 Flume server</h3>
+<p></p>
+<pre><code class="language-html"># collectorMainAgent
+collectorMainAgent.channels = c2
+collectorMainAgent.sources  = s2
+collectorMainAgent.sinks    =k1 k2
+# collectorMainAgent AvroSource
+#
+collectorMainAgent.sources.s2.type = avro
+collectorMainAgent.sources.s2.bind = flume115
+collectorMainAgent.sources.s2.port = 41415
+collectorMainAgent.sources.s2.channels = c2
+ 
+# collectorMainAgent FileChannel
+#
+collectorMainAgent.channels.c2.type = file
+collectorMainAgent.channels.c2.checkpointDir =/opt/var/flume/fchannel/spool/checkpoint
+collectorMainAgent.channels.c2.dataDirs = /opt/var/flume/fchannel/spool/data,/work/flume/fchannel/spool/data
+collectorMainAgent.channels.c2.capacity = 200000000
+collectorMainAgent.channels.c2.transactionCapacity=6000
+collectorMainAgent.channels.c2.checkpointInterval=60000
+# collectorMainAgent hdfsSink
+collectorMainAgent.sinks.k2.type = hdfs
+collectorMainAgent.sinks.k2.channel = c2
+collectorMainAgent.sinks.k2.hdfs.path = hdfs://db-cdh-cluster/flume%{dir}
+collectorMainAgent.sinks.k2.hdfs.filePrefix =k2_%{file}
+collectorMainAgent.sinks.k2.hdfs.inUsePrefix =_
+collectorMainAgent.sinks.k2.hdfs.inUseSuffix =.tmp
+collectorMainAgent.sinks.k2.hdfs.rollSize = 0
+collectorMainAgent.sinks.k2.hdfs.rollCount = 0
+collectorMainAgent.sinks.k2.hdfs.rollInterval = 240
+collectorMainAgent.sinks.k2.hdfs.writeFormat = Text
+collectorMainAgent.sinks.k2.hdfs.fileType = DataStream
+collectorMainAgent.sinks.k2.hdfs.batchSize = 6000
+collectorMainAgent.sinks.k2.hdfs.callTimeout = 60000
+collectorMainAgent.sinks.k1.type = hdfs
+collectorMainAgent.sinks.k1.channel = c2
+collectorMainAgent.sinks.k1.hdfs.path = hdfs://db-cdh-cluster/flume%{dir}
+collectorMainAgent.sinks.k1.hdfs.filePrefix =k1_%{file}
+collectorMainAgent.sinks.k1.hdfs.inUsePrefix =_
+collectorMainAgent.sinks.k1.hdfs.inUseSuffix =.tmp
+collectorMainAgent.sinks.k1.hdfs.rollSize = 0
+collectorMainAgent.sinks.k1.hdfs.rollCount = 0
+collectorMainAgent.sinks.k1.hdfs.rollInterval = 240
+collectorMainAgent.sinks.k1.hdfs.writeFormat = Text
+collectorMainAgent.sinks.k1.hdfs.fileType = DataStream
+collectorMainAgent.sinks.k1.hdfs.batchSize = 6000
+collectorMainAgent.sinks.k1.hdfs.callTimeout = 60000</code></pre>
+<p>../bin/flume-ng agent --conf../conf/ -f flume_Consolidation.conf -n collectorMainAgent-Dflume.root.logger=DEBUG,console</p>
+<p>上面采用的就是类似 cs 架构，各个 flume agent 节点先将各台机器的日志汇总到 Consolidation节点，然后再由这些节点统一写入 HDFS，并且采用了负载均衡的方式，你还可以配置高可用的模式等等。</p>
+<br><br><br>            </div>
+                </div>

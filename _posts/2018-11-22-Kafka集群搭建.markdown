@@ -1,0 +1,172 @@
+---
+layout:     post
+title:      Kafka集群搭建
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq243409855/article/details/73331381				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>Kafka 集群搭建 <br>
+Kafka是一种高吞吐量的分布式发布订阅消息系统，它可以处理消费者规模的网站中的所有动作流数据。本篇文档主要介绍下kafka集群的搭建及使用，和个人在搭建kafka集群中碰到的问题和解决方案。 <br>
+首先，需要准备的软件： <br>
+1、Kafka （<a href="http://kafka.apache.org/downloads" rel="nofollow" target="_blank">http://kafka.apache.org/downloads</a>） <br>
+2、Zookeeper（搭建集群，kafka启动依赖zookeeper） <br>
+3、Kafka-manager 主要负责监控kafka的信息流量，以及消费的信息（<a href="https://github.com/yahoo/kafka-manager" rel="nofollow" target="_blank">https://github.com/yahoo/kafka-manager</a>） <br>
+<strong>Kafka集群是把状态保存在Zookeeper中的，首先要搭建Zookeeper集群。（搭建zookeeper集群的过程这边就不做介绍了）</strong> <br>
+软件环境 <br>
+ （3台服务器-我的测试） <br>
+192.168.181.90 server90 <br>
+192.168.181.91 server91 <br>
+192.168.181.92 server92 <br>
+搭好zookeeper集群后的地址为：192.168.181.90:48881,192.168.181.91:48881,192.168.181.92:48881 <br>
+Kafka集群搭建 <br>
+1、软件环境 <br>
+Linux 3台 <br>
+已经搭建好的zookeeper集群 <br>
+软件版本kafka_2.10-0.10.2.0 <br>
+2、修改配置文件 <br>
+进入到config目录 :  cd /home/qcj/kafka_2.10-0.10.2.0/ <br>
+主要关注：server.properties 这个文件即可， <br>
+修改配置文件(这里主要说明下需要修改的地方)： <br>
+       <strong>broker.id=0</strong>  每台服务器的broker.id都不能相同，三台分别为0,1,2 <br>
+       <strong>listeners=PLAINTEXT://192.168.181.90:9092</strong>（这里特别说明下，ip一定要配，不然consumer消费的时候可能会找不到地址），三台分别为192.168.181.90:9092,192.168.181.91:9092,192.168.181.92:9092 <br>
+       <strong>zookeeper.connect=192.168.181.90:48881,192.168.181.91:48881,192.168.181.92:48881</strong> <br>
+这些都改好后，就可以启动每台服务器上的kafka了。</p>
+
+<p><em>.bin/kafka-server-start.sh  config/server.properties</em></p>
+
+<p>在通过ps -ef|grep kafka 检查下kafka是否成功启动。 <br>
+Ps：这里说明一下，如果不是第一次启动kafka，可能会报broker.id和meta.properties中的broker.id不匹配的错，只要修改/tmp/kafka/meta.properties中broker.id，改成跟server.properties中的相同即可。 <br>
+3、创建topic <br>
+    <em>./kafka-topics.sh –create –zookeeper 192.168.181.90:48881,192.168.181.91:48881,192.168.181.92:48881 –replication-factor 3 –partitions 1 –topic cluster1</em> <br>
+这里说明一下，eplication-factor要跟集群的台数保持一致。分区partitions根据自己的需求设定。 <br>
+4、通过<em>./kafka-topics.sh –describe –zookeeper 192.168.181.90:48881,192.168.181.91:48881,192.168.181.92:48881  –topic cluster1</em>可以查看topic的状态。</p>
+
+<pre><code>至此，kafka集群搭建，和topic创建已经完成。
+</code></pre>
+
+<p>5、JAVA端producer和consumer的配置。 <br>
+    接下里的代码只做demo测试用，并无任何业务处理。 <br>
+Producer端：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> KafkaProcuderService2 {
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> final Logger logger = LoggerFactory.getLogger(KafkaProcuderService2.class);
+
+    <span class="hljs-keyword">private</span> KafkaProducer&lt;String, String&gt; kafkaProducer =<span class="hljs-keyword">new</span> KafkaProducer&lt;&gt;(getKafkaProps());
+
+
+
+
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">sendSync</span>(String key, String <span class="hljs-keyword">value</span>) {
+
+        ProducerRecord&lt;String, String&gt; record = <span class="hljs-keyword">new</span> ProducerRecord&lt;&gt;(<span class="hljs-string">"cluster1"</span>, key, <span class="hljs-keyword">value</span>);
+        <span class="hljs-keyword">try</span> {
+            RecordMetadata result = <span class="hljs-keyword">this</span>.kafkaProducer.send(record).<span class="hljs-keyword">get</span>();
+        } <span class="hljs-keyword">catch</span> (InterruptedException e) {
+            logger.error(<span class="hljs-string">"Catch InterruptedException: "</span>, e);
+        } <span class="hljs-keyword">catch</span> (ExecutionException e) {
+            logger.error(<span class="hljs-string">"Catch ExecutionException: "</span>, e);
+        } <span class="hljs-keyword">catch</span> (Exception e) {
+            logger.error(<span class="hljs-string">"Catch Exception: "</span>, e);
+        }
+    }
+
+    <span class="hljs-keyword">private</span> Properties <span class="hljs-title">getKafkaProps</span>() {
+        Properties props = <span class="hljs-keyword">new</span> Properties();
+        props.put(<span class="hljs-string">"bootstrap.servers"</span>, <span class="hljs-string">"192.168.181.90:9092,192.168.181.91:9092,192.168.181.92:9092"</span>);
+<span class="hljs-comment">//        props.put("client.id", "DemoProducer");</span>
+        props.put(<span class="hljs-string">"key.serializer"</span>, <span class="hljs-string">"org.apache.kafka.common.serialization.StringSerializer"</span>);
+        props.put(<span class="hljs-string">"value.serializer"</span>, <span class="hljs-string">"org.apache.kafka.common.serialization.StringSerializer"</span>);
+
+        <span class="hljs-keyword">return</span> props;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) throws InterruptedException {
+        KafkaProcuderService2 kafkaProcuderService2 =  <span class="hljs-keyword">new</span> KafkaProcuderService2();
+        <span class="hljs-keyword">int</span> i = <span class="hljs-number">0</span>;
+        <span class="hljs-keyword">while</span>(<span class="hljs-keyword">true</span>){
+            kafkaProcuderService2.sendSync(<span class="hljs-string">"i"</span>,String.valueOf(i));
+            Thread.sleep(<span class="hljs-number">2000</span>);
+            i++;
+        }
+    }
+}</code></pre>
+
+<p>Consumer端：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> KafkaConsumerService2 {
+
+    <span class="hljs-keyword">private</span> KafkaConsumer&lt;String, String&gt; consumer;
+
+
+    <span class="hljs-keyword">private</span> Properties <span class="hljs-title">getProps</span>() {
+        Properties props = <span class="hljs-keyword">new</span> Properties();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, <span class="hljs-string">"192.168.181.90:9092,192.168.181.91:9092,192.168.181.92:9092"</span>);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, <span class="hljs-string">"test-consumer-group"</span>);
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, <span class="hljs-string">"true"</span>);
+        props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, <span class="hljs-string">"1000"</span>);
+        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, <span class="hljs-string">"30000"</span>);
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, <span class="hljs-string">"org.apache.kafka.common.serialization.StringDeserializer"</span>);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, <span class="hljs-string">"org.apache.kafka.common.serialization.StringDeserializer"</span>);
+        <span class="hljs-keyword">return</span> props;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">sub</span>() {
+        <span class="hljs-keyword">this</span>.consumer = <span class="hljs-keyword">new</span> KafkaConsumer&lt;&gt;(getProps());
+
+        <span class="hljs-keyword">this</span>.consumer.subscribe(Collections.singletonList(<span class="hljs-string">"cluster1"</span>));
+        <span class="hljs-keyword">while</span>(<span class="hljs-keyword">true</span>) {
+            <span class="hljs-keyword">try</span> {
+                ConsumerRecords&lt;String, String&gt; records = <span class="hljs-keyword">this</span>.consumer.poll(<span class="hljs-number">1000</span>);
+                records.forEach(stringStringRecord -&gt; {
+                    String key = stringStringRecord.key();
+                    String <span class="hljs-keyword">value</span> = stringStringRecord.<span class="hljs-keyword">value</span>();
+                    System.<span class="hljs-keyword">out</span>.println(<span class="hljs-string">"key:"</span>+key+<span class="hljs-string">"   value"</span>+<span class="hljs-keyword">value</span>);
+                });
+            } <span class="hljs-keyword">catch</span> (Exception e) {
+
+            }
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) {
+        KafkaConsumerService2 kafkaConsumerService2 = <span class="hljs-keyword">new</span> KafkaConsumerService2();
+        kafkaConsumerService2.sub();
+    }
+}</code></pre>
+
+<p>启动producer，和consumer就能看到消费者端在不停的接受生产者发出的消息，并且可以复制多份consumer模拟多个消费者。中断其中任意一台kafka的server，仍能正常消费。中断任意一个consumer，其余的consumer会接着几首消息。（这里说明一下，如果多个消费的group.id设为相同，则只要有一台有在接收消息，其余就等待。如果group.id不相同则全部接受同样的消息。具体根据需求自行配置） <br>
+6、遇到的问题和解决方案： <br>
+最严重的一个问题就是我们发现中断broker.id=0的kafka server后消费者就无法正常消费。在这个点上我们研究了很久，发现是因为之前kafka运行残留的一些配置信息导致的。然后针对该问题我们总结出了一种解决方案，实测可行，通过链接zookeeper。将上面的kafka配置全部清空。然后重启kafka就能正常消费了。 <br>
+7、关于kafka-manager的使用： <br>
+下载，编绎 <br>
+编绎，生成发布包： <strong>git clone <a href="https://github.com/yahoo/kafka-manager" rel="nofollow" target="_blank">https://github.com/yahoo/kafka-manager</a></strong> <br>
+下好后： <br>
+cd kafka-manager <br>
+sbt clean dist <br>
+生成的包会在kafka-manager/target/universal 下面。生成的包只需要Java环境就可以运行了，在部署的机器上不需要安装sbt。 <br>
+（这一步可能需要比较长的时间） <br>
+部署 <br>
+打好包好，在部署机器上解压，修改好配置文件，就可以运行了。  <br>
+- 解压 <br>
+<strong>unzip kafka-manager-1.0-SNAPSHOT.zip</strong> <br>
+修改conf/application.conf，把kafka-manager.zkhosts改为自己的zookeeper服务器地址 <br>
+kafka-manager.zkhosts=”localhost:2181” <br>
+启动 <br>
+<strong>cd kafka-manager-1.0-SNAPSHOT/bin</strong> <br>
+<strong>./kafka-manager -Dconfig.file=../conf/application.conf</strong> <br>
+查看帮助 和 后台运行： <br>
+<strong>./kafka-manager -h</strong> <br>
+<strong>nohup ./kafka-manager -Dconfig.file=../conf/application.conf &gt;/dev/null 2&gt;&amp;1 &amp;</strong> <br>
+默认http端口是9000，可以修改配置文件里的http.port的值，或者通过命令行参数传递： <br>
+.<strong>/kafka-manager -Dhttp.port=9001</strong>  <br>
+接着可以访问localhost（你部署的服务器）：9000就可以访问manager页面了。下面是页面展示：</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

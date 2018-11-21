@@ -1,0 +1,290 @@
+---
+layout:     post
+title:      Kafka技术原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_38265137/article/details/80565142				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="kafka简介">Kafka简介</h1>
+
+
+
+<h2 id="kafka概述">Kafka概述：</h2>
+
+<p>Kafka由 linked-in 开源 。</p>
+
+<p>kafka-高产出的分布式消息系统(A high-throughput distributed messaging system)。</p>
+
+<p>Kafka是一个高吞吐、分布式、基于发布订阅的消息系统，利用Kafka技术可以在廉价的PC Server上搭建起大规模消息系统。</p>
+
+
+
+<h2 id="kafka的特性">Kafka的特性：</h2>
+
+<ul>
+<li>高吞吐量、低延迟：kafka每秒可以处理几十万条消息，它的延迟最低只有几毫秒，每个topic可以分多个partition, consumer group 对partition进行consume操作；</li>
+<li>可扩展性：kafka集群支持热扩展；</li>
+<li>持久性、可靠性：消息被持久化到本地磁盘，并且支持数据备份防止数据丢失；</li>
+<li>容错性：允许集群中节点失败（若副本数量为n,则允许n-1个节点失败）；</li>
+<li>高并发：支持数千个客户端同时读写；</li>
+<li>支持实时在线处理和离线处理：可以使用Storm这种实时流处理系统对消息进行实时进行处理，同时还可以使用Hadoop这种批处理系统进行离线处理；</li>
+</ul>
+
+
+
+<h2 id="kafka应用场景">Kafka应用场景：</h2>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113037307?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：Kafka应用场景<center></center></center><p></p>
+
+<p>Kafka和其他组件比较，具有消息持久化、高吞吐、分布式、多客户端支持、实时等特性，适用于离线和在线的消息消费，如常规的消息收集、网站活性跟踪、聚合统计系统运营数据（监控数据）、日志收集等大量数据的互联网服务的数据收集场景。</p>
+
+<ol>
+<li><p>日志收集：一个公司可以用Kafka可以收集各种服务的log，通过kafka以统一接口服务的方式开放给各种consumer，例如Hadoop、Hbase、Solr等；</p></li>
+<li><p>消息系统：解耦和生产者和消费者、缓存消息等；</p></li>
+<li><p>用户活动跟踪：Kafka经常被用来记录web用户或者app用户的各种活动，如浏览网页、搜索、点击等活动，这些活动信息被各个服务器发布到kafka的topic中，然后订阅者通过订阅这些topic来做实时的监控分析，或者装载到Hadoop、数据仓库中做离线分析和挖掘；</p></li>
+<li><p>运营指标：Kafka也经常用来记录运营监控数据。包括收集各种分布式应用的数据，生产各种操作的集中反馈，比如报警和报告；</p></li>
+<li><p>流式处理：比如spark streaming和storm；</p></li>
+<li><p>事件源；</p></li>
+<li><h2 id="kafka在fusioninsight中的位置">kafka在FusionInsight中的位置：</h2></li>
+</ol>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113045122?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：Kafka在FusionInsight中的位置<center></center></center><p></p>
+
+<p>Kafka作为一个分布式消息系统，支持在线和离线消息处理，并提供了Java API以便其他组件对接使用。</p>
+
+
+
+<h1 id="kafka架构与功能">Kafka架构与功能</h1>
+
+
+
+<h2 id="kafka架构">Kafka架构：</h2>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113050217?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：Kafka架构图<center></center></center><p></p>
+
+<p>基本概念：</p>
+
+<ul>
+<li>Broker：Kafka集群包含一个或多个服务实例，这些服务实例被称为Broker。是Kafka当中具体处理数据的单元。Kafka支持Broker的水平扩展。一般Broker数据越多，集群的吞吐力就越强。</li>
+<li>Topic：每条发布到Kafka集群的消息都有一个类别，这个类别被称为Topic。</li>
+<li>Partition：Kafka将Topic分成一个或多个Partition，每个Partition在物理上对应一个文件夹，该文件下存储这个Partition的所有消息。</li>
+<li>Producer：负责发布消息到Kafka Broker。</li>
+<li>Consumer：消息消费者，从Kafka Broker读取消息的客户端。</li>
+<li>Consumer Group：每个Consumer属于一个特定的Consumer Group（可为每个Consumer指定group name）。</li>
+<li>ZooKeeper：kafka与Zookeeper级联，通过Zookeeper管理级联配置，选举Leader。</li>
+</ul>
+
+
+
+<h3 id="kafka-topics">Kafka Topics：</h3>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113057645?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+<center>图；Kafka Topics<center></center></center></center><p></p>
+
+<p>每条发布到Kafka的消息都有个类别，这个类别被称为Topic，也可以理解为一个存储消息的队列。例如：天气作为一个Topic，每天的温度消息就可以存储在“天气”这个队列里。数据总数先进先出。后来的数据追加到后面。</p>
+
+
+
+<h3 id="kafka-partition">Kafka Partition：</h3>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113102372?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+<center>图：Kafka Partition<center></center></center></center><p></p>
+
+<p>每个Topic都有一个或者多个Partitions构成。每个Partition都是有序且不可变的消息队列。引入Partition机制，保证了Kafka的高吞吐能力。</p>
+
+<p>在每个Partition当中，都会存储一个Log文件，Log文件中记录了所有的消息文件。一个Topic的多个Partition，它分布在不同的Kafka节点上，这样多个客户端包括Producer和Consumer就可以并发的访问不同节点，对同一个Topic进行消息的读取。</p>
+
+<p><img src="https://img-blog.csdn.net/20180604113125893?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="&lt;center&gt;" title=""></p>
+
+<p></p><center>图：Partition<center></center></center><p></p>
+
+<ul>
+<li>Topic的Partition数量可以在创建时配置。</li>
+<li>Partition数据决定了每个Consumer group中并发消费者的最大数据。</li>
+<li>Consumer group A有两个消费者来读取4个Partition中数据；Consumer group B有四个消费者来读取4个partition中数据。</li>
+</ul>
+
+<p><strong>Kafka Partition offset:</strong></p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113133692?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：Kafka Partition offset<center></center></center><p></p>
+
+<ul>
+<li>任何发布到此Partition的消息都会被直接追加到log文件的尾部。</li>
+<li>每条消息在文件中的位置称为offset（偏移量），offset是一个long型数字，它唯一标记一条消息。消费者通过（offset、partition、topic）跟踪记录。</li>
+<li>Kafka不支持消息的随机读取。</li>
+</ul>
+
+<p><strong>Kafak Partition Replicas（副本）:</strong></p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113144619?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：副本机制<center></center></center><p></p>
+
+<ul>
+<li>副本以分区为单位。每个分区都有各自的主副本。</li>
+<li>可以通过配置文件，配置副本的个数。</li>
+<li>一个Kafka集群中，各个节点可能互为Leader和Follower。</li>
+<li>主副本叫做Leader，从副本叫做Follower，处于同步状态的副本叫做In-Sync Replicas（ISR）。</li>
+<li>如果Leader失效，那么将会有其他的Follower来接管成为新的Leader。如果由于Follower自身的原因，比如网络原因导致同步落后太多，那么当Leader失效后，就不会将这个Follower选为leader。</li>
+<li>由于Leader的Server承载了全部的请求压力，因此从集群的整体考虑，Kafka会将Leader均衡的分散在每个实例上，来保持整体稳定。</li>
+<li>Follower通过<strong>拉取</strong>的方式从Leader中同步数据。消费者和生产这都是从Leader中读取数据，不与Follower交互。</li>
+</ul>
+
+<p><strong>主副本和从副本的数据同步：</strong></p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113154425?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：主副本和从副本的数据同步<center></center></center><p></p>
+
+<p>从Partition的Leader复制数据到Follower，需要一个线程，实际上，复制数据的操作，是Follower主动从Leader上批量拉取数据，这就极大的提高了Kafka的吞吐量。Follower复制数据的线程叫做ReplicaFetcher Thread，而Kafka的Producer和Consumer只与Leader进行交互，不会与Follower进行交互。</p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113201309?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p>Kafka中每个Broker启动的时候，都会创建一个副本管理服务ReplicaManager，该服务负责维护ReplicaFether Thread与其他Broker链路连接关系。该服务中存在的Follower Partition对应的Leader Partition会分布在不同的Broker上，这些Broker创建相同数量的ReplicaFether Thread，同步对应Partition数据。Kafka中Partition间复制数据，是由Follower主动从Leader拉消息的。Follower每次读取消息都会更新HW状态，用于记录当前最新消息的标识。每当Follower的Partition发生变化而影响Leader所在的Broker时，ReplicaManager就会新建或者销毁相对应的ReplicaFether Thread。</p>
+
+
+
+<h2 id="kafka-logs">Kafka Logs：</h2>
+
+<p>为了使得Kafka的吞吐率可以线性提高，物理上把Topic分成一个或多个Partition，每个Partition在物理上对应一个文件夹，该文件夹下存储这个Partition的所有消息和索性文件。Kafka把Topic中一个Partition大文件分成多个小文件段通过多个小文件段，就容易定期清除或删除已经消费完的文件，减少磁盘占用。</p>
+
+<p>Kafka的存储布局非常简单，Topic的每个分区对应一个逻辑日志，物理上一个日志为相同大小的一个分段文件。每次Producer发布一个消息到一个分区的时候，代理就将这些数据追加到最后一个段文件当中。当发布的消息数量达到消息设定的阈值，或者经过一定的时间后，段文件就会真正的写到磁盘当中。在写入完成以后，消息就会公开给Consumer。</p>
+
+<p>同一个Topic下有不同的分区，每个分区会划分为多个文件，只有一个当前文件在写，其他文件是只读的。当写满一个文件（即达到某个设定的值）Kafka会新建一个空文件继续来写。而老文件切换为只读。</p>
+
+<p>文件的命名以起始的偏移量来进行命名。Segment Files由两大部分组成，分别为Index file和data file，此两个文件一一对应成对出现。后缀 .index 和 .log 就分别表示为Segment的索引文件和数据文件。Segment文件的命名规则是：Partition全局的第一个Segment从0开始，后续每个segment文件为上一个全局Partition的最大offset，这个数据时64位的long型数据。如果没有数据就用0进行填充。通常把日志文件默认为1G，当达到1G就会创建新的Log文件和index文件。如果设置的参数过小，会产生大量的log文件和index文件，系统在启动的时候就需要加载大量的index到内存，占用大量的句柄。如果设置的太大，分段文件又比较少，不利于快速的查找。Kafka就是通过索引实现快速的定位message。</p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113208947?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：索引文件<center></center></center><p></p>
+
+<ul>
+<li>通过索引信息可以快速定位message。</li>
+<li>通过将index元数据全部映射到memory，可以避免segment file的index数据IO磁盘操作。</li>
+<li>通过索引文件稀疏存储，可以大幅降低index文件元数据占用空间大小。</li>
+<li>稀疏存储：将原来完整的数据，只间隔的选择多条数据进行存储。</li>
+</ul>
+
+<p><strong>Kafka Log Cleanup:</strong></p>
+
+<p>日志的清理方式有两种：delete和compact。</p>
+
+<p>删除的阈值有两种：过期的时间和分区内总日志大小。</p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113219221?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113224846?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+<center>图：日志清理方式–compact<center></center></center></center><p></p>
+
+<p>compact操作是保存每个消息的最新value值。消息时顺序存储的，offset大的为最新的数据。</p>
+
+
+
+<h2 id="kafka数据可靠性">Kafka数据可靠性：</h2>
+
+<p>Kafka所有消息都会被持久化到磁盘中，同时Kafka通过对Topic Partition设置Replication来保障数据可靠。</p>
+
+<p>消息传输过程中保障通常有以下三种：</p>
+
+<ul>
+<li>最多一次（At Most Once）：消息可能丢失；消息不会重复发送和处理。</li>
+<li>最少一次（At Lease Once）：消息不会丢失；消息可能会重复发送和处理。</li>
+<li>仅有一次（Exactly Once）：消息不会丢失；消息仅被处理一次。</li>
+</ul>
+
+<p>Kafka消息传输保障机制，通过配置不同的消息发送模式来保障消息传输，进而满足不同的可靠性要求应用场景。</p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113232560?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+
+
+<h1 id="kafka关键流程">Kafka关键流程</h1>
+
+
+
+<h2 id="写流程">写流程：</h2>
+
+<p></p><center><img src="https://img-blog.csdn.net/2018060411323982?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：Kafka写流程–Producer写数据<center></center></center><p></p>
+
+<p>总体流程：</p>
+
+<ul>
+<li>Producer连接任意存活的Broker，请求制定Topic、Partition的Leader元数据信息，然后直接与对应的Broker直接链接，发布数据。</li>
+</ul>
+
+<p>开发分区接口：</p>
+
+<ul>
+<li>用户可以指定分区函数，使得消息可以根据Key，发送到特定的Partition。</li>
+</ul>
+
+
+
+<h2 id="kafka读流程">Kafka读流程：</h2>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113244822?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：Kafka读流程–Consumer读数据<center></center></center><p></p>
+
+<p>总体流程：</p>
+
+<ul>
+<li>Consumer连接指定Topic Partition所在的Leader Broker，用主动获取方式从Kafka中获取消息。</li>
+</ul>
+
+
+
+<h1 id="kafka在zookeeper上的目录结构">Kafka在Zookeeper上的目录结构</h1>
+
+
+
+<h2 id="zookeeper在kafka的作用">Zookeeper在Kafka的作用：</h2>
+
+<ol>
+<li>无论是kafka集群，还是producer和consumer都依赖于zookeeper来保证系统可用性集群保存一些meta信息。</li>
+<li>Kafka使用zookeeper作为其分布式协调框架，很好的将消息生产、消息存储、消息消费的过程结合在一起。</li>
+<li>同时借助zookeeper，kafka能够生产者、消费者和broker在内的所以组件在无状态的情况下，建立起生产者和消费者的订阅关系，并实现生产者与消费者的负载均衡。</li>
+</ol>
+
+
+
+<h2 id="zookeeper-shell">Zookeeper Shell：</h2>
+
+<p>通过zkCli来连接正在运行的Zookeeper Shell客户端，可以通过ls和get命令来获取Kafka相关信息。</p>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113250683?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：用法示例<center></center></center><p></p>
+
+
+
+<h2 id="kafka-in-zookeeper">Kafka in ZooKeeper：</h2>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113255736?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：Kafka在ZooKeeper中的目录结构<center></center></center><p></p>
+
+
+
+<h1 id="kafka-cluster-mirroring">Kafka Cluster Mirroring</h1>
+
+<p></p><center><img src="https://img-blog.csdn.net/20180604113304752?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM4MjY1MTM3/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></center><p></p>
+
+<p></p><center>图：Kafka CLuster Mirroring<center></center></center><p></p>
+
+<p>Kafka Cluster Mirroring是Kafka跨集群数据同步方案，通过Kafka内置的MirrorMaker工具来实现。通过Mirror Maker工具中的consumer从源集群消费数据，然后再通过内置的Producer，将数据重新发布到目标集群。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

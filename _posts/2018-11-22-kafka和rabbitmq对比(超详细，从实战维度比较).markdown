@@ -1,0 +1,173 @@
+---
+layout:     post
+title:      kafka和rabbitmq对比(超详细，从实战维度比较)
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：欢迎分享交流，转载请注明出处，谢谢！					https://blog.csdn.net/myhes/article/details/83247108				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1><a id="kafka_1"></a>kafka介绍</h1>
+<p>kafka是apache开源的消息队列顶级项目之一，在大数据场景下使用较多，由linkedin开源，目前社区活跃，全球较多组织开始使用kafka来进行数据交换。</p>
+<h1><a id="rabbitmq_5"></a>rabbitmq介绍</h1>
+<pre><code>RabbitMQ是流行的开源消息队列系统，用erlang语言开发。RabbitMQ是AMQP（高级消息队列协议）的标准实现。
+</code></pre>
+<h1><a id="kafkarabbitmq_8"></a>kafka和rabbitmq全面对比分析</h1>
+
+<table>
+<thead>
+<tr>
+<th>对比项</th>
+<th>kafka</th>
+<th>rabbitmq</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>开发语言</td>
+<td>Java</td>
+<td>erlang</td>
+</tr>
+<tr>
+<td>是否支持多租户</td>
+<td>2.x.x支持多租户</td>
+<td>支持多租户</td>
+</tr>
+<tr>
+<td>是否支持topic优先级</td>
+<td>不支持</td>
+<td>支持</td>
+</tr>
+<tr>
+<td>是否支持消息全局有序</td>
+<td>不支持</td>
+<td>支持</td>
+</tr>
+<tr>
+<td>是否支持消息分区有序</td>
+<td>支持</td>
+<td>支持</td>
+</tr>
+<tr>
+<td>是否内置监控</td>
+<td>无内置监控</td>
+<td>内置监控</td>
+</tr>
+<tr>
+<td>是否支持多个生产者</td>
+<td>一个topic支持多个生产者</td>
+<td></td>
+</tr>
+<tr>
+<td>是否支持多个消费者</td>
+<td>一个topic支持多个消费者</td>
+<td></td>
+</tr>
+<tr>
+<td>是否支持一个分区多个消费者</td>
+<td>不支持</td>
+<td>不支持</td>
+</tr>
+<tr>
+<td>是否支持JMX</td>
+<td>支持</td>
+<td>不支持(非java语言编写)</td>
+</tr>
+<tr>
+<td>是否支持加密</td>
+<td>支持</td>
+<td>支持</td>
+</tr>
+<tr>
+<td>消息队列协议支持</td>
+<td>仅支持自定义协议</td>
+<td>支持AMQP、MQTT、STOMP协议</td>
+</tr>
+<tr>
+<td>客户端语言支持</td>
+<td>支持多语言客户端</td>
+<td>支持多语言客户端</td>
+</tr>
+<tr>
+<td>是否支持消息追踪</td>
+<td>不支持消息追踪</td>
+<td>支持消息追踪</td>
+</tr>
+<tr>
+<td>是否支持消费者推模式</td>
+<td>不支持消费者推模式</td>
+<td>支持消费者推模式</td>
+</tr>
+<tr>
+<td>是否支持消费者拉模式</td>
+<td>支持消费者拉模式</td>
+<td>支持消费者拉模式</td>
+</tr>
+<tr>
+<td>是否支持广播消息</td>
+<td>支持广播消息</td>
+<td>支持广播消息</td>
+</tr>
+<tr>
+<td>是否支持消息回溯</td>
+<td>支持消息回溯，因为消息持久化，消息被消费后会记录offset和timstamp</td>
+<td>不支持，消息确认被消费后，会被删除</td>
+</tr>
+<tr>
+<td>是否支持消息数据持久化</td>
+<td>支持消息数据持久</td>
+<td>支持消息数据持久</td>
+</tr>
+<tr>
+<td>是否支持消息堆积</td>
+<td>支持消息堆积，并批量持久化到磁盘</td>
+<td>支持阈值内的消息对接，无法支持较大的消息堆积</td>
+</tr>
+<tr>
+<td>是否支持流量控制</td>
+<td>支持控制用户和客户端流量</td>
+<td>支持生产者的流量控制</td>
+</tr>
+<tr>
+<td>是否支持事务性消息</td>
+<td>支持</td>
+<td>不支持</td>
+</tr>
+<tr>
+<td>元数据管理</td>
+<td>通过zookeeper进行管理</td>
+<td>支持消息数据持久</td>
+</tr>
+<tr>
+<td>默认服务端口</td>
+<td>9200</td>
+<td>5672</td>
+</tr>
+<tr>
+<td>默认监控端口</td>
+<td>kafka web console 9000;kafka manager 9000;</td>
+<td>15672</td>
+</tr>
+<tr>
+<td>网络开销</td>
+<td>相对较小</td>
+<td>相对较大</td>
+</tr>
+<tr>
+<td>内存消耗</td>
+<td>相对较小</td>
+<td>相对较大</td>
+</tr>
+<tr>
+<td>cpu消耗</td>
+<td>相对较大</td>
+<td>相对较小</td>
+</tr>
+</tbody>
+</table><h2><a id="_43"></a>实际场景选择</h2>
+<p>在实际生产应用中，通常会使用kafka作为消息传输的数据管道，rabbitmq作为交易数据作为数据传输管道，主要的取舍因素则是是否存在丢数据的可能；rabbitmq在金融场景中经常使用，具有较高的严谨性，数据丢失的可能性更小，同事具备更高的实时性；而kafka优势主要体现在吞吐量上，虽然可以通过策略实现数据不丢失，但从严谨性角度来讲，大不如rabbitmq；而且由于kafka保证每条消息最少送达一次，有较小的概率会出现数据重复发送的情况；</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,137 @@
+---
+layout:     post
+title:      kafka基础概念
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="1kafka介绍">1.kafka介绍</h1>
+
+<p>kafka is a distributed, partitiononed,replicated commited logservice.  <br>
+kafka是一个分布式的、易扩展的、安全性高的消息服务系统。 <br>
+kafka提供了类似于JMS的特性，但在设计实现上又完全不同，它并不是基于JMS规范实现的（kafka的实现不包含事务特性性）。 <br>
+kafka对消息的保存时以Topic进行归类的，向Topic发送消息的称谓Producer,从Topic接受消息的称谓Consumer。 <br>
+kafka集群由多个service组成，每个service在kafka集群中被称作broker。 <br>
+kafka集群的作用就是存储从Producer发过来的消息，然后按照一定的规则将消息发送给Consumer。 <br>
+无论是kafka集群本身，还是Producer 或者Consumer，均依赖于zookeeper来管理集群中的信息同步。 <br>
+<strong>下图为kafka基本结构组成图</strong>： <br>
+<img src="https://img-blog.csdn.net/20180730102326390?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2h1b2ppYW8yMDA2/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></p>
+
+
+
+<h1 id="2kafka系统名词解释">2.kafka系统名词解释</h1>
+
+
+
+<h2 id="21-topics">2.1 Topics</h2>
+
+<p>　　一个topic可以认为是一类消息，每个topic可以被划分成多个partition(区),每个partition在存储层面是append log文件。任何发布到此partition的消息都会被直接追加到log文件的尾部，每条消息在文件中的位置称为offset(偏移量)，offset为一个Long型数字，他是log中一条消息的唯一标识。kafka并没有提供其他额外的索引机制来存储offset,因为kafka的消息读写机制是顺序读写，保证kafka的吞吐率，几乎不允许（可以）对消息进行随机读取。</p>
+
+<p>kafka和JMS的实现（activeMQ）不同的是：即使消息被消费了，消息仍然不会被立即删除。日志文件将会根据broker中的配置要求，将message保留一段时间后再删除。比如将log文件保留2天，那么两天后，该文件将会被删除，无论其中的消息是否被消费。kafka通过这种简单的方式来释放磁盘空间。</p>
+
+<p>　　对于consumer而言，他需要保存消费消息的offset，对于offset的保存和使用，由consumer来控制；当consumer正常消费消息时，offset将会“线性的”向前驱动，即，消息将依照顺序被消费。实际上，consumer也可以通过指定offset来消费特定的消息（offset将会保存在zookeeper中，参见下文）。</p>
+
+<p>　　kafka集群几乎不需要维护任何producer和consumer的状态消息，这些消息由zookeeper来维护保存，因此，producer和consumer的客户端非常轻量级，他们可以随意的加入或者离开，不会对集群造成额外的影响。</p>
+
+<p>　　partition的设计目的有多个，最根本的原因是kafka基于文件存储，通过分区，可以将日志内容分布到多个broker上，避免文件尺寸达到单机的存储上线。可以将一个topic划分成多个partitions，这样既可以降低对单机磁盘容量的要求，又可以提高系统消息的读写速率。此外，越多的partition意味着可以容纳更多的consumer，更有效的提升并发性能。</p>
+
+
+
+<h2 id="22-distination">2.2 Distination</h2>
+
+<p>一个topic的多个partition被分配在kafka集群的多个broker上，每个broker负责partitions中消息的读写操作；此外，kafka还可以配置partition需要的备份个数（replicas），每个partition将会被备份到多个broker中，这样就增强了系统的可靠性。</p>
+
+<p>　　基于replicated方案，那么就意味着需要对多个备份进行调度，每个partition都有一个broker为“leader”，其余都为“follower”。leader负责所有的读写操作，如果leader失效，那么将会有其他的follower被选举为新的leader;follower只是单纯的和leader进行消息同步即可。由此可见，部署leader的broker承载了partition全部的请求压力，因此，从集群的整体角度考虑，有多少个partition，就有多少个leader，kafka将会将这些leader均衡的分配在broker上，来确保集群整体的吞吐量和稳定性。 <br>
+　　</p>
+
+
+
+<h2 id="23-producer">2.3 Producer</h2>
+
+<p>Producer将消息发布到指定的topic中，同时，producer还需要指定该消息属于哪个partition</p>
+
+
+
+<h2 id="24-consumer">2.4 Consumer</h2>
+
+<p>本质上kafka只支持topic，每一个consumer属于一个consumer group，每个consumer group可以包含多个consumer。发送到topic的消息只会被订阅该topic的每个group中的一个consumer消费。 <br>
+　　如果所有的consumer都具有相同的group，这种情况和queue很相似，消息将会在consumer之间均衡分配； <br>
+　　如果所有的consumer都在不同的group中，这种情况就是广播模式，消息会被发送到所有订阅该topic的group中，那么所有的consumer都会消费到该消息。 <br>
+　　　kafka的设计原理决定，对于同一个topic，同一个group中consumer的数量不能多于partition的数量，否则就会有consumer无法获取到消息。</p>
+
+
+
+<h2 id="25-guarantees">2.5 Guarantees</h2>
+
+<p>发送到partition中的消息将会按照它的接受顺序追加到日志中； <br>
+对于消费者而言，它的消息消费顺序是和日志中的顺序一致的； <br>
+如果partition的replicationfactor为N，那么就允许N-1个broker失效。</p>
+
+
+
+<h1 id="3kafka使用场景">3.kafka使用场景</h1>
+
+
+
+<h2 id="31-messaging">3.1 Messaging</h2>
+
+<p>　　对于一些常规的消息系统，kafka是个不错的选择，partition/replication和容错，使得kafka具有良好的扩展性和安全性。不过到目前为止，kafka并没有提供JMS中的“事务性”“消息传输担保机制（消息确认机制）”“消息分组”等企业级特性；kafka只能作为常规的消息系统，在一定程度上，尚未确定消息发送与接收的绝对可靠。</p>
+
+
+
+<h2 id="32-websit-activity-tracking">3.2 websit activity tracking</h2>
+
+<p>　　kafka可以作为“网站活性追踪”的最佳工具；可以将网页/用户操作等信息发送到kafka，进行实时监控或者离线分析等。</p>
+
+
+
+<h2 id="33-log-aggregation">3.3 Log Aggregation</h2>
+
+<p>　　kafka的特性决定了他非常适合做“日志手机中心”；application可以将操作日志批量“异步”发送到kafka集群中，而不是保存在本地或者DB中；kafka可以对消息进行批量的上传和压缩等，这对producer而言，几乎感觉不到性能的开销。此时，consumer端可以使用hadoop等其他系统化的存储和分析系统。</p>
+
+
+
+<h1 id="4-kafka设计原理">4 kafka设计原理</h1>
+
+<p>kafka设计初衷是希望作为一个统一的信息收集平台，能够事实的收集和反馈信息，并且能够支撑较大的数据量，且具备良好的容错能力。</p>
+
+
+
+<h2 id="41持久性">4.1持久性</h2>
+
+<p>　　kafka使用文件存储消息，这就直接决定了kafka在性能上严重依赖于文件系统本身的性能。而且，无论在任何OS下，对文件系统本身的优化几乎没有了改进的可能。文件缓存/直接内存映射是常用的提高文件系统性能的手段。因为kafka是对日志文件进行append操作，因此磁盘检索的开销还是比较少的，同时，为了减少磁盘写入的次数，broker会暂时将消息buffer起来，当消息数量达到了一个阈值，在写入到磁盘，这样就可以减少磁盘IO的次数。</p>
+
+
+
+<h2 id="42-性能">4.2 性能</h2>
+
+<p>　　除了磁盘IO性能意外，我们还需要考虑网络IO，这直接关系到kafka的吞吐量问题。kafka并没有提供太多高超的技巧。 <br>
+对于kafka broker端，sendfile系统调用可以潜在的提高网络IO性能：将文件数据映射到系统内存中，socket直接读取相应的内存区域即可，而不需要进程再次进行copy和交换。 <br>
+对于producer、consumer、broker而言，CPU的开支都不大，因此启用消息压缩机制是一个很好的策略；压缩需要消耗少量的CPU资源，不过对于kafka而言，网络IO应该更为重要。 <br>
+可以通过将任何在网路上传输的消息进行压缩来提高网络IO性能。 <br>
+kafka支持多种压缩方式（gzip/snappy）。</p>
+
+<p><strong>生产者</strong> <br>
+　　负载均衡：producer将会和topic下的所有partition leader保持socket连接；消息由producer直接通过socket发送个broker，中间不会经过任何“消息路由”，实际上，消息被发送给哪个broker由producer端决定。如果一个消息有多个partitions，那么在producer端实现消息“均衡分发”是很有必要的。</p>
+
+<p>　　其中partition leader位置（host:port）保存在zookeeper中，producer作为zookeeper client，已经注册了watch用来监听partition leader的变更事件。</p>
+
+<p>　　异步发送：将多条消息暂且保存在producer的buffer中，当达到一定的数量阈值时，将他们一起批量发送给broker，延迟批量发送实际上是提高了网络效率。不过也存在一些隐患，比如当producer失效时，那些尚未发送出去的消息将会丢失。</p>
+
+<p><strong>消费者</strong> <br>
+　　consumer端向broker发送fatch请求，并告诉其获取消息的offset，此后，consumer会获得一定数量的消息，consumer端也可以通过重置offset来重新获取想要的消息。</p>
+
+<p>　　在JMS中，topic模型是基于push方式的，即broker将消息推送给consumer端。不过在kafka中，采用的是pull模型，即consumer在和broker建立连接后，主动去pull(也就是fatch)消息；这种模式有自己的优点，首先，consumer可以根据自己的消费需求去fatch合适的消息并进行处理，此外，消费者可以良好的控制消费消息的数量。</p>
+
+<p>　　在kafka中，partition中的消息只有一个consumer在消费，不存在消息状态的控制，也没有复杂的消息确认机制，可见，kafka broker是相当轻量级的。当消息被consumer接收后，consumer在本地保存最后消费消息的offset，并间歇性的向zookeeper注册offset。由此可见，consumer也是轻量级的。</p>
+
+
+
+<h1 id="kafka安全机制partition复制备份">kafka安全机制：partition复制备份</h1>
+
+<p>kafka将每个partition数据复制到多个broker上，任何一个partition都有一个leader和多个follower(可以没有)。备份的个数可以通过broker的配置文件进行配置。leader处理所有的read-write请求，follower只需要和leader保持信息同步即可，leader负责跟踪所有的follower状态信息，如果follower落后太多或者失效，leader将会把它从replicas同步列表中删除。当所有的follower将一条消息保存成功，该消息才被认为是发送成功（committed），此时，consumer才能消费它。即使只有一个replicas存活，仍然可以保证消息的正常发送和接受，只要zookeeper集群存活即可。（不同于其他分布式存储，需要多数派存活）</p>
+
+<p>　　当leader失效时，需要在follower中选择一个新的leader（此选举并非通过zookeeper进行选举的），可能此时的follower落后于leader，因此需要一个“up-to-date”的follower。选择新的leader时也需要同时兼顾一个问题，那就是broker上leader的数量，如果一个server上有多个leader，意味着此service将承受更多的IO压力，所以在选举时，需要考虑leader的“负载平衡”。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

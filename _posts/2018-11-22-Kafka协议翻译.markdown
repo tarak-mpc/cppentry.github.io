@@ -1,0 +1,224 @@
+---
+layout:     post
+title:      Kafka协议翻译
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="kafka协议">Kafka协议</h1>
+
+<p>Kafka是linkedin开源的一个数据传输框架，主要的定位是解决一个数据源多个消费者的应用场景，支持和Storm、Spark、Flume对接，提供负载均衡和容错的集群，用来传输各种数据日志。</p>
+
+
+
+<h2 id="links">Links</h2>
+
+<p>关于Kafka的介绍，请参考<a href="https://kafka.apache.org/documentation.html" rel="nofollow">kafka doc</a>。</p>
+
+<p>关于Kafaka的协议，请参考<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol" rel="nofollow">kafka protocol</a>。</p>
+
+<p>关于Kafka的设计理念，参考<a href="http://www.36dsj.com/archives/6387" rel="nofollow">kafka log</a>。</p>
+
+<p>本文主要是记录kafka协议中的重点。</p>
+
+
+
+<h2 id="introduction">Introduction</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">The protocol used <span class="hljs-operator">in</span> <span class="hljs-number">0.7</span> <span class="hljs-operator">and</span> earlier is similar <span class="hljs-built_in">to</span> this, but we chose <span class="hljs-built_in">to</span> make <span class="hljs-operator">a</span> <span class="hljs-constant">one</span> <span class="hljs-built_in">time</span> (we hope) break <span class="hljs-operator">in</span> compatibility <span class="hljs-built_in">to</span> be able <span class="hljs-built_in">to</span> clean up cruft
+<span class="hljs-operator">and</span> generalize things.</code></pre>
+
+<p>这个协议是0.8的，0.7以及更早的协议和这个类似，但是0.8的协议和之前的是不兼容的，希望0.8重新设计后能做一次彻底了断，并且以后都保持兼容性。</p>
+
+
+
+<h2 id="overview">Overview</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">Metadata - Describes <span class="hljs-keyword">the</span> currently available brokers, their host <span class="hljs-keyword">and</span> port information, <span class="hljs-keyword">and</span> gives information <span class="hljs-keyword">about</span> which broker hosts
+which partitions.</code></pre>
+
+<p>这个api是从broker获取metadata，包含可用的brokers，它们的host和port信息，以及broker和partition的对应关系。</p>
+
+
+
+<h2 id="network">Network</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">Kafka uses <span class="hljs-operator">a</span> binary protocol over TCP. The protocol defines all apis <span class="hljs-keyword">as</span> request response message pairs.</code></pre>
+
+<p>Kafka使用基于TCP的字节协议（像RTMP那种，而不像HTTP那种文本协议），API就是由Request和Response实现的。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">The client initiates <span class="hljs-operator">a</span> <span class="hljs-built_in">socket</span> connection <span class="hljs-operator">and</span> <span class="hljs-keyword">then</span> writes <span class="hljs-operator">a</span> sequence <span class="hljs-operator">of</span> request messages <span class="hljs-operator">and</span> reads back <span class="hljs-operator">the</span> corresponding response message.
+No handshake is required <span class="hljs-command"><span class="hljs-keyword">on</span> <span class="hljs-title">connection</span> <span class="hljs-title">or</span> <span class="hljs-title">disconnection</span>.</span></code></pre>
+
+<p>客户端和broker建立连接后，就可以发一些Request，然后读取对应的Respone。没有必要握手，直接连接上就可以发。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">The client will likely need <span class="hljs-built_in">to</span> maintain <span class="hljs-operator">a</span> connection <span class="hljs-built_in">to</span> multiple brokers, <span class="hljs-keyword">as</span> data is partitioned <span class="hljs-operator">and</span> <span class="hljs-operator">the</span> clients will need <span class="hljs-built_in">to</span> talk <span class="hljs-built_in">to</span> <span class="hljs-operator">the</span> server that has
+their data. However <span class="hljs-keyword">it</span> should <span class="hljs-operator">not</span> generally be necessary <span class="hljs-built_in">to</span> maintain multiple connections <span class="hljs-built_in">to</span> <span class="hljs-operator">a</span> single broker <span class="hljs-built_in">from</span> <span class="hljs-operator">a</span> single client instance (i.e.
+connection pooling).</code></pre>
+
+<p>客户端对每个broker都需要维护一个connection，因为数据是分区的(partitioned)，客户端需要和拥有这个分区的服务器交流。但是一个客户端对一个broker没有必要使用多个连接，譬如没有必要用连接池。</p>
+
+
+
+<h2 id="partitioning-and-bootstrapping">Partitioning and bootstrapping</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">Kafka is <span class="hljs-operator">a</span> partitioned <span class="hljs-keyword">system</span> so <span class="hljs-operator">not</span> all servers have <span class="hljs-operator">the</span> complete data <span class="hljs-built_in">set</span>. </code></pre>
+
+<p>Kafka是个分区的(partitioned)系统，因此broker不一定有完整的数据集。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">All systems <span class="hljs-operator">of</span> this nature have <span class="hljs-operator">the</span> question <span class="hljs-operator">of</span> how <span class="hljs-operator">a</span> particular piece <span class="hljs-operator">of</span> data is assigned <span class="hljs-built_in">to</span> <span class="hljs-operator">a</span> particular partition. Kafka clients directly control this
+assignment, <span class="hljs-operator">the</span> brokers themselves enforce no particular semantics <span class="hljs-operator">of</span> which messages should be published <span class="hljs-built_in">to</span> <span class="hljs-operator">a</span> particular partition. </code></pre>
+
+<p>类似的系统都有一个问题：消息如何分配到某个分区。Kafka是交给客户端处理的这个，也就是Kafka的客户端发送消息时指定发送到哪个分区。Broker并不关心消息发送到哪个分区。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">These requests <span class="hljs-keyword">to</span> publish <span class="hljs-keyword">or</span> fetch data must be sent <span class="hljs-keyword">to</span> <span class="hljs-keyword">the</span> broker <span class="hljs-keyword">that</span> <span class="hljs-keyword">is</span> currently acting <span class="hljs-keyword">as</span> <span class="hljs-keyword">the</span> leader <span class="hljs-keyword">for</span> a <span class="hljs-keyword">given</span> partition. This condition <span class="hljs-keyword">is</span>
+enforced <span class="hljs-keyword">by</span> <span class="hljs-keyword">the</span> broker, so a request <span class="hljs-keyword">for</span> a particular partition <span class="hljs-keyword">to</span> <span class="hljs-keyword">the</span> wrong broker will <span class="hljs-constant">result</span> <span class="hljs-keyword">in</span> an <span class="hljs-keyword">the</span> NotLeaderForPartition <span class="hljs-keyword">error</span> code.</code></pre>
+
+<p>客户端发布或获取数据时，必须向角色为Leader的broker发送，非leader的broker会返回NotLeaderForPartition的错误码。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">How can <span class="hljs-keyword">the</span> client find out which topics exist, what partitions they have, <span class="hljs-keyword">and</span> which brokers currently host those partitions so <span class="hljs-keyword">that</span> <span class="hljs-keyword">it</span> can direct <span class="hljs-keyword">its</span>
+requests <span class="hljs-keyword">to</span> <span class="hljs-keyword">the</span> right hosts? This information <span class="hljs-keyword">is</span> dynamic, so you can't just configure each client <span class="hljs-keyword">with</span> <span class="hljs-keyword">some</span> static mapping <span class="hljs-type">file</span>. Instead all Kafka
+brokers can answer a metadata request <span class="hljs-keyword">that</span> describes <span class="hljs-keyword">the</span> current state <span class="hljs-keyword">of</span> <span class="hljs-keyword">the</span> cluster: what topics there are, which partitions those topics have,
+which broker <span class="hljs-keyword">is</span> <span class="hljs-keyword">the</span> leader <span class="hljs-keyword">for</span> those partitions, <span class="hljs-keyword">and</span> <span class="hljs-keyword">the</span> host <span class="hljs-keyword">and</span> port information <span class="hljs-keyword">for</span> these brokers.</code></pre>
+
+<p>客户端如何知道topic是否存在，topic有哪些分区，哪个broker有这个分区？这个信息是动态的，所有的broker都能提供当前集群的状态：有哪些topic？topic分成了哪些分区？Leader broker是谁？Broker的host和port是多少？</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">In other <span class="hljs-property">words</span>, <span class="hljs-keyword">the</span> client needs <span class="hljs-keyword">to</span> somehow find one broker <span class="hljs-keyword">and</span> <span class="hljs-keyword">that</span> broker will <span class="hljs-keyword">tell</span> <span class="hljs-keyword">the</span> client <span class="hljs-keyword">about</span> all <span class="hljs-keyword">the</span> other brokers <span class="hljs-keyword">that</span> exist <span class="hljs-keyword">and</span> what
+partitions they host. This <span class="hljs-keyword">first</span> broker may itself go down so <span class="hljs-keyword">the</span> best practice <span class="hljs-keyword">for</span> a client implementation <span class="hljs-keyword">is</span> <span class="hljs-keyword">to</span> take a <span class="hljs-type">list</span> <span class="hljs-keyword">of</span> two <span class="hljs-keyword">or</span> three urls <span class="hljs-keyword">to</span>
+bootstrap <span class="hljs-keyword">from</span>. </code></pre>
+
+<p>也就是说，客户端需要连接到某个broker，然后通过这个broker找到能提供服务的broker。可以先给客户端一个broker的列表，不至于一个broker挂掉就无法工作了。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">The client <span class="hljs-keyword">does</span> <span class="hljs-keyword">not</span> need <span class="hljs-keyword">to</span> keep polling <span class="hljs-keyword">to</span> see <span class="hljs-keyword">if</span> <span class="hljs-keyword">the</span> cluster has changed; <span class="hljs-keyword">it</span> can fetch metadata once when <span class="hljs-keyword">it</span> <span class="hljs-keyword">is</span> instantiated cache <span class="hljs-keyword">that</span> metadata
+<span class="hljs-keyword">until</span> <span class="hljs-keyword">it</span> receives an <span class="hljs-keyword">error</span> indicating <span class="hljs-keyword">that</span> <span class="hljs-keyword">the</span> metadata <span class="hljs-keyword">is</span> <span class="hljs-keyword">out of</span> <span class="hljs-type">date</span>. </code></pre>
+
+<p>客户端不需要一直去请求元数据，来判断集群是否改变了状态，它只需要在启动时取一次元数据就好了。如果集群状态改变了，譬如topic的broker迁移了，或者新增了分区之类的，客户端会收到一个错误码指出元数据过期了。</p>
+
+
+
+<h2 id="partitioning-strategies">Partitioning Strategies</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">Partitioning really serves <span class="hljs-constant">two</span> purposes <span class="hljs-operator">in</span> Kafka:
+<span class="hljs-number">1.</span> It balances data <span class="hljs-operator">and</span> request <span class="hljs-built_in">load</span> over brokers
+<span class="hljs-number">2.</span> It serves <span class="hljs-keyword">as</span> <span class="hljs-operator">a</span> way <span class="hljs-built_in">to</span> divvy up processing <span class="hljs-operator">among</span> consumer processes <span class="hljs-keyword">while</span> allowing <span class="hljs-built_in">local</span> state <span class="hljs-operator">and</span> preserving order <span class="hljs-operator">within</span> <span class="hljs-operator">the</span> partition.
+We call this semantic partitioning.</code></pre>
+
+<p>分区可以有两个重要的用途：</p>
+
+<ol>
+<li>分区是broker负载均衡的实现，即一个负载很高消息很多的topic可以分区，由多个broker来处理这些分区，每个broker只处理一个或几个分区。</li>
+<li>语义分区。客户端可以根据某种语义进行分区，譬如按照客户端的uuid作为key，这样一个客户端肯定会到一个分区，这个客户端也肯定会被consumer group的某个consumer处理。</li>
+</ol>
+
+
+
+<h2 id="batching">Batching</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">Both our API <span class="hljs-built_in">to</span> <span class="hljs-built_in">send</span>
+messages <span class="hljs-operator">and</span> our API <span class="hljs-built_in">to</span> fetch messages always work <span class="hljs-operator">with</span> <span class="hljs-operator">a</span> sequence <span class="hljs-operator">of</span> messages <span class="hljs-operator">not</span> <span class="hljs-operator">a</span> single message <span class="hljs-built_in">to</span> encourage this.</code></pre>
+
+<p>为了提高性能，可以一次发送多个Request；当然也可以一次一个。</p>
+
+
+
+<h2 id="versioning-and-compatibility">Versioning and Compatibility</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">Our versioning <span class="hljs-keyword">is</span> <span class="hljs-function_start"><span class="hljs-keyword">on</span></span> a per-api basis, each <span class="hljs-property">version</span>
+consisting <span class="hljs-keyword">of</span> a request <span class="hljs-keyword">and</span> response pair.
+
+The intention <span class="hljs-keyword">is</span> <span class="hljs-keyword">that</span> clients would implement a particular <span class="hljs-property">version</span> <span class="hljs-keyword">of</span> <span class="hljs-keyword">the</span> protocol, <span class="hljs-keyword">and</span> indicate this <span class="hljs-property">version</span> <span class="hljs-keyword">in</span> their requests. Our goal <span class="hljs-keyword">is</span> primarily <span class="hljs-keyword">to</span>
+allow API evolution <span class="hljs-keyword">in</span> an environment <span class="hljs-keyword">where</span> downtime <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> allowed <span class="hljs-keyword">and</span> clients <span class="hljs-keyword">and</span> servers cannot all be changed <span class="hljs-keyword">at</span> once.</code></pre>
+
+<p>我们的版本是基于API的，也就是每个Request中都会指定版本信息，Response会根据Request的版本给出对应的响应。</p>
+
+<p>客户端可以实现协议的某个版本，我们主要的目标是支持不能停机更新的业务场景，客户端可以部分升级而不用全部升级。（这个指的是客户端可以混着用不同的版本，升级的时候可以新版本和老版本共存，不用一升级到新版本就导致老版本客户端无法工作）</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">The server will reject requests <span class="hljs-keyword">with</span> a <span class="hljs-property">version</span> <span class="hljs-keyword">it</span> <span class="hljs-keyword">does</span> <span class="hljs-keyword">not</span> support, <span class="hljs-keyword">and</span> will always respond <span class="hljs-keyword">to</span> <span class="hljs-keyword">the</span> client <span class="hljs-keyword">with</span> exactly <span class="hljs-keyword">the</span> protocol format <span class="hljs-keyword">it</span> expects
+based <span class="hljs-function_start"><span class="hljs-keyword">on</span></span> <span class="hljs-keyword">the</span> <span class="hljs-property">version</span> <span class="hljs-keyword">it</span> included <span class="hljs-keyword">in</span> <span class="hljs-keyword">its</span> request.</code></pre>
+
+<p>如果服务器版本过低，或者客户端发起了更高版本的请求。服务器会返回错误，并且指出它能支持的最高版本。</p>
+
+
+
+<h2 id="consumergroup">ConsumerGroup</h2>
+
+<p>其实Kafka的ConsumerGroup和Consumer本身没有什么关系。我一直以为Consumer必须在一个Group中，所以一直难以理解这块的结构，看了Kafka的客户端API以及协议，发现其实Consumer和ConsumerGroup一毛钱关系都没有。</p>
+
+<p>Kafka自己提供了两种Consumer的API：<a href="https://kafka.apache.org/documentation.html#highlevelconsumerapi" rel="nofollow">high level</a>和<a href="https://kafka.apache.org/documentation.html#simpleconsumerapi" rel="nofollow">low level</a>；而Consumer的API协议是在<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-FetchAPI" rel="nofollow">fetch</a>，ConsumerGroup是在<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-OffsetCommit/FetchAPI" rel="nofollow">offset commit</a>。</p>
+
+<p>从<a href="https://kafka.apache.org/documentation.html#simpleconsumerapi" rel="nofollow">low level consumer</a>的实例<a href="https://cwiki.apache.org/confluence/display/KAFKA/0.8.0+SimpleConsumer+Example" rel="nofollow">example</a>，例子中的<code>findLeader</code>是查找某个分区的Leader，然后获取offset是<code>getLastOffset</code>也是指定的分区的，而读取消息是发送的<code>FetchRequest</code>消息读取Response。从中可以看出，和Producer一样，Consumer也是拿到分区后读的，这个和ConsumerGroup没有什么关系，是可以的。</p>
+
+<p>为什么要ConsumerGroup呢？因为Consumer会拿到这个分区的所有消息。因此Kafka在这儿基础上，再加了一层结构，就是ConsumerGroup。既然是要多个Consumer之间负载均衡，那么就必须要共享信息；早期Kafka是用的zookeeper，而0.8之后就是用的broker，可以看<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-ConsumerMetadataRequest" rel="nofollow">协议</a>：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">Consumer Metadata Request
+The offsets <span class="hljs-keyword">for</span> <span class="hljs-operator">a</span> given consumer group are maintained <span class="hljs-keyword">by</span> <span class="hljs-operator">a</span> specific broker called <span class="hljs-operator">the</span> <span class="hljs-built_in">offset</span> coordinator. </code></pre>
+
+<p>或者说，<a href="https://kafka.apache.org/documentation.html#highlevelconsumerapi" rel="nofollow">high level consumer</a>的实现中，实际上用到了zookeeper，貌似还没有迁移过来，可以参考<a href="https://cwiki.apache.org/confluence/display/KAFKA/Consumer+Group+Example" rel="nofollow">实例</a>，指定zookeeper和group后调用<code>createMessageStreams</code>获取<code>KafkaStream</code>，其实就是获取能读取的分区了。</p>
+
+<p>Consumer的实现，大致分为以下几步：</p>
+
+<ol>
+<li>连接Broker获取元数据，找到topic的broker。参考<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-MetadataAPI" rel="nofollow">协议</a></li>
+<li>拿到所有分区，获取能读取的分区的offset，参考<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-OffsetAPI" rel="nofollow">协议</a></li>
+<li>开始读取消息，参考<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-FetchAPI" rel="nofollow">协议</a></li>
+</ol>
+
+<p>ConsumerGroup的实现，大致分为以下几步：</p>
+
+<ol>
+<li>连接Broker获取元数据，和Consumer一样。</li>
+<li>向offset管理者发起请求，拿到自己负责的分区，参考<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-OffsetCommit/FetchAPI" rel="nofollow">协议</a></li>
+<li>读取消息，和Consumer一样。</li>
+<li>同时不断维护offset，和offset管理者通信，参考<a href="https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-OffsetCommit/FetchAPI" rel="nofollow">协议</a></li>
+</ol>
+
+<p>对照Kafka的结构图：</p>
+
+<p><img src="https://img-blog.csdn.net/20150917173154420" alt="KafkaConsumerGroup" title=""></p>
+
+<p>实际上ConsumerGroup是由Consumer和Broker里面的offset管理者（或者zookeeper）维护的概念，目标就是找到自己负责的那个分区。</p>
+
+<p>这就是说，最终一个分区的消息，默认是分配到所有的Consumer上的，或者说所有的Consumer是可以读取的。但是ConsumerGroup是让Consumer知道哪些应该读，而不是Broker将消息不发送给某些Consumer。</p>
+
+<p>这个就是为何Kafka一个ConsumerGroup的Consumer数目，不能比分区多，多出来的Consumer是拿不到消息的。因为多出来的Consumer去向offset管理者请求自己负责的分区时，没有了，已经被别的Consumer分担完了。参考Kafka的说明：</p>
+
+<pre class="prettyprint"><code class=" hljs mizar">Note however <span class="hljs-keyword">that</span> there cannot <span class="hljs-keyword">be</span> more consumer instances than partitions.</code></pre>
+
+<p>因此Kafka的负载均衡核心就是分区，一个Consumer至少会收到一个分区的消息，如果一个分区的消息太多了，那没有办法，只能再新开分区来降低Consumer的负载。</p>
+
+<p>回过头来说，其实Consumer实现很简单的，直接发消息了读就可以。而ConsumerGroup却很复杂，涉及到了信息同步，共享，提交之类的。可以有一个简单的在应用层的方法，就是Consumer自己协调，不同的Consumer来负责不同的分区，或者通过配置（这种就是扩展不方便，更简单），譬如topic有4个分区，可以起2个Consumer每个负责2个分区，这种对于能重启的Consumer是个可行的办法。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

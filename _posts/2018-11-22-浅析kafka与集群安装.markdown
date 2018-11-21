@@ -1,0 +1,159 @@
+---
+layout:     post
+title:      浅析kafka与集群安装
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="kafka介绍">Kafka介绍</h1>
+
+<ul>
+<li>Kafka是什么</li>
+</ul>
+
+<p>kafka的核心概念由分布式、高吞吐量的消息引擎转变成为分布式的流式处理平台。</p>
+
+<ul>
+<li>kafka是如何做到分布式的</li>
+</ul>
+
+<p>kafka本身做成了无状态的机制，而所有状态信息，如集群的节点、topic、分区等信息均由zookeeper进行管理，而zookeeper本身是分布式的</p>
+
+<ul>
+<li>kafka是如何做到高吞吐量的</li>
+</ul>
+
+<p>kafka在底层摒弃了Java的堆缓存机制，采用了操作系统级别的页缓存，同时将随机写操作改为顺序写，再结合Zero-Copy的特性极大的改善了IO性能。</p>
+
+<p>另外kafka使用到了分区的概念，分区也是kafka最小的调度单元，通过将topic消息打散到多个不同的分区上面去，这些分区存放在不同的broker上面，这样来实现消息生产者与消费者的高吞吐量且能够线性的扩展。</p>
+
+<ul>
+<li>如何确立一个topic的分区数量呢</li>
+</ul>
+
+<p>在kafka中存在消费组与消费者的概念，一个消费组可包含多个消费者。一个topic可以有多个分区，但一个分区只允许被一个消费组内的一个消费者享有，可以被多个消费组的多个消费者享有。存在消费组的概念是为了满足一个消息可以被多个消费者使用的需求，需要将这多个消费者设置成不同的消费组，这也就是发布订阅的模型。</p>
+
+<p>如果要实现队列的模型，多个消费者处在一个消费组内，首先我们预先是知道消费者的数量的，来假设一下，如果消费者数量大于分区数量，会导致部分消费者接收不到数据，造成了浪费；如果消费者数量小于分区数量，会导致了kafka这侧的资源浪费，所以当两者相等时，比较合理。</p>
+
+<ul>
+<li>消息与分区的分配机制</li>
+</ul>
+
+<p>当生产者产生消息后，是如何选择分区的呢。现在spring的上层接口己接供了多种API接口，如下所示。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">send(String topic, V data)
+send(String topic, K key, V data)
+send(String topic, <span class="hljs-keyword">int</span> partition, V data)
+send(String topic, <span class="hljs-keyword">int</span> partition, K key, V data)</code></pre>
+
+<p>data是指具体的消息内容，key是指分区路由的一个关键字，partition是指具体的分区。如果在没有显示指定key的情况下，kafka会从zookeeper中获取分区信息决策发往哪个分区，默认是随机选择；如果显示指定了key，则会根据<code>hash(key) % partitionNum</code>来决定；当指明了partition后则会直接发往该分区，这在有业务消息顺序的场景下非常重要。</p>
+
+
+
+<h1 id="kafka集群安装">kafka集群安装</h1>
+
+
+
+<h2 id="安装环境与版本说明">安装环境与版本说明</h2>
+
+<p>kafka版本采用<code>kafka_2.11-1.1.0</code>，下载<a href="http://kafka.apache.org/" rel="nofollow">安装包</a></p>
+
+<p>kafka依赖了zookeeper，选择三台机器如下，为什么是奇数台，这是因为选举机制奇数比较容易仲裁。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ">172.16.18.181
+172.16.18.191
+172.16.18.11</code></pre>
+
+<p>安装JDK环境就不说了。</p>
+
+<p>将安装包解压到<code>/home/kafka_2.11-1.1.0</code>目录下。</p>
+
+
+
+<h2 id="配置zookeeper集群">配置zookeeper集群</h2>
+
+<p>在下载的kafka安装包中己经包含了zookeeper安装包，当然你也可以自行下载单独的zookeeper安装包，在此我使用的是自带的。</p>
+
+
+
+<h3 id="修改zookeeperproperties">修改zookeeper.properties</h3>
+
+<p>在<code>/home/kafka_2.11-1.1.0/conf</code>目录下修改<code>zookeeper.properties</code>文件如下所示。</p>
+
+
+
+<pre class="prettyprint"><code class="language-properties hljs makefile"><span class="hljs-constant">tickTime</span>=2000
+<span class="hljs-constant">initLimit</span>=10
+<span class="hljs-constant">syncLimit</span>=5
+
+<span class="hljs-constant">dataDir</span>=/tmp/zookeeper
+<span class="hljs-constant">clientPort</span>=2181
+<span class="hljs-constant">maxClientCnxns</span>=0
+
+server.1=172.16.18.181:2887:3887
+server.2=172.16.18.191:2887:3887
+server.3=172.16.18.11:2887:3887</code></pre>
+
+
+
+<h3 id="增加myid文件">增加myid文件</h3>
+
+<p><code>myid</code>文件是一个服务标识文件，有时需要手动添加，在<code>/tmp/zookeeper</code>目录下<code>touch myid</code>与<code>echo 1 &gt; myid</code>。</p>
+
+<p>当然181节点标识为1，191节点标识为2，11节点标识为3。</p>
+
+
+
+<h3 id="启动服务">启动服务</h3>
+
+<p>经过以上两步，并将修改部分同步到其它两台机器。</p>
+
+<p>分别在三个节点的/home/kafka_2.11-1.1.0/bin<code>目录，执行</code>./zookeeper-server-start.sh ../config/zookeeper.properties`命令启动服务。</p>
+
+<p>执行<code>./zookeeper-shell.sh 172.16.18.181:2181</code> 登陆客户端，也就是我们理解的CLI命令，使用<code>help</code>命令可以查询到支持的命令列表，在此不一一详解。</p>
+
+
+
+<h2 id="配置kafka集群">配置kafka集群</h2>
+
+
+
+<h3 id="修改serverproperties">修改server.properties</h3>
+
+<p><code>server.properties</code>为kafka的主配置文件，修改内容如下所示。</p>
+
+
+
+<pre class="prettyprint"><code class="language-properties hljs vala"><span class="hljs-preprocessor"># 根据节点编号进行修改，如3个节点，0-2或1-3</span>
+broker.id=<span class="hljs-number">0</span>   
+<span class="hljs-preprocessor"># 这里定要将本节点的IP给补上</span>
+listeners=PLAINTEXT:<span class="hljs-comment">//172.16.18.181:9092</span>
+<span class="hljs-preprocessor"># 预定义的分区数量，也可以后续使用脚本进行修改</span>
+num.partitions=<span class="hljs-number">3</span>
+<span class="hljs-preprocessor"># topic消息的备份副本数量</span>
+offsets.topic.replication.factor=<span class="hljs-number">3</span>
+<span class="hljs-preprocessor"># zookeeper服务节点</span>
+zookeeper.connect=<span class="hljs-number">172.16</span><span class="hljs-number">.18</span><span class="hljs-number">.181</span>:<span class="hljs-number">2181</span>,<span class="hljs-number">172.16</span><span class="hljs-number">.18</span><span class="hljs-number">.191</span>:<span class="hljs-number">2181</span>,<span class="hljs-number">172.16</span><span class="hljs-number">.18</span><span class="hljs-number">.11</span>:<span class="hljs-number">2181</span></code></pre>
+
+<p>在另外两台191与11节点上同步进行修改。</p>
+
+
+
+<h3 id="启动kafka">启动kafka</h3>
+
+<p>从以上步骤来看，配置kafka集群非常简单，因为它的状态管理均放到了zookeeper中进行管理。</p>
+
+<p>在每个节点的<code>/home/kafka_2.11-1.1.0/bin</code>目录下执行<code>./kafka-server-start.sh ../config/server.properties</code>启动服务。</p>
+
+
+
+<h3 id="kafka管理工具">kafka管理工具</h3>
+
+<p>kafka本身没有提供像activemq、rabbitmq那样丰富的管理界面，不过也有第三方的工具支持，目前主要有Kafka Web Conslole、Kafka Manager、KafkaOffsetMonitor，从反馈来看<em>Kafka Manager</em>用得比较多点，后面再介绍使用过程。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

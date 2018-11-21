@@ -1,0 +1,114 @@
+---
+layout:     post
+title:      kafka实战案例分析总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/xhpscdx/article/details/54178591				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h3 id="前言">前言</h3>
+
+<ol>
+<li>介绍kafka的基本特征及概念。</li>
+<li>结合应用需求设计场景，介绍MQ的选型，及kafka实际应用与生产监控技巧。</li>
+</ol>
+
+
+
+<h3 id="kafka主要特征介绍">kafka主要特征介绍</h3>
+
+<p>Kafka is a distributed,partitioned,replicated commit logservice。它提供了类似于JMS的特性，但是在设计实现上完全不同，此外它并不是JMS规范的实现。kafka对消息保存时根据Topic进行归类，发送消息者成为Producer,消息接受者成为Consumer,此外kafka集群有多个kafka实例组成，每个实例(server)成为broker。无论是kafka集群，还是producer和consumer都依赖于zookeeper来保证系统可用性集群保存一些meta信息。</p>
+
+
+
+<h4 id="1-producers">1. Producers</h4>
+
+<pre><code>Producer将消息发布到指定的Topic中,同时Producer也能决定将此消息归属于哪个partition。
+</code></pre>
+
+
+
+<h4 id="2-consumers">2. Consumers</h4>
+
+<pre><code>本质上kafka只支持Topic.每个consumer属于一个consumer group;反过来说,每个group中可以有多个consumer.发送到Topic的消息,只会被订阅此Topic的每个group中的一个consumer消费.
+如果所有的consumer都具有相同的group,这种情况和queue模式很像;消息将会在consumers之间负载均衡.
+如果所有的consumer都具有不同的group,那这就是"发布-订阅";消息将会广播给所有的消费者.
+</code></pre>
+
+
+
+<h4 id="3-topic">3. topic</h4>
+
+<pre><code>  一个Topic可以认为是一类消息，每个topic将被分成多个partition(区),每个partition在存储层面是append log文件。任何发布到此partition的消息都会被直接追加到log文件的尾部，每条消息在文件中的位置称为offset（偏移量），offset为一个long型数字，它是唯一标记一条消息。它唯一的标记一条消息。kafka并没有提供其他额外的索引机制来存储offset，因为在kafka中几乎不允许对消息进行随机读写。offset是存放在zookeeper中。
+</code></pre>
+
+<p>kafka-topics.bat –create –zookeeper localhost:2181 –replication-factor 1 –partitions 3 –topic page_visits</p>
+
+<p>replication-factor    节点  目录下执行如下命令(replication-factor设置为 kafka 节点数)： <br>
+partitions            –指的分片的数量 <br>
+上面这条建立topic的命令，创建一个3个partition，只放在一个replication节点下的topic。</p>
+
+
+
+<h3 id="3-partition">3. partition</h3>
+
+
+
+<h3 id="4-distribution">4. Distribution</h3>
+
+<p>关于kafka特征介绍可以更多参考：<a href="http://www.cnblogs.com/likehua/p/3999538.html" rel="nofollow">http://www.cnblogs.com/likehua/p/3999538.html</a></p>
+
+
+
+<h3 id="订单快照日志分析">订单快照日志分析</h3>
+
+
+
+<h4 id="1-需求">1. 需求</h4>
+
+<p>希望从网关获取订单信息的快照，采用异步的形式发送到后端，来比较获取客户端每次订单操作后，关键要素的前后变化对照。形成订单生命周期内的完整日志信息。展示在订单详情中。</p>
+
+
+
+<h4 id="2-第一版设计">2. 第一版设计</h4>
+
+<p>结合kafka的有序性，高可用性，没重复消息特征，我们采用kafka来做异步缓冲。把订单快照先保存到mongodb中，然后再采用quartz定时分析。采用这个方案随着数据量越来越大，quartz每次批量分析数据容易失败。二，业务即时展示快照结果的需求越强烈。</p>
+
+
+
+<h4 id="3-第二版设计">3. 第二版设计</h4>
+
+<pre><code>在kafka的cunsumer时，直接做快照分析。因为kafka的有序性让我们快照比较得以实施。当获取消息时，在从mongodb中获取它前一步快照，再进行比较分析。这个方案担心cunsumer的消费速度，broker是否会有大量消息积压。 
+</code></pre>
+
+<p>./kafka-consumer-groups.sh –zookeeper localhost:2181/kafka –describe –group group-1</p>
+
+<p>通过上面命令指定自己的分组，topic的消息记录结果如下：</p>
+
+<table>
+<thead>
+<tr>
+  <th>GROUP</th>
+  <th>TOPIC</th>
+  <th>PID</th>
+  <th>OFFSET</th>
+  <th>LOGSIZE</th>
+  <th>LAG</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>消费者组</td>
+  <td>话题id</td>
+  <td>分区id</td>
+  <td>当前已消费的条数</td>
+  <td>总条数</td>
+  <td>未消费的条数</td>
+</tr>
+</tbody></table>
+
+
+<p>在生产环境，应用能够稳定的消费，比第一种方案更稳定，客户体验也更加及时。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

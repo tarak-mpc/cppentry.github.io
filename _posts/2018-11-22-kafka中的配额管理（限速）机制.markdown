@@ -1,0 +1,125 @@
+---
+layout:     post
+title:      kafka中的配额管理（限速）机制
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，转载请注明出处。					https://blog.csdn.net/shuxiaogd/article/details/79390938				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="kafka中的配额管理限速机制">kafka中的配额管理（限速）机制</h1>
+
+<p>kafka支持配额管理，从而可以对Producer和Consumer的produce&amp;fetch操作进行流量限制，防止个别业务压爆服务器。本文主要介绍如何使用kafka的配额管理功能。</p>
+
+<h2 id="1-kafka-quatas简介">1 Kafka Quatas简介</h2>
+
+<p>Kafka配额管理所能配置的对象（或者说粒度）有3种：</p>
+
+<ul>
+<li>user + clientid</li>
+<li>user</li>
+<li>clientid</li>
+</ul>
+
+<p>这3种都是对接入的client的身份进行的认定方式。其中，clientid是每个接入kafka集群的client的一个身份标志，在ProduceRequest和FetchRequest中都需要带上；user只有在开启了身份认证的kafka集群才有。</p>
+
+<p>可配置的选项包括：</p>
+
+<ul>
+<li><code>producer_byte_rate</code>。发布者单位时间（每秒）内可以发布到<strong>单台broker</strong>的字节数。</li>
+<li><code>consumer_byte_rate</code>。消费者单位时间（每秒）内可以从<strong>单台broker</strong>拉取的字节数。</li>
+</ul>
+
+<h2 id="2-如何配置">2 如何配置</h2>
+
+<p>可以通过两种方式来作配额管理：</p>
+
+<ul>
+<li>在配置文件中指定所有client-id的统一配额。</li>
+<li>动态修改zookeeper中相关znode的值，可以配置指定<code>client-id</code>的配额。</li>
+</ul>
+
+<p>使用第一种方式，必须重启broker，而且还不能针对特定<code>client-id</code>设置。所以，推荐大家使用第二种方式。</p>
+
+<h3 id="21-使用官方脚本修改配额">2.1 使用官方脚本修改配额</h3>
+
+<p>kafka官方的二进制包中，包含了一个脚本<code>bin/kafka-configs.sh</code>，支持针对<code>user</code>，<code>client-id</code>，<code>(user,client-id)</code>等三种纬度设置配额（也是通过修改zk来实现的）。</p>
+
+<ol>
+<li>配置user+clientid。例如，user为”user1”，clientid为”clientA”。</li>
+</ol>
+
+<pre class="prettyprint"><code class="language-sh hljs brainfuck"><span class="hljs-comment">bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">configs</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span>  <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">localhost:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">alter</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">add</span><span class="hljs-literal">-</span><span class="hljs-comment">config</span> <span class="hljs-comment">'producer_byte_rate=1024</span><span class="hljs-string">,</span><span class="hljs-comment">consumer_byte_rate=2048'</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">entity</span><span class="hljs-literal">-</span><span class="hljs-comment">type</span> <span class="hljs-comment">users</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">entity</span><span class="hljs-literal">-</span><span class="hljs-comment">name</span> <span class="hljs-comment">user1</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">entity</span><span class="hljs-literal">-</span><span class="hljs-comment">type</span> <span class="hljs-comment">clients</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">entity</span><span class="hljs-literal">-</span><span class="hljs-comment">name</span> <span class="hljs-comment">clientA</span></code></pre>
+
+<ol>
+<li>配置user。例如，user为”user1”</li>
+</ol>
+
+
+
+<pre class="prettyprint"><code class="language-sh hljs brainfuck"><span class="hljs-comment">bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">configs</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span>  <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">localhost:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">alter</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">add</span><span class="hljs-literal">-</span><span class="hljs-comment">config</span> <span class="hljs-comment">'producer_byte_rate=1024</span><span class="hljs-string">,</span><span class="hljs-comment">consumer_byte_rate=2048'</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">entity</span><span class="hljs-literal">-</span><span class="hljs-comment">type</span> <span class="hljs-comment">users</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">entity</span><span class="hljs-literal">-</span><span class="hljs-comment">name</span> <span class="hljs-comment">user1</span></code></pre>
+
+<ol>
+<li>配置client-id。例如，client-id为”clientA”</li>
+</ol>
+
+
+
+<pre class="prettyprint"><code class="language-sh hljs brainfuck"><span class="hljs-comment">bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">configs</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span>  <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">localhost:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">alter</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">add</span><span class="hljs-literal">-</span><span class="hljs-comment">config</span> <span class="hljs-comment">'producer_byte_rate=1024</span><span class="hljs-string">,</span><span class="hljs-comment">consumer_byte_rate=2048'</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">entity</span><span class="hljs-literal">-</span><span class="hljs-comment">type</span> <span class="hljs-comment">clients</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">entity</span><span class="hljs-literal">-</span><span class="hljs-comment">name</span> <span class="hljs-comment">clientA</span></code></pre>
+
+
+
+<h3 id="22-直接写zk来修改配额">2.2 直接写zk来修改配额</h3>
+
+<p>如果我们希望能够在代码里面直接写zk来实现配额管理的话，那要怎样操作呢？</p>
+
+<p>假定我们在启动kafka时指定的zookeeper目录是<code>kafka_rootdir</code>。</p>
+
+<ol>
+<li>配置user+clientid。例如，针对”user1”，”clientA”的配额是10MB/sec，其它clientid的默认配额是5MB/sec。 <br>
+<ul><li>znode: <code>${kafka_rootdir}/config/users/user1/clients/clientid</code>; value: <code>{"version":1,"config":{"producer_byte_rate":"10485760","consumer_byte_rate":"10485760"}}</code></li>
+<li>znode: <code>{kafka_rootdir}/config/users/user1/clients/&lt;default&gt;</code>; value: <code>{"version":1,"config":{"producer_byte_rate":"5242880","consumer_byte_rate":"5242880"}}</code></li></ul></li>
+<li>配置user。例如，”user2”的配额是1MB/sec，其它user的默认配额是5MB/sec。 <br>
+<ul><li>znode: <code>${kafka_rootdir}/config/users/user1</code>; value: <code>{"version":1,"config":{"producer_byte_rate":"1048576","consumer_byte_rate":"1048576"}}</code></li>
+<li>znode: <code>${kafka_rootdir/config/users/&lt;default&gt;</code>; value: <code>{"version":1,"config":{"producer_byte_rate":"5242880","consumer_byte_rate":"5242880"}}</code></li></ul></li>
+<li>配置client-id。例如，”clientB”的配额是2MB/sec，其它clientid的默认配额是1MB/sec。 <br>
+<ul><li>znode:<code>${kafka_rootdir}/config/clients/clientB'; value:</code>{“version”:1,”config”:{“producer_byte_rate”:”2097152”,”consumer_byte_rate”:”2097152”}}<code>&lt;/li&gt; <br>
+&lt;li&gt;znode:</code>${kafka_rootdir}/config/clients/<code>; value:</code>{“version”:1,”config”:{“producer_byte_rate”:”1048576”,”consumer_byte_rate”:”1048576”}}`</li></ul></li>
+</ol>
+
+<p>无论是使用官方的脚本工具，还是自己写zookeeper，最终都是将配置写入到zk的相应znode。所有的broker都会watch这些znode，在数据发生变更时，重新获取配额值并及时生效。为了降低配额管理的复杂度和准确度，kafka中每个broker各自管理配额。所以，上面我们配置的那些额度值都是单台broker所允许的额度值。</p>
+
+<h2 id="3-优先级">3 优先级</h2>
+
+<p>首先，我们需要明白，kafka在管理配额的时候，是以“组”的概念来管理的。而管理的对象，则是producer或consumer到broker的一条条的TCP连接。</p>
+
+<p>那么在进行额度管理的时候，kafka首先需要确认，这条连接属于哪个“组”，进而确定当前连接是否超过了所属“组”的总额度。</p>
+
+<p>在进行“组”判定的时候，依照以下的优先级顺序依次判定：</p>
+
+<pre class="prettyprint"><code class="language-sh hljs coffeescript"><span class="hljs-regexp">/config/users/</span>&lt;user&gt;<span class="hljs-regexp">/clients/</span>&lt;client-id&gt;
+<span class="hljs-regexp">/config/users/</span>&lt;user&gt;<span class="hljs-regexp">/clients/</span>&lt;<span class="hljs-reserved">default</span>&gt;
+<span class="hljs-regexp">/config/users/</span>&lt;user&gt;
+<span class="hljs-regexp">/config/users/</span>&lt;<span class="hljs-reserved">default</span>&gt;<span class="hljs-regexp">/clients/</span>&lt;client-id&gt;
+<span class="hljs-regexp">/config/users/</span>&lt;<span class="hljs-reserved">default</span>&gt;<span class="hljs-regexp">/clients/</span>&lt;<span class="hljs-reserved">default</span>&gt;
+<span class="hljs-regexp">/config/users/</span>&lt;<span class="hljs-reserved">default</span>&gt;
+<span class="hljs-regexp">/config/clients/</span>&lt;client-id&gt;
+<span class="hljs-regexp">/config/clients/</span>&lt;<span class="hljs-reserved">default</span>&gt;</code></pre>
+
+<p>一旦找到了符合的“组”，即中止判定过程。</p>
+
+
+
+<h2 id="4-超额处理">4 超额处理</h2>
+
+<p>如果连接超过了配额值会怎么样呢？kafka给出的处理方式是：延时回复给业务方，不使用特定返回码。</p>
+
+<p>具体到producer还是consumer，处理方式又有所不同：</p>
+
+<ul>
+<li>Producer。如果Producer超额了，先把数据append到log文件，再计算延时时间，并在ProduceResponse的ThrottleTime字段填上延时的时间（v2，只在0.10.0版本以上支持）。</li>
+<li>Consumer。如果Consumer超额了，先计算延时时间，在延时到期后再去从log读取数据并返回给Consumer。否则无法起到限制对文件系统的读蜂拥。在v1（0.9.0以上版本）和v2版本的FetchResponse中有ThrottleTime字段，表示因为超过配额而延时了多久。</li>
+</ul>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

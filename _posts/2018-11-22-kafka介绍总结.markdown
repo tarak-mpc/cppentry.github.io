@@ -1,0 +1,127 @@
+---
+layout:     post
+title:      kafka介绍总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/chenxun2009/article/details/60587200				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="kafka的介绍">kafka的介绍</h1>
+
+<ul>
+<li>Kafka is a distributed,partitioned,replicated commit logservice 它提供了类似于JMS的特性，但是在设计实现上完全不同，此外它并不是JMS规范的实现。kafka对消息保存时根据Topic进行归类，发送消息者成为Producer,消息接受者成为Consumer,此外kafka集群有多个kafka实例组成，每个实例(server)成为broker。无论是kafka集群，还是producer和consumer都依赖于zookeeper来保证系统可用性集群保存一些meta信息。</li>
+</ul>
+
+<p><img src="C:%5CUsers%5Cchen%5CDesktop%5C11111.png" alt="image" title=""></p>
+
+<ul>
+<li><strong>kafka是一种高吞吐量的分布式发布订阅消息系统，她有如下特性：</strong> <br>
+<ol><li><strong>高吞吐量</strong>：kafka每秒可以生产数十万(25万)的消息（50M），每秒处理55万消息(100M)</li>
+<li><strong>持久化操作</strong>：将消息持久化到磁盘，因此可以用于批量消费，例如ETL，以及实时应用程序，通过将数据持久化到到磁盘以及replication机制达到了防止数据丢失的效果</li>
+<li><strong>分布式</strong>：易于向外扩展，所有的producer和consumer以及broker都会有多个，均为分布式的，无需停机就可以扩展</li>
+<li>消息被处理状态是由consumer来维护(消息的偏移量offset)，然后保存在zookeeper中，无需server来维护当失败的时候能自动平衡，下文会详细讲解的</li>
+<li>同时支持在线（online）和离线（offline）消费消息</li></ol></li>
+</ul>
+
+<hr>
+
+<ul>
+<li><p><strong>Topic：</strong></p>
+
+<ol><li>每条发布到Kafka集群的消息都有一个类别，这个类别被称为Topic。（物理上不同Topic的消息分开存储，逻辑上一个Topic的消息虽然保存于一个或多个broker上但用户只需指定消息的Topic即可生产或消费数据而不必关心数据存于何处）</li>
+<li>一个Topic可以认为是一类消息，每个topic将被分成多个partition(区),每个partition在存储层面是append log文件。任何发布到此partition的消息都会被直接追加到log文件的尾部，每条消息在文件中的位置称为offset（偏移量），offset为一个long型数字，它是唯一标记一条消息。它唯一的标记一条消息。kafka并没有提供其他额外的索引机制来存储offset，因为在kafka中几乎不允许对消息进行“随机读写”。</li></ol></li>
+<li><p><strong>集群</strong>： <br>
+Kafka集群包含一个或多个服务器，这种服务器被称为broker。kafka集群几乎不需要维护任何consumer和producer状态信息,这些信息有zookeeper保存;因此producer和consumer的客户端实现非常轻量级,它们可以随意离开,而不会对集群造成额外的影响</p></li>
+<li><p><strong>partition：</strong></p>
+
+<ol><li>Parition是物理上的概念，每个Topic包含一个或多个Partition.</li>
+<li>partitions的设计目的有多个.最根本原因是kafka基于文件存储.通过分区,可以将日志内容分散到多个server上,来避免文件尺寸达到单机磁盘的上限,每个partiton都会被当前server(kafka实例)保存;可以将一个topic切分多任意多个partitions,来消息保存/消费的效率.此外越多的partitions意味着可以容纳更多的consumer,有效提升并发消费的能力</li></ol></li>
+<li><p><strong>分布式</strong>：  <br>
+一个Topic的多个partitions,被分布在kafka集群中的多个server上;每个server(kafka实例)负责partitions中消息的读写操作;此外kafka还可以配置partitions需要备份的个数(replicas),每个partition将会被备份到多台机器上,以提高可用性.</p></li>
+<li><p><strong>replication</strong>：  <br>
+基于replicated方案,那么就意味着需要对多个备份进行调度;每个partition都有一个server为”leader”;leader负责所有的读写操作,如果leader失效,那么将会有其他follower来接管(成为新的leader);follower只是单调的和leader跟进,同步消息即可..由此可见作为leader的server承载了全部的请求压力,因此从集群的整体考虑,有多少个partitions就意味着有多少个”leader”,kafka会将”leader”均衡的分散在每个实例上,来确保整体的性能稳定.</p></li>
+<li><p><strong>Producers：</strong></p>
+
+<ol><li>Producer将消息发布到指定的Topic中,同时Producer也能决定将此消息归属于哪个partition;比如基于”round-robin”方式或者通过其他的一些算法等.</li>
+<li>Producer发送消息到broker时，会根据Paritition机制选择将其存储到哪一个Partition。如果Partition机制设置合理，所有消息可以均匀分布到不同的Partition里，这样就实现了负载均衡。</li></ol></li>
+<li><p><strong>Consumers：</strong></p>
+
+<ol><li>本质上kafka只支持Topic.每个consumer属于一个consumer group;反过来说,每个group中可以有多个consumer.发送到Topic的消息,只会被订阅此Topic的每个group中的一个consumer消费.</li>
+<li>如果所有的consumer都具有相同的group,这种情况和queue模式很像;消息将会在consumers之间负载均衡.</li>
+<li>如果所有的consumer都具有不同的group,那这就是”发布-订阅”;消息将会广播给所有的消费者.</li>
+<li>在kafka中,一个partition中的消息只会被group中的一个consumer消费;每个group中consumer消息消费互相独立;我们可以认为一个group是一个”订阅”者,一个Topic中的每个partions,只会被一个”订阅者”中的一个consumer消费,不过一个consumer可以消费多个partitions中的消息.kafka只能保证一个partition中的消息被某个consumer消费时,消息是顺序的.事实上,从Topic角度来说,消息仍不是有序的.</li></ol></li>
+</ul>
+
+<hr>
+
+
+
+<h1 id="kafka的设计原理">kafka的设计原理</h1>
+
+<p>kafka的设计初衷是希望作为一个统一的信息收集平台,能够实时的收集反馈信息,并需要能够支撑较大的数据量,且具备良好的容错能力. <br>
+1. 持久性 <br>
+kafka使用文件存储消息,这就直接决定kafka在性能上严重依赖文件系统的本身特性.且无论任何OS下,对文件系统本身的优化几乎没有可能.文件缓存/直接内存映射等是常用的手段.因为kafka是对日志文件进行append操作,因此磁盘检索的开支是较小的;同时为了减少磁盘写入的次数,broker会将消息暂时buffer起来,当消息的个数(或尺寸)达到一定阀值时,再flush到磁盘,这样减少了磁盘IO调用的次数.</p>
+
+<p>2.性能 <br>
+需要考虑的影响性能点很多,除磁盘IO之外,我们还需要考虑网络IO,这直接关系到kafka的吞吐量问题.kafka并没有提供太多高超的技巧;对于producer端,可以将消息buffer起来,当消息的条数达到一定阀值时,批量发送给broker;对于consumer端也是一样,批量fetch多条消息.不过消息量的大小可以通过配置文件来指定.对于kafka broker端,似乎有个sendfile系统调用可以潜在的提升网络IO的性能:将文件的数据映射到系统内存中,socket直接读取相应的内存区域即可,而无需进程再次copy和交换. 其实对于producer/consumer/broker三者而言,CPU的开支应该都不大,因此启用消息压缩机制是一个良好的策略;压缩需要消耗少量的CPU资源,不过对于kafka而言,网络IO更应该需要考虑.可以将任何在网络上传输的消息都经过压缩.kafka支持gzip/snappy等多种压缩方式.</p>
+
+<p>3.生产者 <br>
+ 负载均衡: producer将会和Topic下所有partition leader保持socket连接;消息由producer直接通过socket发送到broker,中间不会经过任何”路由层”.事实上,消息被路由到哪个partition上,有producer客户端决定.比如可以采用”random”“key-hash”“轮询”等,如果一个topic中有多个partitions,那么在producer端实现”消息均衡分发”是必要的.</p>
+
+<blockquote>
+  <p>其中partition leader的位置(host:port)注册在zookeeper中,producer作为zookeeper client,已经注册了watch用来监听partition leader的变更事件.</p>
+  
+  <p>异步发送：将多条消息暂且在客户端buffer起来，并将他们批量的发送到broker，小数据IO太多，会拖慢整体的网络延迟，批量延迟发送事实上提升了网络效率。不过这也有一定的隐患，比如说当producer失效时，那些尚未发送的消息将会丢失。</p>
+</blockquote>
+
+<p>4、消费者 <br>
+consumer端向broker发送”fetch”请求,并告知其获取消息的offset;此后consumer将会获得一定条数的消息;consumer端也可以重置offset来重新消费消息.</p>
+
+<p>在JMS实现中,Topic模型基于push方式,即broker将消息推送给consumer端.不过在kafka中,采用了pull方式,即consumer在和broker建立连接之后,主动去pull(或者说fetch)消息;这中模式有些优点,首先consumer端可以根据自己的消费能力适时的去fetch消息并处理,且可以控制消息消费的进度(offset);此外,消费者可以良好的控制消息消费的数量,batch fetch.</p>
+
+<p>其他JMS实现,消息消费的位置是有prodiver保留,以便避免重复发送消息或者将没有消费成功的消息重发等,同时还要控制消息的状态.这就要求JMS broker需要太多额外的工作.在kafka中,partition中的消息只有一个consumer在消费,且不存在消息状态的控制,也没有复杂的消息确认机制,可见kafka broker端是相当轻量级的.当消息被consumer接收之后,consumer可以在本地保存最后消息的offset,并间歇性的向zookeeper注册offset.由此可见,consumer客户端也很轻量级.</p>
+
+<p>5.复制备份</p>
+
+<p>kafka将每个partition数据复制到多个server上,任何一个partition有一个leader和多个follower(可以没有);备份的个数可以通过broker配置文件来设定.leader处理所有的read-write请求,follower需要和leader保持同步.Follower和consumer一样,消费消息并保存在本地日志中;leader负责跟踪所有的follower状态,如果follower”落后”太多或者失效,leader将会把它从replicas同步列表中删除.当所有的follower都将一条消息保存成功,此消息才被认为是”committed”,那么此时consumer才能消费它.即使只有一个replicas实例存活,仍然可以保证消息的正常发送和接收,只要zookeeper集群存活即可.(不同于其他分布式存储,比如hbase需要”多数派”存活才行)</p>
+
+<p>当leader失效时,需在followers中选取出新的leader,可能此时follower落后于leader,因此需要选择一个”up-to-date”的follower.选择follower时需要兼顾一个问题,就是新leaderserver上所已经承载的partition leader的个数,如果一个server上有过多的partition leader,意味着此server将承受着更多的IO压力.在选举新leader,需要考虑到”负载均衡”.</p>
+
+<hr>
+
+
+
+<h1 id="总结kafka的设计">总结Kafka的设计：</h1>
+
+<ol>
+<li><p>吞吐量</p>
+
+<ul><li>高吞吐是kafka需要实现的核心目标之一，为此kafka做了以下一些设计：</li>
+<li>数据磁盘持久化：消息不在内存中cache，直接写入到磁盘，充分利用磁盘的顺序读写性能</li>
+<li>zero-copy：减少IO操作步骤</li>
+<li>数据批量发送</li>
+<li>数据压缩</li>
+<li>Topic划分为多个partition，提高parallelism</li></ul></li>
+<li><p>负载均衡</p>
+
+<ul><li>producer根据用户指定的算法，将消息发送到指定的partition</li>
+<li>存在多个partiiton，每个partition有自己的replica，每个replica分布在不同的Broker节点上</li>
+<li>多个partition需要选取出lead partition，lead partition负责读写，并由zookeeper负责fail over</li>
+<li>通过zookeeper管理broker与consumer的动态加入与离开</li></ul></li>
+<li><p>拉取系统</p></li>
+</ol>
+
+<p>由于kafka broker会持久化数据，broker没有内存压力，因此，consumer非常适合采取pull的方式消费数据，具有以下几点好处： <br>
+- 简化kafka设计 <br>
+- consumer根据消费能力自主控制消息拉取速度consumer根据自身情况自主选择消费模式，例如批量，重复消费，从尾端开始消费等</p>
+
+<ol>
+<li>可扩展性 <br>
+<ul><li>当需要增加broker结点时，新增的broker会向zookeeper注册，而producer及consumer会根据注册在zookeeper上的watcher感知这些变化，并及时作出调整。</li></ul></li>
+</ol>
+
+<p>参考文献<a href="http://www.cnblogs.com/likehua/p/3999538.html" rel="nofollow">：http://www.cnblogs.com/likehua/p/3999538.html</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

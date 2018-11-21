@@ -1,0 +1,187 @@
+---
+layout:     post
+title:      kaka消费者
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/huxin889/article/details/54290306				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<ul><li>引入Kafka依赖包<pre><code class="language-html">&lt;dependencies&gt;  
+    &lt;dependency&gt;  
+        &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;  
+        &lt;artifactId&gt;kafka_2.11&lt;/artifactId&gt;  
+        &lt;version&gt;0.8.2.1&lt;/version&gt;  
+    &lt;/dependency&gt;  
+    &lt;dependency&gt;  
+        &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;  
+        &lt;artifactId&gt;kafka-clients&lt;/artifactId&gt;  
+        &lt;version&gt;0.8.2.1&lt;/version&gt;  
+    &lt;/dependency&gt;  
+&lt;/dependencies&gt;  </code></pre><br></li><li>kafka消费者配置</li></ul><pre><code class="language-html">zookeeper.connect=192.168.27.129:2181
+zookeeper.session.timeout.ms=1000
+zookeeper.sync.time.ms=500
+auto.commit.interval.ms=500
+auto.commit.enable=false
+auto.offset.reset=smallest
+
+#group.id=ecsgroup
+group.id=test-group-1
+
+#topic=ecps-test-05
+topic=test
+
+#topic=ecps-test2
+derializer.class=com.ai.iis.logger.kafka.MessageDeserialize
+#equals to kafka topic partitions value
+thread=1
+#partitioner.class=</code></pre>
+<p><br></p>
+<p>kafka消费者，该类是一个抽象类，其抽象方法为doBusiness为业务处理方法，其参数为kafka的每次消息</p>
+<p></p><pre><code class="language-java">package com.ai.ecsite.kafka.consumer.interfaces;
+
+import com.ai.ecsite.util.common.PropertiesLoader;
+import kafka.consumer.ConsumerConfig;
+import kafka.consumer.ConsumerIterator;
+import kafka.consumer.KafkaStream;
+import kafka.javaapi.consumer.ConsumerConnector;
+import kafka.message.MessageAndMetadata;
+import kafka.serializer.StringDecoder;
+import kafka.utils.VerifiableProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * kafka消费者基础，完成了kafka连接、启动、解析kafka数据，并定义了业务处理规范
+ *
+ * Created by huxin on 2016/12/20.
+ */
+public abstract class AbstractKafkaConsumer {
+    // 日志
+    private final static Logger logger = LoggerFactory.getLogger(AbstractKafkaConsumer.class);
+    // kafka消息者连接器
+    private static ConsumerConnector consumer;
+    // 线程池
+    private ExecutorService executor;
+    // 配置文件信息
+    private PropertiesLoader propertiesLoader = null;
+
+    /**
+     * 初始化kafka消费者连接器
+     *
+     * @return
+     */
+    public ConsumerConnector getConsumerConnector(String file) {
+        consumer = kafka.consumer.Consumer.createJavaConsumerConnector(createConsumerConfig(file));
+        return consumer;
+    }
+
+    /**
+     * kafka消息进程
+     */
+    public void run(String file) {
+        // 初始化消息者
+        consumer =  getConsumerConnector (file);
+        //消费kafka的消息,进程数不能大于kafka集群的数目，否则造成偏移不齐
+        int thread = Integer.valueOf(propertiesLoader.getProperty("thread") != null?propertiesLoader.getProperty("thread") : "1");
+        String topic = propertiesLoader.getProperty("topic");
+
+        // 键与值都声明为字符串解码
+        StringDecoder keyDecoder = new StringDecoder(new VerifiableProperties());
+        StringDecoder valueDecoder = new StringDecoder(new VerifiableProperties());
+
+        Map&lt;String, Integer&gt; topicCountMap = new HashMap&lt;String, Integer&gt;();
+        topicCountMap.put(topic, thread);
+        Map&lt;String, List&lt;KafkaStream&lt;String, String&gt;&gt;&gt; consumerMap = consumer.createMessageStreams(topicCountMap, keyDecoder, valueDecoder);
+        List&lt;KafkaStream&lt;String, String&gt;&gt; streams = consumerMap.get(topic);
+
+        try {
+            executor = Executors.newFixedThreadPool(thread);
+            int threadNumber = 0;
+            // 遍历消息，该处为阻塞队列，如果没有消息会一直等待，直到有消息
+            for (final KafkaStream&lt;String, String&gt; kafkaStream : streams) {
+                logger.info("creating thread {}", threadNumber);
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        ConsumerIterator&lt;String, String&gt; it = kafkaStream.iterator();
+                        while (it.hasNext()) {
+                            MessageAndMetadata&lt;String, String&gt; data = it.next();
+                            String msg = data.message();
+                            try {
+                                if (null != msg &amp;&amp; msg.trim().length() &gt; 0) {
+                                    // 业务处理
+                                    doBusiness(msg);
+                                }
+                                consumer.commitOffsets();
+                            } catch (Exception e) {
+                                logger.error("doing message fail! message is :" + msg + ",   mappings.com.ai.ecsite.dao.cache is :" + e);
+                            }
+                        }
+                    }
+                }).start();
+
+
+                logger.debug("已经启动线程{}", threadNumber);
+                threadNumber++;
+            }
+
+            logger.warn("exit kafka consumer");
+            System.in.read();
+        } catch (Exception e) {
+            logger.warn("启动consumer线程失败，错误信息：{}", e.getMessage());
+        }
+    }
+
+    /**
+     * kafka消费消息时的业务处理类，此方法需要被重写
+     */
+    public abstract void doBusiness(String msg) ;
+
+    /**
+     * 关闭消息者与连接
+     */
+    public void shutdown (){
+        // 关闭消费者
+        if (consumer != null){
+            consumer.shutdown();
+        }
+        if (executor != null){
+            executor.shutdown();;
+        }
+    }
+
+    /**
+     * 创建kafka所需的配置文件
+     *
+     * @param
+     * @return
+     * @author huxin
+     * @create 2016/11/24
+     * @version V1.0.0
+     */
+    private ConsumerConfig createConsumerConfig(String file) {
+        // 加载properties信息
+        propertiesLoader = new PropertiesLoader(file);
+        Properties props = new Properties();
+        props.put("zookeeper.connect", propertiesLoader.getProperty("zookeeper.connect"));
+        props.put("group.id", propertiesLoader.getProperty("group.id"));
+        props.put("zookeeper.session.timeout.ms", propertiesLoader.getProperty("zookeeper.session.timeout.ms"));
+        props.put("zookeeper.sync.time.ms", propertiesLoader.getProperty("zookeeper.sync.time.ms"));
+        props.put("auto.commit.interval.ms", propertiesLoader.getProperty("auto.commit.interval.ms"));
+        props.put("auto.commit.enable", propertiesLoader.getProperty("auto.commit.enable"));
+        props.put("auto.offset.reset", propertiesLoader.getProperty("auto.offset.reset"));
+
+        return new ConsumerConfig(props);
+    }
+}
+</code></pre><br><br>            </div>
+                </div>

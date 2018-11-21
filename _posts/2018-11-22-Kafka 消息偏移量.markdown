@@ -1,0 +1,49 @@
+---
+layout:     post
+title:      Kafka 消息偏移量
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>Kafka是大数据领域常用的消息队列，其高效的吞吐量和分布式容错等特性是其收到青睐的重要原因。</p>
+
+<h2 id="kafka消息的位置">kafka消息的位置</h2>
+
+<p>用好Kafka，维护其消息偏移量对于避免消息的重复消费与遗漏消费,确保消息的Exactly-once是至关重要的。<br>
+kafka的消息所在的位置Topic、Partitions、Offsets三个因素决定。<br>
+Kafka消费者消费的消息位置还与consumer的group.id有关。</p>
+
+<h2 id="consumeroffsets与earlieastleaderoffsets的关系">consumerOffsets与earlieastLeaderOffsets的关系</h2>
+
+<table><thead><tr><th>名称</th>
+			<th>含义</th>
+		</tr></thead><tbody><tr><td>earlieastLeaderOffsets</td>
+			<td>存储在broker上的<span style="color:#ff0000;">leader</span>节点的最早的消息偏移量</td>
+		</tr><tr><td>consumerOffsets</td>
+			<td>消费者消费的消息偏移量位置</td>
+		</tr></tbody></table><p>为了表述方便，我们记earlieastLeaderOffsets为A，记consumerOffsets为B 。</p>
+
+<ul><li>情况一：正常情况下，消费的消息偏移量应该大于broker上存储的最早的消息偏移量，即 A &lt; B：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170802165736275?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvT2l0ZUJvZHk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></li>
+</ul><p><strong>我们知道，存储在broker上的kafka的消息常设置消息过期配置，当到达过期时间时过期的消息将会被清除。</strong></p>
+
+<ul><li>
+	<p>情况二：如果A 依然小于 B，则仍可以正常消费：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170802170603704?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvT2l0ZUJvZHk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+	</li>
+	<li>
+	<p>情况三：然而，当 A &gt; B 时，则说明还没有被消费的消息已经被清除：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170802170701615?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvT2l0ZUJvZHk=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"><br>
+	此种情况会抛出 <code>kafka.common.OffsetOutOfRangeException</code> 异常。</p>
+	</li>
+</ul><h2 id="consumeroffsets-小于-earlieastleaderoffsets的影响与解决办法">consumerOffsets 小于 earlieastLeaderOffsets的影响与解决办法</h2>
+
+<p>当情况三发生时，在（B，A）区间内的消息还没有被消费就已经被清除了，将导致两个后果。<br>
+1. 消息丢失。<br>
+2. 抛出 <code>kafka.common.OffsetOutOfRangeException</code> 异常。</p>
+
+<p>在对消息完整性有严格要求的系统中，消息的丢失造成的影响会比较严重，所以在这种情况下，要保证消息不会遭到丢失。<br><strong>避免消息丢失包含两个方面：</strong></p>
+
+<ul><li>还没有被消费过的消息不会被清除。<br>
+	在没有外部系统清除kafka消息的情况下，协调设置broker的最大保留大小 <code>log.retention.bytes</code> 和 最大保留时间<code>log.retention.hours</code> 等，来配合消费者端的读取消息。可以通过读取和监控消费者消费的offsets，来保证消息不会被意外清除。</li>
+	<li>消费者端消费消息没有遗漏。<br>
+	当消费者意外中断时，重新启动消费时能够从上一次中断的消息偏移量开始消费。</li>
+</ul>            </div>
+                </div>

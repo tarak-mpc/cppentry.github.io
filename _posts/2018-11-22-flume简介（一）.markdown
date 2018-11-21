@@ -1,0 +1,75 @@
+---
+layout:     post
+title:      flume简介（一）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1><a id="flume_1"></a>flume简介</h1>
+<p><a href="http://flume.apache.org/" rel="nofollow">flume官网</a><br>
+<img src="https://img-blog.csdn.net/20180920155842817?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MzE3OTk5Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<hr>
+<h4><a id="1_Flume_6"></a>1. Flume是什么？</h4>
+<p>Flume是一种分布式，可靠和可用的服务，用于高效收集，聚合和移动大量日志数据。 它具有基于流数据流的简单灵活的架构。 它具有可靠的可靠性机制和许多故障转移和恢复机制的强大和容错能力。 它使用一个简单的可扩展数据模型，允许在线分析应用程序。</p>
+<p>Flume是Cloudera公司开发的用于实时收集服务器（apache/ngnix等）日志数据的框架，Flume很多时候和storm以及spark streaming等流式处理框架结合使用。</p>
+<p><strong>可靠性机制：</strong><br>
+Flume可靠性：Flume 使用事务性的方式保证传送Event整个过程的可靠性。 Sink 必须在Event 被存入 Channel 后，或者，已经被传达到下一站agent里，又或者已经被存入外部数据目的地之后，才能把 Event 从 Channel 中 remove 掉。这样数据流里的 event 无论是在一个 agent 里还是多个 agent 之间流转，都能保证可靠，因为以上的事务保证了 event 会被成功存储起来。这就保证了端到端的可靠性。比如 Flume支持在本地保存一份文件 channel 作为备份，而memory channel 将event存在内存 queue 里，速度快，但丢失的话无法恢复，所以channel的选型，维护也很重要。</p>
+<p>flume使用这种事物的方式保证events传输的可靠性所以这就不得不提Flume的事务机制（类似数据库的事务机制）：Flume使用两个独立的事务分别负责从soucrce到channel，以及从channel到sink的事件传递。<br>
+比如spooling directory source 为文件的每一行创建一个事件，一旦事务中所有的事件全部传递到channel且提交成功，那么source就将该文件标记为完成。同理，事务以类似的方式处理从channel到sink的传递过程，如果因为某种 原因使得事件无法记录，那么事务将会回滚。且所有的事件都会保持到channel中，等待重新传递。</p>
+<p><strong>可恢复性</strong><br>
+events被存储在channel里面，如果flume挂了可以从channel中恢复，保证数据不会丢失（不是绝对的，若使用memory channel数据就丢失了），你可以选择不同类型的channel根据业务需求，例如file channel存储在本地磁盘，可以保证数据不会丢失；<br>
+也有memory channel，他简单将event存储在内存队列中，速度快，但是agent挂掉可能会使得缓存在内存中的数据丢失。</p>
+<hr>
+<h4><a id="2_Flume_23"></a>2. Flume历史</h4>
+<p>Flume目前有两种版本代码行，版本0.9.x和1.x.</p>
+<p>0.9x以前叫做Flume OG（original generation），属于 cloudera。但随着 FLume 功能的扩展，Flume OG 代码工程臃肿、核心组件设计不合理、核心配置不标准等缺点暴露出来，日志传输不稳定的现象尤为严重，为了解决这些问题，1.X后对Flume进行了重构重构后的版本统称为 Flume NG（next generation）；改动的另一原因是将 Flume 纳入 apache 旗下，cloudera Flume 改名为 Apache Flume。Apache Flume是Apache Software Foundation的顶级项目。</p>
+<hr>
+<h4><a id="3_Flume_30"></a>3. Flume产生背景</h4>
+<p>我们知道对于关系型数据库我们可以使用sqoop进行数据的处理，导入hive，hdfs,mysql等。那对于一些日志该怎么处理呢？（From outside To inside ），怎么样定时收集ng产生的日志到HDFS呢？<br>
+我们可能想到直接使用shell写一个脚本，使用crontab(Linux或Unix下定时执行任务命令 / 定时执行命令文本文件)进行调度，这样不就行了吗。。但是有没有想到一个问题呢，如果日志量太大，涉及到存储格式、压缩格式、序列化等等一些大数据中常用的东西怎么办呢？要从不同的源端收集是不是要写多个脚本呢？同样我要存到不同的地方发该怎么办呢？肯定不止这些问题。所以Flume出现了来帮助我们解决这些问题。</p>
+<hr>
+<h4><a id="4_flume_35"></a>4. flume内部结构</h4>
+<p><strong>Event：</strong> Event是Flume事件处理的最小单元，Flume在读取数据源时，会将一行数据（也就是遇到\r\n）包装成一个Event，它主要有俩个部分，Header和Body, Header主要是以Key,Value的形式用来记录该数据的一些冗余信息，可用来标记数据唯一信息，利用Header的信息，我们可以对数据做出一些额外的操作，如对数据进行一个简单过滤，Body则是存入真正数据的地方。</p>
+<p>Agent： 代表一个独立的Flume进程，包含组件Source、 Channel、 Sink。（Agent使用JVM 运行Flume。每台机器运行一个agent，但是可以在一个agent中包含多个sources、channel和sinks。）</p>
+<p>flume之所以这么神奇，是源于它自身的一个设计，这个设计就是agent，agent本身是一个java进程，运行在日志收集节点—所谓日志收集节点就是服务器节点。</p>
+<p><strong>Source:</strong><br>
+是专门用来收集数据的，可以处理各种类型、各种格式的日志数据（包括avro、thrift、exec、jms、spooling directory、netcat、sequence generator、syslog、http、legacy、自定义） ,并将接收的数据以Flume的event格式传递给一个或者多个通道channel。</p>
+<p><strong>Channel:</strong><br>
+channel是一种<strong>短暂的存储容器</strong>,它将从source处接收到的event格式的数据缓存起来,可对<strong>数据进行处理</strong>,直到它们被sinks消费掉,它在source和sink间起着一共桥梁的作用,channal是一个完整的事务,这一点保证了数据在收发的时候的一致性. 并且它可以和任意数量的source和sink链接. （存放数据支持的类型有: JDBC channel , File System channel , Memort channel等）</p>
+<p><strong>sink:</strong><br>
+sink组件是处理Channel中的数据发送到目的地的组件进行存储，目的地包括hdfs、logger、avro、thrift、ipc、file、Hbase、solr、自定义。<br>
+<strong>总结</strong>：Flume处理数据的最小单元是Event，一个Agent代表一个Flume进程，一个Agent=Source+Channel+Sink 组成。Flume牛逼之处也在于他的组成部分，可以进行各种组合选型。</p>
+<hr>
+<h4><a id="5__54"></a>5. 对所在服务器要求</h4>
+<p>1，java运行时环境 ——&gt;  Java 1.6以上版本</p>
+<p>2，内存 ——&gt;  使用Sources，Channels或者Sinks要配置足够的内存。</p>
+<p>3，硬盘空间 ——&gt;  使用Channels和Sinks要配置足够的硬盘空间。</p>
+<p>4，目录权限 ——&gt;  被Agent使用的目录必须要有读和写的权限。</p>
+<hr>
+<h4><a id="6_Flume_63"></a>6. Flume有哪些优缺点</h4>
+<p>(1).优点</p>
+<ol>
+<li>
+<p>Flume可以将应用产生的数据存储到任何集中存储器中，比如HDFS、 HBase数据库 、内存中 、HIVE 、ElasticSearch 、Kafka、 file、solr、自定义等等</p>
+</li>
+<li>
+<p>当收集数据的速度超过将写入数据的时候，也就是当收集信息遇到峰值时，这时候收集的信息非常大，甚至超过了系统的写入数据能力，这时候，Flume会在数据生产者和数据收容器间做出调整，保证其能够在两者之间提供一共平稳的数据.</p>
+</li>
+<li>
+<p>提供上下文路由特征</p>
+</li>
+<li>
+<p>Flume的管道是基于事务，保证了数据在传送和接收时的一致性.</p>
+</li>
+<li>
+<p>Flume是可靠的，容错性高的，可升级的，易管理的,并且可定制的。</p>
+</li>
+</ol>
+<p>… 6.实时性，Flume有一个好处可以实时的将分析数据并将数据保存在数据库或者其他系统中</p>
+<p>(2).缺点</p>
+<p>1， Flume的配置很繁琐，source，channel，sink的关系在配置文件里面交织在一起，不便于管理</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

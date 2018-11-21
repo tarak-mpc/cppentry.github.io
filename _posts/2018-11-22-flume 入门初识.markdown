@@ -1,0 +1,141 @@
+---
+layout:     post
+title:      flume 入门初识
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主编写文章，未经博主允许转载，转载请注明出处。					https://blog.csdn.net/u012373815/article/details/52938855				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="介绍">介绍</h1>
+
+<p>Flume 是 Cloudera 提供的日志收集系统,具有分布式、高可靠、 高可用性等特点,对海量日志采集、聚合和传输,Flume 支持在日志 系统中定制各类数据发送方,同时,Flume 提供对数据进行简单处理, 并写到各种数据接受方的能力。</p>
+
+<p>Flume 使用 java 编写,其需要运行在 Java1.6 或更高版本之上。</p>
+
+<h2 id="工作方式">工作方式</h2>
+
+<p>Flume采用了多Master的方式。为了保证配置数据的一致性，Flume[1] 引入了ZooKeeper，用于保存配置数据，ZooKeeper本身可保证配置数据的一致性和高可用，另外，在配置数据发生变化时，ZooKeeper可以通知Flume Master节点。Flume Master间使用gossip协议同步数据。</p>
+
+
+
+<h2 id="流程结构">流程结构</h2>
+
+<p>Flume的结构主要分为三部分：source、channel以及sink.其中source为源头，负责采集日志；channel为通道，负责传输和暂时储存；sink为目的地，将采集到的日志保存起来。在真正日志采集的过程中，根据待采集日志的类型以及存储需求，选择相应的类型的source、channel和sink进行配</p>
+
+
+
+<h1 id="架构">架构</h1>
+
+<h2 id="数据流">数据流</h2>
+
+<p>Flume 的核心是把数据从数据源收集过来,再送到目的地。为了 保证输送一定成功,在送到目的地之前,会先缓存数据,待数据真正 到达目的地后,删除自己缓存的数据。</p>
+
+<p>Flume 传输的数据的基本单位是 <strong>Event,</strong>如果是文本文件,通常 是一行记录,这也是事务的基本单位。<strong>Event 从 Source,流向 Channel,再到 Sink,本身为一个 byte 数组,并可携带 headers 信 息。Event 代表着一个数据流的最小完整单元,从外部数据源来,向 外部的目的地去。</strong></p>
+
+<p>Flume 运行的核心是 <strong>Agent</strong>。它是一个完整的数据收集工具,含 有三个核心组件,分别是 source、channel、sink。通过这些组件, Event 可以从一个地方流向另一个地方,如下图所示。 <br>
+<img src="https://img-blog.csdn.net/20161026221502470" alt="这里写图片描述" title=""></p>
+
+<p>source 可以接收外部源发送过来的数据。不同的 source,可以 接受不同的数据格式。比如有目录池(spooling directory)数据源, 可以监控指定文件夹中的新文件变化,如果目录中有文件产生,就会 立刻读取其内容。</p>
+
+<p>channel 是一个存储地,接收 source 的输出,直到有 sink 消 费掉 channel 中的数据。channel 中的数据直到进入到下一个 channel 中或者进入终端才会被删除。当 sink 写入失败后,可以自 动重启,不会造成数据丢失,因此很可靠。</p>
+
+<p>sink 会消费 channel 中的数据,然后送给外部源或者其他 source。如数据可以写入到 HDFS 或者 HBase 中。</p>
+
+<h2 id="多代理流">多代理流</h2>
+
+<p><img src="https://img-blog.csdn.net/20161029231328382" alt="这里写图片描述" title=""></p>
+
+<p><strong>flume 允许多个 agent 连在一起</strong>,形成前后相连的多级跳。</p>
+
+<p><img src="https://img-blog.csdn.net/20161029232024229" alt="这里写图片描述" title=""> <br>
+合并流 <br>
+<img src="https://img-blog.csdn.net/20161030211335414" alt="这里写图片描述" title=""> <br>
+多通路流 <br>
+<img src="https://img-blog.csdn.net/20161030211435484" alt="这里写图片描述" title=""></p>
+
+<h1 id="核心组件解析"><strong>核心组件解析</strong></h1>
+
+<h2 id="source"><strong>source</strong></h2>
+
+<p>Client 端操作消费数据的来源,Flume 支持 Avro,log4j,syslog 和 http post(body 为 json 格式)。可以让应用程序同已有的 Source 直接打交道,如 AvroSource,SyslogTcpSource。也可以写一个 Source,以 IPC(进程间通信协议) 或 RPC(远程进程间通信协议) 的 方式接入自己的应用,Avro 和 Thrift 都可以(分别有 NettyAvroRpcClient 和 ThriftRpcClient 实 现 了 RpcClient 接 口),其中 Avro 是默认的 RPC 协议。具体代码级别的 Client 端数 据接入,可以参考官方手册。</p>
+
+<p>对现有程序改动最小的使用方式是使用是直接读取程序原来记录 的日志文件,基本可以实现无缝接入,不需要对现有程序进行任何改 动。 对于</p>
+
+<h2 id="直接读取文件-source有两种方式"><strong>直接读取文件 Source,有两种方式:</strong></h2>
+
+<h2 id="execsource"><strong>ExecSource</strong>:</h2>
+
+<p>以运行 Linux 命令的方式,持续的输出最新的数 据,如           文件名 指令,在这种方式下,取的文件名必须是指 定的。 ExecSource 可以实现对日志的实时收集,但是存在 Flume 不 运行或者指令执行出错时,将无法收集到日志数据,无法保证日志数 据的完整性。</p>
+
+<p>且flume 运行中可动态的修改配置文件。flume不用停止动态修改。</p>
+
+<h2 id="spoolsource"><strong>SpoolSource:</strong></h2>
+
+<p>监测配置的目录下新增的文件,并将文件中的数据 读取出来。需要注意两点:</p>
+
+<p>拷贝到 spool 目录下的文件不可以再打 开编辑; <br>
+spool 目录下不可包含相应的子目录。</p>
+
+<p>SpoolSource 虽然无 法实现实时的收集数据,但是可以使用以分钟的方式分割文件,趋近 于实时。如果应用无法实现以分钟切割日志文件的话,可以两种收集 方式结合使用。 在实际使用的过程中,可以结合 log4j 使用,使用 log4j 的时候,将 log4j 的文件分割机制设为1分钟一次,将文件拷 贝到 spool 的监控目录。log4j 有一个 TimeRolling 的插件,可以 把 log4j 分割文件到 spool 目录。基本实现了实时的监控。</p>
+
+<p>Flume 在传完文件之后,将会修改文件的后缀,变为 <strong>.COMPLETED</strong> (后缀也可以在配置文件中灵活指定)。</p>
+
+<h2 id="channel"><strong>Channel</strong></h2>
+
+<p>有几个 channel 可供选择,分别是 Memory Channel, JDBC Channel , File Channel,  Psuedo Transaction Channel。比较常见 的是前三种 channel。</p>
+
+<p>MemoryChannel 可以实现<strong>高速的吞吐</strong>,但是<strong>无法保证数据的完整 性</strong>。 <br>
+Memory Channel 是一个 不稳定的隧道,其原因是由于它在内存中存储所有事件。如果 java 进程死掉,任何存储在内存的事件将会丢失。另外,内存的空间受到 RAM 大小的限制。 <br>
+MemoryRecoverChannel 在官方文档的建议上已经建义使用 FileChannel 来替换。</p>
+
+<p>FileChannel 保证数据的<strong>完整性与一致性</strong>。在具体配置 FileChannel 时,建议 FileChannel 设置的目录和程序日志文件保存 的目录设成不同的磁盘,以便提高效率。</p>
+
+<p>File Channel 是一个持久化的隧道(channel),它持久化所有的 事件,并将其存储到磁盘中。因此,即使 Java 虚拟机当掉,或者操 作系统崩溃或重启,再或者事件没有在管道中成功地传递到下一个代 理(agent),这一切都不会造成数据丢失。,而 File Channel 不受内存和 jvm 的限制,只要磁盘空 间足够,它就可以将所有事件数据存储到磁盘上。</p>
+
+<h2 id="sink"><strong>sink</strong></h2>
+
+<p>Sink 在设置存储数据时,可以向文件系统、数据库、hadoop 存数 据,在日志数据较少时,可以将数据存储在文件系中,并且设定一定 的时间间隔保存数据。（一定时间间隔把数据刷到文件系统中） 在日志数据较多时,可以将相应的日志数据存 储到 Hadoop 中,便于日后进行相应的数据分析.更多 sink 的内容可 以参考官方手册。</p>
+
+<hr>
+
+<h1 id="flume处理日志">Flume处理日志</h1>
+
+<p>Flume不止可以采集日志，还可以对日志进行简单的处理，在source处可以通过interceptor对日志正文处的重要内容进行过滤提取，在channel处可以通过header进行分类，将不同类型的日志投入不同的通道中，在sink处可以通过正则序列化来将正文内容进行进一步的过滤和分类。</p>
+
+
+
+<h2 id="flume-source-interceptors">Flume Source Interceptors</h2>
+
+<p>Flume可以通过interceptor将重要信息提取出来并且加入到header中，常用的interceptor有时间戳、主机名和UUID等，用户也可以根据个人需求编写正则过滤器，将某些特定格式的日志内容过滤出来，以满足特殊需求。</p>
+
+
+
+<h2 id="flume-channel-selectors">Flume Channel Selectors</h2>
+
+<p>Flume可以根据需求将不同的日志传输进不同的channel，具体方式有两种：复制和多路传输。复制就是不对日志进行分组，而是将所有日志都传输到每个通道中，对所有通道不做区别对待；多路传输就是根据指定的header将日志进行分类，根据分类规则将不同的日志投入到不同的channel中，从而将日志进行人为的初步分类。</p>
+
+
+
+<h2 id="flume-sink-processors">Flume Sink Processors</h2>
+
+<p>Flume在sink处也可以对日志进行处理，常见的sink处理器包括custom、failover、load balancing和default等，和interceptor一样，用户也可以根据特殊需求使用正则过滤处理器，将日志内容过滤出来，但和interceptor不同的是在sink处使用正则序列化过滤出的内容不会加入到header中，从而不会使日志的header显得过于臃肿。</p>
+
+<hr>
+
+
+
+<h1 id="性能">性能</h1>
+
+<h2 id="可靠性"><strong>可靠性</strong></h2>
+
+<p>Flume 的核心是把数据从数据源收集过来,再送到目的地。为了 保证输送一定成功,在送到目的地之前,会先缓存数据,待数据真正 到达目的地后,删除自己缓存的数据。(sink传输后删除channel  的数据)</p>
+
+<p>Flume 使用<strong>事务性</strong>的方式保证传送 Event 整个过程的可靠性。 Sink 必须在 Event <strong>被存入</strong> Channel 后,或者已经被传达到下一 站 agent 里,又或者,已经被存入外部数据目的地之后,才能把 Event 从 Channel 中 remove 掉。(也就是数据持久化了，或者数据流出当前agent)这样数据流里的 event 无论是在一个 agent 里还是多个 agent 之间流转,都能保证可靠,因为<strong>以上的事 务</strong>保证了 event 会被成功存储起来。而 Channel 的多种实现在可恢 复性上有不同的保证。也保证了 event 不同程度的可靠性。比如 Flume 支持在本地保存一份文件 channel 作为备份,而 memory channel 将 event 存在内存 queue 里,速度快,但丢失的话无法恢 复。</p>
+
+<h2 id="可恢复性"><strong>可恢复性</strong></h2>
+
+<p>还是靠 Channel。推荐使用 FileChannel,事件持久化在本地文件 系统里(性能较差)。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

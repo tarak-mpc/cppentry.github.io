@@ -1,0 +1,315 @@
+---
+layout:     post
+title:      消息中间件kafka（0.9以及0.10版本）学习及实践
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文同步个人博客http://blueskykong.com/，为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/keets1992/article/details/52316053				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"></span>
+<div style="line-height:1.5;font-size:14px;"><strong>目录</strong></div>
+<div style="line-height:1.5;font-size:14px;">一、介绍</div>
+<div style="line-height:1.5;font-size:14px;">二、特点</div>
+<div style="line-height:1.5;font-size:14px;">三、何时需要消息队列</div>
+<div style="line-height:1.5;font-size:14px;">四、组件</div>
+<div style="line-height:1.5;font-size:14px;">五、消息发送的流程</div>
+<div style="line-height:1.5;font-size:14px;">六、原理</div>
+<div style="line-height:1.5;font-size:14px;">七、实践</div>
+<div style="line-height:1.5;font-size:14px;">八、版本比较</div>
+</div>
+<div style="line-height:1.5;"><span style="font-size:18px;"><a href="http://http//blog.csdn.net/keets1992/article/details/52316053" rel="nofollow">查看文章链接</a></span></div>
+<div style="line-height:1.5;"><span style="font-size:18px;color:#33ccff;">中间件交流群：461333361</span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;">一、介绍</span></div>
+<div style="line-height:1.5;font-size:14px;">kafka，A distributed publish-subscribe messaging system，消息中间件利用高效可靠的消息传递机制进行平台无关的数据交流，并基于数据通信来进行分布式系统的集成。通过提供消息传递和消息排队模型，它可以在分布式环境下扩展进程间的通信。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">kafka是LinkedIn开源出来的一款消息中间件，用scala语言，在LinkedIn的业务场景中用于收集日志信息，典型的pub-sub中的pull模型。一般的JMS都是push模型，如老牌的RabbitMQ，ActiveMQ等。pull模型的还有RocketMQ，用java语言基于kafka原理改写的，一种优化的做法----长轮询pull模型。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;">二、特点</span></div>
+<div style="text-indent:28px;line-height:1.5;font-size:14px;">
+MQ生来就是解决生产者和消费者速度不匹配的问题而诞生的，那么MQ系统一个最最基本的要求就是写入速度必须要快，哪怕出队速度慢点也无所谓，因为业务高峰期持续时间是有限的，高峰结束之后有的是时间让消费者慢慢消化，更别说简单粗暴多加几台消费者就好了。</div>
+<div style="text-indent:28px;line-height:1.5;font-size:14px;">
+1.同时为发布和订阅提供高吞吐量。据了解，Kafka每秒可以生产约25万消息（50 MB），每秒处理55万消息（110 MB）。</div>
+<div style="line-height:1.5;text-indent:28px;font-size:14px;">
+2.可进行持久化操作。将消息持久化到磁盘，因此可用于批量消费，例如ETL，以及实时应用程序。通过将数据持久化到硬盘以及replication防止数据丢失。</div>
+<div style="line-height:1.5;text-indent:28px;font-size:14px;">
+3.分布式系统，易于向外扩展。所有的producer、broker和consumer都会有多个，均为分布式的。无需停机即可扩展机器。</div>
+<div style="line-height:1.5;text-indent:28px;font-size:14px;">
+4.消息被处理的状态是在consumer端维护，而不是由server端维护。当失败时能自动平衡。</div>
+<div style="line-height:1.5;text-indent:28px;font-size:14px;">
+5.支持online和offline的场景。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;">三、何时需要消息队列</span></div>
+<div style="line-height:1.5;font-size:14px;">MQ消息队列是应运松偶合的概念而产生的，主要以队列和发布订阅为消息传输机制，以异步的方式将消息可靠的传输到消费端的一种基础产品。</div>
+<div style="line-height:1.5;font-size:14px;">它被广泛的应用与跨平台、跨系统的分布式系统之间，为它们提供高效可靠的异步传输机制。</div>
+<div style="line-height:1.5;font-size:14px;">可以使用mq的场景有很多，最常用的几种，是做业务解耦/最终一致性/广播/错峰流控等。反之，如果需要强一致性，关注业务逻辑的处理结果，则RPC显得更为合适。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;">四、组件</span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"><img src="https://img-blog.csdn.net/20160825164122596?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"></span>
+<div style="line-height:1.5;font-size:14px;">broker：发布和订阅的中间者，堆积消息。</div>
+<div style="line-height:1.5;font-size:14px;">zookeeper：管理kafka集群，监控每个broker的状态，使得发布和订阅都与有效的broker进行。</div>
+<div style="line-height:1.5;font-size:14px;">producer：消息的发布者。<span style="font-family:Helvetica;">Producer将消息发布到指定的Topic中,同时Producer也能决定将此消息发送到哪个partition。</span></div>
+<div style="line-height:1.5;font-size:14px;">consumer：异步消费者，通过订阅感兴趣的topic，从broker拉取消息进行消费。在kafka中,一个partition中的消息只会被group中的一个consumer消费(同一时刻);每个group中consumer消息消费互相独立;我们可以认为一个group是一个"订阅"者,一个Topic中的每个partions,只会被一个"订阅者"中的一个consumer消费,不过一个consumer可以同时消费多个partitions中的消息.kafka只能保证一个partition中的消息被某个consumer消费时是顺序的.事实上,从Topic角度来说,当有多个partitions时,消息仍不是全局有序的.</div>
+<div style="line-height:1.5;font-size:14px;">Consumer group: 每个consumer客户端被创建时,会向zookeeper注册自己的信息;此作用主要是为了"负载均衡".一个group中的多个consumer可以交错的消费一个topic的所有partitions;简而言之,保证此topic的所有partitions都能被此group所消费,且消费时为了性能考虑,让partition相对均衡的分散到每个consumer上.</div>
+<div style="line-height:1.5;font-size:14px;">topic：将消息划分成话题，作为某一类型的队列。</div>
+<div style="line-height:1.5;font-size:14px;">Partition： parition是物理上的概念，每个topic包含一个或多个partition，创建topic时可指定parition数量。每个partition对应于一个文件夹，该文件夹下存储该partition的数据和索引文件。topic进行划分为多个分区，分区可以自己写函数指定分配消息到某一分区，默认的如hash，round-robin方式，Kafka尽量的使所有分区均匀的分布到集群所有的节点上而不是集中在某些节点上，另外主从关系也尽量均衡这样每个几点都会担任一定比例的分区的leader.。<span style="font-size:15px;color:rgb(46,46,46);">每个partition是一个有序的队列，每条消息拥有一个offset。</span></div>
+<img src="https://img-blog.csdn.net/20160825164232452?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"></span>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;">五、消息发送的流程</span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"><img src="https://img-blog.csdn.net/20160825164307389?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"></span>
+<div style="text-indent:28px;line-height:1.5;font-size:14px;">
+1.Producer根据指定的partition方法（round-robin、hash等），将消息发布到指定topic的partition里面</div>
+<div style="line-height:1.5;text-indent:28px;font-size:14px;">
+2.kafka集群接收到Producer发过来的消息后，将其持久化到硬盘，并保留消息指定时长（可配置），而不关注消息是否被消费。</div>
+<div style="line-height:1.5;text-indent:28px;font-size:14px;">
+3.Consumer从kafka集群pull数据，并控制获取消息的offset</div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;">六、原理</span></div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">1.持久化</span></div>
+<div style="line-height:1.5;font-size:14px;">kafka使用文件存储消息(append only log),这就直接决定kafka在性能上严重依赖文件系统的本身特性.且无论任何OS下,对文件系统本身的优化是非常艰难的.文件缓存/直接内存映射等是常用的手段.因为kafka是对日志文件进行append操作,因此磁盘检索的开支是较小的;同时为了减少磁盘写入的次数,broker会将消息暂时buffer起来,当消息的个数(或尺寸)达到一定阀值时,再flush到磁盘,这样减少了磁盘IO调用的次数.对于kafka而言,较高性能的磁盘,将会带来更加直接的性能提升.</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">2.性能</span></div>
+<div style="line-height:1.5;font-size:14px;">除磁盘IO之外,我们还需要考虑网络IO,这直接关系到kafka的吞吐量问题.kafka并没有提供太多高超的技巧;对于producer端,可以将消息buffer起来,当消息的条数达到一定阀值时,批量发送给broker;对于consumer端也是一样,批量fetch多条消息.不过消息量的大小可以通过配置文件来指定.对于kafka broker端,似乎有个sendfile系统调用可以潜在的提升网络IO的性能:将文件的数据映射到系统内存中,socket直接读取相应的内存区域即可,而无需进程再次copy和交换(这里涉及到"磁盘IO数据"/"内核内存"/"进程内存"/"网络缓冲区",多者之间的数据copy).</div>
+<div style="line-height:1.5;font-size:14px;">其实对于producer/consumer/broker三者而言,CPU的开支应该都不大,因此启用消息压缩机制是一个良好的策略;压缩需要消耗少量的CPU资源,不过对于kafka而言,网络IO更应该需要考虑.可以将任何在网络上传输的消息都经过压缩.kafka支持gzip/snappy等多种压缩方式.</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">3.负载均衡</span></div>
+<div style="line-height:1.5;font-size:14px;">kafka集群中的任何一个broker,都可以向producer提供metadata信息,这些metadata中包含"集群中存活的servers列表"/"partitions leader列表"等信息(请参看zookeeper中的节点信息). 当producer获取到metadata信息之后, producer将会和Topic下所有partition leader保持socket连接;消息由producer直接通过socket发送到broker,中间不会经过任何"路由层".</div>
+<div style="line-height:1.5;font-size:14px;">异步发送，将多条消息暂且在客户端buffer起来,并将他们批量发送到broker;小数据IO太多,会拖慢整体的网络延迟,批量延迟发送事实上提升了网络效率;不过这也有一定的隐患,比如当producer失效时,那些尚未发送的消息将会丢失。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">4.Topic模型</span></div>
+<div style="line-height:1.5;font-size:14px;">其他JMS实现,消息消费的位置是有prodiver保留,以便避免重复发送消息或者将没有消费成功的消息重发等,同时还要控制消息的状态.这就要求JMS broker需要太多额外的工作.在kafka中,partition中的消息只有一个consumer在消费,且不存在消息状态的控制,也没有复杂的消息确认机制,可见kafka broker端是相当轻量级的.当消息被consumer接收之后,consumer可以在本地保存最后消息的offset,并间歇性的向zookeeper注册offset.由此可见,consumer客户端也很轻量级。</div>
+<div style="line-height:1.5;font-size:14px;">kafka中consumer负责维护消息的消费记录,而broker则不关心这些,这种设计不仅提高了consumer端的灵活性,也适度的减轻了broker端设计的复杂度;这是和众多JMS prodiver的区别.此外,kafka中消息ACK的设计也和JMS有很大不同,kafka中的消息是批量(通常以消息的条数或者chunk的尺寸为单位)发送给consumer,当消息消费成功后,向zookeeper提交消息的offset,而不会向broker交付ACK.或许你已经意识到,这种"宽松"的设计,将会有"丢失"消息/"消息重发"的危险.</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">5.消息传输一致</span></div>
+<div style="line-height:1.5;font-size:14px;">Kafka提供3种消息传输一致性语义：最多1次，最少1次，恰好1次。</div>
+<div style="line-height:1.5;font-size:14px;">最少1次：可能会重传数据，有可能出现数据被重复处理的情况;</div>
+<div style="line-height:1.5;font-size:14px;">最多1次：可能会出现数据丢失情况;</div>
+<div style="line-height:1.5;font-size:14px;">恰好1次：并不是指真正只传输1次，只不过有一个机制。确保不会出现“数据被重复处理”和“数据丢失”的情况。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">at most once: 消费者fetch消息,然后保存offset,然后处理消息;当client保存offset之后,但是在消息处理过程中consumer进程失效(crash),导致部分消息未能继续处理.那么此后可能其他consumer会接管,但是因为offset已经提前保存,那么新的consumer将不能fetch到offset之前的消息(尽管它们尚没有被处理),这就是"at
+ most once".</div>
+<div style="line-height:1.5;font-size:14px;">at least once: 消费者fetch消息,然后处理消息,然后保存offset.如果消息处理成功之后,但是在保存offset阶段zookeeper异常或者consumer失效,导致保存offset操作未能执行成功,这就导致接下来再次fetch时可能获得上次已经处理过的消息,这就是"at least once".</div>
+<div style="line-height:1.5;font-size:14px;">"Kafka Cluster"到消费者的场景中可以采取以下方案来得到“恰好1次”的一致性语义：</div>
+<div style="line-height:1.5;font-size:14px;">最少1次＋消费者的输出中额外增加已处理消息最大编号：由于已处理消息最大编号的存在，不会出现重复处理消息的情况。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">6.副本</span></div>
+<div style="line-height:1.5;font-size:14px;">kafka中,replication策略是基于partition,而不是topic;kafka将每个partition数据复制到多个server上,任何一个partition有一个leader和多个follower(可以没有);备份的个数可以通过broker配置文件来设定。leader处理所有的read-write请求,follower需要和leader保持同步.Follower就像一个"consumer",消费消息并保存在本地日志中;leader负责跟踪所有的follower状态,如果follower"落后"太多或者失效,leader将会把它从replicas同步列表中删除.当所有的follower都将一条消息保存成功,此消息才被认为是"committed",那么此时consumer才能消费它,这种同步策略,就要求follower和leader之间必须具有良好的网络环境.即使只有一个replicas实例存活,仍然可以保证消息的正常发送和接收,只要zookeeper集群存活即可.</div>
+<div style="line-height:1.5;font-size:14px;">选择follower时需要兼顾一个问题,就是新leader server上所已经承载的partition leader的个数,如果一个server上有过多的partition leader,意味着此server将承受着更多的IO压力.在选举新leader,需要考虑到"负载均衡",partition leader较少的broker将会更有可能成为新的leader.</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">7.log</div>
+<div style="line-height:1.5;font-size:14px;">每个log entry格式为"4个字节的数字N表示消息的长度" + "N个字节的消息内容";每个日志都有一个offset来唯一的标记一条消息,offset的值为8个字节的数字,表示此消息在此partition中所处的起始位置..每个partition在物理存储层面,有多个log file组成(称为segment).segment file的命名为"最小offset".kafka.例如"00000000000.kafka";其中"最小offset"表示此segment中起始消息的offset.</div>
+<img src="https://img-blog.csdn.net/20160825164400296?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"></span>
+<div style="line-height:1.5;font-size:14px;">获取消息时,需要指定offset和最大chunk尺寸,offset用来表示消息的起始位置,chunk size用来表示最大获取消息的总长度(间接的表示消息的条数).根据offset,可以找到此消息所在segment文件,然后根据segment的最小offset取差值,得到它在file中的相对位置,直接读取输出即可.</div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">7.分布式</span></div>
+<div style="line-height:1.5;font-size:14px;">kafka使用zookeeper来存储一些meta信息,并使用了zookeeper watch机制来发现meta信息的变更并作出相应的动作(比如consumer失效,触发负载均衡等)</div>
+<div style="line-height:1.5;font-size:14px;">Broker node registry: 当一个kafka broker启动后,首先会向zookeeper注册自己的节点信息(临时znode),同时当broker和zookeeper断开连接时,此znode也会被删除.</div>
+<div style="line-height:1.5;font-size:14px;">Broker Topic Registry: 当一个broker启动时,会向zookeeper注册自己持有的topic和partitions信息,仍然是一个临时znode.</div>
+<div style="line-height:1.5;font-size:14px;">Consumer and Consumer group: 每个consumer客户端被创建时,会向zookeeper注册自己的信息;此作用主要是为了"负载均衡".一个group中的多个consumer可以交错的消费一个topic的所有partitions;简而言之,保证此topic的所有partitions都能被此group所消费,且消费时为了性能考虑,让partition相对均衡的分散到每个consumer上.</div>
+<div style="line-height:1.5;font-size:14px;">Consumer id Registry: 每个consumer都有一个唯一的ID(host:uuid,可以通过配置文件指定,也可以由系统生成),此id用来标记消费者信息.</div>
+<div style="line-height:1.5;font-size:14px;">Consumer offset Tracking: 用来跟踪每个consumer目前所消费的partition中最大的offset.此znode为持久节点,可以看出offset跟group_id有关,以表明当group中一个消费者失效,其他consumer可以继续消费.</div>
+<div style="line-height:1.5;font-size:14px;">Partition Owner registry: 用来标记partition正在被哪个consumer消费.临时znode。此节点表达了"一个partition"只能被group下一个consumer消费,同时当group下某个consumer失效,那么将会触发负载均衡(即:让partitions在多个consumer间均衡消费,接管那些"游离"的partitions)</div>
+<div style="line-height:1.5;font-size:14px;">当consumer启动时,所触发的操作:</div>
+<div style="line-height:1.5;font-size:14px;">A) 首先进行"Consumer id Registry";</div>
+<div style="line-height:1.5;font-size:14px;">B) 然后在"Consumer id Registry"节点下注册一个watch用来监听当前group中其他consumer的"leave"和"join";只要此znode path下节点列表变更,都会触发此group下consumer的负载均衡.(比如一个consumer失效,那么其他consumer接管partitions).</div>
+<div style="line-height:1.5;font-size:14px;">C) 在"Broker id registry"节点下,注册一个watch用来监听broker的存活情况;如果broker列表变更,将会触发所有的groups下的consumer重新balance.</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">总结: </div>
+<div style="line-height:1.5;font-size:14px;">1) Producer端使用zookeeper用来"发现"broker列表,以及和Topic下每个partition leader建立socket连接并发送消息.</div>
+<div style="line-height:1.5;font-size:14px;">2) Broker端使用zookeeper用来注册broker信息,已经监测partition leader存活性.</div>
+<div style="line-height:1.5;font-size:14px;">3) Consumer端使用zookeeper用来注册consumer信息,其中包括consumer消费的partition列表等,同时也用来发现broker列表,并和partition leader建立socket连接,并获取消息。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">8.Leader的选择</span></div>
+<div style="line-height:1.5;font-size:14px;">Kafka的核心是日志文件，日志文件在集群中的同步是分布式数据系统最基础的要素。</div>
+<div style="line-height:1.5;font-size:14px;">如果leaders永远不会down的话我们就不需要followers了！一旦leader down掉了，需要在followers中选择一个新的leader.但是followers本身有可能延时太久或者crash，所以必须选择高质量的follower作为leader.必须保证，一旦一个消息被提交了，但是leader down掉了，新选出的leader必须可以提供这条消息。大部分的分布式系统采用了多数投票法则选择新的leader,对于多数投票法则，就是根据所有副本节点的状况动态的选择最适合的作为leader.Kafka并不是使用这种方法。</div>
+<div style="line-height:1.5;font-size:14px;">Kafka动态维护了一个同步状态的副本的集合（a set of in-sync replicas），简称ISR，在这个集合中的节点都是和leader保持高度一致的，任何一条消息必须被这个集合中的每个节点读取并追加到日志中了，才回通知外部这个消息已经被提交了。因此这个集合中的任何一个节点随时都可以被选为leader.ISR在ZooKeeper中维护。ISR中有f+1个节点，就可以允许在f个节点down掉的情况下不会丢失消息并正常提供服。ISR的成员是动态的，如果一个节点被淘汰了，当它重新达到“同步中”的状态时，他可以重新加入ISR.这种leader的选择方式是非常快速的，适合kafka的应用场景。</div>
+<div style="line-height:1.5;font-size:14px;">一个邪恶的想法：如果所有节点都down掉了怎么办？Kafka对于数据不会丢失的保证，是基于至少一个节点是存活的，一旦所有节点都down了，这个就不能保证了。</div>
+<div style="line-height:1.5;font-size:14px;">实际应用中，当所有的副本都down掉时，必须及时作出反应。可以有以下两种选择:</div>
+<div style="line-height:1.5;font-size:14px;">1. 等待ISR中的任何一个节点恢复并担任leader。</div>
+<div style="line-height:1.5;font-size:14px;">2. 选择所有节点中（不只是ISR）第一个恢复的节点作为leader.</div>
+<div style="line-height:1.5;font-size:14px;">这是一个在可用性和连续性之间的权衡。如果等待ISR中的节点恢复，一旦ISR中的节点起不起来或者数据都是了，那集群就永远恢复不了了。如果等待ISR意外的节点恢复，这个节点的数据就会被作为线上数据，有可能和真实的数据有所出入，因为有些数据它可能还没同步到。Kafka目前选择了第二种策略，在未来的版本中将使这个策略的选择可配置，可以根据场景灵活的选择。</div>
+<div style="line-height:1.5;font-size:14px;">这种窘境不只Kafka会遇到，几乎所有的分布式数据系统都会遇到。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">9.副本管理</span></div>
+<div style="line-height:1.5;font-size:14px;">以上仅仅以一个topic一个分区为例子进行了讨论，但实际上一个Kafka将会管理成千上万的topic分区.Kafka尽量的使所有分区均匀的分布到集群所有的节点上而不是集中在某些节点上，另外主从关系也尽量均衡这样每个几点都会担任一定比例的分区的leader.</div>
+<div style="line-height:1.5;font-size:14px;">优化leader的选择过程也是很重要的，它决定了系统发生故障时的空窗期有多久。Kafka选择一个节点作为“controller”,当发现有节点down掉的时候它负责在游泳分区的所有节点中选择新的leader,这使得Kafka可以批量的高效的管理所有分区节点的主从关系。如果controller down掉了，活着的节点中的一个会备切换为新的controller.</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">10.Leader与副本同步</span></div>
+<div style="line-height:1.5;font-size:14px;">对于某个分区来说，保存正分区的"broker"为该分区的"leader"，保存备份分区的"broker"为该分区的"follower"。备份分区会完全复制正分区的消息，包括消息的编号等附加属性值。为了保持正分区和备份分区的内容一致，Kafka采取的方案是在保存备份分区的"broker"上开启一个消费者进程进行消费，从而使得正分区的内容与备份分区的内容保持一致。一般情况下，一个分区有一个“正分区”和零到多个“备份分区”。可以配置“正分区+备份分区”的总数量，关于这个配置，不同主题可以有不同的配置值。注意，生产者，消费者只与保存正分区的"leader"进行通信。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">Kafka允许topic的分区拥有若干副本，这个数量是可以配置的，你可以为每个topic配置副本的数量。Kafka会自动在每个副本上备份数据，所以当一个节点down掉时数据依然是可用的。</div>
+<div style="line-height:1.5;font-size:14px;">Kafka的副本功能不是必须的，你可以配置只有一个副本，这样其实就相当于只有一份数据。</div>
+<div style="line-height:1.5;font-size:14px;">创建副本的单位是topic的分区，每个分区都有一个leader和零或多个followers.所有的读写操作都由leader处理，一般分区的数量都比broker的数量多的多，各分区的leader均匀的分布在brokers中。所有的followers都复制leader的日志，日志中的消息和顺序都和leader中的一致。followers向普通的consumer那样从leader那里拉取消息并保存在自己的日志文件中。</div>
+<div style="line-height:1.5;font-size:14px;">许多分布式的消息系统自动的处理失败的请求，它们对一个节点是否着（alive）”有着清晰的定义。Kafka判断一个节点是否活着有两个条件：</div>
+<div style="line-height:1.5;font-size:14px;">1. 节点必须可以维护和ZooKeeper的连接，Zookeeper通过心跳机制检查每个节点的连接。</div>
+<div style="line-height:1.5;font-size:14px;">2. 如果节点是个follower,他必须能及时的同步leader的写操作，延时不能太久。</div>
+<div style="line-height:1.5;font-size:14px;">符合以上条件的节点准确的说应该是“同步中的（in sync）”，而不是模糊的说是“活着的”或是“失败的”。Leader会追踪所有“同步中”的节点，一旦一个down掉了，或是卡住了，或是延时太久，leader就会把它移除。至于延时多久算是“太久”，是由参数replica.lag.max.messages决定的，怎样算是卡住了，怎是由参数replica.lag.time.max.ms决定的。</div>
+<div style="line-height:1.5;font-size:14px;">只有当消息被所有的副本加入到日志中时，才算是“committed”，只有committed的消息才会发送给consumer，这样就不用担心一旦leader down掉了消息会丢失。Producer也可以选择是否等待消息被提交的通知，这个是由参数acks决定的。</div>
+<div style="line-height:1.5;font-size:14px;">Kafka保证只要有一个“同步中”的节点，“committed”的消息就不会丢失。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;">七、实践</span></div>
+<div style="line-height:1.5;font-size:14px;">搭建环境如下图，kafka集群5台broker，使用zookeeper管理集群，注册producer和consumer。</div>
+<img src="https://img-blog.csdn.net/20160825164450211?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"></span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">zookeeper配置：</span></div>
+<div style="line-height:1.5;font-size:14px;"># the directory where the snapshot is stored.</div>
+<div style="line-height:1.5;font-size:14px;">dataDir=/home/fund/zk/data</div>
+<div style="line-height:1.5;font-size:14px;">dataLogDir=/home/fund/zk/log</div>
+<div style="line-height:1.5;font-size:14px;"># the port at which the clients will connect</div>
+<div style="line-height:1.5;font-size:14px;">clientPort=2181</div>
+<div style="line-height:1.5;font-size:14px;"># disable the per-ip limit on the number of connections since this is a non-production config</div>
+<div style="line-height:1.5;font-size:14px;">maxClientCnxns=0</div>
+<div style="line-height:1.5;font-size:14px;">server.1=172.16.30.*:2888:3888</div>
+<div style="line-height:1.5;font-size:14px;">server.2=172.16.30.*:2888:3888</div>
+<div style="line-height:1.5;font-size:14px;">server.3=172.16.30.*:2888:3888</div>
+<div style="line-height:1.5;font-size:14px;">server.4=172.16.30.*:2888:3888</div>
+<div style="line-height:1.5;font-size:14px;">server.5=172.16.30.*:2888:3888</div>
+<div style="line-height:1.5;font-size:14px;">initLimit=5</div>
+<div style="line-height:1.5;font-size:14px;">syncLimit=2</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">broker配置：</span></div>
+<div style="line-height:1.5;font-size:14px;">############################# Server Basics #############################</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">broker.id=213</div>
+<div style="line-height:1.5;font-size:14px;">delete.topic.enable=true</div>
+<div style="line-height:1.5;font-size:14px;">############################# Socket Server Settings #############################</div>
+<div style="line-height:1.5;font-size:14px;">listeners=PLAINTEXT://:9092</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">advertised.host.name=172.16.30.*</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">num.network.threads=3</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">num.io.threads=8</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">socket.send.buffer.bytes=102400</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">socket.receive.buffer.bytes=102400</div>
+<div style="line-height:1.5;font-size:14px;">#min.insync.replicas=3</div>
+<div style="line-height:1.5;font-size:14px;">socket.request.max.bytes=104857600</div>
+<div style="line-height:1.5;font-size:14px;">offsets.topic.replication.factor=3</div>
+<div style="line-height:1.5;font-size:14px;">auto.leader.rebalance.enable=true</div>
+<div style="line-height:1.5;font-size:14px;">auto.create.topics.enable=true</div>
+<div style="line-height:1.5;font-size:14px;">offsets.commit.required.acks=-1</div>
+<div style="line-height:1.5;font-size:14px;">unclean.leader.election=false</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">############################# Log Basics #############################</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">log.dirs=/tmp/kafka-logs-1</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">num.partitions=10</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">num.recovery.threads.per.data.dir=3</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">############################# Log Flush Policy #############################</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">log.flush.interval.messages=10000</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">log.flush.interval.ms=1000</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">############################# Log Retention Policy #############################</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">log.retention.hours=168</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">log.retention.bytes=1073741824</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">log.segment.bytes=1073741824</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">log.retention.check.interval.ms=300000</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">############################# Zookeeper #############################</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">zookeeper.connect=172.16.30.*:2181,172.16.30.*:2181,172.16.30.*:2181,172.16.30.*:2181,172.16.30.*:2181</div>
+<div style="line-height:1.5;font-size:14px;">host.name=172.16.30.*</div>
+<div style="line-height:1.5;font-size:14px;">zookeeper.connection.timeout.ms=6000</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">producer配置：</span></div>
+<div style="line-height:1.5;font-size:14px;">acks=1</div>
+<div style="line-height:1.5;font-size:14px;">retries=3</div>
+<div style="line-height:1.5;font-size:14px;">batch.size=16384</div>
+<div style="line-height:1.5;font-size:14px;">#Normally this occurs only under load when records arrive faster than they can be sent out.</div>
+<div style="line-height:1.5;font-size:14px;">linger.ms=1</div>
+<div style="line-height:1.5;font-size:14px;">timeout.ms=30000</div>
+<div style="line-height:1.5;font-size:14px;">buffer.memory=33554432</div>
+<div style="line-height:1.5;font-size:14px;">retry.backoff.ms=100</div>
+<div style="line-height:1.5;font-size:14px;">connections.max.idle.ms=540000</div>
+<div style="line-height:1.5;font-size:14px;">bootstrap.servers=172.16.30.*:9092</div>
+<div style="line-height:1.5;font-size:14px;">partitioner.class=org.apache.kafka.clients.producer.internals.DefaultPartitioner</div>
+<div style="line-height:1.5;font-size:14px;">value.serializer=com.common.kafka.message.KafkaMessageSerializer</div>
+<div style="line-height:1.5;font-size:14px;">key.serializer=org.apache.kafka.common.serialization.LongSerializer</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">consumer配置：</span></div>
+<div style="line-height:1.5;font-size:14px;">bootstrap.servers=172.16.30.*:9092</div>
+<div style="line-height:1.5;font-size:14px;">enable.auto.commit=flase</div>
+<div style="line-height:1.5;font-size:14px;">session.timeout.ms=30000</div>
+<div style="line-height:1.5;font-size:14px;">fetch.min.bytes=1</div>
+<div style="line-height:1.5;font-size:14px;">exclude.internal.topics=true</div>
+<div style="line-height:1.5;font-size:14px;">auto.offset.reset=latest</div>
+<div style="line-height:1.5;font-size:14px;">key.deserializer=org.apache.kafka.common.serialization.LongDeserializer</div>
+<div style="line-height:1.5;font-size:14px;">value.deserializer=org.apache.kafka.common.serialization.StringDeserializer</div>
+<div style="line-height:1.5;font-size:14px;">group.id=test_50</div>
+<div style="line-height:1.5;font-size:14px;">heartbeat.interval.ms=3000</div>
+<div style="line-height:1.5;font-size:14px;">connections.max.idle.ms=540000</div>
+<div style="line-height:1.5;font-size:14px;">max.poll.records=2147483647</div>
+<div style="line-height:1.5;font-size:14px;">request.timeout.ms=40000</div>
+<div style="line-height:1.5;font-size:14px;">reconnect.backoff.ms=50</div>
+<div style="line-height:1.5;font-size:14px;">retry.backoff.ms=100</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;">测试用例：<a href="https://docs.google.com/spreadsheets/d/1bDt3yT9J9bK1krJhBH-fA-1iLdbfbtjMRIc6er8Giq0/edit#gid=0" rel="nofollow"><span style="color:rgb(0,0,255);">kafka tests</span></a></div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;">八、版本比较</span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">（一）、0.8.x vs 0.9</span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">1.安全</span></div>
+<div style="line-height:1.5;font-size:14px;">Kafka提供了三个安全特性。</div>
+<div style="line-height:1.5;font-size:14px;">一是提供Kerberos 和 TLS 身份认证。</div>
+<div style="line-height:1.5;font-size:14px;">二是提供了类似Unix-like权限系统，控制哪些用户可以访问数据。</div>
+<div style="line-height:1.5;font-size:14px;">三是提供数据传输加密。</div>
+<div style="line-height:1.5;font-size:14px;">当然只有新的producer，consumer API和0.9的consumer实现才能使用这些安全特性。老的API还是没有这些安全方面的控制。</div>
+<div style="line-height:1.5;font-size:14px;">这些安全特性实现了向下兼容的方式，不启动安全特性的用户不必担心性能的降低。</div>
+<div style="line-height:1.5;font-size:14px;">这只是第一版的安全特性，更多的安全控制会在将来的版本中提供。</div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">2.Kafka Connect</span></div>
+<div style="line-height:1.5;font-size:14px;">Kafka Connect,它可以和外部系统、数据集建立一个数据流的连接，实现数据的输入、输出。</div>
+<img src="https://img-blog.csdn.net/20160825164528016?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"></span>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">3.新的Consumer</span></div>
+<div style="line-height:1.5;font-size:14px;">Kafka 0.8.2, Producer被重新设计， Kafka 0.9则重新设计了Consumer接口。它不再区分high-level consumer API和low-level consumer API，而是提供了一个统一的consumer API。</div>
+<div style="line-height:1.5;font-size:14px;">1）.Kafka可以自行维护Offset、消费者的Position。也可以开发者自己来维护Offset，实现相关的业务需求。消费时，可以只消费指定的Partitions</div>
+<div style="line-height:1.5;font-size:14px;">2）.可以使用外部存储记录Offset，如数据库之类的。</div>
+<div style="line-height:1.5;font-size:14px;">3）.自行控制Consumer消费消息的位置。</div>
+<div style="line-height:1.5;font-size:14px;">4）.可以使用多线程进行消费。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">4.为用户定义配额</span></div>
+<div style="line-height:1.5;font-size:14px;">一个大的Kafka集群可能有多个用户。0.9以前，consumer 如果处理的消息非常快，可能会垄断整个broker的网络资源，producer也是如此。现在Kafka 0.9提供了基于client的用户配额控制。对于Producer可以控制每个client的每秒写的字节数，对于Consumer控制每个 client的每秒读的字节。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:18px;">（二）、0.9 vs 0.10</span></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">1.Kafka Streams</span></div>
+<div style="line-height:1.5;font-size:14px;">Kafka Streams包含了一整套描述常见流操作的高级语言API（比如 joining, filtering以及aggregating records），这使得开发者可以快速开发强大的流处理应用程序。Kafka Streams提供了状态和无状态的处理能力，并且可以部署在很多系统之上。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">2.Connectors连接状态/控制的REST API</span></div>
+<div style="line-height:1.5;font-size:14px;">在Kafka 0.10.0.0中，Kafka Connect得到了持续提升。</div>
+<div style="line-height:1.5;font-size:14px;">在此之前，用户需要监控日志以便看到各个connectors以及他们task的状态，现在Kafka已经支持了获取的状态API这样使得监控变得更简单。</div>
+<div style="line-height:1.5;font-size:14px;">同时也添加了控制相关的API，这使得用户可以在进行维护的时候停止一个connector；或者手动地重启那些失败的task。这些能够直观的在用户界面展示和管理connector目前可以在控制中心(Control Center)看到。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">3.SASL改进</span></div>
+<div style="line-height:1.5;font-size:14px;">新的安全特性，包括通过SASL支持Kerberos。Apache Kafka 0.10.0.0现在支持更多的SASL特性，包括外部授权服务器，在一台服务器上支持多种类型的SASL认证以及其他的改进。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">4.Rack Awareness</span></div>
+<div style="line-height:1.5;font-size:14px;">现在Kafka已经内置了机架感知以便隔离副本，这使得Kafka保证副本可以跨越到多个机架或者是可用区域，显著提高了Kafka的弹性和可用性。这个功能是由Netflix提供的。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">5.Kafka Consumer Max Records</span></div>
+<div style="line-height:1.5;font-size:14px;">在Kafka 0.9.0.0，开发者们在新consumer上使用poll()函数的时候是几乎无法控制返回消息的条数。不过值得高兴的是，此版本的Kafka引入了max.poll.records参数，允许开发者控制返回消息的条数。</div>
+<div style="line-height:1.5;font-size:14px;"><br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:16px;">6.协议版本改进</span></div>
+<div style="line-height:1.5;font-size:14px;">Kafka brokers现在支持返回所有支持的协议版本的请求API，这个特点的好处就是以后将允许一个客户端支持多个broker版本。</div>
+<br></div>
+<div style="line-height:1.5;font-size:14px;"><span style="font-size:22px;"><br></span></div>
+<div><span style="font-size:22px;line-height:33px;">参考：</span></div>
+<div><span style="font-size:22px;line-height:33px;">http://kafka.apache.org/<br></span></div>
+<div><span style="font-size:22px;line-height:33px;">http://blog.jobbole.com/75328/<br></span></div>
+<div><span style="font-size:22px;line-height:33px;">http://www.infoq.com/cn/articles/kafka-analysis-part-1<br></span></div>
+<div><span style="font-size:22px;line-height:33px;">http://blog.csdn.net/yangchao228/article/details/40583765<br></span></div>
+<div><br></div>
+            </div>
+                </div>

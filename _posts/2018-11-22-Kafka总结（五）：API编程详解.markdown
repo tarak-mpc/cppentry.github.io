@@ -1,0 +1,326 @@
+---
+layout:     post
+title:      Kafka总结（五）：API编程详解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p><a href="https://mp.csdn.net/postedit/81283142" rel="nofollow">Kafka总结（一）：Kafka概述</a></p>
+
+<p><a href="https://mp.csdn.net/postedit/81283229" rel="nofollow">Kafka总结（二）：Kafka核心组件</a></p>
+
+<p><a href="https://mp.csdn.net/postedit/81283286" rel="nofollow">Kafka总结（三）：Kafka核心流程分析</a></p>
+
+<p><a href="https://mp.csdn.net/postedit/81283397" rel="nofollow">Kafka总结（四）：Kafka命令操作</a></p>
+
+<p><a href="https://mp.csdn.net/postedit/81283460" rel="nofollow">Kafka总结（五）：API编程详解</a></p>
+
+<p><a href="https://mp.csdn.net/postedit/81283491" rel="nofollow">Kafka总结（六）：Kafka Stream详解</a></p>
+
+<p><a href="https://mp.csdn.net/postedit/81283546" rel="nofollow">Kafka总结（七）：数据采集应用</a></p>
+
+<p><a href="https://mp.csdn.net/postedit/81283568" rel="nofollow">Kafka总结（八）：KafKa与ELK整合应用</a></p>
+
+<p><a href="https://mp.csdn.net/postedit/81283606" rel="nofollow">Kafka总结（九）：KafKa 与Spark整合应用</a></p>
+
+<p style="margin-left:0cm;">Kafka提供了以下4类核心API</p>
+
+<ol><li>Producer API :</li>
+</ol><p style="margin-left:0cm;">提供生产消息相关接口，我们通过实现该API提供的接口来自定义Producer、自定义分区策略等</p>
+
+<ol><li>Consumer API :</li>
+</ol><p style="margin-left:0cm;">Consumer API提供消费信息相关接口，包括创建消费者、消费偏移量管理端等。</p>
+
+<ol><li>Stream API:</li>
+</ol><p style="margin-left:0cm;">Streams API是Kafka提供的一系列用来构建流处理程序的接口，通过Streams API让流处理相关的应用场景变得更加简单；</p>
+
+<ol><li>Connect API:</li>
+</ol><p style="margin-left:0cm;">Kafka在0.9.0版本之后提供了一种方便Kafka与外部系统进行数据流连接的连接器（connect），实现将数据导入到Kafka或者从Kafka中导出到外部系统。Connect API提供了相关实现的接口，不过很多时候我们并不需要编码来实现Connect功能，而只需要简单的几个配置就可以应用Kafka Connect与外部系统进行数据交互。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<h2 style="margin-left:0cm;">1.主题管理</h2>
+
+<p style="margin-left:0cm;">由于主题的元数据信息是注册在ZooKeeper相应的节点中，所以对主题的操作实质是对ZooKeeper中记录主题元数据信息相关路径的操作。</p>
+
+<p style="margin-left:0cm;">Kafka将对ZooKeeper的相关操作封装成了ZKUtils类，并封装了一个AdminUtils类调用ZkClient类的相关方法以实现对Kafka元数据的操作：包括对主题、代理、消费者等相关的元数据的操作。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;"><strong>对主题操作的相关API</strong><strong>调用较简单，相应的操作都是通过调用AdminUtils</strong><strong>类的相应方法来完成的</strong></p>
+
+<h3 style="margin-left:0cm;">1.1创建主题</h3>
+
+<p style="margin-left:0cm;">AdminUtils.createTopic();</p>
+
+<p style="margin-left:0cm;">创建主题的方法返回类型是void，在客户端创建主题的时候并不能真正的保证创建主题成功，客户端创建主题仅仅是在ZooKeeper相应路径创建节点并写入主题元数据信息，客户端创建主题若没发生异常则表示在ZooKeeper写入主题元数据信息成功；</p>
+
+<h3 style="margin-left:0cm;">1.2修改主题级别</h3>
+
+<p style="margin-left:0cm;">配置的修改每次都是覆盖操作，后一次的修改会完全覆盖前一次的修改。这样当后一次修改时候没有包括前一次相应的配置，当本次修改后，不包括在本次修改的配置将会恢复到默认值；</p>
+
+<p style="margin-left:0cm;">因此为了不覆盖先前已经进行的修改，在每次修改之前，先查询主题当前的配置，然后再次基础上进行修改；</p>
+
+<p style="margin-left:0cm;">//  获取当前已有的配置，可以指定配置类型</p>
+
+<p style="margin-left:0cm;">Properties curProp = AdminUtils.fetchEntityConfig(ZKUtils,ConfigType.Topic(),topic);</p>
+
+<p style="margin-left:0cm;">curProp.putAll(properties);</p>
+
+<p style="margin-left:0cm;">AdminUtils.changeTopicConfig(ZKUtils,topic,curProp);</p>
+
+<h3 style="margin-left:0cm;">1.3增加分区</h3>
+
+<p style="margin-left:0cm;">AdminUtils.addPartitions()方法为一个主题增加分区，在增加分区的时候可以指定分区副本分配方案，也可以不指定。如果不指定分配方案，则Kafka采用默认的分区副本分配方案；</p>
+
+<p style="margin-left:0cm;">AdminUtils.addPartitions();</p>
+
+<p style="margin-left:0cm;">说明：</p>
+
+<p style="margin-left:0cm;">第三个参数：是指定分区总数，如果某个主题已经有一个分区，想要增加两个分区，则该参数为3而不是2</p>
+
+<p style="margin-left:0cm;">第四个参数：指定副本分配方案：不同分区的副本用逗号隔开，同一个分区的多个副本之间用冒号分隔，同时需要注意的是：副本分配方案要包括已有分区的副本分配信息，根据分配顺序从左到右依次与分区对应，分区编号递增；</p>
+
+<h3 style="margin-left:0cm;">1.4分区副本重分配</h3>
+
+<p style="margin-left:0cm;">Kafka并没有提供直接增加副本的API，但是提供了修改分区副本分配方案的方法</p>
+
+<p style="margin-left:0cm;">AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK();</p>
+
+<p style="margin-left:0cm;">通过该方法可以实现分区副本重分配，同时也可以通过该接口为某个主题增加分区和副本；</p>
+
+<p style="margin-left:0cm;">调用步骤：</p>
+
+<p style="margin-left:0cm;">步骤：</p>
+
+<ol><li>实例化ZKUtils；</li>
+	<li>获取代理元数据（BrokerMetadata）信息；</li>
+	<li>生成分区副本分配方案 ，当然也可以自定义分配方案；</li>
+	<li>调用createOrUpdateTopicPartitionAssignmentPathInZK()方法完成副本分配；</li>
+	<li>释放与ZooKeeper的连接；</li>
+</ol><h3 style="margin-left:0cm;">1.5删除主题</h3>
+
+<p style="margin-left:0cm;">删除主题的API较简单，通过调用AdminUtils.deleteTopic(ZKUtils,topic)方法，即可删除指定的主题；</p>
+
+<h2 style="margin-left:0cm;">2.生产者API应用</h2>
+
+<p style="margin-left:0cm;">通过Producer API开发生产者程序</p>
+
+<h3 style="margin-left:0cm;">2.1.单线程生产者</h3>
+
+<p style="margin-left:0cm;">实现简单的Kafka生产者的一般步骤如下：</p>
+
+<ol><li>创建Properties对象，设置生产者级别配置；</li>
+	<li>根据Properties对象实例化一个KafkaProducer对象；</li>
+	<li>实例化ProducerRecord对象，每条消息对应一个该对象；</li>
+</ol><p style="margin-left:0cm;">1.ProducerRecord 含义: 发送给Kafka Broker的key/value 值对</p>
+
+<p style="margin-left:0cm;">2.内部数据结构：</p>
+
+<p style="margin-left:0cm;">-- Topic （名字）</p>
+
+<p style="margin-left:0cm;">-- PartitionID ( 可选)</p>
+
+<p style="margin-left:0cm;">-- Key[( 可选 )</p>
+
+<p style="margin-left:0cm;">-- Value</p>
+
+<p style="margin-left:0cm;">3.生产者记录（简称PR）的发送逻辑:</p>
+
+<p style="margin-left:0cm;">&lt;1&gt; 若指定Partition ID,则PR被发送至指定Partition</p>
+
+<p style="margin-left:0cm;">&lt;2&gt; 若未指定Partition ID,但指定了Key, PR会按照hasy(key)发送至对应Partition</p>
+
+<p style="margin-left:0cm;">&lt;3&gt; 若既未指定Partition ID也没指定Key，PR会按照round-robin模式发送到每个Partition</p>
+
+<p style="margin-left:0cm;">&lt;4&gt; 若同时指定了Partition ID和Key, PR只会发送到指定的Partition (Key不起作用，代码逻辑决定)</p>
+
+<p style="margin-left:0cm;">4.生产者记录(PR)的实现：</p>
+
+<p style="margin-left:0cm;"> 针对3,提供三种构造函数形参:</p>
+
+<p style="margin-left:0cm;">-- ProducerRecord(topic, partition, key, value)</p>
+
+<p style="margin-left:0cm;">-- ProducerRecord(topic, key, value)</p>
+
+<p style="margin-left:0cm;">-- ProducerRecord(topic, value)</p>
+
+<ol><li>调用KafkaProducer发送消息的方法将ProducerRecord发送到Kafka相应节点；</li>
+	<li>关闭KafkaProducer，释放连接的资源；</li>
+</ol><p style="margin-left:0cm;"> </p>
+
+<h3 style="margin-left:0cm;">2.2.多线程生产者</h3>
+
+<p style="margin-left:0cm;">为了提升Kafka发送消费的吞吐量，在数据量比较大的额同时对消息顺序也没有严格要求的情况下，可以采用多线程的方式。</p>
+
+<p style="margin-left:0cm;">实现多线程生产者一般有两种方式：</p>
+
+<ol><li>只实例化一个KafkaProducer对象，然后启动多个线程共享该KafkaProducer实例；</li>
+	<li>实例化多个KafkaProducer对象（该方式性能比前一种方式查的多）</li>
+</ol><h2 style="margin-left:0cm;">2.3.消费者API应用</h2>
+
+<h3 style="margin-left:0cm;">1.旧版消费者API应用</h3>
+
+<ol><li>低级API：SimpleConsumer：</li>
+</ol><p style="margin-left:0cm;">对消息更灵活的控制，使用较为复杂，需要自己管理已经消费的消息偏移量</p>
+
+<p style="margin-left:0cm;"><strong>低级消费者API</strong><strong>使用场景：</strong></p>
+
+<ol><li>支持消息重复消费</li>
+	<li>添加事务管理机制，保证消息被处理并且仅仅被处理一次；</li>
+	<li>只消费指定分区或者指定分区的某些片段</li>
+</ol><p style="margin-left:0cm;">使用步骤：</p>
+
+<ol><li>获取指定主题相应分区对应的元数据信息；</li>
+</ol><ol><li>实例化一个SimpleConsumer，该消费者作为获取元数据信息的执行者；</li>
+	<li>构造获取主题元素据信息的请求TopicMetadataRequest</li>
+	<li>通过Consumer.send()正式与代理建立连接，连接上代理之后发送TopicMetadataRequest请求。</li>
+	<li>从步骤三返回响应结果中获取主题元数据信息TopicMetaData列表。每个主题的每个分区的元数据对应一个TopicMetadata对象，遍历主题元数据信息列表，获取当前分区对应的元数据信息PartitionMetadata；</li>
+</ol><ol><li>由于副本机制的引入，Leader代理节点负责读写操作，因此需要找出指定分区的Leader副本节点，创建一个SimpleConsumer，建立与Leader副本的连接；</li>
+	<li>构造消费请求；</li>
+	<li>获取数据并处理；</li>
+	<li>对偏移量进行处理；</li>
+</ol><p style="margin-left:0cm;"> </p>
+
+<ol><li>当代理发送变化的时候进行相应的处理，保证消息被正常消费；</li>
+	<li>高级API：ZooKeeperConsumerConnector</li>
+</ol><p style="margin-left:0cm;">消费者无需管理已经消费的消息偏移量；</p>
+
+<h3 style="margin-left:0cm;">2.新版消费者API应用（KafKaConsumer）</h3>
+
+<p>1.创建消费者</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p>2.订阅主题</p>
+
+<p style="margin-left:0cm;">在实例化一个消费者之后，需要为该消费者订阅主题，一个消费者可以订阅多个主题，通常我们可以使用集合的方式指定多个主题，或者使用正则表达式的方式订阅特定模式的主题。</p>
+
+<p style="margin-left:0cm;">同时，在订阅主题的时候还可以注册一个回调监听器，用于当消费者发生平衡的时候的回调处理。该监听器为ConsumerRelalanceListener接口，当消费者发生平衡操作的时候，可以在该接口的相应方法中完成必要的应用程序逻辑处理，如提交消费偏移量操作，该接口定义了两个回调方法：一个是在消费者平衡操作开始之前、消费者停止拉取消息之后被调用的onPartitionRevokedff ——该方法我们可以提交偏移量，以避免数据的重复消费；</p>
+
+<p style="margin-left:0cm;">另一个平衡之后，消费开始拉取消息之前被调用的onPartitionsAssigned——该方法中保证个消费者回滚到正确的偏移量，即重置各消费者消费偏移量；</p>
+
+<p style="margin-left:0cm;">Kafka定义了三种订阅方法：</p>
+
+<ol><li>subscribe(Collection&lt;String&gt; topics)方法:</li>
+</ol><p style="margin-left:0cm;">以集合的方式指定消费订阅的主题，通常我们使用ArrayList；</p>
+
+<p>     2.subscribe(Collection&lt;String&gt; topics,ConsumerRebalanceListener listener)方法:</p>
+
+<p style="margin-left:0cm;">订阅主题的时候指定一个监听器，用于在消费者发生平衡操作的时候回调进行相应的业务处理；</p>
+
+<p>     3.subscribe(Pattern pattern, ConsumerRebalanceListener listener)方法:</p>
+
+<p style="margin-left:0cm;">以正则表达式形式指定匹配特定模式的主题；</p>
+
+<p style="margin-left:0cm;">在订阅主题之后，就可以通过Kafka提供的poll(long timeout)方法轮询拉取消息；</p>
+
+<p>3.订阅指定分区</p>
+
+<p style="margin-left:0cm;">Kafka消费者可以通过调用KafkaConsumer.suscribe()方法订阅主题，也可以直接订阅某些主题的特定分区。</p>
+
+<p style="margin-left:0cm;">使用assign(Collection&lt;TopicPartition&gt; partitions)方法用来订阅指定的分区；</p>
+
+<p style="margin-left:0cm;">【注意】：</p>
+
+<p style="margin-left:0cm;">                   通过subscribe方法订阅主题具有消费者自动均衡的功能。在多线程条件下多个消费者进程根据分区分配策略自动分配消费者线程与分区的关系，当一个消费组的消费者发生增减变化的时候，分区分配关系会自动的调整，以实现消费负载均衡以及故障的自动转移。</p>
+
+<p style="margin-left:0cm;">   而assign方法订阅主题的时候，不具有消费自动均衡的功能；</p>
+
+<p>4.消费偏移量管理</p>
+
+<ol><li>committed(TopicPartition partition):返回一个OffsetAndMetadata对象，通过该对象可以获取制定分区已经提交的偏移量；</li>
+	<li>position(TopicPartition partition)：返回下一次拉取位置</li>
+	<li>seek(TopicPartition partition,long offset)：用于将消费者起始位置重置到指定的偏移量位置</li>
+	<li>SeekToBeginning()：指定从消息起始位置开始消费；对应偏移量重置策略auto.offset.reset=earliest</li>
+	<li>seekToEnd()：指定从最新消息对应的位置开始消费，也就是需要等到新的消息写入之后才进行拉取，对应偏移量重置策略auto.offset.reset=latest</li>
+</ol><p style="margin-left:0cm;">Kafka消费者消费位移确认有自动提交与手动提交两种策略。在创建KafKaConsumer对象的时候，通过参数<strong>enable.auto.commit</strong><strong>设定。true</strong><strong>表示是自动提交，默认是自动提交。</strong></p>
+
+<p style="margin-left:0cm;">自动提交策略由消费者协调器（ConsumerCoordinator）每隔${auto.commit.interval.ms}毫秒执行一次偏移量的提交。手动提交需要由客户端自己控制偏移量的提交；</p>
+
+<ol><li>自动提交：</li>
+</ol><p style="margin-left:0cm;">在创建一个消费者的时候，默认是自动提交偏移量；，客户端只关心业务即可，在程序中没有任何关于提交偏移量的操作，更不像SimpleConsumer在每次poll之前都需要知道拉取消息的位置；</p>
+
+<p>      2.手动提交：</p>
+
+<p style="margin-left:0cm;">手动提交策略提供了一种对偏移量更加灵活控制的管理方式，有时候我们需要对偏移量进行更加精准的控制，以保证消息不被重复消费以及消息不被丢失；</p>
+
+<p style="margin-left:0cm;">例如：我们对拉取到的消息需要写入数据库获取其他网络访问请求，亦或者是更加复杂的业务处理，在这种场景下，我们认为所有的业务处理完成自后才认为消息被成功消费，那么这种场景下我们必须手动的控制偏移量的提交；</p>
+
+<p style="margin-left:0cm;">Kafka提供了异步提交（commitAsync）和同步提交（commitSync）两种手动提交的方式：</p>
+
+<ul><li>异步提交（commitAsync）：</li>
+</ul><p style="margin-left:0cm;">异步方式下的消费者线程不会被阻塞，可能在提交偏移量操作的结果还未返回的时候就开始进行下一次的拉取操作，在提交失败的时候也不会尝试提交；</p>
+
+<ul><li>同步提交（commitSync）：</li>
+</ul><p style="margin-left:0cm;">同步模式下提交失败的时候一直尝试提交，直到遇到无法重试的情况下才会结束，同时同步方式下消费者线程在拉取消息会被阻塞，直到偏移量提交操作成功或者在提交过程中发生错误。</p>
+
+<p>5.以时间戳查询消息</p>
+
+<p style="margin-left:0cm;">Kafka在0.10.1.1版本增加了时间戳索引文件，假如，我们希望从某个时间段开始消费，我们可以使用offsetForTimes()方法定位到离这个时间最近的第一条消息的偏移量，在 查找到偏移量之后调用seek方法将消费偏移量重置到所查询的偏移量位置，然后调用pool方法长轮询拉取消息。</p>
+
+<p>6.消费速度控制</p>
+
+<p style="margin-left:0cm;">Kafka还提供了对消费速度控制的方法，例如：我们可能需要暂停某些分区消费，先消费其他的分区，当到达一定的条件的时候再恢复对这些分区的消费；</p>
+
+<p style="margin-left:0cm;">当同时消费多个主题的时候，并将不同的主题的消息进行关联运算处理或者流式计算时候的join操作的时候，由于不同的主题数据产生的速率不尽相同，此时我们就可以通过控制消息生产速率较快的主题的消费速度，先从生产速率慢的主题中获取消息；</p>
+
+<p style="margin-left:0cm;">Kafka提供了</p>
+
+<ol><li>pause(Collection&lt;TopicPartition &gt;partitions) ：</li>
+</ol><p style="margin-left:0cm;">暂停某些分区在拉取操作的时候返回数据给客户端</p>
+
+<p>      2.resume(Collection&lt;TopicPartition&gt; partitions)：</p>
+
+<p style="margin-left:0cm;">恢复某些分区向客户端返回数据操作。</p>
+
+<p>7.多线程实现</p>
+
+<p style="margin-left:0cm;">KafKaConsumer是非线程安全的，多线程需要处理好线程同步。多线程的实现方式有多种，这里我们使用如下方式：每个线程各自实例化一个KafKaConsumer对象；</p>
+
+<p style="margin-left:0cm;">多个消费者线程消费同一个主题：</p>
+
+<p style="margin-left:0cm;">多个消费者线程消费同一个分区：需要考虑偏移量提交处理的问题，并且当消费者线程数大于分区数的时候，就会有部分的消费者线程一直处于空闲状态，在实际应用中一般不推荐，我们一般将分区作为消费者线程的最小划分单位；</p>
+
+<h2 style="margin-left:0cm;">2.4.自定义组件实现</h2>
+
+<p style="margin-left:0cm;">Kafka对部分配置的属性值提供了统一的接口，允许用户自定义其实现，客户端只需要实现该接口相应的方法，在方法中根据业务需要进行定制，例如：客户端可以自定义分区器以及序列化和反序列化类</p>
+
+<h3 style="margin-left:0cm;">1.分区器</h3>
+
+<p style="margin-left:0cm;">实际应用中，有可能Kafka默认分区策略并不能很好的满足业务需求，此时就就需要根据Kafka提供的API开发定制满足业务场景的分区策略，也就是需要自定义一个分区器；</p>
+
+<p style="margin-left:0cm;"><a href="http://blog.csdn.net/high2011/article/details/53705737" rel="nofollow">http://blog.csdn.net/high2011/article/details/53705737</a></p>
+
+<p style="margin-left:0cm;">自定义分区器的步骤：</p>
+
+<ol><li>实现org.apache.kafka.clients.producer.Partition接口，重写该接口的int partition(String topic,Object key ,byte[] keyBytes,Object value,byte[] valueBytes,Cluster cluster)方法，在方法中实现分区分配算法；</li>
+	<li>在实例化KafkaProducer的配置中指定partitioner.class为自定义分区器；</li>
+</ol><h3 style="margin-left:0cm;">2.序列化与反序列化</h3>
+
+<p style="margin-left:0cm;">Kafka对外提供了统一的序列化和反序列化接口，客户端通过实现这两个接口自定义序列化和反序列化类。</p>
+
+<p style="margin-left:0cm;">Avro序列化框架：</p>
+
+<p style="margin-left:0cm;">Avro依赖Schema来实现数据结构定义，Avro的Schema主要由JSON对象来表示。通过Avro工具（可以通过Maven插件）将Schema定义的数据结构编译为对应的Java对象；</p>
+
+<h2 style="margin-left:0cm;">2.5.Spring与KafKa整合应用</h2>
+
+<p style="margin-left:0cm;">Spring与Kafka的整合有spring-kafka和spring-integration-kafka两种方式。</p>
+
+<h3 style="margin-left:0cm;">1.生产者</h3>
+
+<p style="margin-left:0cm;">Spring和Kafka整合之后，创建生产者的相关操作交由Spring容器来进行管理。spring-kafka将KafkaProducer相关的操作封装成为一个KafKaTemplate对象，因此创建一个生产者就是要完成KafKaTemplate对象的实例化；</p>
+
+<p style="margin-left:0cm;">KafkaTemplate还提供了一个ProducerListener接口，该接口定义了onSuccess方法和onError方法，分别用于在消息发送成功和失败的时候进行相应的处理。</p>
+
+<h3 style="margin-left:0cm;">2.消费者</h3>
+
+<p style="margin-left:0cm;">spring-kafka是通过监听模式消费消息的，spring-kafka定义了一个消息监听者容器接口MessageListenerContainer，该接口有如下两个实现类：</p>
+
+<p style="margin-left:0cm;">KafKaMessageListenerContainer：单线程容器</p>
+
+<p style="margin-left:0cm;">ConcurrentMessageListenerContainer：多线程并发容器</p>
+
+<p style="margin-left:0cm;">由于是监听模式，所以需要创建一个监听器，spring-kafka提供了一个MessageListener接口，客户端只需要实现该接口，并覆盖onMessage(ConsumerRecord&lt;String,String&gt; data)方法，再在该方法中实现消费者对消息的具体业务处理。在装配监听者容器的时候以构造注入方式将该监听器注入到容器；</p>            </div>
+                </div>

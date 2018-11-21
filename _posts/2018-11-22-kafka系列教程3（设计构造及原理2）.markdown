@@ -1,0 +1,149 @@
+---
+layout:     post
+title:      kafka系列教程3（设计构造及原理2）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>Rec: FuRenjie</p>
+<p><br></p>
+<p></p>
+<div class="bct fc05 fc11 nbw-blog ztag" style="line-height:28px;font-size:16px;color:rgb(68,68,68);overflow:hidden;font-family:'Hiragino Sans GB W3', 'Hiragino Sans GB', Arial, Helvetica, simsun, u5b8bu4f53;">
+<div><span style="font-size:14px;">前面一节讲了kafka的一些构造及原理，这些内容参考自kafka论文，但是随着kafka的不断更新，一些新的特性被加了进来，如复本，消息精简等，这些在最新的kafka文档中有补充。本篇通过kafka最新的文档内容，继续来谈谈kafka在持久化，复本，消息精简等设计的原理及方法。</span></div>
+<div><strong><span style="font-size:24px;color:#0000ff;line-height:42px;">设计</span></strong></div>
+<div><br></div>
+<div>动机：</div>
+<div><span></span>设计一个可以实时处理大公司需要的大规模统一数据平台。这需要大量的使用案例，这需支持要高吞吐量的事件流（类似日志）。支持离线定期的获取批量数据。系统必须是低延迟的支持传统的消息队列。系统必须是可分区，分布式，实时处理。万一消息流喂到了其他系统，该系统需要支持这种容错。</div>
+<div><br></div>
+<div>持久化：</div>
+<div><span></span>kafka强依赖于文件系统（用于存储或缓存消息）。通常都会认为磁盘会比较慢，但实际上磁盘可以慢也可以快，这取决于你的用法，只要恰当使用，磁盘至少可以和网络一样快。有测试说线性写约在600MB/s，而随机写只有100k/s(6个7200rpm sata raid5 JBOD)。现代的操作系统都提供read-ahead and</div>
+<div>write-behind技术。即预取block来进行读操作和合并小的逻辑写为一组进行物理写操作，（可以查看http://queue.acm.org/detail.cfm?id=1563874获得进一步阅读，由于操作系统对磁盘和内存协调优化的原因，事实上在某些情况序列化磁盘操作有时比随机内存操作更快）。为了补偿（compensate）这个磁盘慢的分歧（divergence），在读写数据到内存的时候，通常内存中会有两份（甚至更多）相同的数据（因为读的时候os已经将数据缓存到内存了，然后你又人为的将消息读到内存中，故至少有两份）。解决建议很简单，不要先把消息存到缓存后再写到文件系统中（文件系统不等于磁盘，写到文件系统可能导致内存溢出，因为os不是立即将内容写入磁盘，而是先缓存,然后批量写）；而是直接持久化到文件系统中并且不急于flush到磁盘。</div>
+<div><br></div>
+<div><span></span>通常消息系统使用Btree维护检索消息的meta数据，虽然Btree的开销是O(logN)，但是在磁盘中不是这样，并行磁盘操作也会让很小的磁盘搜索变成很大的开销，故存储系统一般要提供快速的cache操作和慢的物理磁盘操作两种方式。通过观察树形结构检索开销往往是超线性（superlinear）的，比如两倍的数据增长将会导致慢于两倍的性能延迟。故kafka持久化消息时简单的进行追加而没有其他检索，这一个是读与写之间不会冲突，另一个是性能与数据的大小无关。</div>
+<div><br></div>
+<div><span></span>解决了磁盘弱调用方式后，仍然还有两个问题要处理，一个是大量的IO操作，另一个是过量的字节复制。解决第一个方法是采用自然的分组消息，即生产者一口气（in one go）将一批消息发送到服务器及对应log中，消费者也一口气获取一批消息。为解决第二个问题，我们采用了标准的二进制文件格式与生产者，消费者，broker共享（这样批量数据可以不用任何修改就能够在他们之间传输）。由于这个优势，在现在操作系统中我们可以直接通过系统调用将日志文件的数据直接发送到socket端而无需其他修改和缓存复制操作（参见https://www.ibm.com/developerworks/linux/library/j-zerocopy/）。另外kafka提供了端对端的批量压缩，整个压缩解压过程不需要服务器参与。保证速度和压缩比的高效。</div>
+<div><br></div>
+<div><span></span>生产者直接将消息发送到对应的leader而不需要其他中间层介入。为达到该效果，需要每个broker都知道leader是谁。同样我们暴露了api用于指定客户端将那些消息发送到哪些分区。同时消息是批量异步发送到服务器上的，这可能导致一旦生产者挂掉，缓存的未发送到服务器端的消息丢失。</div>
+<div><br></div>
+<div>消费者采用fetch请求（拉的方式）并带上offset位置来获取消息，这使得消费者可以多次的取相同的消息。</div>
+<div><br></div>
+<div><strong><span style="font-size:24px;color:#0000ff;line-height:42px;">消息投递论</span></strong></div>
+<div>一般消息投递能够提供以下保证：</div>
+<div><br></div>
+<div>有如下语义（semantics）</div>
+<div>at most once:消息可能丢失但是不会重复</div>
+<div>at least once:消息不会丢失但是可能重复</div>
+<div>exactly once:每个消息不会重复不会丢失（我们最需要的）</div>
+<div><br></div>
+<div><span></span>很多系统宣称能够支持exactly once。但是重要的是那些细则（fine print）。大部分有误导（比如不包括生产者或消费者挂掉，多个消费者操作，写入磁盘的数据丢失等各种情况）。对于kafka讲，只要commit的消息对应的broker“活着”（所谓活着定义见下一节）。但是即使是一个完美的broker，当生产者发送消息给broker时出现了网络异常，消费者也无法知道这个消息到底有没有commi。这类似于往数据库中插入一条记录同时又带有自增长字段。这当然可以通过生产者带上类似主键的方式使其发送的请求幂等，这不是不重要（这可保证类似服务器重启这些容错性），可能在kafka后续版本中加上。生产者可以指定多种level的持久化及异步方式以提高性能。</div>
+<div><br></div>
+<div>对于消费者处理，有以下几种语义：</div>
+<div>1.获得消息，保存位置，处理消息（这可能导致一旦客户端挂掉，新的客户端接管时不会处理已保存过位置的消息，这等效于at most once语义）</div>
+<div>2.获得消息，处理消息，保存位置（这可能导致一旦客户端挂掉，新的客户端接管时处理前面客户端已处理过的消息，这等效于at least once语义，大部分情况下消息有主键，这样可以使更新是幂等的）</div>
+<div>3.那exactly once语义如何做呢？实际上限制不再消息系统，而是在如何协调消费者。典型的方式是使用两阶段提交（及将更新offset及处理后的输出作为一个事务），但是代价较大，我们可以简单的将存储offset和输出写在一个地方使其要么都更新要么都没更新。于是我们采用了该方法保证无需主键即可使消息处理不重复。</div>
+<div><br></div>
+<div>kafka默认保证at least once语义的投递方式，至于exactly one方式，kafka提供了offset方便客户端来自己实现。</div>
+<div><br></div>
+<div><strong><span style="font-size:24px;color:#0000ff;line-height:42px;">复本</span></strong></div>
+<div><span></span>kafka将日志复制到指定多个服务器上。大多数其他消息系统提供了复本关联机制，但是虽然我们也提供，但是这是一个有诸多缺点的决定：slave不活跃，吞吐量严重影响，繁琐的人工培植等。所以我们还是建使用非复本的的topic。复本的单元是分区。在正常情况下，每个分区有一个leader和0到多个follower。所有的读写操作都是在leader端的，由于分区可以多于broker数，故leader也可以是分布式的。follow的日志和leader的日志是相同的（当然在给定时间里末端的消息可能未来得及产生复本）。follow复制消息就如同普通kafka消费者一样从leader消费消息，只不过又将拿到的消息放在了自己的log中。</div>
+<div><br></div>
+<div>和其他分布式系统一样，节点“活着”的定义在于我们能否处理一些失败情况。kafka需要两个条件保证是“活着”</div>
+<div>1.节点在zookeeper注册的session还在且可维护（基于zookeeper心跳机制）</div>
+<div>2.如果是slave则能够紧随leader的更新不至于落得太远。</div>
+<div>kafka采用in sync来代替“活着”。如果follower挂掉或卡住或落得很远，则leader会移除同步列表中的in</div>
+<div>sync。至于落了多远才叫远由replica.lag.max.messages配置，而表示复本“卡住”由replica.lag.time.max.ms配置。kafka不处理拜占庭将军问题。</div>
+<div><br></div>
+<div><span></span>所谓一条消息是“提交”的，意味着所有in sync的复本也持久化到了他们的log中。这意味着消费者无需担心leader挂掉导致数据丢失。另一方面，生产者可以选择是否等待消息“提交”。通过request.required.acks指定。kafka保证至少一个复本是in sync状态的，那么提交的消息就不会丢失。</div>
+<div>kafka能够在复本挂掉重启后保证服务可用，但是不能在出现网络分区的情况下保证服务可用。</div>
+<div>作为核心的复本日志，可以通过其他分布式系统的状态机功能实现。复本日志作为一致性模型，保证了消息的顺序。这有很多种实现方法，最简单和有效的就是让leader来实现，只要leader或者，所有的follower只能按leader的顺序来复制数据。当然这产生了一个新的问题，如果leader挂掉怎么办？如果leader挂掉，我们需要选择一个follow作为新的leader，但我们要保证该follower的数据是最新的。有个最常用的策略来进行leader选举，就是2f+1策略，意思是只要有f+1的复本已获得了leader的最新的消息，那么就认为该消息被提交了。如果有机器挂掉，则可以允许最多f个机器同时挂掉（含leader）。以保证至少有一个节点的消息是最新的。这个“大多数选举”策略有一个比较好的特性，他的延迟取决于最快的服务器。就是说如果有3个节点，那么延迟由最快的follower而非慢的决定。这里有很多该类家族的算法，如zk的Zab,Raft,Viewstamped
+ Replication等。而最接近的与kafka实现匹配的已发表的学术文章就是来自微软的PacificA。</div>
+<div><span></span>在实践中为满足一个节点的挂掉而仅仅冗余3个节点还是不够的。但是如果允许两个节点挂掉的话，则需要5个节点冗余，这需要5x的磁盘空间和1/5th的吞吐量。这就是为啥quorum算法(一种通过指定需要ack的数量和指定需要对比多少log的数量来选举leader的算法)更常用于共享一些集群的配置信息（如zookeeper）而较少用于存储主要的数据信息（数据量太大）。</div>
+<div><span></span>kafka使用了比较不同的途径来选择quorum组，不同于“大多数选举”，kafka动态的维护了一组in-sync(ISR)的复本，表示已追上了leader,只有处于该状态的成员组才是能被选择为leader的。kafka的写到一个分区的请求只有所有的in-sync的复本已收到了这个写请求后才算是提交。这些ISR组会在发生变化时被持久化到zookeeper中。这在kafka使用模型是一个很重要的因素。通过ISR模型和f+1复本，可以让kafka的topic支持最多f个节点挂掉而不会导致提交的数据丢失。</div>
+<div><span></span>虽然“大多数选举”的优势是性能不由最慢的节点决定（ISR方式不能），但是ISR方式可以在某些地方做优化，如是否在未收到提交的信息前block客户端，或减少复本数来提高吞吐量和降低磁盘空间。</div>
+<div><span></span>另一个重要而独特的设计是kafka不需要挂掉的节点在恢复后数据是完整的。一般复本算法都依赖于“稳态存储”。但事实上无论哪种失败恢复的情况都不会违背“一致性”原则。数据丢失主要有两种情况，一种是磁盘问题导致的数据丢失，另一种是在每次写操作时不一定会做fsync来保证一致性（这会大大降低性能）。所以我们的协议是：挂掉重启后，只要丢失的或未刷新的数据重新完全的同步后，就允许该节点重新加入到ISR做中。</div>
+<div><br></div>
+<div>如果所有节点都挂了怎么办？</div>
+<div>如果不幸遇到这个情况，那么我们需要考虑会发生什么？这将有两种情形：</div>
+<div>1.等待ISR的复本恢复，然后选择该复本为leader（这需要该复本仍然有所有数据的情况）</div>
+<div>2.选择第一个复本作为leader（无关是否是ISR状态）</div>
+<div><span></span>这两种策略都比较简单，分别建立在可用性和一致性上。如果我们等待ISR的复本起来，如果该复本因某种原因永远起不来，则系统也将永远挂掉。而另一方面，如果非ISR的复本恢复，则将不能保证所有提交的消息还在。在当前kafka版本中，我们选择第二种策略。未来我们可能使其可配置以支持更多的用户使用情况。</div>
+<div><span></span>这种窘况也不是kafka独有，对于“大多数选举”的服务来讲，如果大多数节点真的都挂了，要么选择所有数据都不要了，或者违背一致性选择剩下的一个服务作为新的数据源</div>
+<div><br></div>
+<div><strong><span style="font-size:24px;color:#0000ff;line-height:42px;">复本管理</span></strong></div>
+<div><br></div>
+<div><span></span>前面讲的复本日志只是覆盖了一个日志，如一个top分区。但是kafka集群会管理成百上千的分区，我们尝试通过轮询平衡这些分区以避免将那些有很多分区的topic分配到很小数量的节点上。同样的，我们还需要平衡leadership以至于每个作为leader的节点都能够有相同的比例共享所有分区。</div>
+<div>另外还有个重要优化是leader选举过程将有个时间窗不可用。一般本地实现是只要这个节点中的分区有挂掉的，那么要所有挂掉的分区进行了选举后才算结束。而kafka是选择一个节点作为控制器，该控制器负责监测失败和对所有受影响的分区进行leader切换。这样的好处是可以批量给大量的分区请求leader选举及通知以降低过程的复杂性和速度。如果一个控制器挂了，另外一个存在的节点将会成为一个新的控制器。 </div>
+<div><br></div>
+<div><span style="font-size:24px;color:#0000ff;line-height:42px;"><strong>日志精简（log compaction）</strong></span></div>
+<div><br></div>
+<div><span></span>一般kafka会保证每个topic的分区持久化至少最后一次的key,value记录。该特性一般用在系统挂掉后启动恢复状态等情景中，我们来分别深挖这些情形：</div>
+<div><span></span>前面讨论过一个简单的让过时的log清理掉的方法是通过一定时间或当log达到了一定的大小时。这只能用在那些每个log是相互独立的情况且记录是临时的（如队列，一旦消费掉就可以不用了）。但是一类重要的数据流是用来修改已存在的key下的多个数据的log信息。我们来详情讨论一下这类情况。</div>
+<div><br></div>
+<div><span></span>假设有个topic内容包含用户的email信息，每次用户更新email的时候将发送一个消息到该topic并指定该用户的id作为key.现在用户123在一定时期发送了这些消息。每个消息代表更新该用户的email地址（其他id这里略掉）：</div>
+<div><br></div>
+<div>123 =&gt; bill@microsoft.com</div>
+<div>            .</div>
+<div>            .</div>
+<div>            .</div>
+<div>123 =&gt; bill@gatesfoundation.org</div>
+<div>            .</div>
+<div>            .</div>
+<div>            .</div>
+<div>123 =&gt; bill@gmail.com（最新）</div>
+<div><br></div>
+<div><span></span>日志精简保证持久化最后更新的信息（即123 =&gt; bill@gmail.com）。采用该机制我们可以保证log包含了所有对应key的最终信息的快照而非那些最近变化的信息对应的key。这意味着下游的消费者可以获得最终的状态而无需拿到所有的变化的消息信息。这种策略可以单独设置在某些topic上。</div>
+<div><span></span>这种功能受人物关系网的最老也是最成功的底层基础的启发。即“数据库更新日志缓存服务”，命名为Databus。不同于大多数日志结构存储系统，kafka被设计用于快速的线性的读和写。不同于databus，kafka作为“真相的来源(source-of-truth)”特别利于那些上游数据无法回放的情形。</div>
+<div><br></div>
+<div>日志精简基础</div>
+<div><br></div>
+<div>这里用较上层的图形化展示逻辑的kafka日志及每个消息</div>
+<div><br></div>
+<div>
+<div style="text-align:center;"><img alt="kafka系列教程3（设计构造及原理2） - 网易杭研后台技术中心 - 网易杭研后台技术中心的博客" src="http://img2.ph.126.net/rJiErpIT0DbLnrua2Qx90A==/873698327810193119.png" style="border:0px;"></div>
+ </div>
+<div><br></div>
+<div><span></span>head部分表示正常的kafka日志，这是密集的序列化的offset和持久化了所有的消息。日志精简作为可选项，用于处理tail部分的日志。注意offset是记录了顺序，而且不会被改变。虽然消息已经被精简，但是还要注意所有的offset依然有效且指向了日志的位置。在这种情形下该位置具体值由较高的offset确定（将不区分新老offset值）。例如，上图的36,37,38都指向的同一个位置并且读取的实际值是38对应的值。</div>
+<div><span></span>精简同样运行删除，一个有key但是是空负载(null payload,kafka把值用payload表示)的消息将被删除。这将使标记着把高优先级的含有该key的所有消息也标记为删除。删除即表示不去持久化那些被标记的消息。</div>
+<div><span></span>日志精简是在后台定期的复制日志片段。该操作不会阻塞读操作。而且会做限流以保证不影响到生产者和消费者。实际的过程如下图所示：</div>
+<div>
+<div style="text-align:center;"><img alt="kafka系列教程3（设计构造及原理2） - 网易杭研后台技术中心 - 网易杭研后台技术中心的博客" src="http://img1.ph.126.net/c6qsKUJy1bY2kQKvTvEZQw==/2679078828432204415.png" style="border:0px;"></div>
+ </div>
+<div><br></div>
+<div>日志精简由下面方式保证：</div>
+<div>1.那些追上最新的日志的消费者将拿到所有的已写入的消息且有序的offset.</div>
+<div>2.消息顺序是被保持的，精简不会重新给消息排序，除了删除动作。</div>
+<div>3.消息对应的offset不会改变。它是永久表示消息所在的位置的id标示。</div>
+<div>4.所有从0位置开始的读操作都会检查的记录状态及顺序。所有删除标记者都会查看那些reader达到的日志的时间段是小于topic的delete.retention.ms setting（默认24小时）配置的。这个重要的机制用于在删除动作开始的同时有读操作时，为了删除动作不会优先于读的操作以保证读操作能够读到数据。</div>
+<div>5.对于消费者的机制同4.</div>
+<div><br></div>
+<div>日志精简细节：</div>
+<div>日志精简是被log cleaner处理的。它通过从池里取到的后台线程来复制日志片段</div>
+<div>，一旦发现head有对应key的log就把后面的记录给删除。每个精简线程工作如下：</div>
+<div>1.选择有最高比例的log head及log tail。</div>
+<div>2.创建一个简单的统计记录每个key的最后的offset所在日志最前面的位置。</div>
+<div>3.从头到尾的删除那些在随后有该key对应的消息的那些日志。当需要磁盘空间时，新的片段将交换到日志中去。</div>
+<div>4.日志头统计本质上是一个空间密集型(space-compact)hash表,每个entry使用固定的24byte。这样8GB的cleaner buffer一次迭代可清理大约366GB的日志（设1k的消息）。</div>
+<div><br></div>
+<div>配置log cleaner：</div>
+<div><br></div>
+<div>默认0.8.1的log cleaner是关闭的。可通过log.cleaner.enable=true打开，可以策略到某个对应的topic，如：log.cleanup.policy=compact</div>
+<div><br></div>
+<div>日志精简限制：</div>
+<div>1.你不能指定多少log不用精简（不能指定log的head位置）。当前所有的日志片段都是有效的。除非最后一个片段（该片段可能正在做写操作）</div>
+<div>2.日志精简暂时不支持压缩的topic.</div>
+</div>
+<div class="nbw-blog-end" style="color:rgb(68,68,68);font-family:'Hiragino Sans GB W3', 'Hiragino Sans GB', Arial, Helvetica, simsun, u5b8bu4f53;">
+</div>
+<div style="color:rgb(68,68,68);font-family:'Hiragino Sans GB W3', 'Hiragino Sans GB', Arial, Helvetica, simsun, u5b8bu4f53;">
+</div>
+<div style="color:rgb(68,68,68);font-family:'Hiragino Sans GB W3', 'Hiragino Sans GB', Arial, Helvetica, simsun, u5b8bu4f53;">
+</div>
+<div style="color:rgb(68,68,68);font-family:'Hiragino Sans GB W3', 'Hiragino Sans GB', Arial, Helvetica, simsun, u5b8bu4f53;">
+<div class="wumii-hook"></div>
+</div>
+<div class="nbw-act tbar fc03 clearfix" style="text-align:right;color:rgb(100,160,56);line-height:20px;font-family:'Hiragino Sans GB W3', 'Hiragino Sans GB', Arial, Helvetica, simsun, u5b8bu4f53;">
+</div>
+<br><p></p>
+            </div>
+                </div>

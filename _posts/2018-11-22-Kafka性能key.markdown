@@ -1,0 +1,65 @@
+---
+layout:     post
+title:      Kafka性能key
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h2 id="activity-name">Kafka是如何实现高吞吐率的</h2>
+
+<p>原创 2016-02-27 杜亦舒 <a href="https://mp.weixin.qq.com/s?__biz=MzA4Nzc4MjI4MQ==&amp;mid=402996330&amp;idx=1&amp;sn=14551bb8268556e4d4f73f7f5c7e0e48&amp;scene=4&amp;key=f4f32f98804444ef818c9409ddd5e5d2e79eb5c8ae3c94ee42c91727fc68ef52d3942c5dcbac43f027a091530e70361e25c9416e8a3d4f56e6ba0ad4b1a1dc2650cdc9718855935076bef09e8e4eb2a8&amp;ascene=7&amp;uin=MzYyNjMwMjgw&amp;devicetype=Windows+7&amp;version=6203005d&amp;pass_ticket=wiDShOsNMbLEWcUmDzxYr0%2FGjoY4lCCeD5TGElZiLCLRsxarKFoUc6j4HLCwL3Jb&amp;winzoom=1#%23" rel="nofollow" id="post-user">性能与架构</a></p>
+
+<p>Kafka是分布式消息系统，需要处理海量的消息，Kafka的设计是把所有的消息都写入速度低容量大的硬盘，以此来换取更强的存储能力，但实际上，使用硬盘并没有带来过多的性能损失<br><br>
+kafka主要使用了以下几个方式实现了超高的吞吐率<br>
+ </p>
+
+<p>顺序读写</p>
+
+<p> </p>
+
+<p>kafka的消息是不断追加到文件中的，这个特性使kafka可以充分利用磁盘的顺序读写性能<br><br>
+顺序读写不需要硬盘磁头的寻道时间，只需很少的扇区旋转时间，所以速度远快于随机读写<br><br>
+Kafka官方给出了测试数据(Raid-5，7200rpm)：<br><br>
+顺序 I/O: 600MB/s<br><br>
+随机 I/O: 100KB/s<br>
+ </p>
+
+<p>零拷贝</p>
+
+<p><br>
+先简单了解下文件系统的操作流程，例如一个程序要把文件内容发送到网络<br><br>
+这个程序是工作在用户空间，文件和网络socket属于硬件资源，两者之间有一个内核空间<br><br>
+在操作系统内部，整个过程为：<br><br><img alt="" class="has" src="http://mmbiz.qpic.cn/mmbiz/wv3K6j4ibl91uS8HoA3CuWGtcq7PtOc0pE5Scl9k7a2aFgjhl1yCUotw57UwzO5SnzGr6UjdHjfaf9YCGhULeYA/0?wx_fmt=png" width="350"><br><br>
+在Linux kernel2.2 之后出现了一种叫做"零拷贝(zero-copy)"系统调用机制，就是跳过“用户缓冲区”的拷贝，建立一个磁盘空间和内存的直接映射，数据不再复制到“用户态缓冲区”<br><br>
+系统上下文切换减少为2次，可以提升一倍的性能<br><br><img alt="" class="has" src="http://mmbiz.qpic.cn/mmbiz/wv3K6j4ibl91uS8HoA3CuWGtcq7PtOc0p4V7eyN6O0LN8ibRKVhdmbj8vNjaIHcys5wTuPTF7P4ficyuT3FUPX6Sg/0?wx_fmt=png" width="350"><br>
+ </p>
+
+<p>文件分段</p>
+
+<p> </p>
+
+<p>kafka的队列topic被分为了多个区partition，每个partition又分为多个段segment，所以一个队列中的消息实际上是保存在N多个片段文件中<br><br><img alt="" class="has" src="http://mmbiz.qpic.cn/mmbiz/wv3K6j4ibl91uS8HoA3CuWGtcq7PtOc0pOnZC41D8b73U6ibGtRgHJvjITMvI7oFUnLHGqdbrZYtJ9V8c8ZfickPw/0?wx_fmt=png" width="350"><br><br>
+通过分段的方式，每次文件操作都是对一个小文件的操作，非常轻便，同时也增加了并行处理能力<br><br>
+ </p>
+
+<p>批量发送</p>
+
+<p><br>
+Kafka允许进行批量发送消息，先将消息缓存在内存中，然后一次请求批量发送出去<br><br>
+比如可以指定缓存的消息达到某个量的时候就发出去，或者缓存了固定的时间后就发送出去<br><br>
+如100条消息就发送，或者每5秒发送一次<br><br>
+这种策略将大大减少服务端的I/O次数<br>
+ </p>
+
+<p>数据压缩</p>
+
+<p> </p>
+
+<p>Kafka还支持对消息集合进行压缩，Producer可以通过GZIP或Snappy格式对消息集合进行压缩<br><br>
+压缩的好处就是减少传输的数据量，减轻对网络传输的压力<br><br>
+Producer压缩之后，在Consumer需进行解压，虽然增加了CPU的工作，但在对大数据处理上，瓶颈在网络上而不是CPU，所以这个成本很值得。</p>
+
+<p> </p>
+
+<p>二手转载 <a href="https://www.cnblogs.com/jun1019/p/6260575.html" rel="nofollow">https://www.cnblogs.com/jun1019/p/6260575.html</a></p>            </div>
+                </div>

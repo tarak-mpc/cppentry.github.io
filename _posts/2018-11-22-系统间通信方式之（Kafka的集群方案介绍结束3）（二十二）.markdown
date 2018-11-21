@@ -1,0 +1,188 @@
+---
+layout:     post
+title:      系统间通信方式之（Kafka的集群方案介绍结束3）（二十二）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div id="article_content" class="article_content csdn-tracking-statistics" style="color:rgb(69,69,69);overflow:hidden;">
+<div class="markdown_views" style="font-family:'microsoft yahei';color:rgb(63,63,63);">
+<h2 id="4-5kafka原理消费者" style="font-family:inherit;font-weight:100;line-height:1.1;color:inherit;font-size:2.15em;">
+4-5、Kafka原理：消费者</h2>
+<p style="line-height:27.2px;">
+作为Apache Kafka消息队列，它的性能指标相当一部分取决于消费者们的性能——只要消息能被快速消费掉不在Broker端形成拥堵，整个Apache Kafka就不会出现性能瓶颈问题。</p>
+<h3 id="4-5-1基本使用" style="font-family:inherit;font-weight:100;line-height:1.1;color:inherit;font-size:1.7em;">
+<a name="t1" style="background:transparent;color:rgb(79,161,219);"></a>4-5-1、基本使用</h3>
+<p style="line-height:27.2px;">
+我们首先使用Kafka Client For JAVA API为各位读者演示一下最简单的Kafka消费者端的使用。以下示例代码可以和上文中所给出的生产者代码相对应，形成一个完整的消息创建——接收——发送过程：</p>
+<pre class="prettyprint" style="font-family:'Source Code Pro', monospace;font-size:14px;line-height:23.8px;color:rgb(51,51,51);"><code class="hljs java has-numbering" style="font-family:'Source Code Pro', monospace;font-size:12.6px;color:inherit;background:transparent;display:block;"><span class="hljs-keyword" style="color:rgb(0,0,136);">package</span> kafkaTQ;
+
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> java.util.HashMap;
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> java.util.List;
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> java.util.Map;
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> java.util.Properties;
+
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> kafka.consumer.Consumer;
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> kafka.consumer.ConsumerConfig;
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> kafka.consumer.ConsumerIterator;
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> kafka.consumer.KafkaStream;
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> kafka.javaapi.consumer.ConsumerConnector;
+<span class="hljs-keyword" style="color:rgb(0,0,136);">import</span> kafka.message.MessageAndMetadata;
+
+<span class="hljs-javadoc" style="color:rgb(136,0,0);">/**
+ * 这是Kafka的topic消费者
+ *<span class="hljs-javadoctag" style="color:rgb(102,0,102);"> @author</span> yinwenjie
+ */</span>
+<span class="hljs-keyword" style="color:rgb(0,0,136);">public</span> <span class="hljs-class"><span class="hljs-keyword" style="color:rgb(0,0,136);">class</span> <span class="hljs-title" style="color:rgb(102,0,102);">KafkaConsumer_GroupOne</span> {</span>
+    <span class="hljs-keyword" style="color:rgb(0,0,136);">public</span> <span class="hljs-keyword" style="color:rgb(0,0,136);">static</span> <span class="hljs-keyword" style="color:rgb(0,0,136);">void</span> <span class="hljs-title">main</span>(String[] args) <span class="hljs-keyword" style="color:rgb(0,0,136);">throws</span> RuntimeException {
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// ==============首先各种连接属性</span>
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// Kafka消费者的完整连接属性在Apache Kafka官网http://kafka.apache.org/documentation.html#consumerconfigs</span>
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// 有详细介绍（请参看Old Consumer Configs。New Consumer Configs是给Kafka V0.9.0.0+使用的）</span>
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// 这里我们设置几个关键属性</span>
+        Properties props = <span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> Properties();
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// zookeeper相关的，如果有多个zk节点，这里以“,”进行分割</span>
+        props.put(<span class="hljs-string" style="color:rgb(0,136,0);">"zookeeper.connect"</span>, <span class="hljs-string" style="color:rgb(0,136,0);">"192.168.61.140:2181"</span>);
+        props.put(<span class="hljs-string" style="color:rgb(0,136,0);">"zookeeper.connection.timeout.ms"</span>, <span class="hljs-string" style="color:rgb(0,136,0);">"10000"</span>);
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// 还记得上文的说明吗：对于一个topic而言，同一用户组内的所有用户只被允许访问一个分区。</span>
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// 所以要让多个Consumer实现对一个topic的负载均衡，每个groupid的名称都要一样</span>
+        String groupname = <span class="hljs-string" style="color:rgb(0,136,0);">"group2"</span>;
+        props.put(<span class="hljs-string" style="color:rgb(0,136,0);">"group.id"</span>, groupname);
+
+        <span class="hljs-comment" style="color:rgb(136,0,0);">//==============</span>
+        ConsumerConfig consumerConfig = <span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> ConsumerConfig(props);
+        ConsumerConnector consumerConnector = Consumer.createJavaConsumerConnector(consumerConfig);
+
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// 我们只创建一个消费者</span>
+        HashMap&lt;String, Integer&gt; map = <span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> HashMap&lt;String, Integer&gt;();
+        map.put(<span class="hljs-string" style="color:rgb(0,136,0);">"my_topic2"</span>, <span class="hljs-number" style="color:rgb(0,102,102);">1</span>);
+        Map&lt;String, List&lt;KafkaStream&lt;<span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[], <span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[]&gt;&gt;&gt; topicMessageStreams = consumerConnector.createMessageStreams(map);
+
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// 获取并启动消费线程，注意看关键就在这里，一个消费线程可以负责消费一个topic中的多个partition</span>
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// 但是一个partition只能分配到一个消费线程去</span>
+        KafkaStream&lt;<span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[], <span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[]&gt; stream = topicMessageStreams.get(<span class="hljs-string" style="color:rgb(0,136,0);">"my_topic2"</span>).get(<span class="hljs-number" style="color:rgb(0,102,102);">0</span>);
+        <span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> Thread(<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> ConsumerThread(stream)).start();
+
+        <span class="hljs-comment" style="color:rgb(136,0,0);">// 接着锁住主线程，让其不退出</span>
+        <span class="hljs-keyword" style="color:rgb(0,0,136);">synchronized</span> (KafkaConsumer_GroupTwo.class) {
+            <span class="hljs-keyword" style="color:rgb(0,0,136);">try</span> {
+                KafkaConsumer_GroupTwo.class.wait();
+            } <span class="hljs-keyword" style="color:rgb(0,0,136);">catch</span> (InterruptedException e) {
+                e.printStackTrace(System.out);
+            }
+        }
+    }
+
+    <span class="hljs-javadoc" style="color:rgb(136,0,0);">/**
+     *<span class="hljs-javadoctag" style="color:rgb(102,0,102);"> @author</span> yinwenjie
+     */</span>
+    <span class="hljs-keyword" style="color:rgb(0,0,136);">private</span> <span class="hljs-keyword" style="color:rgb(0,0,136);">static</span> <span class="hljs-class"><span class="hljs-keyword" style="color:rgb(0,0,136);">class</span> <span class="hljs-title" style="color:rgb(102,0,102);">ConsumerThread</span> <span class="hljs-keyword" style="color:rgb(0,0,136);">implements</span> <span class="hljs-title" style="color:rgb(102,0,102);">Runnable</span> {</span>
+
+        <span class="hljs-keyword" style="color:rgb(0,0,136);">private</span> KafkaStream&lt;<span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[], <span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[]&gt; stream;
+
+        <span class="hljs-javadoc" style="color:rgb(136,0,0);">/**
+         *<span class="hljs-javadoctag" style="color:rgb(102,0,102);"> @param</span> stream
+         */</span>
+        <span class="hljs-keyword" style="color:rgb(0,0,136);">public</span> <span class="hljs-title">ConsumerThread</span>(KafkaStream&lt;<span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[], <span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[]&gt; stream) {
+            <span class="hljs-keyword" style="color:rgb(0,0,136);">this</span>.stream = stream;
+        }
+
+        <span class="hljs-annotation" style="color:rgb(155,133,157);">@Override</span>
+        <span class="hljs-keyword" style="color:rgb(0,0,136);">public</span> <span class="hljs-keyword" style="color:rgb(0,0,136);">void</span> <span class="hljs-title">run</span>() {
+            ConsumerIterator&lt;<span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[], <span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[]&gt; iterator =  <span class="hljs-keyword" style="color:rgb(0,0,136);">this</span>.stream.iterator();
+            <span class="hljs-comment" style="color:rgb(136,0,0);">//============这个消费者获取的数据在这里</span>
+            <span class="hljs-keyword" style="color:rgb(0,0,136);">while</span>(iterator.hasNext()){  
+                MessageAndMetadata&lt;<span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[], <span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[]&gt; message = iterator.next();
+                <span class="hljs-keyword" style="color:rgb(0,0,136);">int</span> partition = message.partition();
+                String topic = message.topic();
+                String messageT = <span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> String(message.message());
+                System.out.println(<span class="hljs-string" style="color:rgb(0,136,0);">"接收到: "</span> + messageT + <span class="hljs-string" style="color:rgb(0,136,0);">"来自于topic：["</span> + topic + <span class="hljs-string" style="color:rgb(0,136,0);">"] + 第partition["</span> + partition + <span class="hljs-string" style="color:rgb(0,136,0);">"]"</span>); 
+            }
+        }
+    }
+}</code></pre><ul class="pre-numbering" style="list-style:none;line-height:23.8px;width:50px;background-color:rgb(238,238,238);border-right:1px solid rgb(221,221,221);text-align:right;"><li style="list-style:none;color:rgb(153,153,153);">1</li><li style="list-style:none;color:rgb(153,153,153);">2</li><li style="list-style:none;color:rgb(153,153,153);">3</li><li style="list-style:none;color:rgb(153,153,153);">4</li><li style="list-style:none;color:rgb(153,153,153);">5</li><li style="list-style:none;color:rgb(153,153,153);">6</li><li style="list-style:none;color:rgb(153,153,153);">7</li><li style="list-style:none;color:rgb(153,153,153);">8</li><li style="list-style:none;color:rgb(153,153,153);">9</li><li style="list-style:none;color:rgb(153,153,153);">10</li><li style="list-style:none;color:rgb(153,153,153);">11</li><li style="list-style:none;color:rgb(153,153,153);">12</li><li style="list-style:none;color:rgb(153,153,153);">13</li><li style="list-style:none;color:rgb(153,153,153);">14</li><li style="list-style:none;color:rgb(153,153,153);">15</li><li style="list-style:none;color:rgb(153,153,153);">16</li><li style="list-style:none;color:rgb(153,153,153);">17</li><li style="list-style:none;color:rgb(153,153,153);">18</li><li style="list-style:none;color:rgb(153,153,153);">19</li><li style="list-style:none;color:rgb(153,153,153);">20</li><li style="list-style:none;color:rgb(153,153,153);">21</li><li style="list-style:none;color:rgb(153,153,153);">22</li><li style="list-style:none;color:rgb(153,153,153);">23</li><li style="list-style:none;color:rgb(153,153,153);">24</li><li style="list-style:none;color:rgb(153,153,153);">25</li><li style="list-style:none;color:rgb(153,153,153);">26</li><li style="list-style:none;color:rgb(153,153,153);">27</li><li style="list-style:none;color:rgb(153,153,153);">28</li><li style="list-style:none;color:rgb(153,153,153);">29</li><li style="list-style:none;color:rgb(153,153,153);">30</li><li style="list-style:none;color:rgb(153,153,153);">31</li><li style="list-style:none;color:rgb(153,153,153);">32</li><li style="list-style:none;color:rgb(153,153,153);">33</li><li style="list-style:none;color:rgb(153,153,153);">34</li><li style="list-style:none;color:rgb(153,153,153);">35</li><li style="list-style:none;color:rgb(153,153,153);">36</li><li style="list-style:none;color:rgb(153,153,153);">37</li><li style="list-style:none;color:rgb(153,153,153);">38</li><li style="list-style:none;color:rgb(153,153,153);">39</li><li style="list-style:none;color:rgb(153,153,153);">40</li><li style="list-style:none;color:rgb(153,153,153);">41</li><li style="list-style:none;color:rgb(153,153,153);">42</li><li style="list-style:none;color:rgb(153,153,153);">43</li><li style="list-style:none;color:rgb(153,153,153);">44</li><li style="list-style:none;color:rgb(153,153,153);">45</li><li style="list-style:none;color:rgb(153,153,153);">46</li><li style="list-style:none;color:rgb(153,153,153);">47</li><li style="list-style:none;color:rgb(153,153,153);">48</li><li style="list-style:none;color:rgb(153,153,153);">49</li><li style="list-style:none;color:rgb(153,153,153);">50</li><li style="list-style:none;color:rgb(153,153,153);">51</li><li style="list-style:none;color:rgb(153,153,153);">52</li><li style="list-style:none;color:rgb(153,153,153);">53</li><li style="list-style:none;color:rgb(153,153,153);">54</li><li style="list-style:none;color:rgb(153,153,153);">55</li><li style="list-style:none;color:rgb(153,153,153);">56</li><li style="list-style:none;color:rgb(153,153,153);">57</li><li style="list-style:none;color:rgb(153,153,153);">58</li><li style="list-style:none;color:rgb(153,153,153);">59</li><li style="list-style:none;color:rgb(153,153,153);">60</li><li style="list-style:none;color:rgb(153,153,153);">61</li><li style="list-style:none;color:rgb(153,153,153);">62</li><li style="list-style:none;color:rgb(153,153,153);">63</li><li style="list-style:none;color:rgb(153,153,153);">64</li><li style="list-style:none;color:rgb(153,153,153);">65</li><li style="list-style:none;color:rgb(153,153,153);">66</li><li style="list-style:none;color:rgb(153,153,153);">67</li><li style="list-style:none;color:rgb(153,153,153);">68</li><li style="list-style:none;color:rgb(153,153,153);">69</li><li style="list-style:none;color:rgb(153,153,153);">70</li><li style="list-style:none;color:rgb(153,153,153);">71</li><li style="list-style:none;color:rgb(153,153,153);">72</li><li style="list-style:none;color:rgb(153,153,153);">73</li><li style="list-style:none;color:rgb(153,153,153);">74</li><li style="list-style:none;color:rgb(153,153,153);">75</li><li style="list-style:none;color:rgb(153,153,153);">76</li><li style="list-style:none;color:rgb(153,153,153);">77</li><li style="list-style:none;color:rgb(153,153,153);">78</li><li style="list-style:none;color:rgb(153,153,153);">79</li><li style="list-style:none;color:rgb(153,153,153);">80</li><li style="list-style:none;color:rgb(153,153,153);">81</li><li style="list-style:none;color:rgb(153,153,153);">82</li><li style="list-style:none;color:rgb(153,153,153);">83</li><li style="list-style:none;color:rgb(153,153,153);">84</li><li style="list-style:none;color:rgb(153,153,153);">85</li></ul><p style="line-height:27.2px;">
+以上代码片段有几个关键点需要进行一下说明：</p>
+<ul style="line-height:27.2px;"><li style="list-style:disc;">“map.put(“my_topic2”, 1);” 这句代码表示将会为名叫“my_topic2”的队列创建数量为1的消费者。在一个进程的连接中，您可以指定创建多个topic的消费者数量。例如：</li></ul><pre class="prettyprint" style="font-family:'Source Code Pro', monospace;font-size:14px;line-height:23.8px;color:rgb(51,51,51);"><code class="hljs asciidoc has-numbering" style="font-family:'Source Code Pro', monospace;font-size:12.6px;color:inherit;background:transparent;display:block;"><span class="hljs-code">......
+# 为my_topic2的队列创建数量为1的消费者
+# 并且为my_topic3的队列创建数量为4的消费者
+map.put("my_topic2", 1);
+map.put("my_topic3", 4);
+......</span></code></pre><ul class="pre-numbering" style="list-style:none;line-height:23.8px;width:50px;background-color:rgb(238,238,238);border-right:1px solid rgb(221,221,221);text-align:right;"><li style="list-style:none;color:rgb(153,153,153);">1</li><li style="list-style:none;color:rgb(153,153,153);">2</li><li style="list-style:none;color:rgb(153,153,153);">3</li><li style="list-style:none;color:rgb(153,153,153);">4</li><li style="list-style:none;color:rgb(153,153,153);">5</li><li style="list-style:none;color:rgb(153,153,153);">6</li></ul><ul style="line-height:27.2px;"><li style="list-style:disc;">每一个消费者都需要一个独立的线程进行工作。您可以将工作任务放入已经创建好的线程池（推荐这样做），也可以像以上代码示例中那样创建一个线程并运行任务。</li></ul><pre class="prettyprint" style="font-family:'Source Code Pro', monospace;font-size:14px;line-height:23.8px;color:rgb(51,51,51);"><code class="hljs asciidoc has-numbering" style="font-family:'Source Code Pro', monospace;font-size:12.6px;color:inherit;background:transparent;display:block;"><span class="hljs-code">......
+# 使用线程池
+# 这里的参数就是消费者的总数量
+ExecutorService threadPool = Executors.newFixedThreadPool(1);
+threadPool.execute(new ConsumerThread(stream));
+......</span></code></pre><ul class="pre-numbering" style="list-style:none;line-height:23.8px;width:50px;background-color:rgb(238,238,238);border-right:1px solid rgb(221,221,221);text-align:right;"><li style="list-style:none;color:rgb(153,153,153);">1</li><li style="list-style:none;color:rgb(153,153,153);">2</li><li style="list-style:none;color:rgb(153,153,153);">3</li><li style="list-style:none;color:rgb(153,153,153);">4</li><li style="list-style:none;color:rgb(153,153,153);">5</li><li style="list-style:none;color:rgb(153,153,153);">6</li></ul><ul style="line-height:27.2px;"><li style="list-style:disc;">在开发过程中，消费者端无需知道任何一个Broker的位置。但是必须至少知道一个zookeeper服务节点的位置。通过这个位置，消费者端首先会去zookeeper服务上查找指定的topic的分区情况和已有的消费者情况。</li></ul><h3 id="4-5-2分区与消费者负载" style="font-family:inherit;font-weight:100;line-height:1.1;color:inherit;font-size:1.7em;">
+<a name="t2" style="background:transparent;color:rgb(79,161,219);"></a>4-5-2、分区与消费者负载</h3>
+<p style="line-height:27.2px;">
+<span>Apache Kafka集群中的消费者以线程为单位</span>，如在上一小节代码段所示：我们在一个进程中，为Topic为“my_topic2”的队列创建了一个线程，这个线程就是一个消费者——属于名为“group2”的用户组。这时，Topic中所有分区的消息都会交给这个消费线程进行消费。如下图所示：</p>
+<p style="line-height:27.2px;">
+<img src="https://img-blog.csdn.net/20160508113315100" alt="这里写图片描述" title="" style="border:0px;vertical-align:middle;"></p>
+<p style="line-height:27.2px;">
+虽然一个消费者可以同时消费Topic中多个分区（Partition）的消息，但在生产环境下为了获得更优的消费性能并不建议这样做。由于单个消费者线程的处理能力是有限的，一旦出现数据洪峰，消息就会堆积在Broker端无法被处理（如果消费者端使用了线程池，则可能堆积在消费者端，这要看您怎么编写代码）。所以上一个小节那样的消费者编码方式，最多就是用来做做“Hello World”那样的示例，没有更多的使用价值了。</p>
+<h3 id="4-5-3优化-一" style="font-family:inherit;font-weight:100;line-height:1.1;color:inherit;font-size:1.7em;">
+<a name="t3" style="background:transparent;color:rgb(79,161,219);"></a>4-5-3、优化 一：</h3>
+<p style="line-height:27.2px;">
+第一种改进方法，就是让<span>一个消费者只消费一个分区（Partition）中的消息，且整个系统中的消费者大于等于Topic中的分区数量</span>。设计方案如下：</p>
+<p style="line-height:27.2px;">
+<img src="https://img-blog.csdn.net/20160508120904838" alt="这里写图片描述" title="" style="border:0px;vertical-align:middle;"></p>
+<p style="line-height:27.2px;">
+如上图所示，这个Topic下一共有四个分区（Partition），对应的消费者数量也有四个，但是这四个消费者同属于一个进程，存在于同一个物理节点上。我们根据这个设计方案，更改之前消费者端的代码，如下（为了节约篇幅，只给出主要的更改位置）：</p>
+<pre class="prettyprint" style="font-family:'Source Code Pro', monospace;font-size:14px;line-height:23.8px;color:rgb(51,51,51);"><code class="hljs cs has-numbering" style="font-family:'Source Code Pro', monospace;font-size:12.6px;color:inherit;background:transparent;display:block;">......
+<span class="hljs-comment" style="color:rgb(136,0,0);">// 后续创建的所有消费者线程，都是属于group2的消费组</span>
+String groupname = <span class="hljs-string" style="color:rgb(0,136,0);">"group2"</span>;
+props.put(<span class="hljs-string" style="color:rgb(0,136,0);">"group.id"</span>, groupname);
+
+......
+<span class="hljs-comment" style="color:rgb(136,0,0);">// 在这个进程中，为topic名为my_topic2的队列创建了四个消费者</span>
+HashMap&lt;String, Integer&gt; map = <span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> HashMap&lt;String, Integer&gt;();
+map.put(<span class="hljs-string" style="color:rgb(0,136,0);">"my_topic2"</span>, <span class="hljs-number" style="color:rgb(0,102,102);">4</span>);
+Map&lt;String, List&lt;KafkaStream&lt;<span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[], <span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[]&gt;&gt;&gt; topicMessageStreams = consumerConnector.createMessageStreams(map);
+
+......
+<span class="hljs-comment" style="color:rgb(136,0,0);">// 为这四个消费者分配四个不同的线程</span>
+<span class="hljs-comment" style="color:rgb(136,0,0);">// 消费者线程1</span>
+KafkaStream&lt;<span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[], <span class="hljs-keyword" style="color:rgb(0,0,136);">byte</span>[]&gt; stream = topicMessageStreams.<span class="hljs-keyword" style="color:rgb(0,0,136);">get</span>(<span class="hljs-string" style="color:rgb(0,136,0);">"my_topic2"</span>).<span class="hljs-keyword" style="color:rgb(0,0,136);">get</span>(<span class="hljs-number" style="color:rgb(0,102,102);">0</span>);
+<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> Thread(<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> ConsumerThread(stream)).start();
+
+<span class="hljs-comment" style="color:rgb(136,0,0);">// 消费者线程2</span>
+stream = topicMessageStreams.<span class="hljs-keyword" style="color:rgb(0,0,136);">get</span>(<span class="hljs-string" style="color:rgb(0,136,0);">"my_topic2"</span>).<span class="hljs-keyword" style="color:rgb(0,0,136);">get</span>(<span class="hljs-number" style="color:rgb(0,102,102);">1</span>);
+<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> Thread(<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> ConsumerThread(stream)).start();
+
+<span class="hljs-comment" style="color:rgb(136,0,0);">// 消费者线程3</span>
+stream = topicMessageStreams.<span class="hljs-keyword" style="color:rgb(0,0,136);">get</span>(<span class="hljs-string" style="color:rgb(0,136,0);">"my_topic2"</span>).<span class="hljs-keyword" style="color:rgb(0,0,136);">get</span>(<span class="hljs-number" style="color:rgb(0,102,102);">2</span>);
+<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> Thread(<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> ConsumerThread(stream)).start();
+
+<span class="hljs-comment" style="color:rgb(136,0,0);">// 消费者线程4</span>
+stream = topicMessageStreams.<span class="hljs-keyword" style="color:rgb(0,0,136);">get</span>(<span class="hljs-string" style="color:rgb(0,136,0);">"my_topic2"</span>).<span class="hljs-keyword" style="color:rgb(0,0,136);">get</span>(<span class="hljs-number" style="color:rgb(0,102,102);">3</span>);
+<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> Thread(<span class="hljs-keyword" style="color:rgb(0,0,136);">new</span> ConsumerThread(stream)).start();
+
+......
+<span class="hljs-comment" style="color:rgb(136,0,0);">// 接着锁住主线程，让其不退出</span>
+synchronized (KafkaConsumer_GroupTwo.class) {
+    <span class="hljs-keyword" style="color:rgb(0,0,136);">try</span> {
+        KafkaConsumer_GroupTwo.class.wait();
+    } <span class="hljs-keyword" style="color:rgb(0,0,136);">catch</span> (InterruptedException e) {
+        e.printStackTrace(System.<span class="hljs-keyword" style="color:rgb(0,0,136);">out</span>);
+    }
+}
+......</code></pre><ul class="pre-numbering" style="list-style:none;line-height:23.8px;width:50px;background-color:rgb(238,238,238);border-right:1px solid rgb(221,221,221);text-align:right;"><li style="list-style:none;color:rgb(153,153,153);">1</li><li style="list-style:none;color:rgb(153,153,153);">2</li><li style="list-style:none;color:rgb(153,153,153);">3</li><li style="list-style:none;color:rgb(153,153,153);">4</li><li style="list-style:none;color:rgb(153,153,153);">5</li><li style="list-style:none;color:rgb(153,153,153);">6</li><li style="list-style:none;color:rgb(153,153,153);">7</li><li style="list-style:none;color:rgb(153,153,153);">8</li><li style="list-style:none;color:rgb(153,153,153);">9</li><li style="list-style:none;color:rgb(153,153,153);">10</li><li style="list-style:none;color:rgb(153,153,153);">11</li><li style="list-style:none;color:rgb(153,153,153);">12</li><li style="list-style:none;color:rgb(153,153,153);">13</li><li style="list-style:none;color:rgb(153,153,153);">14</li><li style="list-style:none;color:rgb(153,153,153);">15</li><li style="list-style:none;color:rgb(153,153,153);">16</li><li style="list-style:none;color:rgb(153,153,153);">17</li><li style="list-style:none;color:rgb(153,153,153);">18</li><li style="list-style:none;color:rgb(153,153,153);">19</li><li style="list-style:none;color:rgb(153,153,153);">20</li><li style="list-style:none;color:rgb(153,153,153);">21</li><li style="list-style:none;color:rgb(153,153,153);">22</li><li style="list-style:none;color:rgb(153,153,153);">23</li><li style="list-style:none;color:rgb(153,153,153);">24</li><li style="list-style:none;color:rgb(153,153,153);">25</li><li style="list-style:none;color:rgb(153,153,153);">26</li><li style="list-style:none;color:rgb(153,153,153);">27</li><li style="list-style:none;color:rgb(153,153,153);">28</li><li style="list-style:none;color:rgb(153,153,153);">29</li><li style="list-style:none;color:rgb(153,153,153);">30</li><li style="list-style:none;color:rgb(153,153,153);">31</li><li style="list-style:none;color:rgb(153,153,153);">32</li><li style="list-style:none;color:rgb(153,153,153);">33</li><li style="list-style:none;color:rgb(153,153,153);">34</li><li style="list-style:none;color:rgb(153,153,153);">35</li><li style="list-style:none;color:rgb(153,153,153);">36</li><li style="list-style:none;color:rgb(153,153,153);">37</li><li style="list-style:none;color:rgb(153,153,153);">38</li><li style="list-style:none;color:rgb(153,153,153);">39</li></ul><h3 id="4-5-4优化-二" style="font-family:inherit;font-weight:100;line-height:1.1;color:inherit;font-size:1.7em;">
+<a name="t4" style="background:transparent;color:rgb(79,161,219);"></a>4-5-4、优化 二：</h3>
+<p style="line-height:27.2px;">
+显然“优化方案一”中的做法虽然实现了4消费者分别对应4个分区的负载均衡方案，但是受限于单个物理节点的处理性能，所以这种方案的处理性能还有进一步优化的可能。我们可以在多个节点物理节点上均匀散步这些消费者，对Topic分区中的消息进行一一对应的消费，如下图所示：</p>
+<p style="line-height:27.2px;">
+<img src="https://img-blog.csdn.net/20160508124218458" alt="这里写图片描述" title="" style="border:0px;vertical-align:middle;"></p>
+<p style="line-height:27.2px;">
+上图所示的设计思路中，我们使用了2个物理节点完成消息的消费任务，每个服务节点上开启的消费进程上有两个消费者线程。这样Topic中4个分区的消息就会被均匀分布到2个物理节点中，且每一个物理节点处理两个分区中的消息。</p>
+<blockquote style="line-height:27.2px;">
+<p style="font-size:1em;line-height:1.5;color:rgb(111,111,111);">
+注意：可能您在分别启动这些消费进程的时候，由于时间上存在差异，某一台服务节点上的消费进程将暂时被分配多个分区进行消息接收。但没有关系，当这个消费者性能到达瓶颈，分区中的消息出现拥堵的时候，这个分区就会被新的消费者所代替，直到10个消费者线程分别和10个分区建立一一对应关系为止</p>
+<p style="font-size:1em;line-height:1.5;color:rgb(111,111,111);">
+<span style="color:rgb(120,128,135);font-family:'PingFang SC', 'Microsoft YaHei', SimHei, Arial, SimSun;font-size:14px;background-color:rgb(255,255,255);"><br></span></p>
+<p style="font-size:1em;line-height:1.5;color:rgb(111,111,111);">
+<span style="color:rgb(120,128,135);font-family:'PingFang SC', 'Microsoft YaHei', SimHei, Arial, SimSun;font-size:14px;background-color:rgb(255,255,255);">来源：http://blog.csdn.net/yinwenjie（未经允许严禁用于商业用途！）</span></p>
+</blockquote>
+</div>
+</div>
+            </div>
+                </div>

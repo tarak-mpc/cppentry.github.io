@@ -1,0 +1,104 @@
+---
+layout:     post
+title:      Kafka实战－数据持久化
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1>1.概述</h1>
+<p>　　经过前面Kafka实战系列的学习，我们通过学习《<a id="homepage1_HomePageDays_ctl00_DayList_TitleUrl_13" class="postTitle2" href="http://www.cnblogs.com/smartloli/p/4530117.html" rel="nofollow">Kafka实战－入门</a>》了解Kafka的应用场景和基本原理，《<a id="homepage1_HomePageDays_ctl00_DayList_TitleUrl_12" class="postTitle2" href="http://www.cnblogs.com/smartloli/p/4538173.html" rel="nofollow">Kafka实战－Kafka
+ Cluster</a>》一文给大家分享了Kafka集群的搭建部署，让大家掌握了集群的搭建步骤，《<a id="homepage1_HomePageDays_ctl00_DayList_TitleUrl_4" class="postTitle2" href="http://www.cnblogs.com/smartloli/p/4581501.html" rel="nofollow">Kafka实战－实时日志统计流程</a>》一文给大家讲解一个项目（或者说是系统）的整体流程，《<a id="homepage1_HomePageDays_ctl00_DayList_TitleUrl_1" class="postTitle2" href="http://www.cnblogs.com/smartloli/p/4615908.html" rel="nofollow">Kafka实战－Flume到Kafka</a>》一文给大家介绍了Kafka的数据生产过程，《<a id="homepage1_HomePageDays_ctl00_DayList_TitleUrl_0" class="postTitle2" href="http://www.cnblogs.com/smartloli/p/4632644.html" rel="nofollow">Kafka实战－Kafka到Storm</a>》一文给大家介绍了Kafka的数据消费，通过Storm来实时计算处理。今天进入Kafka实战的最后一个环节，那就是Kafka实战的结果的数据持久化。下面是今天要分享的内容目录：</p>
+<ul><li>结果持久化</li><li>实现过程</li><li>结果预览</li></ul><p>　　下面开始今天的分享内容。</p>
+<h1>2.结果持久化</h1>
+<p>　　一般，我们在进行实时计算，将结果统计处理后，需要将结果进行输出，供前端工程师去展示我们统计的结果（所说的报表）。结果的存储，这里我们选择的是Redis＋MySQL进行存储，下面用一张图来展示这个持久化的流程，如下图所示：</p>
+<p><img src="http://images0.cnblogs.com/blog2015/666745/201507/151405080163254.png" alt=""></p>
+<p>　　从途中可以看出，实时计算的部分由Storm集群去完成，然后将计算的结果输出到Redis和MySQL库中进行持久化，给前端展示提供数据源。接下来，我给大家介绍如何实现这部分流程。</p>
+<h1>3.实现过程</h1>
+<p>　　首先，我们去实现Storm的计算结果输出到Redis库中，代码如下所示：</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+<pre><span style="color:#0000ff;">package</span><span style="color:#000000;"> cn.hadoop.hdfs.storm;
+
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> java.util.HashMap;
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> java.util.Map;
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> java.util.Map.Entry;
+
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> redis.clients.jedis.Jedis;
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> cn.hadoop.hdfs.util.JedisFactory;
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> backtype.storm.task.OutputCollector;
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> backtype.storm.task.TopologyContext;
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> backtype.storm.topology.IRichBolt;
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> backtype.storm.topology.OutputFieldsDeclarer;
+</span><span style="color:#0000ff;">import</span><span style="color:#000000;"> backtype.storm.tuple.Tuple;
+
+</span><span style="color:#008000;">/**</span><span style="color:#008000;">
+ * @Date Jun 10, 2015
+ *
+ * @Author dengjie
+ *
+ * @Note Calc WordsCount eg.
+ </span><span style="color:#008000;">*/</span>
+<span style="color:#0000ff;">public</span> <span style="color:#0000ff;">class</span> WordsCounterBlots <span style="color:#0000ff;">implements</span><span style="color:#000000;"> IRichBolt {
+
+    </span><span style="color:#008000;">/**</span><span style="color:#008000;">
+     * 
+     </span><span style="color:#008000;">*/</span>
+    <span style="color:#0000ff;">private</span> <span style="color:#0000ff;">static</span> <span style="color:#0000ff;">final</span> <span style="color:#0000ff;">long</span> serialVersionUID = -619395076356762569L<span style="color:#000000;">;
+
+    OutputCollector collector;
+    Map</span>&lt;String, Integer&gt;<span style="color:#000000;"> counter;
+
+    @SuppressWarnings(</span>"rawtypes"<span style="color:#000000;">)
+    </span><span style="color:#0000ff;">public</span> <span style="color:#0000ff;">void</span><span style="color:#000000;"> prepare(Map stormConf, TopologyContext context, OutputCollector collector) {
+        </span><span style="color:#0000ff;">this</span>.collector =<span style="color:#000000;"> collector;
+        </span><span style="color:#0000ff;">this</span>.counter = <span style="color:#0000ff;">new</span> HashMap&lt;String, Integer&gt;<span style="color:#000000;">();
+    }
+
+    </span><span style="color:#0000ff;">public</span> <span style="color:#0000ff;">void</span><span style="color:#000000;"> execute(Tuple input) {
+        String word </span>= input.getString(0<span style="color:#000000;">);
+        Integer integer </span>= <span style="color:#0000ff;">this</span><span style="color:#000000;">.counter.get(word);
+        </span><span style="color:#0000ff;">if</span> (integer != <span style="color:#0000ff;">null</span><span style="color:#000000;">) {
+            integer </span>+= 1<span style="color:#000000;">;
+            </span><span style="color:#0000ff;">this</span><span style="color:#000000;">.counter.put(word, integer);
+        } </span><span style="color:#0000ff;">else</span><span style="color:#000000;"> {
+            </span><span style="color:#0000ff;">this</span>.counter.put(word, 1<span style="color:#000000;">);
+        }
+        </span><span style="color:#0000ff;">for</span> (Entry&lt;String, Integer&gt; entry : <span style="color:#0000ff;">this</span><span style="color:#000000;">.counter.entrySet()) {
+           </span><span style="color:#008000;">//</span><span style="color:#008000;"> write result to redis</span>
+            Jedis jedis = JedisFactory.getJedisInstance("real-time"<span style="color:#000000;">);
+            jedis.set(entry.getKey(), entry.getValue().toString());
+            
+            </span><span style="color:#008000;">//</span><span style="color:#008000;"> write result to mysql
+            </span><span style="color:#008000;">//</span><span style="color:#008000;"> ...</span>
+<span style="color:#000000;">        }
+</span><span style="color:#0000ff;">this</span><span style="color:#000000;">.collector.ack(input);
+    }
+
+    </span><span style="color:#0000ff;">public</span> <span style="color:#0000ff;">void</span><span style="color:#000000;"> cleanup() {
+        </span><span style="color:#008000;">//</span><span style="color:#008000;"> TODO Auto-generated method stub</span>
+<span style="color:#000000;">        
+    }
+
+    </span><span style="color:#0000ff;">public</span> <span style="color:#0000ff;">void</span><span style="color:#000000;"> declareOutputFields(OutputFieldsDeclarer declarer) {
+        </span><span style="color:#008000;">//</span><span style="color:#008000;"> TODO Auto-generated method stub</span>
+<span style="color:#000000;">
+    }
+
+    </span><span style="color:#0000ff;">public</span> Map&lt;String, Object&gt;<span style="color:#000000;"> getComponentConfiguration() {
+        </span><span style="color:#008000;">//</span><span style="color:#008000;"> TODO Auto-generated method stub</span>
+        <span style="color:#0000ff;">return</span> <span style="color:#0000ff;">null</span><span style="color:#000000;">;
+    }
+
+}</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+</div>
+<p>　　<span style="color:#ff0000;"><strong>注：这里关于输出到MySQL就不赘述了，大家可以按需处理即可。</strong></span></p>
+<h1>4.结果预览</h1>
+<p>　　在实现持久化到Redis的代码实现后，接下来，我们通过提交Storm作业，来观察是否将计算后的结果持久化到了Redis集群中。结果如下图所示：</p>
+<p><img src="http://images0.cnblogs.com/blog2015/666745/201507/151426516262029.png" alt=""></p>
+<p>　　通过Redis的Client来浏览存储的Key值，可以观察统计的结果持久化到来Redis中。</p>
+<h1>5.总结</h1>
+<p>　　我们在提交作业到Storm集群的时候需要观察作业运行状况，有可能会出现异常，我们可以通过Storm UI界面来观察，会有提示异常信息的详细描述。若是出错，大家可以通过Storm UI的错误信息和Log日志打印的错误信息来定位出原因，从而找到对应的解决办法。</p>
+            </div>
+                </div>

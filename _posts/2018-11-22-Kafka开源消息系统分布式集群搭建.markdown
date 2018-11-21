@@ -1,0 +1,530 @@
+---
+layout:     post
+title:      Kafka开源消息系统分布式集群搭建
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_25371579/article/details/54772480				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="kafka开源消息系统分布式集群搭建">Kafka开源消息系统分布式集群搭建</h1>
+
+
+
+<h2 id="1kafka是什么">1、KafKa是什么</h2>
+
+<pre><code>在流式计算中，KafKa一般用来缓存数据，Storm通过消费KafKa的数据进行计算
+
+KafKa + Storm + Redis
+
+a.Apache KafKa是一个开源消息系统，由Scala写成。
+是由Apache软件基金会开发的一个开源消息系统项目
+
+b.kafka最初是由LinkedIn开发，并与2011年初开源。2012年10月从Apache Incubator毕业。
+该项目的目标是为了处理实时数据提供一个统一、高通量、低等待的平台。
+
+c.KafKa是一个分布式消息队列：生产者、消费者的功能。它提供了类似于JMS的特性，但是在设计实现上完全不同，此外它并不是JMS规范的实现
+
+d.KafKa对消息保存时根据Topic进行归类，发送消息者称为Producer，消息接受者称为Consumer，此外KafKa集群有多个KafKa实例组成，每个实例(server)称为broker。
+
+e.无论是KafKa集群，还是producer和consumer都依赖于Zookeeper集群保存一些meta信息，来保证系统可用性。
+</code></pre>
+
+
+
+<h2 id="2jms是什么">2、JMS是什么</h2>
+
+
+
+<h3 id="21jms的基础">2.1、JMS的基础</h3>
+
+<pre><code>JMS是什么：JMS是Java提供的一套技术规范
+JMS干什么用：用来异构系统集成通信，缓解系统瓶颈，提高系统的伸缩性增强系统用户体验，使得系统模块化和组件化变得可行并更加灵活
+通过什么方式：生产消费者模式(生产者、服务器、消费者)
+</code></pre>
+
+<p><img src="http://i1.piimg.com/1949/60ad97cc2f7a9375.png" alt="Markdown" title=""></p>
+
+<pre><code>jdk、kafka、activemq......
+</code></pre>
+
+
+
+<h3 id="22jms消息传输模型">2.2、JMS消息传输模型</h3>
+
+<pre><code>点对点模式(一对一，消费者主动拉取数据，消息收到后消息清除)
+点对点模型通常是一个基于拉取或者轮循的消息传送模型，这种模型从队列中请求信息，而不是将消息推送到客户端。
+这个模型的特点是发送到队列的消息被一个且只有一个接收者接收处理，即使有多个消息监听者也是如此
+
+发布/订阅模式(一对多，数据生产后，推送给所有订阅者)
+发布订阅模型则是一个基于推送的消息传送模型。发布订阅模型可以有多种不同的订阅者，临时订阅者只在监听主题时才接收消息，
+而持久订阅者则监听主题的所有消息，即使当前订阅者不可用，处于离线状态
+</code></pre>
+
+<p><img src="http://p1.bpimg.com/1949/f316ddd759a353f5.png" alt="Markdown" title=""></p>
+
+<pre><code>queue.put(object)  数据生产
+queue.take(object) 数据消费
+</code></pre>
+
+
+
+<h3 id="23jms核心组件">2.3、JMS核心组件</h3>
+
+<pre><code>Destination：消息发送的目的地，也就是前面说的Queue和Topic
+Message：从字面上就可以看出是被发送的消息
+Producer：消息的生产者，要发送一个消息，必须通过这个生产者来发送
+MessageConsumer：与生产者相对应，这是消息的消费者或接收者，通过它来接收一个消息
+</code></pre>
+
+<p><img src="http://p1.bpimg.com/1949/667d77a951136942.png" alt="Markdown" title=""></p>
+
+<pre><code>StreamMessage：Java 数据流消息，用标准流操作来顺序的填充和读取。
+MapMessage：一个Map类型的消息；名称为 string 类型，而值为 Java 的基本类型。
+TextMessage：普通字符串消息，包含一个String。
+ObjectMessage：对象消息，包含一个可序列化的Java 对象
+BytesMessage：二进制数组消息，包含一个byte[]。
+XMLMessage:  一个XML类型的消息。
+最常用的是TextMessage和ObjectMessage。
+
+通过与ConnectionFactory可以获得一个connection
+通过connection可以获得一个session会话
+</code></pre>
+
+
+
+<h3 id="24常见的类jms消息服务器">2.4常见的类JMS消息服务器</h3>
+
+
+
+<h4 id="241jms消息服务器activemq">2.4.1、JMS消息服务器ActiveMQ</h4>
+
+<pre><code>ActiveMQ是Apache出品，最流行的，能力强劲的开源消息总线。
+ActiveMQ是一个完全支持JMS1.1和J2EE1.4规范的。
+
+主要特点：
+多种语言和协议编写客户端。语言：Java、C、C++、C#、Ruby、Perl、Python、PHP。
+应用协议：OpenWire，Stomp REST，WS Notification，XMPP，AMQP
+完全支持JMS1.1和J2EE1.4规范(持久化，XA消息，事务)
+对Spring的支持，ActiveMQ可以很容易内嵌到使用Spring的系统里面去，而且也支持Spring2.0的特性
+通过了常见J2EE服务器(如Geronimo，JBoss 4，GlassFish，WebLogic)的测试，其中通过JCA1.5 resource adaptors的配置，
+可以让ActiveMQ可以自动的部署到任何兼容J2EE 1.4商业服务器上
+支持多种传送协议：in=VM，TCP，SSL，NIO，UDP，JGroups，JXTA
+支持通过JDBC和journal提供高速的消息持久化
+从设计上保证了高性能的集群，客户端-服务器，点对点
+支持Ajax
+支持与Axis的整合
+可以很容易得调用内嵌JMS provider，进行测试
+</code></pre>
+
+
+
+<h4 id="242分布式消息中间件-metamorphosis">2.4.2、分布式消息中间件 Metamorphosis</h4>
+
+<pre><code>Metamorphosis(MetaQ)是一个高性能、高可用、可拓展的分布式消息中间件，
+类似于LinkedIn的Kafka，具有消息存储顺序写、吞吐量大和支持本地和XA事务等特性，
+适用于大吞吐量、顺序消息、广播和日志数据传输场景，在淘宝和支付宝有着广泛的应用，
+现已开源。
+
+主要特点：
+1、生产者、服务器和消费者都可分布
+2、消息存储顺序写
+3、性能极高，吞吐量大
+4、支持消息顺序
+5、支持本地和XA事务
+6、客户端pull，随机读，利用sendfile系统调用，zero-copy，批量拉数据
+7、支持消费端事务
+8、支持消息广播模式
+9、支持异步发送消息
+10、支持http协议
+11、支持消息重试和recover
+12、数据迁移、扩容对用户透明
+13、消费状态保存在客户端
+14、支持同步和异步复制两种HA
+15、支持group commit
+</code></pre>
+
+
+
+<h4 id="243分布式消息中间件-rocketmq">2.4.3、分布式消息中间件 RocketMQ</h4>
+
+<pre><code>RockeMQ是一款分布式、队列模型的消息中间件，具有以下特点：
+能够保证严格的消息顺序
+提供丰富的消息拉取模式
+高效的订阅者水平拓展能力
+实时的消息订阅机制
+亿级消息堆积能力
+Metaq3.0版本改名，产品名称改为RocketMQ
+</code></pre>
+
+
+
+<h4 id="244其他mq">2.4.4、其他MQ</h4>
+
+<pre><code>.NET消息中间件DotNetMQ
+基于Hbase的消息队列 HQueue
+Go的MQ框架 KiteQ
+AMQP消息服务器 RabbitMQ
+MemcacheQ是一个基于MemcacheDB的消息队列服务器
+</code></pre>
+
+
+
+<h2 id="3为什么需要消息队列重要">3、为什么需要消息队列(重要)</h2>
+
+<pre><code>消息系统的核心作用就是三点：解耦，异步和并行
+以用户注册的案例来说明消息系统的作用
+</code></pre>
+
+
+
+<h3 id="31用户注册的一般流程">3.1、用户注册的一般流程</h3>
+
+<p><img src="http://p1.bqimg.com/1949/5992ee73bb9abad8.jpg" alt="Markdown" title=""></p>
+
+<pre><code>问题：随着后端流程越来越多，每步流程都需要额外的耗费很多时间，从而会导致用户更长的等待延迟
+</code></pre>
+
+
+
+<h3 id="32用户注册的并行执行">3.2、用户注册的并行执行</h3>
+
+<p><img src="http://p1.bqimg.com/1949/9d207a03ce607cc5.jpg" alt="Markdown" title=""></p>
+
+<pre><code>问题：系统并行的发起了4个请求，4个请求中，如果某一个环节执行1分钟，其他环节再快，用户也需要等待1分钟。
+如果其中一个环节异常之后，整个服务挂掉了。
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/1949/5a52b50564cb5884.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="33用户注册的最终一致">3.3、用户注册的最终一致</h3>
+
+<p><img src="http://p1.bqimg.com/1949/98cc57f1bc8c17d9.jpg" alt="Markdown" title=""></p>
+
+<pre><code>1、保证主流程的正常执行、执行成功之后，发送MQ消息出去
+2、需要这个destincation的其他系统通过消费数据再执行，最终一致
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/1949/9d207a03ce607cc5.jpg" alt="Markdown" title=""></p>
+
+
+
+<h2 id="4kafka核心组件">4.Kafka核心组件</h2>
+
+<pre><code>Topic：消息根据Topic进行分类
+Producer：发送消息者
+Consumer：消息接受者
+broker：每个Kafka实例(server)
+Zookeeper：依赖集群保存meta信息
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/1949/2ebf3b9235cffb56.png" alt="Markdown" title=""></p>
+
+
+
+<h2 id="5kafka集群搭建">5.Kafka集群搭建</h2>
+
+
+
+<h3 id="51下载解压">5.1.下载解压</h3>
+
+<pre><code>从官网下载Kafka，下载地址http://kafka.apache.org/downloads.html
+注意这里最好下载scala2.10版本的kafka，因为scala2.10版本的兼容性比较好和2.11版本差别太大
+</code></pre>
+
+<p><img src="http://i1.piimg.com/581590/26c541f6058127b8.png" alt="Markdown" title=""></p>
+
+<pre><code>通过命令解压
+[root@node02 software]# tar -zxvf kafka_2.10-0.9.0.1.tgz -C /opt/modules
+</code></pre>
+
+
+
+<h3 id="52重命名">5.2.重命名</h3>
+
+<pre><code>[root@node02 modules]# mv kafka_2.10-0.9.0.1 kafka
+</code></pre>
+
+
+
+<h3 id="53配置启动">5.3.配置启动</h3>
+
+
+
+<h4 id="541配置configserverproperties">5.4.1.配置config/server.properties</h4>
+
+<pre><code>[root@node02 ~]# cd /opt/modules/kafka/
+[root@node02 kafka]# vi config/server.properties
+</code></pre>
+
+
+
+<h4 id="542配置brokerid从0开始后面其他节点配置1234等等">5.4.2.配置broker.id从0开始，后面其他节点配置1,2,3,4等等</h4>
+
+<pre><code>broker.id=0
+host.name=node02
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/b59cdcae0b1e3eb4.png" alt="Markdown" title=""></p>
+
+
+
+<h4 id="543事先启动zookeeper集群这里配置zookeeper集群的地址">5.4.3.事先启动zookeeper集群，这里配置zookeeper集群的地址</h4>
+
+<pre><code>zookeeper.connect=node02:2181,node03:2181,node04:2181
+</code></pre>
+
+<p><img src="http://i1.piimg.com/581590/9dd16ee3e9f1b48b.png" alt="Markdown" title=""></p>
+
+
+
+<h4 id="544将集群分发到其他机器比如">5.4.4.将集群分发到其他机器，比如</h4>
+
+<pre><code>[root@node02 ~]# scp -r /opt/modules/kafka/ root@node03:/opt/modules/kakfa
+[root@node02 ~]# scp -r /opt/modules/kafka/ root@node04:/opt/modules/kakfa
+</code></pre>
+
+
+
+<h4 id="545这里注意修改brokeridhostname">5.4.5.这里注意修改broker.id、host.name</h4>
+
+<pre><code>[root@node03 ~]# cd /opt/modules/kafka/
+[root@node03 kafka]# vi config/server.properties
+broker.id=1
+host.name=node03
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/12b33a0feb7053e1.png" alt="Markdown" title=""></p>
+
+<pre><code>[root@node04 ~]# cd /opt/modules/kafka
+[root@node04 kafka]# vi config/server.properties
+broker.id=2
+host.name=node04
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/be4bec656b2d02df.png" alt="Markdown" title=""></p>
+
+
+
+<h4 id="546修改完配置以后在每个节点启动kafka的broker">5.4.6.修改完配置以后在每个节点启动kafka的broker</h4>
+
+<pre><code>[root@node02 kafka]# ./bin/kafka-server-start.sh config/server.properties
+[root@node03 kafka]# ./bin/kafka-server-start.sh config/server.properties
+[root@node04 kafka]# ./bin/kafka-server-start.sh config/server.properties
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/e375c3adcda0880f.png" alt="Markdown" title=""></p>
+
+
+
+<h4 id="547测试">5.4.7.测试</h4>
+
+
+
+<h5 id="5471新建一个topic">5.4.7.1.新建一个topic</h5>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@node02</span> kafka]<span class="hljs-comment"># ./bin/kafka-topics.sh -zookeeper node02:2181,node03:2181,node04:2181 -topic test -replication-factor 2 -partitions 5 -create</span>
+<span class="hljs-constant">Created</span> topic <span class="hljs-string">"test"</span>.</code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/de70cde2342436b3.png" alt="Markdown" title=""></p>
+
+
+
+<h5 id="5472查看当前的topic">5.4.7.2.查看当前的topic</h5>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@node02</span> kafka]<span class="hljs-comment"># ./bin/kafka-topics.sh -zookeeper node02:2181,node03:2181,node04:2181 -list</span>
+test</code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/cfb803bd628b673c.png" alt="Markdown" title=""></p>
+
+
+
+<h5 id="5473查看一个topic的分区及副本状态信息">5.4.7.3.查看一个topic的分区及副本状态信息</h5>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-title">[</span><span class="hljs-comment">root@node03</span> <span class="hljs-comment">kafka</span><span class="hljs-title">]</span><span class="hljs-comment">#</span> <span class="hljs-string">.</span><span class="hljs-comment">/bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">topics</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">describe</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">node02:2181</span><span class="hljs-string">,</span><span class="hljs-comment">node03:2181</span><span class="hljs-string">,</span><span class="hljs-comment">node04:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">test</span></code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/0a2d73dd901e1554.png" alt="Markdown" title=""></p>
+
+
+
+<h5 id="5474在一个节点创建一个provider">5.4.7.4.在一个节点创建一个provider</h5>
+
+<pre><code>在provider输入信息，在consumer能接收到信息
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-title">[</span><span class="hljs-comment">root@node03</span> <span class="hljs-comment">kafka</span><span class="hljs-title">]</span><span class="hljs-comment">#</span> <span class="hljs-string">.</span><span class="hljs-comment">/bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">console</span><span class="hljs-literal">-</span><span class="hljs-comment">producer</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">broker</span><span class="hljs-literal">-</span><span class="hljs-comment">list</span> <span class="hljs-comment">node02:9092</span><span class="hljs-string">,</span><span class="hljs-comment">node03:9092</span><span class="hljs-string">,</span><span class="hljs-comment">node04:9092</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">test</span></code></pre>
+
+<p><img src="http://p1.bpimg.com/581590/1870db9a8b52a0eb.png" alt="Markdown" title=""></p>
+
+
+
+<h5 id="5475在另一个节点创建一个consumer">5.4.7.5.在另一个节点创建一个consumer</h5>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-title">[</span><span class="hljs-comment">root@node04</span> <span class="hljs-comment">kafka</span><span class="hljs-title">]</span><span class="hljs-comment">#</span> <span class="hljs-string">.</span><span class="hljs-comment">/bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">console</span><span class="hljs-literal">-</span><span class="hljs-comment">consumer</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">node02:2181</span><span class="hljs-string">,</span><span class="hljs-comment">node03:2181</span><span class="hljs-string">,</span><span class="hljs-comment">node04:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">from</span><span class="hljs-literal">-</span><span class="hljs-comment">beginning</span> <span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">test</span></code></pre>
+
+<p><img src="http://p1.bpimg.com/581590/d1593b558ef59a9d.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="55kafka生产者java-api">5.5.Kafka生产者Java API</h3>
+
+<p><img src="http://p1.bqimg.com/581590/e992f92a4424b535.png" alt="Markdown" title=""></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">package</span> com.matrix.kafka;
+
+<span class="hljs-keyword">import</span> kafka.javaapi.producer.Producer;
+<span class="hljs-keyword">import</span> kafka.producer.KeyedMessage;
+<span class="hljs-keyword">import</span> kafka.producer.ProducerConfig;
+
+<span class="hljs-keyword">import</span> java.util.Properties;
+<span class="hljs-keyword">import</span> java.util.UUID;
+
+<span class="hljs-javadoc">/**
+ * 这是一个简单的Kafka producer代码 包含两个功能: 1、数据发送 2、数据按照自定义的partition策略进行发送
+ *
+ * KafkaSpout的类
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">KafakProducerSimple</span> {</span>
+
+    <span class="hljs-javadoc">/**
+     * 1、指定当前kafka producer生产的数据的目的地 创建topic可以输入以下命令，在kafka集群的任一节点进行创建。
+     * bin/kafka-topics.sh --create --zookeeper zk01:2181 --replication-factor 1
+     * --partitions 1 --topic test
+     */</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> String TOPIC = <span class="hljs-string">"test"</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) <span class="hljs-keyword">throws</span> Exception {
+        <span class="hljs-javadoc">/**
+         * 2、读取配置文件
+         */</span>
+        Properties props = <span class="hljs-keyword">new</span> Properties();
+        <span class="hljs-comment">/*
+         * key.serializer.class默认为serializer.class
+         */</span>
+        props.put(<span class="hljs-string">"serializer.class"</span>, <span class="hljs-string">"kafka.serializer.StringEncoder"</span>);
+        <span class="hljs-comment">/*
+         * kafka broker对应的主机，格式为host1:port1,host2:port2
+         */</span>
+        props.put(<span class="hljs-string">"zk.connect"</span>, <span class="hljs-string">"node02:2181,node03:2181,node04:2181"</span>);
+        props.put(<span class="hljs-string">"metadata.broker.list"</span>, <span class="hljs-string">"node02:9092,node03:9092,node04:9092"</span>);
+        <span class="hljs-comment">/*
+         * request.required.acks,设置发送数据是否需要服务端的反馈,有三个值0,1,-1
+         * 0，意味着producer永远不会等待一个来自broker的ack，这就是0.7版本的行为。
+         * 这个选项提供了最低的延迟，但是持久化的保证是最弱的，当server挂掉的时候会丢失一些数据。 1，意味着在leader
+         * replica已经接收到数据后，producer会得到一个ack。
+         * 这个选项提供了更好的持久性，因为在server确认请求成功处理后，client才会返回。
+         * 如果刚写到leader上，还没来得及复制leader就挂了，那么消息才可能会丢失。
+         * -1，意味着在所有的ISR都接收到数据后，producer才得到一个ack。
+         * 这个选项提供了最好的持久性，只要还有一个replica存活，那么数据就不会丢失
+         */</span>
+        props.put(<span class="hljs-string">"request.required.acks"</span>, <span class="hljs-string">"1"</span>);
+        <span class="hljs-comment">/*
+         * 可选配置，如果不配置，则使用默认的partitioner partitioner.class
+         * 默认值：kafka.producer.DefaultPartitioner
+         * 用来把消息分到各个partition中，默认行为是对key进行hash。
+         */</span>
+        <span class="hljs-comment">// props.put("partitioner.class", "com.matrix.kafka.MyLogPartitioner");</span>
+        <span class="hljs-javadoc">/**
+         * 3、通过配置文件，创建生产者
+         */</span>
+        Producer&lt;String, String&gt; producer = <span class="hljs-keyword">new</span> Producer&lt;String, String&gt;(<span class="hljs-keyword">new</span> ProducerConfig(props));
+        <span class="hljs-comment">// 发送数据</span>
+        <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> messageNo = <span class="hljs-number">1</span>; messageNo &lt; <span class="hljs-number">100000</span>; messageNo++) {
+            <span class="hljs-javadoc">/**
+             * 5、调用producer的send方法发送数据 注意：这里需要指定
+             * partitionKey，用来配合自定义的MyLogPartitioner进行数据分发
+             */</span>
+            producer.send(
+                    <span class="hljs-keyword">new</span> KeyedMessage&lt;String, String&gt;(TOPIC, messageNo + <span class="hljs-string">""</span>, <span class="hljs-string">"appid"</span> + UUID.randomUUID() + <span class="hljs-string">"matrix"</span>));
+        }
+    }
+}
+
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/02ec6290f9c20b9c.png" alt="Markdown" title=""></p>
+
+
+
+<h4 id="551用一个comsumer从某一个topic中读取信息">5.5.1.用一个comsumer从某一个topic中读取信息</h4>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-title">[</span><span class="hljs-comment">root@node04</span> <span class="hljs-comment">kafka</span><span class="hljs-title">]</span><span class="hljs-comment">#</span> <span class="hljs-string">.</span><span class="hljs-comment">/bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">console</span><span class="hljs-literal">-</span><span class="hljs-comment">consumer</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">node02:2181</span><span class="hljs-string">,</span><span class="hljs-comment">node03:2181</span><span class="hljs-string">,</span><span class="hljs-comment">node04:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">from</span><span class="hljs-literal">-</span><span class="hljs-comment">beginning</span> <span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">test</span></code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/3d741a2f783f9c1b.png" alt="Markdown" title=""></p>
+
+
+
+<h3 id="56kafka消费者java-api">5.6.Kafka消费者Java API</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">package</span> com.matrix.kafka;
+
+<span class="hljs-keyword">import</span> java.util.HashMap;
+<span class="hljs-keyword">import</span> java.util.List;
+<span class="hljs-keyword">import</span> java.util.Map;
+<span class="hljs-keyword">import</span> java.util.Properties;
+
+<span class="hljs-keyword">import</span> kafka.consumer.Consumer;
+<span class="hljs-keyword">import</span> kafka.consumer.ConsumerConfig;
+<span class="hljs-keyword">import</span> kafka.consumer.KafkaStream;
+<span class="hljs-keyword">import</span> kafka.javaapi.consumer.ConsumerConnector;
+<span class="hljs-keyword">import</span> kafka.message.MessageAndMetadata;
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">KafkaConsumerSimple</span> {</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> String topic = <span class="hljs-string">"test"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> Integer threads = <span class="hljs-number">1</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) {
+        Properties props = <span class="hljs-keyword">new</span> Properties();
+        props.put(<span class="hljs-string">"zookeeper.connect"</span>, <span class="hljs-string">"node02:2181,node03:2181,node04:2181"</span>);
+        props.put(<span class="hljs-string">"group.id"</span>, <span class="hljs-string">"1111"</span>);
+        props.put(<span class="hljs-string">"auto.offset.reset"</span>, <span class="hljs-string">"smallest"</span>);
+
+        ConsumerConfig config = <span class="hljs-keyword">new</span> ConsumerConfig(props);
+        ConsumerConnector consumer = Consumer.createJavaConsumerConnector(config);
+        Map&lt;String, Integer&gt; topicCountMap = <span class="hljs-keyword">new</span> HashMap&lt;String, Integer&gt;();
+        topicCountMap.put(topic, <span class="hljs-number">1</span>);
+        <span class="hljs-comment">// topicCountMap.put("mygirls", 1);</span>
+        <span class="hljs-comment">// topicCountMap.put("myboys", 1);</span>
+        Map&lt;String, List&lt;KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt;&gt;&gt; consumerMap = consumer.createMessageStreams(topicCountMap);
+        List&lt;KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt;&gt; streams = consumerMap.get(topic);
+
+        <span class="hljs-keyword">for</span> (<span class="hljs-keyword">final</span> KafkaStream&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt; kafkaStream : streams) {
+            <span class="hljs-keyword">new</span> Thread(<span class="hljs-keyword">new</span> Runnable() {
+                <span class="hljs-annotation">@Override</span>
+                <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">run</span>() {
+                    <span class="hljs-keyword">for</span> (MessageAndMetadata&lt;<span class="hljs-keyword">byte</span>[], <span class="hljs-keyword">byte</span>[]&gt; mm : kafkaStream) {
+                        String msg = <span class="hljs-keyword">new</span> String(mm.message());
+                        System.out.println(msg);
+                    }
+                }
+
+            }).start();
+
+        }
+    }
+}
+</code></pre>
+
+<p><img src="http://p1.bqimg.com/581590/9d58fe18c54db202.png" alt="Markdown" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

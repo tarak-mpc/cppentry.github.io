@@ -1,0 +1,120 @@
+---
+layout:     post
+title:      MQ入门总结（六）Kafka的原理和使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>转载：<a href="https://www.cnblogs.com/luxiaoxun/p/5492646.html" rel="nofollow">Kafka基本原理</a></p>
+<p>转载：<a href="http://blog.csdn.net/suifeng3051/article/details/48053965" rel="nofollow">Kafka 设计与原理详解</a></p>
+<p>转载：<a href="http://blog.csdn.net/xlgen157387/article/details/77266719" rel="nofollow">Kafka简介、基本原理、执行流程与使用场景</a></p>
+<p>转载：<a href="http://blog.csdn.net/xlgen157387/article/details/77312569" rel="nofollow">Kafka 单机和分布式环境搭建与案例使用</a></p>
+<p></p>
+<h1><span style="font-size:14px;color:#ff6600;">一、Kafka</span></h1>
+<span style="font-size:14px;">Kafka是最初由Linkedin公司开发，是一个分布式、支持分区的（partition）、多副本的（replica），基于zookeeper协调的<strong><span style="color:#ff0000;">分布式消息系统</span></strong>，它的最大的特性就是可以实时的<strong>处理大量数据以满足各种需求场景</strong>：比如基于hadoop的批处理系统、低延迟的实时系统、storm/Spark流式处理引擎，web/nginx日志、访问日志，消息服务等等，用scala语言编写，Linkedin于2010年贡献给了Apache基金会并成为顶级开源项目。</span>
+<p></p>
+<h1><span style="font-size:14px;color:#ff6600;">二、Kafka的应用场景</span></h1>
+<p></p>
+<ol><li><span style="font-size:14px;"><strong>日志收集</strong>：一个公司可以用Kafka可以收集各种服务的log，通过kafka以统一接口服务的方式开放给各种consumer，例如hadoop、Hbase、Solr等。</span></li><li><span style="font-size:14px;"><strong>消息系统</strong>：解耦和生产者和消费者、缓存消息等。</span></li><li><span style="font-size:14px;"><strong>用户活动跟踪</strong>：Kafka经常被用来记录web用户或者app用户的各种活动，如浏览网页、搜索、点击等活动，这些活动信息被各个服务器发布到kafka的topic中，然后订阅者通过订阅这些topic来做实时的监控分析，或者装载到hadoop、数据仓库中做离线分析和挖掘。</span></li><li><span style="font-size:14px;"><strong>运营指标</strong>：Kafka也经常用来记录运营监控数据。包括收集各种分布式应用的数据，生产各种操作的集中反馈，比如报警和报告。</span></li><li><span style="font-size:14px;"><strong>流式处理</strong>：比如spark streaming和storm</span></li><li><span style="font-size:14px;"><strong>事件源</strong></span></li></ol><p></p>
+<p></p>
+<h2><span style="font-size:14px;color:#ff6600;">Kafka的特性</span></h2>
+<span style="font-size:14px;"></span>
+<ul><li>（1）高吞吐量、低延迟：kafka每秒可以处理几十万条消息，它的延迟最低只有几毫秒，每个topic可以分多个partition, consumer group 对partition进行consume操作；</li><li>（2）可扩展性：kafka集群支持热扩展；</li><li>（3）持久性、可靠性：消息被持久化到本地磁盘，并且支持数据备份防止数据丢失；</li><li>（4）容错性：允许集群中节点失败（若副本数量为n,则允许n-1个节点失败）；</li><li>（5）高并发：支持数千个客户端同时读写；</li><li>（6）支持实时在线处理和离线处理：可以使用Storm这种实时流处理系统对消息进行实时进行处理，同时还可以使用Hadoop这种批处理系统进行离线处理；</li></ul><p></p>
+<h1><span style="font-size:14px;color:#ff6600;">三、Kafka的拓扑结构</span></h1>
+<p><span style="font-size:14px;"><img src="https://img-blog.csdn.net/20170816193213042?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGxnZW4xNTczODc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述"><br></span></p>
+<p><span style="font-size:14px;">Kafka中发布订阅的对象是topic。我们可以为每类数据创建一个topic，把向topic发布消息的客户端称作<strong>producer</strong>，从topic订阅消息的客户端称作<strong>consumer</strong>。Producers和consumers可以同时从多个topic读写数据。一个kafka集群由一个或多个broker服务器组成，它负责持久化和备份具体的kafka消息。<br></span></p>
+<ul><li>topic：消息存放的目录即主题</li><li>Producer：生产消息到topic的一方</li><li>Consumer：订阅topic消费消息的一方</li><li>Broker：Kafka的服务实例就是一个broker</li></ul><p></p>
+<p><span style="font-size:14px;"><strong><span style="color:#ff6600;">3.1 Zookeeper在kafka的作用</span></strong><br>
+上述，提到了Zookeeper，那么Zookeeper在kafka的作用是什么？<br>
+（1）无论是kafka集群，还是producer和consumer都<strong><span style="color:#ff0000;">依赖于zookeeper来保证系统可用性集群保存一些meta信息</span></strong>。<br>
+（2）Kafka使用zookeeper作为其<strong><span style="color:#ff0000;">分布式协调框架</span></strong>，很好的将消息生产、消息存储、消息消费的过程结合在一起。<br>
+（3）同时借助zookeeper，kafka能够生产者、消费者和broker在内的所有组件在无状态的情况下，<strong>建立起生产者和消费者的订阅关系，并实现生产者与消费者的负载均衡</strong>。<br></span></p>
+<p><span style="font-size:14px;"><span style="color:#ff6600;"><strong>3.2 Replications、Partitions 和Leaders</strong></span><br><strong><span style="color:#ff6600;">Replications</span></strong></span></p>
+<p><span style="font-size:14px;">通过上面介绍的我们可以知道，kafka中的数据是持久化的并且能够容错的。Kafka允许用户为每个topic设置副本数量，副本数量决定了有几个broker来存放写入的数据。如果你的副本数量设置为3，那么一份数据就会被存放在3台不同的机器上，那么就允许有2个机器失败。</span></p>
+<p><span style="font-size:14px;">一般推荐副本数量至少为2，这样就可以保证增减、重启机器时不会影响到数据消费。如果对<strong>数据持久化</strong>有更高的要求，可以把副本数量<strong>设置为3</strong>或者更多。 </span></p>
+<p><span style="font-size:14px;"><strong><span style="color:#ff6600;">3.2.1 Partitions</span></strong><br>
+Kafka中的topic是<strong>以partition的形式</strong>存放的，每一个topic都可以设置它的partition数量，Partition的数量决定了组成topic的log的数量。</span></p>
+<p><span style="font-size:14px;">Producer在生产数据时，会按照一定规则（这个规则是可以自定义的）把消息发布到<strong><span style="color:#ff0000;">topic的各个partition中</span></strong>。上面将的副本都是以partition为单位的，不过<strong>只有一个partition的副本会被选举成leader作为读写用</strong>。 <br>
+关于如何设置partition值需要考虑的因素。<strong><span style="color:#ff0000;">一个partition只能被一个消费者消费</span></strong>（<strong><span style="color:#ff0000;">一个消费者可以同时消费多个partition</span></strong>），因此，如果设置的partition的数量小于consumer的数量，就会<strong><span style="color:#ff0000;">有消费者消费不到数据</span></strong>。所以，</span></p>
+<p><span style="font-size:14px;">1. 推荐<strong><span style="color:#ff0000;">partition的数量一定要大于同时运行的consumer的数量</span></strong>。</span></p>
+<p><span style="font-size:14px;">2. <strong><span style="color:#ff0000;">建议partition的数量大于集群broker的数量</span></strong>，这样leader partition就可以<strong>均匀的分布在各个broker中，最终使得集群负载均衡</strong>。</span></p>
+<p><span style="font-size:14px;">3. kafka需要为每个partition分配一些内存来缓存消息数据，如果partition数量越大，就要为kafka分配更大的heap space。<br><span style="color:#ff6600;"><strong>3.2.2 Producers</strong></span><br>
+Producers直接发送消息到broker上的leader partition，不需要经过任何中介一系列的路由转发。为了实现这个特性，kafka集群中的<strong><span style="color:#ff0000;">每个broker都可以响应producer的请求</span></strong>，并返回topic的一些元信息，这些元信息包括哪些机器是存活的，topic的leader partition都在哪，现阶段哪些leader partition是可以直接被访问的。 <br>
+Producer客户端自己控制着消息被推送到哪些partition。实现的方式可以是<strong>随机分配、实现一类随机负载均衡算法，或者指定一些分区算法</strong>。Kafka提供了接口供用户实现自定义的分区，用户可以为每个消息指定一个<strong>partitionKey</strong>，通过这个key来实现一些hash分区算法。比如，把userid作为partitionkey的话，相同userid的消息将会被推送到同一个分区。 </span></p>
+<p><span style="font-size:14px;"><span style="color:#ff6600;"><strong>3.2.3 Batch</strong></span><br>
+以Batch的方式推送数据可以极大的提高处理效率，kafka Producer 可以将消息在内存中累计到一定数量后作为一个batch发送请求。Batch的数量大小可以通过Producer的参数控制，参数值可以设置为<strong>累计的消息的数量</strong>（如500条）、<strong>累计的时间间隔</strong>（如100ms）或者<strong>累计的数据大小</strong>(64KB)。通过增加batch的大小，可以减少网络请求和磁盘IO的次数，当然具体参数设置需要在效率和时效性方面做一个权衡。 </span></p>
+<p><span style="font-size:14px;"><span style="color:#ff6600;"><strong>3.2.4 Ack</strong></span><br>
+Producers可以异步的并行的向kafka发送消息，但是通常producer在发送完消息之后会得到一个<strong><span style="color:#ff0000;">future响应</span></strong>，返回的是offset值或者发送过程中遇到的错误。这其中有个非常重要的参数“acks”,这个参数决定了producer要求leader partition 收到确认的副本个数。</span></p>
+<p><span style="font-size:14px;">1. 如果<strong><span style="color:#ff6600;">acks设置数量为0</span></strong>，表示<strong><span style="color:#ff0000;">producer不会等待broker的响应</span></strong>，所以，producer无法知道消息是否发送成功，这样有可能会导致数据丢失，但同时，<strong><span style="color:#ff0000;">acks值为0会得到最大的系统吞吐量</span></strong>。 <br>
+2. 若<strong><span style="color:#ff6600;">acks设置为1</span></strong>，表示producer会在leader partition收到消息时得到broker的一个确认，这样会有更好的可靠性，因为客户端会等待直到broker确认收到消息。若设置为-1，producer会在所有备份的partition收到消息时得到broker的确认，这个设置可以得到<strong><span style="color:#ff0000;">最高的可靠性保证</span></strong>。 </span></p>
+<p><span style="font-size:14px;"><strong><span style="color:#ff6600;">3.2.5 Code</span></strong><br>
+Kafka 消息有一个定长的header和变长的字节数组组成。因为kafka消息支持字节数组，也就使得kafka可以支持任何用户自定义的序列号格式或者其它已有的格式如Apache Avro、protobuf等。Kafka没有限定单个消息的大小，但我们推荐消息大小不要超过1MB,通常一般消息大小都在1~10kB之前。<br><span style="color:#ff6600;"><strong>3.3 Consumers</strong></span><br>
+Kafka提供了两套consumer api，分为<strong><span style="color:#ff0000;">high-level api和sample-api</span></strong>。</span></p>
+<p><span style="font-size:14px;">1. Sample-api 是一个底层的API，它维持了一个和单一broker的连接，并且这个API是<strong>完全无状态</strong>的，每次请求都需要指定offset值，因此，这套API也是最灵活的。 <br>
+在kafka中，当前读到消息的offset值是由consumer来维护的，因此，consumer可以<strong>自己决定如何读取kafka中的数据</strong>。比如，consumer可以通过重设offset值来<strong>重新消费已消费过的数据</strong>。不管有没有被消费，kafka会保存数据一段时间，这个时间周期是可配置的，只有到了过期时间，kafka才会删除这些数据。 <br>
+2. High-level API<strong><span style="color:#ff0000;">封装了对集群中一系列broker的访问</span></strong>，可以透明的消费一个topic。它自己维持了已消费消息的状态，即每次消费的都是下一个消息。 </span></p>
+<p><span style="font-size:14px;"><img src="http://cdn1.infoqstatic.com/statics_s2_20151224-0209/resource/articles/kafka-analysis-part-1/zh/resources/0310025.png" alt=""><br>
+High-level API还支持<strong>以组的形式消费topic</strong>，如果consumers有同一个组名，那么kafka就相当于一个<strong>队列消息服务</strong>，而各个consumer均衡的消费相应partition中的数据。若consumers有不同的组名，那么此时kafka就相当与一个<strong>广播服务</strong>，会把topic中的所有消息广播到每个consumer。 <br></span></p>
+<h1><span style="font-size:14px;color:#ff6600;">四、Kafka 的设计原理</span></h1>
+<p><span style="font-size:14px;">Kafka的主要设计思想如下：<br></span></p>
+<ol><li><strong>Consumergroup</strong>：各个consumer可以组成一个组，每个消息只能被组中的一个consumer消费，如果一个消息可以被多个consumer消费的话，那么这些consumer必须在不同的组。</li><li><strong>消息状态</strong>：在Kafka中，消息的状态被保存在<strong>consumer</strong>中，broker不会关心哪个消息被消费了被谁消费了，只记录一个offset值（指向partition中下一个要被消费的消息位置），这就意味着如果consumer处理不好的话，broker上的一个消息可能会被消费多次。</li><li><strong>消息持久化</strong>：Kafka中会把消息<strong>持久化到本地文件系统</strong>中，并且保持极高的效率。</li><li><strong>消息有效期</strong>：Kafka会长久保留其中的消息，以便<strong>consumer</strong>可以多次消费，当然其中很多细节是可配置的。</li><li><strong>批量发送</strong>：Kafka支持以消息集合为单位进行批量发送，以提高push效率。</li><li><strong>push-and-pull</strong> : Kafka中的Producer和consumer采用的是<strong><span style="color:#ff0000;">push-and-pull</span></strong>模式，即Producer只管向broker push消息，consumer只管从broker pull消息，两者对消息的生产和消费是异步的。</li><li><strong>Kafka集群中broker之间的关系</strong>：不是主从关系，各个broker在集群中<strong>地位一样</strong>，我们可以随意的增加或删除任何一个broker节点。</li><li><strong>负载均衡方面</strong>： Kafka提供了一个 metadata API来管理broker之间的负载（对Kafka0.8.x而言，对于0.7.x主要靠zookeeper来实现负载均衡）。</li><li><strong>同步异步</strong>：Producer采用异步push方式，极大提高Kafka系统的吞吐率（可以通过参数控制是采用同步还是异步方式）。</li><li><strong>分区机制partition</strong>：Kafka的broker端支持消息分区，Producer可以决定把消息发到哪个分区，在一个分区中消息的顺序就是Producer发送消息的顺序，一个主题中可以有多个分区，具体分区的数量是可配置的。分区的意义很重大，后面的内容会逐渐体现。</li><li><strong>离线数据装载</strong>：Kafka由于对可拓展的数据持久化的支持，它也非常适合向Hadoop或者数据仓库中进行数据装载。</li><li><strong>插件支持</strong>：现在不少活跃的社区已经开发出不少插件来拓展Kafka的功能，如用来配合Storm、Hadoop、flume相关的插件。</li></ol><p></p>
+<h2><span style="font-size:14px;color:#ff6600;">4.1 Kafka Topic&amp;Partition</span></h2>
+<p><span style="font-size:14px;">消息发送时都被发送到一个topic，其本质就是一个目录，而topic由是由一些Partition Logs(分区日志)组成,其组织结构如下图所示：<br></span></p>
+<p><span style="font-size:14px;"><img src="http://kafka.apache.org/images/log_anatomy.png" alt=""><br><br></span></p>
+<p><span style="font-size:14px;">我们可以看到，<strong>每个Partition中的消息都是有序的</strong>，生产的消息被不断<strong><span style="color:#ff0000;">追加到Partition log上</span></strong>，其中的每一个消息都被赋予了一个唯一的offset值。 <br>
+Kafka集群会保存所有的消息，不管消息有没有被消费；我们可以设定消息的过期时间，只有过期的数据才会被自动清除以释放磁盘空间。比如我们设置消息过期时间为2天，那么这2天内的所有消息都会被保存到集群中，数据只有超过了两天才会被清除。 <br>
+Kafka需要维持的元数据只有一个–<strong><span style="color:#ff0000;">消费消息在Partition中的offset值</span></strong>，Consumer每消费一个消息，offset就会加1。其实消息的状态完全是由Consumer控制的，Consumer可以<strong>跟踪和重设</strong>这个offset值，这样的话Consumer就可以读取任意位置的消息。 <br>
+把消息日志以Partition的形式存放有多重考虑，</span></p>
+<p><span style="font-size:14px;">第一，方便在集群中扩展，每个Partition可以通过调整以适应它所在的机器，而一个topic又可以有多个Partition组成，因此<strong>整个集群就可以适应任意大小的数据</strong>了；</span></p>
+<p><span style="font-size:14px;">第二就是可以提高并发，因为可以<strong>以Partition为单位读写</strong>了。</span></p>
+<p></p>
+<h2><span style="font-size:14px;color:#ff6600;">4.2 压缩</span></h2>
+<span style="font-size:14px;">我们上面已经知道了Kafka支持以集合（batch）为单位发送消息，在此基础上，Kafka还支持对消息集合进行<strong>压缩</strong>，Producer端可以通过GZIP或Snappy格式对消息集合进行压缩。Producer端进行压缩之后，在Consumer端需进行解压。</span>
+<p></p>
+<p><span style="font-size:14px;">压缩的好处就是<strong>减少传输的数据量，减轻对网络传输的压力</strong>，在对大数据处理上，瓶颈往往体现在网络上而不是CPU（压缩和解压会耗掉部分CPU资源）。 <br>
+那么如何区分消息是压缩的还是未压缩的呢，Kafka在消息头部添加了一个<strong>描述压缩属性字节</strong>，这个字节的后两位表示消息的压缩采用的编码，如果后两位为0，则表示消息未被压缩。</span></p>
+<p></p>
+<h2><span style="font-size:14px;color:#ff6600;">4.3 消息可靠性</span></h2>
+<span style="font-size:14px;">在消息系统中，保证消息在生产和消费过程中的可靠性是十分重要的，在实际消息传递过程中，可能会出现如下三中情况：<br></span>
+<ol><li>一个消息发送失败</li><li>一个消息被发送多次</li><li>最理想的情况：exactly-once ,一个消息发送成功且仅发送了一次</li></ol>
+有许多系统声称它们实现了exactly-once，但是它们其实忽略了生产者或消费者在生产和消费过程中有可能失败的情况。比如虽然一个Producer成功发送一个消息，但是消息在发送途中丢失，或者成功发送到broker，也被consumer成功取走，但是这个<strong>consumer在处理取过来的消息时失败了</strong>。 <br>
+从Producer端看：
+<p></p>
+<p><span style="font-size:14px;">Kafka是这么处理的，当一个消息被发送后，Producer会<strong><span style="color:#ff0000;">等待broker成功接收到消息的反馈</span></strong>（可通过参数控制等待时间），如果消息在途中丢失或是其中一个broker挂掉，Producer会<strong>重新发送</strong>（我们知道Kafka有备份机制，可以通过参数控制是否等待所有备份节点都收到消息）。 <br>
+从Consumer端看：</span></p>
+<p><span style="font-size:14px;">前面讲到过partition，broker端记录了partition中的一个offset值，这个值指向Consumer下一个即将消费message。当Consumer收到了消息，但却在处理过程中挂掉，此时Consumer可以通过这个offset值<strong>重新找到上一个消息再进行处理</strong>。Consumer还有权限控制这个offset值，对持久化到broker端的消息做任意处理。</span></p>
+<p></p>
+<p></p>
+<h2><span style="font-size:14px;"><span style="color:#ff6600;"><strong>4.4 备份机制</strong></span></span></h2>
+<span style="font-size:14px;">备份机制是Kafka0.8版本的新特性，备份机制的出现大大<strong>提高了Kafka集群的可靠性、稳定性</strong>。有了备份机制后，Kafka允许集群中的节点挂掉后而不影响整个集群工作。一个备份数量为n的集群允许n-1个节点失败。在所有备份节点中，有一个节点作为lead节点，这个节点保存了其它备份节点列表，并维持各个备份间的状体同步。下面这幅图解释了Kafka的备份机制:</span>
+<p></p>
+<p><span style="font-size:14px;"><img src="https://img-blog.csdn.net/20150828162159461" alt="这里写图片描述"><br></span></p>
+<h2><span style="font-size:14px;color:#ff0000;">4.5 partiton中segment文件存储结构</span></h2>
+<p><span style="font-size:14px;">每个partion(目录)相当于一个巨型文件被平均分配到多个大小相等<strong><span style="color:#ff0000;">segment(段)数据文件</span></strong>中。但每个段segment file消息数量不一定相等，这种特性方便old segment file快速被删除。每个partiton只需要支持顺序读写就行了，segment文件生命周期由服务端配置参数决定。<br></span></p>
+<p><span style="font-size:14px;"><img src="https://img-blog.csdn.net/20170107212036116?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzU3MzEzMw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p><span style="font-size:14px;">producer发message到某个topic，message会被均匀的分布到多个<strong>partition</strong>上（随机或根据用户指定的回调函数进行分布），kafka broker收到message往对应partition的<strong>最后一个segment上添加该消息</strong>，当某个segment上的消息条数达到配置值或消息发布时间超过阈值时，segment上的消息会被flush到磁盘，只有flush到磁盘上的消息consumer才能消费，segment达到一定的大小后将不会再往该segment写数据，broker会创建新的segment。<br><br></span></p>
+<p><span style="font-size:14px;">每个part在内存中对应一个<strong><span style="color:#ff0000;">index</span></strong>，记录每个segment中的<strong>第一条消息偏移</strong>。<br>
+segment file组成：由2大部分组成，分别为<strong>index file</strong>和<strong>data file</strong>，此2个文件一一对应，成对出现，后缀".index"和“.log”分别表示为segment索引文件、数据文件.<br>
+segment文件命名规则：partion全局的第一个segment从0开始，后续每个segment文件名为上一个全局partion的最大offset(偏移message数)。数值最大为64位long大小，19位数字字符长度，没有数字用0填充。<br><br><br>
+每个segment中存储很多条消息，消息id由其逻辑位置决定，即从消息id可直接定位到消息的存储位置，避免id到位置的额外映射。<br>
+下面文件列表是笔者在Kafka broker上做的一个实验，创建一个topicXXX包含1 partition，设置每个segment大小为500MB,并启动producer向Kafka broker写入大量数据,如下图2所示segment文件列表形象说明了上述2个规则：<br></span></p>
+<p><span style="font-size:14px;"><img src="https://img-blog.csdn.net/20170107212205785?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzU3MzEzMw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p><span style="font-size:14px;">以上述图2中一对segment file文件为例，说明segment中index&lt;—-&gt;data file对应关系物理结构如下：<br></span></p>
+<p><span style="font-size:14px;"><img src="https://img-blog.csdn.net/20170107212224538?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzU3MzEzMw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p><span style="font-size:14px;">五、Kafka最小系统</span></p>
+<p><span style="font-size:14px;">当Broker使用单机时即构成了Kafka的最小系统，架构如下：</span></p>
+<p><span style="font-size:14px;"><img src="https://img-blog.csdn.net/20170816195347506?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveGxnZW4xNTczODc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述"><br>
+（1）Server-1 broker 其实就是 kafka 的 <strong><span style="color:#ff0000;">server</span></strong>，因为 producer 和 consumer 都要去还它。 Broker 主要还是做<strong><span style="color:#ff0000;">存储</span></strong>用。<br>
+（2）Server-2 是 zookeeper 的 server 端，它维持了一张表，记录了各个节点的<strong> IP、端口等信息</strong>。<br>
+（3）Server-3、 4、 5 他们的共同之处就是都配置了 <strong><span style="color:#ff0000;">zkClient</span></strong>，更明确的说，就是运行前必须<strong><span style="color:#ff0000;">配置 zookeeper的地址</span></strong>，道理也很简单，这之间的连接都是需要 zookeeper 来进行分发的。<br>
+（4）Server-1 和 Server-2 的关系，他们可以放在一台机器上，也可以分开放，zookeeper 也可以配集群。目的是防止某一台挂了。<br>
+简单说下整个系统运行的顺序：<br>
+（1）启动zookeeper 的 server<br>
+（2）启动kafka 的 server<br>
+（3）Producer 如果生产了数据，会先通过 zookeeper 找到 broker，然后将数据存放到 broker<br>
+（4）Consumer 如果要消费数据，会先通过 zookeeper 找对应的 broker，然后消费。</span></p>
+<p><span style="font-size:14px;">具体配置和使用见：<a href="http://blog.csdn.net/xlgen157387/article/details/77312569" rel="nofollow">Kafka 单机和分布式环境搭建与案例使用</a>（只有机会学，没机会用，神呐，谁能给我个应用场景！）</span></p>
+<p><span style="font-size:14px;"><br></span></p>
+            </div>
+                </div>

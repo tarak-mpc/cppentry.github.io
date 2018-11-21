@@ -1,0 +1,210 @@
+---
+layout:     post
+title:      Kafka的通讯协议
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div class="markdown-here-wrapper">
+<h1 id="kafka-" style="font-weight:bold;font-size:1.6em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(221,221,221);">
+Kafka的通讯协议</h1>
+<p>标签:kafka</p>
+<hr><p>Kafka的Producer、Broker和Consumer之间采用的是一套自行设计的基于TCP层的协议。Kafka的这套协议完全是为了Kafka自身的业务需求而定制的，而非要实现一套类似于Protocol Buffer的通用协议。本文将介绍这套协议的相关内容。</p>
+<h2 id="-" style="font-weight:bold;font-size:1.4em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+基本数据类型</h2>
+<ol><li>定长数据类型：int8,int16,int32和int64，对应到Java中就是byte, short, int和long。</li><li>变长数据类型：bytes和string。变长的数据类型由两部分组成，分别是一个有符号整数N(表示内容的长度)和N个字节的内容。其中，N为-1表示内容为null。bytes的长度由int32表示，string的长度由int16表示。</li><li>数组：数组由两部分组成，分别是一个由int32类型的数字表示的数组长度N和N个元素。</li></ol><h2 id="request-response-" style="font-weight:bold;font-size:1.4em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+Request和Response的基本结构</h2>
+<p>Kafka中两个角色之间通讯的基本单位是Request/Response，Request和Response的基本结构如下：</p>
+<pre style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;font-size:1em;line-height:1.2em;"><code style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;border:1px solid rgb(234,234,234);display:inline;background-color:rgb(248,248,248);overflow:auto;border:1px solid rgb(204,204,204);display:block !important;">RequestOrResponse =&gt; MessageSize (RequestMessage | ResponseMessage)
+</code></pre>
+<p>其中各字段的含义为：</p>
+<table style="border-collapse:collapse;border-spacing:0px;font-family:inherit;font-style:inherit;font-variant:inherit;font-weight:inherit;line-height:inherit;border:0px;"><thead><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+名称</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+类型</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+描述</th>
+</tr></thead><tbody style="border:0px;"><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+MessageSize</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int32</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示RequestMessage或者ResponseMessage的长度</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+RequestMessage/ResponseMessage</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+-</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示Request或者Response的内容，在下面将会介绍其具体格式。</td>
+</tr></tbody></table><p>这个结构定义了通讯双方交换数据的基本结构。通讯的过程可以简单地表示为：客户端打开与服务器端的Socket，然后往Socket写入一个int32的数字表示这次发送的Request有多少字节，然后继续往Socket中写入对应字节数的数据。服务器端先读出一个int32的整数从而获取这次Request的大小，然后读取对应字节数的数据从而得到Request的具体内容。服务器端处理了请求后，也用同样的方式来发送响应。</p>
+<h3 id="requestmessage-" style="font-weight:bold;font-size:1.3em;">
+RequestMessage的结构</h3>
+<p>RequestMessage的结构如下：</p>
+<pre style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;font-size:1em;line-height:1.2em;"><code style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;border:1px solid rgb(234,234,234);display:inline;background-color:rgb(248,248,248);overflow:auto;border:1px solid rgb(204,204,204);display:block !important;">RequestMessage =&gt; ApiKey ApiVersion CorrelationId ClientId Request
+</code></pre>
+<table style="border-collapse:collapse;border-spacing:0px;font-family:inherit;font-style:inherit;font-variant:inherit;font-weight:inherit;line-height:inherit;border:0px;"><thead><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+名称</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+类型</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+描述</th>
+</tr></thead><tbody style="border:0px;"><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+ApiKey</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int16</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示这次请求的API编号</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+ApiVersion</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int16</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示请求的API的版本，有了版本后就可以做到后向兼容</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+CorrelationId</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int32</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+由客户端指定的一个数字唯一标示这次请求的id，服务器端在处理完请求后也会把同样的CorrelationId写到Response中，这样客户端就能把某个请求和响应对应起来了。</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+ClientId</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+string</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+客户端指定的用来描述客户端的字符串，会被用来记录日志和监控，它唯一标示一个客户端。</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Request</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+-</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Request的具体内容。</td>
+</tr></tbody></table><h3 id="responsemessage-" style="font-weight:bold;font-size:1.3em;">
+ResponseMessage的结构</h3>
+<p>ResponseMessage的结构如下：</p>
+<pre style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;font-size:1em;line-height:1.2em;"><code style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;border:1px solid rgb(234,234,234);display:inline;background-color:rgb(248,248,248);overflow:auto;border:1px solid rgb(204,204,204);display:block !important;">ResponseMessage =&gt; CorrelationId Response
+</code></pre>
+<table style="border-collapse:collapse;border-spacing:0px;font-family:inherit;font-style:inherit;font-variant:inherit;font-weight:inherit;line-height:inherit;border:0px;"><thead><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+名称</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+类型</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+描述</th>
+</tr></thead><tbody style="border:0px;"><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+CorrelationId</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int32</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+对应Request的CorrelationId。</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Response</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+-</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+对应Request的Response，不同的Request的Response的字段是不一样的。</td>
+</tr></tbody></table><h2 id="message" style="font-weight:bold;font-size:1.4em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+Message</h2>
+<p>Kafka是一个分布式消息系统，Producer生产消息并推送(Push)给Broker，然后Consumer再从Broker那里取走(Pull)消息。Producer生产的消息就是由Message来表示的，对用户来讲，它就是键-值对，来看看它的结构。</p>
+<pre style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;font-size:1em;line-height:1.2em;"><code style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;border:1px solid rgb(234,234,234);display:inline;background-color:rgb(248,248,248);overflow:auto;border:1px solid rgb(204,204,204);display:block !important;">Message =&gt; Crc MagicByte Attributes Key Value
+</code></pre>
+<table style="border-collapse:collapse;border-spacing:0px;font-family:inherit;font-style:inherit;font-variant:inherit;font-weight:inherit;line-height:inherit;border:0px;"><thead><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+名称</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+类型</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+描述</th>
+</tr></thead><tbody style="border:0px;"><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+CRC</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int32</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示这条消息(不包括CRC字段本身)的校验码</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+MagicByte</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int8</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示消息格式的版本，用来做后向兼容，目前值为0</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Attributes</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int8</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示这条消息的元数据，目前最低两位用来表示压缩格式</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Key</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+bytes</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示这条消息的Key，可以为null</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Value</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+bytes</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示这条消息的Value。Kafka支持消息嵌套，也就是把一条消息作为Value放到另外一条消息里面。</td>
+</tr></tbody></table><h2 id="messageset" style="font-weight:bold;font-size:1.4em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+MessageSet</h2>
+<p>MessageSet用来组合多条Message，它在每条Message的基础上加上了Offset和MessageSize，其结构是：</p>
+<pre style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;font-size:1em;line-height:1.2em;"><code style="font-size:.85em;font-family:Consolas, Inconsolata, Courier, monospace;border:1px solid rgb(234,234,234);display:inline;background-color:rgb(248,248,248);overflow:auto;border:1px solid rgb(204,204,204);display:block !important;">MessageSet =&gt; [Offset MessageSize Message]
+</code></pre>
+<p>它的含义是MessageSet是个数组，数组的每个元素由三部分组成，分别是Offset，MessageSize和Message，它们的含义分别是：</p>
+<table style="border-collapse:collapse;border-spacing:0px;font-family:inherit;font-style:inherit;font-variant:inherit;font-weight:inherit;line-height:inherit;border:0px;"><thead><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+名称</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+类型</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+描述</th>
+</tr></thead><tbody style="border:0px;"><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Offset</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int64</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+它用来作为log中的序列号，Producer在生产消息的时候还不知道具体的值是什么，可以随便填个数字进去</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+MessageSize</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+int32</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示这条Message的大小</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Message</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+-</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+表示这条Message的具体内容，其格式见上一小节。</td>
+</tr></tbody></table><h2 id="message-" style="font-weight:bold;font-size:1.4em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+Message的压缩</h2>
+<p>Kafka支持下面几种压缩方式，</p>
+<table style="border-collapse:collapse;border-spacing:0px;font-family:inherit;font-style:inherit;font-variant:inherit;font-weight:inherit;line-height:inherit;border:0px;"><thead><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+压缩方式</th>
+<th style="font-size:1em;border:1px solid rgb(204,204,204);font-weight:bold;background-color:rgb(240,240,240);">
+编码</th>
+</tr></thead><tbody style="border:0px;"><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+不压缩</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+0</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Gzip</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+1</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+Snappy</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+2</td>
+</tr><tr style="border-width:1px 0px 0px;border-top-style:solid;border-top-color:rgb(204,204,204);background-color:#FFFFFF;background-color:rgb(248,248,248);"><td style="font-size:1em;border:1px solid rgb(204,204,204);">
+LZ4</td>
+<td style="font-size:1em;border:1px solid rgb(204,204,204);">
+3</td>
+</tr></tbody></table><p>其中编码就是Message的Attribute的最低两位的值。</p>
+<p>因为单条消息中重复内容可能不多，所以通常把多条消息放在一起组成MessageSet，然后再把MessageSet放到一条Message里面去，从而提高压缩比率。</p>
+<h2 id="request-respone-message-messageset-" style="font-weight:bold;font-size:1.4em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(238,238,238);">
+Request/Respone和Message/MessageSet的关系</h2>
+<ul><li>Request/Response是通讯层的结构，和网络的7层模型对比的话，它类似于TCP层。</li><li>Message/MessageSet定义的是业务层的结构，类似于网络7层模型中的HTTP层。Message/MessageSet只是Request/Response的payload中的一种数据结构。</li></ul><h1 style="font-weight:bold;font-size:1.6em;border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:rgb(221,221,221);">
+小结</h1>
+<p>Kafka的通讯协议中不含Schema，格式也比较简单，这样设计的好处是协议自身的Overhead小，再加上把多条Message放在一起做压缩，提高压缩比率，从而在网络上传输的数据量会少一些。</p>
+<div title="'MDH:IyBLYWZrYeeahOmAmuiur+WNj+iurjxicj48YnI+PGJyPuagh+etvjprYWZrYTxicj48YnI+PGJy" style="width:0;overflow:hidden;font-size:0em;">
+​</div>
+</div>
+            </div>
+                </div>
