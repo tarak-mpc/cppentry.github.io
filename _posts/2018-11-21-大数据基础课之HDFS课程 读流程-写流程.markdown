@@ -1,0 +1,70 @@
+---
+layout:     post
+title:      大数据基础课之HDFS课程 读流程-写流程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2><a id="HDFS__0"></a>HDFS课程 读流程-写流程</h2>
+<h2><a id="1_HDFS_1"></a>1 HDFS-写流程</h2>
+<p><img src="https://www.coderfei.com/2017/12/17/hadoop-4-hadoop-hdfs-detail/hdfs_write.png" alt="HDFS课程-写流程"><br>
+1.写流程</p>
+<p>hdfs dfs -ls /                         hdfs文件系统的根目录  而不是Linux<br>
+hdfs dfs -ls hdfs://hadoop002:9000/    hdfs://hadoop002:9000 来自core-site.xml<br>
+hdfs dfs -ls                           读取当前命令操作的用户的路径 /user/用户/</p>
+<p>hdfs dfs -put NOTICE.txt  /<br>
+1.Client调用FileSystem.create(filePath),去与NN节点进行RPC通信，check该路径下的文件是否已经存在？<br>
+是否有权限创建该文件？<br>
+假如OK，就创建一个新的文件，但是不关联任何的block，返回一个FSDataOutputStream对象；<br>
+假如不OK，就返回错误信息</p>
+<p>[root@hadoop002 hadoop-2.6.0-cdh5.7.0]# bin/hdfs dfs -put README.txt /<br>
+put: Permission denied: user=root, access=WRITE, inode="/":hadoop:supergroup:drwxr-xr-x<br>
+[root@hadoop002 hadoop-2.6.0-cdh5.7.0]#</p>
+<p>130M<br>
+block0-1  block0-2  block0-3<br>
+block1-1  block1-2  block1-3</p>
+<p>2.Client调用FSDataOutputStream对象的write方法，将<br>
+第一个块写入第一个DN，第一个DN写完就传输给第二个DN,<br>
+第二个DN写完就传输给第三个DN，当第三个DN写完，就返回一个ack packet<br>
+给第二个DN，当第二个DN接受到第三个的DN的ack packet，就发送ack packet<br>
+给第一个DN,当第一个DN接受到第二个的DN的ack packet，就返回ack packet<br>
+给FSDataOutputStream对象，意思标识第一个块 三个副本写完；<br>
+然后其余的块依次这样写</p>
+<p>3.当文件全部写完，Client调用FSDataOutputStream对象的close方法，关闭输出流，flush缓存区的数据包。</p>
+<p>4.再调用FileSystem.complete(),告诉NN节点写入成功</p>
+<h2><a id="2_HDFS__36"></a>2 HDFS 读流程</h2>
+<p><img src="https://img-blog.csdn.net/20181012220320307?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTI5MjM4Mjc=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="读流程"><br>
+2.文件读流程 --&gt; FSDataInputStream (面试题)</p>
+<p>hadoop]$ bin/hdfs/dfs -cat /test.log</p>
+<p>2.1 client通过FileSystem.open(filePath)方法，去与NN进行RPC通信，返回该文件的部分或者全部的block块（也包含该列表各block的分布在DataNode地址的列表），也就是返回FSDataInputStream对象<br>
+2.2 Client调用FSDataInputStream对象的read()方法。<br>
+a.去与第一个块的最近的datanode进行read，读取完后会check，假如successful会关闭与当前DataNode通信；（假如check fail会记录失败的块+DataNode信息，下次就不会读取，那么会去该块的第二个DataNode地址读取）<br>
+b.然后第二个块的遜的DataNode上的进行读取，check后会关闭与DataNode的通信。<br>
+c.假如block列表读取完了，文件还未结束，那么FileSystem会从NameNode获取下一批的block的列表。（当然读操作对于client端是透明的，感觉就是连续的数据流）<br>
+2.3 Client调用FSDataInputStream.close()方法，关闭输入流。<br>
+！<br>
+读写过程，数据完整性如何保持？<br>
+通过校验和。因为每个chunk中都有一个校验位，一个个chunk构成packet，一个个packet最终形成block，故可在block上求校验和。</p>
+<p>HDFS 的client端即实现了对 HDFS 文件内容的校验和 (checksum) 检查。当客户端创建一个新的HDFS文件时候，分块后会计算这个文件每个数据块的校验和，此校验和会以一个隐藏文件形式保存在同一个 HDFS 命名空间下。当client端从HDFS中读取文件内容后，它会检查分块时候计算出的校验和（隐藏文件里）和读取到的文件块中校验和是否匹配，如果不匹配，客户端可以选择从其他 Datanode 获取该数据块的副本。</p>
+<p>HDFS中文件块目录结构具体格式如下：</p>
+<p>${dfs.datanode.data.dir}/<br>
+├── current<br>
+│ ├── BP-526805057-127.0.0.1-1411980876842<br>
+│ │ └── current<br>
+│ │ ├── VERSION<br>
+│ │ ├── finalized<br>
+│ │ │ ├── blk_1073741825<br>
+│ │ │ ├── blk_1073741825_1001.meta<br>
+│ │ │ ├── blk_1073741826<br>
+│ │ │ └── blk_1073741826_1002.meta<br>
+│ │ └── rbw<br>
+│ └── VERSION<br>
+└── in_use.lock</p>
+<p>in_use.lock表示DataNode正在对文件夹进行操作<br>
+rbw是“replica being written”的意思，该目录用于存储用户当前正在写入的数据。<br>
+Block元数据文件（*.meta）由一个包含版本、类型信息的头文件和一系列校验值组成。校验和也正是存在其中。</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>
