@@ -1,0 +1,185 @@
+---
+layout:     post
+title:      flume的拓扑结构
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/warrah/article/details/78780260				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p><strong>1 多个应用通过连接同一个Flume Agent</strong> <br>
+参考<a href="http://blog.csdn.net/warrah/article/details/78774547" rel="nofollow">logback与flume集成</a>章节的描述，很容想到各个系统使用同一个logback和flume的配置文件，轻松的实现了将日志数据写入HDFS中的效果。 <br>
+<img src="https://img-blog.csdn.net/20171212112316545?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd2FycmFo/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="1" title=""> <br>
+这种设计的问题也很凸显，单点故障。 <br>
+<strong>2 Flume Agent集群</strong> <br>
+很容易就想到了，使用haproxy做代理 <br>
+<img src="https://img-blog.csdn.net/20171215090433544?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd2FycmFo/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="2" title=""> <br>
+haproxy配置也较为简单</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbscript">frontend flume_hdfs_front
+        bind *:<span class="hljs-number">9095</span>
+        mode tcp
+    <span class="hljs-built_in">log</span> global
+    <span class="hljs-keyword">option</span> tcplog
+    timeout client <span class="hljs-number">3600</span>s
+    backlog <span class="hljs-number">4096</span>
+    maxconn <span class="hljs-number">1000000</span>
+    default_backend flume_hdfs_back
+
+backend flume_hdfs_back
+        mode tcp
+        <span class="hljs-keyword">option</span> <span class="hljs-built_in">log</span>-health-checks
+    <span class="hljs-keyword">option</span> redispatch
+    <span class="hljs-keyword">option</span> tcplog
+    balance roundrobin
+    timeout connect <span class="hljs-number">1</span>s
+    timeout queue <span class="hljs-number">5</span>s
+    timeout <span class="hljs-built_in">server</span> <span class="hljs-number">3600</span>s
+        balance roundrobin
+        <span class="hljs-built_in">server</span> f1 <span class="hljs-number">192.168</span><span class="hljs-number">.5</span><span class="hljs-number">.174</span>:<span class="hljs-number">44444</span> check inter <span class="hljs-number">2000</span> rise <span class="hljs-number">3</span> fall <span class="hljs-number">3</span> weight <span class="hljs-number">1</span> 
+        <span class="hljs-built_in">server</span> f2 <span class="hljs-number">192.168</span><span class="hljs-number">.5</span><span class="hljs-number">.173</span>:<span class="hljs-number">44444</span> check inter <span class="hljs-number">2000</span> rise <span class="hljs-number">3</span> fall <span class="hljs-number">3</span> weight <span class="hljs-number">1</span></code></pre>
+
+<p>我设置的一个文件大小是10M，当我将其中一台机器174停掉后，我发现每台flume会生成自己的文件，而不是在原来的文件中追加。 <br>
+<img src="https://img-blog.csdn.net/20171215095702028?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd2FycmFo/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="3" title=""> <br>
+当我再把174启动，把173停掉时，一条新的记录又产生了。 <br>
+<img src="https://img-blog.csdn.net/20171215100226162?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd2FycmFo/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="4" title=""> <br>
+方案2中，Flume Agent直连HDFS的方式，当多个Flume Agent写入HDFS的时候，HDFS的namenode就会产生巨大的压力。 <br>
+<strong>3 Flume根据不同的业务写入不同的数据库</strong> <br>
+<img src="https://img-blog.csdn.net/20171215155958310?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvd2FycmFo/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="5" title=""> <br>
+这里还是将flume作为hbase的前置节点，探索flume到一定程度，就不用重复造轮子了，前人走过的路，跟着摔跟头是不明智的，<a href="http://blog.csdn.net/xvshu/article/details/51243332" rel="nofollow">flume高并发优化——（2）精简结构</a>，以及<a href="http://blog.csdn.net/xvshu/article/details/51243689" rel="nofollow"> flume高并发优化——（4）kafka channel</a> <br>
+我们公司的flume拓扑结构还需要精简 <br>
+<strong>4 使用kafka channel，写入hbase</strong>  <br>
+<img src="https://img-blog.csdn.net/20180620160906285?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dhcnJhaA==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="1" title=""> <br>
+这种方式写多个sink对消费同一个channel，source传递来的数据只会在某一个sink中执行，执行成功后另外的sink不会重复执行.</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor"># read from kafka and write to hbase</span>
+dzm-agent<span class="hljs-preprocessor">.sources</span> = dzm-source
+dzm-agent<span class="hljs-preprocessor">.channels</span> = dzm-channel dzm-channel-detail
+dzm-agent<span class="hljs-preprocessor">.sinks</span> = dzm-sink dzm-sink-detail
+
+<span class="hljs-preprocessor"># source</span>
+dzm-agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.dzm</span>-source<span class="hljs-preprocessor">.type</span>=avro
+dzm-agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.dzm</span>-source<span class="hljs-preprocessor">.bind</span>=<span class="hljs-number">0.0</span><span class="hljs-number">.0</span><span class="hljs-number">.0</span>
+dzm-agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.dzm</span>-source<span class="hljs-preprocessor">.port</span>=<span class="hljs-number">44443</span>
+<span class="hljs-preprocessor">#dzm-agent.sources.dzm-source.selector.type = replicating</span>
+
+<span class="hljs-preprocessor"># channel</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.channel</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaChannel</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = ceshi185:<span class="hljs-number">19092</span>,ceshi186:<span class="hljs-number">19092</span>,ceshi185:<span class="hljs-number">19092</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = flume_dzm_channel
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.consumer</span><span class="hljs-preprocessor">.group</span><span class="hljs-preprocessor">.id</span> = flume_dzm_channel
+
+<span class="hljs-preprocessor"># sink</span>
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink<span class="hljs-preprocessor">.type</span> = asynchbase
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink<span class="hljs-preprocessor">.table</span> = t_invoice_ticket
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink<span class="hljs-preprocessor">.columnFamily</span> = i
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink<span class="hljs-preprocessor">.serializer</span> = <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.bwjf</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.invoice</span><span class="hljs-preprocessor">.dzm</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.InvoiceHbaseSerializer</span>
+
+<span class="hljs-preprocessor"># detail-channel</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel-detail<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.channel</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaChannel</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel-detail<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = ceshi185:<span class="hljs-number">19092</span>,ceshi186:<span class="hljs-number">19092</span>,ceshi185:<span class="hljs-number">19092</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel-detail<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = flume_dzm_detail_channel
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel-detail<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.consumer</span><span class="hljs-preprocessor">.group</span><span class="hljs-preprocessor">.id</span> = flume_dzm_detail_channel
+
+<span class="hljs-preprocessor"># detail-sink</span>
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail<span class="hljs-preprocessor">.type</span> = asynchbase
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail<span class="hljs-preprocessor">.table</span> = t_invoice_detail_ticket
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail<span class="hljs-preprocessor">.columnFamily</span> = i
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail<span class="hljs-preprocessor">.serializer</span> = <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.bwjf</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.invoice</span><span class="hljs-preprocessor">.dzm</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.InvoiceDetailHbaseSerializer</span>
+
+<span class="hljs-preprocessor"># assemble</span>
+dzm-agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.dzm</span>-source<span class="hljs-preprocessor">.channels</span> = dzm-channel dzm-channel-detail
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink<span class="hljs-preprocessor">.channel</span> = dzm-channel
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail<span class="hljs-preprocessor">.channel</span> = dzm-channel-detail</code></pre>
+
+<p><strong>5 sink组</strong> <br>
+sink组中所有sink是不会同时被激活，任何时候只有它们中的一个用来发送数据，因此sink组不应该用来更快的清除channel。</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor"># read from kafka and write to hbase</span>
+dzm-agent<span class="hljs-preprocessor">.sources</span> = dzm-source
+dzm-agent<span class="hljs-preprocessor">.channels</span> = dzm-channel dzm-channel-detail
+dzm-agent<span class="hljs-preprocessor">.sinks</span> = dzm-sink1 dzm-sink2 dzm-sink3 dzm-sink-detail1 dzm-sink-detail2 dzm-sink-detail3
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span> = dzm-sg dzm-sg-detail
+
+<span class="hljs-preprocessor"># source</span>
+dzm-agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.dzm</span>-source<span class="hljs-preprocessor">.type</span>=avro
+dzm-agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.dzm</span>-source<span class="hljs-preprocessor">.bind</span>=<span class="hljs-number">0.0</span><span class="hljs-number">.0</span><span class="hljs-number">.0</span>
+dzm-agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.dzm</span>-source<span class="hljs-preprocessor">.port</span>=<span class="hljs-number">44443</span>
+<span class="hljs-preprocessor">#dzm-agent.sources.dzm-source.selector.type = replicating</span>
+
+<span class="hljs-preprocessor"># channel</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.channel</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaChannel</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = ceshi185:<span class="hljs-number">19092</span>,ceshi186:<span class="hljs-number">19092</span>,ceshi185:<span class="hljs-number">19092</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = flume_dzm_channel
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.consumer</span><span class="hljs-preprocessor">.group</span><span class="hljs-preprocessor">.id</span> = flume_dzm_channel
+
+<span class="hljs-preprocessor"># sink group</span>
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span> = dzm-sg
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span><span class="hljs-preprocessor">.dzm</span>-sg<span class="hljs-preprocessor">.sinks</span> = dzm-sink1 dzm-sink2 dzm-sink3
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span><span class="hljs-preprocessor">.dzm</span>-sg<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.type</span> = load_balance
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span><span class="hljs-preprocessor">.dzm</span>-sg<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.backoff</span> = load_balance
+
+<span class="hljs-preprocessor"># sink</span>
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink1<span class="hljs-preprocessor">.type</span> = asynchbase
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink1<span class="hljs-preprocessor">.table</span> = t_invoice_ticket
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink1<span class="hljs-preprocessor">.columnFamily</span> = i
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink1<span class="hljs-preprocessor">.serializer</span> = <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.bwjf</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.invoice</span><span class="hljs-preprocessor">.dzm</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.InvoiceHbaseSerializer</span>
+
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink2<span class="hljs-preprocessor">.type</span> = asynchbase
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink2<span class="hljs-preprocessor">.table</span> = t_invoice_ticket
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink2<span class="hljs-preprocessor">.columnFamily</span> = i
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink2<span class="hljs-preprocessor">.serializer</span> = <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.bwjf</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.invoice</span><span class="hljs-preprocessor">.dzm</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.InvoiceHbaseSerializer</span>
+
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink3<span class="hljs-preprocessor">.type</span> = asynchbase
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink3<span class="hljs-preprocessor">.table</span> = t_invoice_ticket
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink3<span class="hljs-preprocessor">.columnFamily</span> = i
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink3<span class="hljs-preprocessor">.serializer</span> = <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.bwjf</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.invoice</span><span class="hljs-preprocessor">.dzm</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.InvoiceHbaseSerializer</span>
+
+<span class="hljs-preprocessor"># detail-channel</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel-detail<span class="hljs-preprocessor">.type</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.channel</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.KafkaChannel</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel-detail<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.bootstrap</span><span class="hljs-preprocessor">.servers</span> = ceshi185:<span class="hljs-number">19092</span>,ceshi186:<span class="hljs-number">19092</span>,ceshi185:<span class="hljs-number">19092</span>
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel-detail<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.topic</span> = flume_dzm_detail_channel
+dzm-agent<span class="hljs-preprocessor">.channels</span><span class="hljs-preprocessor">.dzm</span>-channel-detail<span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.consumer</span><span class="hljs-preprocessor">.group</span><span class="hljs-preprocessor">.id</span> = flume_dzm_detail_channel
+
+<span class="hljs-preprocessor"># detail-sink group</span>
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span> = dzm-detail-sg
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span><span class="hljs-preprocessor">.dzm</span>-detail-sg<span class="hljs-preprocessor">.sinks</span> = dzm-sink-detail1 dzm-sink-detail2 dzm-sink-detail3
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span><span class="hljs-preprocessor">.dzm</span>-detail-sg<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.type</span> = load_balance
+dzm-agent<span class="hljs-preprocessor">.sinkGroups</span><span class="hljs-preprocessor">.dzm</span>-detail-sg<span class="hljs-preprocessor">.processor</span><span class="hljs-preprocessor">.backoff</span> = load_balance
+
+<span class="hljs-preprocessor"># detail-sink</span>
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail1<span class="hljs-preprocessor">.type</span> = asynchbase
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail1<span class="hljs-preprocessor">.table</span> = t_invoice_detail_ticket
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail1<span class="hljs-preprocessor">.columnFamily</span> = i
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail1<span class="hljs-preprocessor">.serializer</span> = <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.bwjf</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.invoice</span><span class="hljs-preprocessor">.dzm</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.InvoiceDetailHbaseSerializer</span>
+
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail2<span class="hljs-preprocessor">.type</span> = asynchbase
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail2<span class="hljs-preprocessor">.table</span> = t_invoice_detail_ticket
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail2<span class="hljs-preprocessor">.columnFamily</span> = i
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail2<span class="hljs-preprocessor">.serializer</span> = <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.bwjf</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.invoice</span><span class="hljs-preprocessor">.dzm</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.InvoiceDetailHbaseSerializer</span>
+
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail3<span class="hljs-preprocessor">.type</span> = asynchbase
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail3<span class="hljs-preprocessor">.table</span> = t_invoice_detail_ticket
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail3<span class="hljs-preprocessor">.columnFamily</span> = i
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail3<span class="hljs-preprocessor">.serializer</span> = <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.bwjf</span><span class="hljs-preprocessor">.flume</span><span class="hljs-preprocessor">.invoice</span><span class="hljs-preprocessor">.dzm</span><span class="hljs-preprocessor">.sink</span><span class="hljs-preprocessor">.InvoiceDetailHbaseSerializer</span>
+
+<span class="hljs-preprocessor"># assemble</span>
+dzm-agent<span class="hljs-preprocessor">.sources</span><span class="hljs-preprocessor">.dzm</span>-source<span class="hljs-preprocessor">.channels</span> = dzm-channel dzm-channel-detail
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink1<span class="hljs-preprocessor">.channel</span> = dzm-channel
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink2<span class="hljs-preprocessor">.channel</span> = dzm-channel
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink3<span class="hljs-preprocessor">.channel</span> = dzm-channel
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail1<span class="hljs-preprocessor">.channel</span> = dzm-channel-detail
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail2<span class="hljs-preprocessor">.channel</span> = dzm-channel-detail
+dzm-agent<span class="hljs-preprocessor">.sinks</span><span class="hljs-preprocessor">.dzm</span>-sink-detail3<span class="hljs-preprocessor">.channel</span> = dzm-channel-detail</code></pre>
+
+<p>参考资料： <br>
+1. 《Flume构建高可用、可扩展的海量日志采集系统》，Hari ShreedHaran著，马延辉，史东杰译。 <br>
+2. <a href="http://blog.csdn.net/xvshu/article/details/51243477" rel="nofollow">flume高并发优化——（3）haproxy</a> <br>
+3. <a href="http://blog.csdn.net/xvshu/article/details/51994762" rel="nofollow">flume高并发优化——（9）配置文件交由zookeeper管理</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

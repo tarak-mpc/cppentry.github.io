@@ -1,0 +1,204 @@
+---
+layout:     post
+title:      kafka初探
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="kafka初探">kafka初探</h2>
+
+
+
+<h3 id="环境">环境</h3>
+
+<p><strong>必须有java环境</strong></p>
+
+
+
+<h4 id="下载安装kafka">下载安装kafka</h4>
+
+<p>1.从kafka官网中下载最新版，<a href="http://kafka.apache.org" rel="nofollow">http://kafka.apache.org</a>,</p>
+
+
+
+<pre class="prettyprint"><code class="language-bash hljs ">wget https://www.apache.org/dyn/closer.cgi?path=/kafka/<span class="hljs-number">1.1</span>.<span class="hljs-number">0</span>/kafka_2.<span class="hljs-number">11</span>-<span class="hljs-number">1.1</span>.<span class="hljs-number">0</span>.tgz
+
+tar -xzvf kafka_2.<span class="hljs-number">11</span>-<span class="hljs-number">1.1</span>.<span class="hljs-number">0</span>.tgz 
+<span class="hljs-built_in">cd</span> kafka_2.<span class="hljs-number">11</span>-<span class="hljs-number">1.1</span>.<span class="hljs-number">0</span>/</code></pre>
+
+
+
+<h4 id="启动">启动</h4>
+
+<p>kafka默认端口是9092，需要保证9092端口已经开启</p>
+
+<p>1.启动自带的zookeeper：</p>
+
+
+
+<pre class="prettyprint"><code class="language-bash hljs ">bin/zookeeper-server-start.sh config/zookeeper.properties</code></pre>
+
+<p>2.启动kafka server:</p>
+
+
+
+<pre class="prettyprint"><code class="language-bash hljs ">bin/kafka-server-start.sh config/server.properties</code></pre>
+
+
+
+<h4 id="测试">测试</h4>
+
+<p>代码: </p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">KafkaUtils</span> {</span>
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> Logger LOGGER = LoggerFactory.getLogger(KafkaUtils.class);
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> Producer&lt;String, String&gt; producer;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> Consumer&lt;String, String&gt; consumer;
+
+    <span class="hljs-keyword">private</span> <span class="hljs-title">KafkaUtils</span>(){
+
+    }
+
+    <span class="hljs-javadoc">/**
+     * 生产者config
+     */</span>
+    <span class="hljs-keyword">static</span> {
+        Properties prop = <span class="hljs-keyword">new</span> Properties();
+        prop.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KafkaProperties.KAFKA_SERVER_URL+<span class="hljs-string">":"</span>+ KafkaProperties.KAFKA_SERVER_PORT);
+        prop.put(ProducerConfig.CLIENT_ID_CONFIG, KafkaProperties.CLIENT_ID);
+        prop.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        prop.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        producer = <span class="hljs-keyword">new</span> KafkaProducer&lt;&gt;(prop);
+    }
+
+
+    <span class="hljs-keyword">static</span> {
+        Properties prop = <span class="hljs-keyword">new</span> Properties();
+        prop.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KafkaProperties.KAFKA_SERVER_URL+<span class="hljs-string">":"</span>+ KafkaProperties.KAFKA_SERVER_PORT);
+        prop.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, <span class="hljs-string">"true"</span>);
+        prop.put(ConsumerConfig.GROUP_ID_CONFIG, KafkaProperties.GROUP_ID);
+        prop.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, <span class="hljs-string">"1000"</span>);
+        prop.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, <span class="hljs-string">"30000"</span>);
+<span class="hljs-comment">//        prop.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,"earliest");</span>
+        prop.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        prop.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        consumer = <span class="hljs-keyword">new</span> KafkaConsumer&lt;&gt;(prop);
+    }
+
+    <span class="hljs-javadoc">/**
+     * 发送消息
+     *<span class="hljs-javadoctag"> @param</span> msg
+     *<span class="hljs-javadoctag"> @param</span> async 是否异步
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">sendMsg</span>(String msg, <span class="hljs-keyword">boolean</span> async){
+        <span class="hljs-keyword">if</span> (!async){
+            <span class="hljs-keyword">try</span> {
+                producer.send(<span class="hljs-keyword">new</span> ProducerRecord&lt;String, String&gt;(KafkaProperties.TOPIC,
+                        String.valueOf(<span class="hljs-keyword">new</span> Date().getTime()), msg)).get();
+                LOGGER.info(<span class="hljs-string">"发送消息成功,msg: {}"</span>, msg);
+            } <span class="hljs-keyword">catch</span> (InterruptedException e) {
+                LOGGER.error(<span class="hljs-string">"发送消息失败-{}"</span>, e);
+            } <span class="hljs-keyword">catch</span> (ExecutionException e) {
+                LOGGER.error(<span class="hljs-string">"发送消息失败-{}"</span>, e);
+            }
+        }<span class="hljs-keyword">else</span> {
+            producer.send(<span class="hljs-keyword">new</span> ProducerRecord&lt;String, String&gt;(KafkaProperties.TOPIC,
+                    String.valueOf(<span class="hljs-keyword">new</span> Date().getTime()), msg));
+        }
+    }
+
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">getMessage</span>(){
+        consumer.subscribe(Collections.singletonList(KafkaProperties.TOPIC));
+        <span class="hljs-keyword">while</span> (<span class="hljs-keyword">true</span>){
+            ConsumerRecords&lt;String, String&gt; records = consumer.poll(<span class="hljs-number">1000</span>);
+            <span class="hljs-keyword">if</span> (records.count() &gt; <span class="hljs-number">0</span>){
+                <span class="hljs-keyword">for</span> (ConsumerRecord&lt;String, String&gt; record: records){
+                    LOGGER.info(<span class="hljs-string">"接收消息: key:{} - value: {} - offset: {}"</span>,record.key(),record.value(), record.offset());
+                }
+                <span class="hljs-keyword">break</span>;
+            }
+        }
+    }
+}</code></pre>
+
+<p>测试用例:  </p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">KafkaUtilsTest</span> {</span>
+
+    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">sendMsgTest</span>(){
+        String msg = <span class="hljs-string">"hello, 你好吗?"</span>;
+        KafkaUtils.sendMsg(msg, <span class="hljs-keyword">false</span>);
+    }
+
+    <span class="hljs-annotation">@Test</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">getMessageTest</span>(){
+        KafkaUtils.getMessage();
+    }
+}</code></pre>
+
+<p>1.运行<code>sendMsgTest</code>调试，控制台报错: </p>
+
+
+
+<pre class="prettyprint"><code class="language-console hljs mizar">Connection to node 0 could <span class="hljs-keyword">not</span> <span class="hljs-keyword">be</span> established. Broker may <span class="hljs-keyword">not</span> <span class="hljs-keyword">be</span> available</code></pre>
+
+<p><strong>解决方案:</strong> <br>
+在kafka解压目录中，打开config/server.properties文件，找到<strong>listeners</strong>,并取消注解,在<code>PLAINTEXT</code>后面添加broker的ip(kafka服务器的ip): </p>
+
+
+
+<pre class="prettyprint"><code class="language-bash hljs "><span class="hljs-comment">############################# Socket Server Settings #############################</span>
+
+<span class="hljs-comment"># The address the socket server listens on. It will get the value returned from</span>
+<span class="hljs-comment"># java.net.InetAddress.getCanonicalHostName() if not configured.</span>
+<span class="hljs-comment">#   FORMAT:</span>
+<span class="hljs-comment">#     listeners = listener_name://host_name:port</span>
+<span class="hljs-comment">#   EXAMPLE:</span>
+<span class="hljs-comment">#     listeners = PLAINTEXT://your.host.name:9092</span>
+listeners=PLAINTEXT://<span class="hljs-number">192.168</span>.<span class="hljs-number">1</span>xx.xxx:<span class="hljs-number">9092</span></code></pre>
+
+<p>重启kafka服务器，再次运行<code>sendMsgTest</code>:</p>
+
+
+
+<pre class="prettyprint"><code class="language-console hljs avrasm">[main] INFO  <span class="hljs-keyword">com</span><span class="hljs-preprocessor">.kafka</span><span class="hljs-preprocessor">.util</span><span class="hljs-preprocessor">.KafkaUtils</span>:  发送消息成功,msg: hello, 你好吗?</code></pre>
+
+<p>2.消费消息，运行<code>getMessageTest</code>,控制台好像一直在poll，并不能消费获取刚才发送的消息</p>
+
+<p><strong>解决方案</strong></p>
+
+<p>打开config/server.properties文件,找到<code>advertised.listeners</code>,并取消注释，在<code>PLAINTEXT</code>后面添加broker的ip(kafka服务器ip): </p>
+
+
+
+<pre class="prettyprint"><code class="language-bash hljs "><span class="hljs-comment">############################# Socket Server Settings #############################</span>
+
+<span class="hljs-comment"># The address the socket server listens on. It will get the value returned from</span>
+<span class="hljs-comment"># java.net.InetAddress.getCanonicalHostName() if not configured.</span>
+<span class="hljs-comment">#   FORMAT:</span>
+<span class="hljs-comment">#     listeners = listener_name://host_name:port</span>
+<span class="hljs-comment">#   EXAMPLE:</span>
+<span class="hljs-comment">#     listeners = PLAINTEXT://your.host.name:9092</span>
+listeners=PLAINTEXT://<span class="hljs-number">192.168</span>.<span class="hljs-number">1</span>xx.xxx:<span class="hljs-number">9092</span>
+
+<span class="hljs-comment"># Hostname and port the broker will advertise to producers and consumers. If not set,</span>
+<span class="hljs-comment"># it uses the value for "listeners" if configured.  Otherwise, it will use the value</span>
+<span class="hljs-comment"># returned from java.net.InetAddress.getCanonicalHostName().</span>
+advertised.listeners=PLAINTEXT://<span class="hljs-number">192.168</span>.<span class="hljs-number">1</span>xx.xxx:<span class="hljs-number">9092</span></code></pre>
+
+<p>重启kafka服务器，再次运行<code>getMessageTest</code>,从控制台可以看到:  </p>
+
+
+
+<pre class="prettyprint"><code class="language-console hljs livecodeserver">接收消息: key:<span class="hljs-number">1523765927237</span> - <span class="hljs-built_in">value</span>: hello, 你好吗? - <span class="hljs-built_in">offset</span>: <span class="hljs-number">9</span></code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

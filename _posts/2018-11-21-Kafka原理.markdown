@@ -1,0 +1,542 @@
+---
+layout:     post
+title:      Kafka原理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>1、Kafka介绍</p>
+<p style="color:#333333;">       Kafka是由Linkedin公司开发，是一个<span style="background:#FFFF00;">分布式、分区的、多副本的、多订阅者，基于zookeeper协调的分布式日志系统</span>(也可以当做MQ系统)，常见可以用于web/nginx日志、访问日志，消息服务等等。</p>
+<p>2、Kafka文件存储机制</p>
+<p style="color:#333333;">Kafka部分名词解释如下：</p>
+<p><span style="color:#00B0F0;">        </span><span style="color:#00B0F0;">Broker</span><span style="color:#333333;">：消息中间件处理结点，一个Kafka节点就是一个broker，多个broker可以组成一个Kafka集群；</span></p>
+<p><span style="color:#00B0F0;">        </span><span style="color:#00B0F0;">Topic</span><span style="color:#333333;">：一类消息，例如page view日志、click日志等都可以以topic的形式存在，Kafka集群能够同时负责多个topic的分发；</span></p>
+<p><span style="color:#00B0F0;">        </span><span style="color:#00B0F0;">Partition</span><span style="color:#333333;">：topic物理上的分组，一个topic可以分为多个partition，每个partition是一个有序的队列；</span></p>
+<p><span style="color:#00B0F0;">        </span><span style="color:#00B0F0;">Segment</span><span style="color:#333333;">：partition物理上由多个segment组成；</span></p>
+<p><span style="color:#00B0F0;">        </span><span style="color:#00B0F0;">offset</span><span style="color:#333333;">：每个partition都由一系列有序的、不可变的消息组成，这些消息被连续的追加到partition中。partition中的每个消息都有一个连续的序列号叫做offset,用于partition唯一标识一条消息.</span></p>
+<p>2.1 、topic中partition存储分布</p>
+<p><span style="color:#00B0F0;">        </span><span style="color:#333333;">假设实验环境中Kafka集群只有一个broker，xxx/message-folder为数据文件存储根目录，在Kafka broker中server.properties文件配置(参数log.dirs=xxx/message-folder)，例如创建2个topic名称分别为report_push、launch_info, partitions数量都为partitions=4</span></p>
+<p style="color:#333333;">存储路径和目录规则为：</p>
+<p style="color:#333333;">xxx/message-folder</p>
+<p style="color:#333333;">              |--report_push-0<br>
+              |--report_push-1<br>
+              |--report_push-2<br>
+              |--report_push-3<br>
+              |--launch_info-0<br>
+              |--launch_info-1<br>
+              |--launch_info-2<br>
+              |--launch_info-3</p>
+<p><span style="color:#00B0F0;">        </span><span style="color:#333333;">在Kafka文件存储中，同一个topic下有多个不同partition，每个partition为一个目录，partiton命名规则为topic名称+有序序号，第一个partiton序号从0开始，序号最大值为partitions数量减1。</span></p>
+<p>2.2、partiton中文件存储方式</p>
+<p style="color:#333333;">        下面示意图形象说明了partition中文件存储方式:</p>
+<p style="color:#333333;">                                                                                      图1</p>
+<p style="color:#333333;">        每个partion(目录)相当于一个巨型文件被平均分配到多个大小相等segment(段)数据文件中。但每个段segment file消息数量不一定相等，这种特性方便old segment file快速被删除。</p>
+<p style="color:#333333;">        <span style="background:#FFFF00;">每个partiton只需要支持顺序读写（硬盘顺序读写的速度很快）</span>就行了，segment文件生命周期由服务端配置参数决定。这样做的好处就是能快速删除无用文件，有效提高磁盘利用率。</p>
+<p>2.3、partiton中segment文件存储结构</p>
+<p style="color:#333333;">        segment file组成：由2大部分组成，分别为index file和data file，此2个文件一一对应，成对出现，后缀".index"和“.log”分别表示为segment索引文件、数据文件.</p>
+<p style="color:#333333;">        segment文件命名规则：partion全局的第一个segment从0开始，后续每个segment文件名为上一个segment文件最后一条消息的offset值。数值最大为64位long大小，19位数字字符长度，没有数字用0填充。</p>
+<p style="color:#333333;">        创建一个topicXXX包含1 partition，设置每个segment大小为500MB,并启动producer向Kafka broker写入大量数据,如下图2所示segment文件列表形象说明了上述2个规则：</p>
+<p>                                                                        图2</p>
+<p>        以图2中一对segment file文件为例，说明segment中index&lt;—&gt;data file对应关系物理结构如下：</p>
+<p> </p>
+<p>                                                                             图3</p>
+<p>         图3中索引文件存储大量元数据，数据文件存储大量消息，索引文件中元数据指向对应数据文件中message的物理偏移地址。其中以索引文件中元数据3,497为例，依次在数据文件中表示第3个message(在全局partiton表示第368772个message)、以及该消息的物理偏移地址为497。</p>
+<p>        从图3了解到segment data file由许多message组成，下面详细说明message物理结构如下：</p>
+<p>                                                                                     图4</p>
+<p>参数说明：</p>
+<div>
+<table border="1" cellpadding="0" cellspacing="0" title="" summary=""><tbody><tr><td>
+<p>关键字</p>
+</td>
+<td>
+<p>解释说明</p>
+</td>
+</tr><tr><td>
+<p>8 byte offset</p>
+</td>
+<td>
+<p>在parition(分区)内的每条消息都有一个有序的id号，这个id号被称为偏移(offset),它可以唯一确定每条消息在parition(分区)内的位置。即offset表示partiion的第多少message</p>
+</td>
+</tr><tr><td>
+<p>4 byte message size</p>
+</td>
+<td>
+<p>message大小</p>
+</td>
+</tr><tr><td>
+<p>4 byte CRC32</p>
+</td>
+<td>
+<p>用crc32校验message</p>
+</td>
+</tr><tr><td>
+<p>1 byte “magic"</p>
+</td>
+<td>
+<p>表示本次发布Kafka服务程序协议版本号</p>
+</td>
+</tr><tr><td>
+<p>1 byte “attributes"</p>
+</td>
+<td>
+<p>表示为独立版本、或标识压缩类型、或编码类型。</p>
+</td>
+</tr><tr><td>
+<p>4 byte key length</p>
+</td>
+<td>
+<p>表示key的长度,当key为-1时，K byte key字段不填</p>
+</td>
+</tr><tr><td>
+<p>K byte key</p>
+</td>
+<td>
+<p>可选</p>
+</td>
+</tr><tr><td>
+<p>value bytes payload</p>
+</td>
+<td>
+<p>表示实际消息数据。</p>
+</td>
+</tr></tbody></table></div>
+<p>2.3、在partition中如何通过offset查找message</p>
+<p>例如读取offset=368776的message，需要通过下面2个步骤查找。</p>
+<p>第一步查找segment file<br>
+以图2为例，其中00000000000000000000.index表示最开始的文件，起始偏移量(offset)为0.第二个文件00000000000000368769.index的消息量起始偏移量为368770 = 368769 + 1.同样，第三个文件00000000000000737337.index的起始偏移量为737338=737337 + 1，其他后续文件依次类推，以起始偏移量命名并排序这些文件，只要根据offset二分查找文件列表，就可以快速定位到具体文件。当offset=368776时定位到00000000000000368769.index|log</p>
+<p>第二步通过segment file查找message<br>
+通过第一步定位到segment file，当offset=368776时，依次定位到00000000000000368769.index的元数据物理位置和00000000000000368769.log的物理偏移地址，然后再通过00000000000000368769.log顺序查找直到offset=368776为止。</p>
+<p>从图3可知这样做的优点，segment index file采取稀疏索引存储方式，它减少索引文件大小，通过mmap可以直接内存操作，稀疏索引为数据文件的每个对应message设置一个元数据指针,它比稠密索引节省了更多的存储空间，但查找起来需要消耗更多的时间。</p>
+<p>2.4、Kafka中读写message有如下特点</p>
+<p>写message</p>
+<p>消息从java堆转入page cache(即物理内存)。</p>
+<p>由异步线程刷盘,消息从page cache刷入磁盘。</p>
+<p>读message</p>
+<p>消息直接从page cache转入socket发送出去。</p>
+<p>当从page cache没有找到相应数据时，此时会产生磁盘IO,从磁盘Load消息到page cache,然后直接从socket发出去。</p>
+<p>3、总结</p>
+<p>Kafka高效文件存储设计特点</p>
+<p>Kafka把topic中一个parition大文件分成多个小文件段，通过多个小文件段，就容易定期清除或删除已经消费完文件，减少磁盘占用。</p>
+<p>通过索引信息可以快速定位message和确定response的最大大小。</p>
+<p>通过index元数据全部映射到memory，可以避免segment file的IO磁盘操作。</p>
+<p>通过索引文件稀疏存储，可以大幅降低index文件元数据占用空间大小。</p>
+<p>4、<a href="http://blog.csdn.net/lizhitao/article/details/41778193" rel="nofollow">Kafka集群partitions/replicas默认分配解析</a></p>
+<p>Kafka集群partition replication默认自动分配分析</p>
+<p>下面以一个Kafka集群中4个Broker举例，创建1个topic包含4个Partition，2 Replication；数据Producer流动如图所示：</p>
+<p>(1)</p>
+<p>(2)当集群中新增2节点，Partition增加到6个时分布情况如下：</p>
+<p>副本分配逻辑规则如下：</p>
+<p>在Kafka集群中，每个Broker都有均等分配Partition的Leader机会。</p>
+<p>上述图Broker Partition中，箭头指向为副本，以Partition-0为例:broker1中parition-0为Leader，Broker2中Partition-0为副本。</p>
+<p>上述图种每个Broker(按照BrokerId有序)依次分配主Partition,下一个Broker为副本，如此循环迭代分配，多副本都遵循此规则。</p>
+<p>副本分配算法如下：</p>
+<p>将所有N Broker和待分配的i个Partition排序.</p>
+<p>将第i个Partition分配到第(i mod n)个Broker上.</p>
+<p>将第i个Partition的第j个副本分配到第((i + j) mod n)个Broker上.</p>
+<p>5、kafka server.properties配置详解</p>
+<p>broker.id=0  </p>
+<p>num.network.threads=2  </p>
+<p>num.io.threads=8  </p>
+<p>socket.send.buffer.bytes=1048576  </p>
+<p>socket.receive.buffer.bytes=1048576  </p>
+<p>socket.request.max.bytes=104857600  </p>
+<p>log.dirs=/tmp/kafka-logs  </p>
+<p>num.partitions=2  </p>
+<p>log.retention.hours=168  </p>
+<p>  </p>
+<p>log.segment.bytes=536870912  </p>
+<p>log.retention.check.interval.ms=60000  </p>
+<p>log.cleaner.enable=false  </p>
+<p>  </p>
+<p>zookeeper.connect=localhost:2181  </p>
+<p>zookeeper.connection.timeout.ms=1000000  </p>
+<p> </p>
+<ul type="disc"><li>server.properties中所有配置参数说明(解释)如下列表： </li></ul><div>
+<table border="1" cellpadding="0" cellspacing="0" title="" summary=""><tbody><tr><td>
+<p>参数</p>
+</td>
+<td>
+<p>说明(解释)</p>
+</td>
+</tr><tr><td>
+<p>broker.id =0</p>
+</td>
+<td>
+<p>每一个broker在集群中的唯一表示，要求是正数。当该服务器的IP地址发生改变时，broker.id没有变化，则不会影响consumers的消息情况</p>
+</td>
+</tr><tr><td>
+<p>log.dirs=/data/kafka-logs</p>
+</td>
+<td>
+<p>kafka数据的存放地址，多个地址的话用逗号分割,多个目录分布在不同磁盘上可以提高读写性能  /data/kafka-logs-1，/data/kafka-logs-2</p>
+</td>
+</tr><tr><td>
+<p>port =9092</p>
+</td>
+<td>
+<p>broker server服务端口</p>
+</td>
+</tr><tr><td>
+<p>message.max.bytes =6525000</p>
+</td>
+<td>
+<p>表示消息体的最大大小，单位是字节</p>
+</td>
+</tr><tr><td>
+<p>num.network.threads =4</p>
+</td>
+<td>
+<p>broker处理消息的最大线程数，一般情况下数量为cpu核数</p>
+</td>
+</tr><tr><td>
+<p>num.io.threads =8</p>
+</td>
+<td>
+<p>broker处理磁盘IO的线程数，数值为cpu核数2倍</p>
+</td>
+</tr><tr><td>
+<p>background.threads =4</p>
+</td>
+<td>
+<p>一些后台任务处理的线程数，例如过期消息文件的删除等，一般情况下不需要去做修改</p>
+</td>
+</tr><tr><td>
+<p>queued.max.requests =500</p>
+</td>
+<td>
+<p>等待IO线程处理的请求队列最大数，若是等待IO的请求超过这个数值，那么会停止接受外部消息，应该是一种自我保护机制。</p>
+</td>
+</tr><tr><td>
+<p>host.name</p>
+</td>
+<td>
+<p>broker的主机地址，若是设置了，那么会绑定到这个地址上，若是没有，会绑定到所有的接口上，并将其中之一发送到ZK，一般不设置</p>
+</td>
+</tr><tr><td>
+<p>socket.send.buffer.bytes=100*1024</p>
+</td>
+<td>
+<p>socket的发送缓冲区，socket的调优参数SO_SNDBUFF</p>
+</td>
+</tr><tr><td>
+<p>socket.receive.buffer.bytes =100*1024</p>
+</td>
+<td>
+<p>socket的接受缓冲区，socket的调优参数SO_RCVBUFF</p>
+</td>
+</tr><tr><td>
+<p>socket.request.max.bytes =100*1024*1024</p>
+</td>
+<td>
+<p>socket请求的最大数值，防止serverOOM，message.max.bytes必然要小于socket.request.max.bytes，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>log.segment.bytes =1024*1024*1024</p>
+</td>
+<td>
+<p>topic的分区是以一堆segment文件存储的，这个控制每个segment的大小，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>log.roll.hours =24*7</p>
+</td>
+<td>
+<p>这个参数会在日志segment没有达到log.segment.bytes设置的大小，也会强制新建一个segment会被 topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>log.cleanup.policy = delete</p>
+</td>
+<td>
+<p>日志清理策略选择有：delete和compact主要针对过期数据的处理，或是日志文件达到限制的额度，会被 topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>log.retention.minutes=300</p>
+<p>或</p>
+<p>log.retention.hours=24</p>
+</td>
+<td>
+<p>数据文件保留多长时间， 存储的最大时间超过这个时间会根据log.cleanup.policy设置数据清除策略</p>
+<p>log.retention.bytes和log.retention.minutes或log.retention.hours任意一个达到要求，都会执行删除</p>
+<p> </p>
+<p>有2删除数据文件方式：</p>
+<p>      按照文件大小删除：log.retention.bytes</p>
+<p>  按照2中不同时间粒度删除：分别为分钟，小时</p>
+</td>
+</tr><tr><td>
+<p>log.retention.bytes=-1</p>
+</td>
+<td>
+<p>topic每个分区的最大文件大小，一个topic的大小限制 = 分区数*log.retention.bytes。-1没有大小限log.retention.bytes和log.retention.minutes任意一个达到要求，都会执行删除，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>log.retention.check.interval.ms=5minutes</p>
+</td>
+<td>
+<p>文件大小检查的周期时间，是否处罚 log.cleanup.policy中设置的策略</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.enable=false</p>
+</td>
+<td>
+<p>是否开启日志清理</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.threads = 2</p>
+</td>
+<td>
+<p>日志清理运行的线程数</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.io.max.bytes.per.second=None</p>
+</td>
+<td>
+<p>日志清理时候处理的最大大小</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.dedupe.buffer.size=500*1024*1024</p>
+</td>
+<td>
+<p>日志清理去重时候的缓存空间，在空间允许的情况下，越大越好</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.io.buffer.size=512*1024</p>
+</td>
+<td>
+<p>日志清理时候用到的IO块大小一般不需要修改</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.io.buffer.load.factor =0.9</p>
+</td>
+<td>
+<p>日志清理中hash表的扩大因子一般不需要修改</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.backoff.ms =15000</p>
+</td>
+<td>
+<p>检查是否处罚日志清理的间隔</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.min.cleanable.ratio=0.5</p>
+</td>
+<td>
+<p>日志清理的频率控制，越大意味着更高效的清理，同时会存在一些空间上的浪费，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>log.cleaner.delete.retention.ms =1day</p>
+</td>
+<td>
+<p>对于压缩的日志保留的最长时间，也是客户端消费消息的最长时间，同log.retention.minutes的区别在于一个控制未压缩数据，一个控制压缩后的数据。会被topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>log.index.size.max.bytes =10*1024*1024</p>
+</td>
+<td>
+<p>对于segment日志的索引文件大小限制，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>log.index.interval.bytes =4096</p>
+</td>
+<td>
+<p>当执行一个fetch操作后，需要一定的空间来扫描最近的offset大小，设置越大，代表扫描速度越快，但是也更好内存，一般情况下不需要搭理这个参数</p>
+</td>
+</tr><tr><td>
+<p>log.flush.interval.messages=None</p>
+<p>例如log.flush.interval.messages=1000</p>
+<p>表示每当消息记录数达到1000时flush一次数据到磁盘</p>
+</td>
+<td>
+<p>log文件”sync”到磁盘之前累积的消息条数,因为磁盘IO操作是一个慢操作,但又是一个”数据可靠性"的必要手段,所以此参数的设置,需要在"数据可靠性"与"性能"之间做必要的权衡.如果此值过大,将会导致每次"fsync"的时间较长(IO阻塞),如果此值过小,将会导致"fsync"的次数较多,这也意味着整体的client请求有一定的延迟.物理server故障,将会导致没有fsync的消息丢失.</p>
+</td>
+</tr><tr><td>
+<p>log.flush.scheduler.interval.ms =3000</p>
+</td>
+<td>
+<p>检查是否需要固化到硬盘的时间间隔</p>
+</td>
+</tr><tr><td>
+<p>log.flush.interval.ms = None</p>
+<p>例如：log.flush.interval.ms=1000</p>
+<p>表示每间隔1000毫秒flush一次数据到磁盘</p>
+</td>
+<td>
+<p>仅仅通过interval来控制消息的磁盘写入时机,是不足的.此参数用于控制"fsync"的时间间隔,如果消息量始终没有达到阀值,但是离上一次磁盘同步的时间间隔达到阀值,也将触发.</p>
+</td>
+</tr><tr><td>
+<p>log.delete.delay.ms =60000</p>
+</td>
+<td>
+<p>文件在索引中清除后保留的时间一般不需要去修改</p>
+</td>
+</tr><tr><td>
+<p>log.flush.offset.checkpoint.interval.ms =60000</p>
+</td>
+<td>
+<p>控制上次固化硬盘的时间点，以便于数据恢复一般不需要去修改</p>
+</td>
+</tr><tr><td>
+<p>auto.create.topics.enable =true</p>
+</td>
+<td>
+<p>是否允许自动创建topic，若是false，就需要通过命令创建topic</p>
+</td>
+</tr><tr><td>
+<p>default.replication.factor =1</p>
+</td>
+<td>
+<p>是否允许自动创建topic，若是false，就需要通过命令创建topic</p>
+</td>
+</tr><tr><td>
+<p>num.partitions =1</p>
+</td>
+<td>
+<p>每个topic的分区个数，若是在topic创建时候没有指定的话会被topic创建时的指定参数覆盖</p>
+</td>
+</tr><tr><td>
+<p>以下是kafka中Leader,replicas配置参数</p>
+</td>
+<td>
+<p> </p>
+</td>
+</tr><tr><td>
+<p>controller.socket.timeout.ms =30000</p>
+</td>
+<td>
+<p>partition leader与replicas之间通讯时,socket的超时时间</p>
+</td>
+</tr><tr><td>
+<p>controller.message.queue.size=10</p>
+</td>
+<td>
+<p>partition leader与replicas数据同步时,消息的队列尺寸</p>
+</td>
+</tr><tr><td>
+<p>replica.lag.time.max.ms =10000</p>
+</td>
+<td>
+<p>replicas响应partition leader的最长等待时间，若是超过这个时间，就将replicas列入ISR(in-sync replicas)，并认为它是死的，不会再加入管理中</p>
+</td>
+</tr><tr><td>
+<p>replica.lag.max.messages =4000</p>
+</td>
+<td>
+<p>如果follower落后与leader太多,将会认为此follower[或者说partition relicas]已经失效</p>
+<p>##通常,在follower与leader通讯时,因为网络延迟或者链接断开,总会导致replicas中消息同步滞后</p>
+<p>##如果消息之后太多,leader将认为此follower网络延迟较大或者消息吞吐能力有限,将会把此replicas迁移</p>
+<p>##到其他follower中.</p>
+<p>##在broker数量较少,或者网络不足的环境中,建议提高此值.</p>
+</td>
+</tr><tr><td>
+<p>replica.socket.timeout.ms=30*1000</p>
+</td>
+<td>
+<p>follower与leader之间的socket超时时间</p>
+</td>
+</tr><tr><td>
+<p>replica.socket.receive.buffer.bytes=64*1024</p>
+</td>
+<td>
+<p>leader复制时候的socket缓存大小</p>
+</td>
+</tr><tr><td>
+<p>replica.fetch.max.bytes =1024*1024</p>
+</td>
+<td>
+<p>replicas每次获取数据的最大大小</p>
+</td>
+</tr><tr><td>
+<p>replica.fetch.wait.max.ms =500</p>
+</td>
+<td>
+<p>replicas同leader之间通信的最大等待时间，失败了会重试</p>
+</td>
+</tr><tr><td>
+<p>replica.fetch.min.bytes =1</p>
+</td>
+<td>
+<p>fetch的最小数据尺寸,如果leader中尚未同步的数据不足此值,将会阻塞,直到满足条件</p>
+</td>
+</tr><tr><td>
+<p>num.replica.fetchers=1</p>
+</td>
+<td>
+<p>leader进行复制的线程数，增大这个数值会增加follower的IO</p>
+</td>
+</tr><tr><td>
+<p>replica.high.watermark.checkpoint.interval.ms =5000</p>
+</td>
+<td>
+<p>每个replica检查是否将最高水位进行固化的频率</p>
+</td>
+</tr><tr><td>
+<p>controlled.shutdown.enable =false</p>
+</td>
+<td>
+<p>是否允许控制器关闭broker ,若是设置为true,会关闭所有在这个broker上的leader，并转移到其他broker</p>
+</td>
+</tr><tr><td>
+<p>controlled.shutdown.max.retries =3</p>
+</td>
+<td>
+<p>控制器关闭的尝试次数</p>
+</td>
+</tr><tr><td>
+<p>controlled.shutdown.retry.backoff.ms =5000</p>
+</td>
+<td>
+<p>每次关闭尝试的时间间隔</p>
+</td>
+</tr><tr><td>
+<p>leader.imbalance.per.broker.percentage =10</p>
+</td>
+<td>
+<p>leader的不平衡比例，若是超过这个数值，会对分区进行重新的平衡</p>
+</td>
+</tr><tr><td>
+<p>leader.imbalance.check.interval.seconds =300</p>
+</td>
+<td>
+<p>检查leader是否不平衡的时间间隔</p>
+</td>
+</tr><tr><td>
+<p>offset.metadata.max.bytes</p>
+</td>
+<td>
+<p>客户端保留offset信息的最大空间大小</p>
+</td>
+</tr><tr><td>
+<p>kafka中zookeeper参数配置</p>
+</td>
+<td>
+<p> </p>
+</td>
+</tr><tr><td>
+<p> </p>
+<p>zookeeper.connect = localhost:2181</p>
+</td>
+<td>
+<p>zookeeper集群的地址，可以是多个，多个之间用逗号分割hostname1:port1,hostname2:port2,hostname3:port3</p>
+</td>
+</tr><tr><td>
+<p>zookeeper.session.timeout.ms=6000</p>
+</td>
+<td>
+<p>ZooKeeper的最大超时时间，就是心跳的间隔，若是没有反映，那么认为已经死了，不易过大</p>
+</td>
+</tr><tr><td>
+<p>zookeeper.connection.timeout.ms =6000</p>
+</td>
+<td>
+<p>ZooKeeper的连接超时时间</p>
+</td>
+</tr><tr><td>
+<p>zookeeper.sync.time.ms =2000</p>
+</td>
+<td>
+<p>ZooKeeper集群中leader和follower之间的同步实际那</p>
+</td>
+</tr></tbody></table></div>
+<p><br></p>
+<p> 注：该文档为本人整理别人的文档，不是原创，特此说明！</p>
+            </div>
+                </div>

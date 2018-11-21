@@ -1,0 +1,117 @@
+---
+layout:     post
+title:      6年资深开发带你10分钟了解Kafka ACL机制
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>1.概述<br>
+在Kafka0.9版本之前，Kafka集群时没有安全机制的。Kafka Client应用可以通过连接Zookeeper地址，例如zk1:2181:zk2:2181,zk3:2181等。来获取存储在Zookeeper中的Kafka元数据信息。拿到Kafka Broker地址后，连接到Kafka集群，就可以操作集群上的所有主题了。由于没有权限控制，集群核心的业务主题时存在风险的。</p>
+<p>2.内容<br>
+2.2 身份认证</p>
+<p>Kafka的认证范围包含如下：</p>
+<p>Client与Broker之间<br>
+Broker与Broker之间<br>
+Broker与Zookeeper之间<br>
+当前Kafka系统支持多种认证机制，如SSL、SASL（Kerberos、PLAIN、SCRAM）。</p>
+<p>2.3 SSL认证流程</p>
+<p>在Kafka系统中，SSL协议作为认证机制默认是禁止的，如果需要使用，可以手动启动SSL机制。安装和配置SSL协议的步骤，如下所示：</p>
+<p>在每个Broker中Create一个Tmp密钥库<br>
+创建CA<br>
+给证书签名<br>
+配置Server和Client<br>
+执行脚本如下所示：</p>
+<p>#! /bin/bash<br>
+2# 1.Create rsa<br>
+3keytool -keystore server.keystore.jks -alias dn1 -validity 365 -genkey -keyalg RSA<br>
+4# 2.Create CA<br>
+5openssl req -new -x509 -keyout ca-key -out ca-cert -days 365<br>
+6# 3.Import client<br>
+7keytool -keystore client.truststore.jks -alias CAROOT -import -file ca-cert<br>
+8# 4.Import server<br>
+9keytool -keystore server.truststore.jks -alias CAROOT -import -file ca-cert<br>
+10# 5.Export<br>
+11keytool -keystore server.keystore.jks -alias dn1 -certreq -file cert-file<br>
+12# 6.Signed<br>
+13openssl x509 -req -CA ca-cert -CAkey ca-key -in cert-file -out cert-signed -days 365 -CAcreateserial -passin pass:123456<br>
+14# 7.Import ca-cert<br>
+15keytool -keystore server.keystore.jks -alias CARoot -import -file ca-cert<br>
+16# 8.Import cert-signed<br>
+17keytool -keystore server.keystore.jks -alias dn1 -import -file cert-signed<br>
+2.4 SASL认证流程</p>
+<p>在Kafka系统中，SASL机制包含三种，它们分别是Kerberos、PLAIN、SCRAM。以PLAIN认证为示例，下面给大家介绍PLAIN认证流程。</p>
+<p>2.4.1 配置Server</p>
+<p>首先，在$KAFKA_HOME/config目录中新建一个文件，名为kafka_server_jaas.conf，配置内容如下：</p>
+<p>1KafkaServer {<br>
+2   org.apache.kafka.common.security.plain.PlainLoginModule required<br>
+3   username=“smartloli”<br>
+4   password=“smartloli-secret”<br>
+5   user_admin=“smartloli-secret”;<br>
+6};<br>
+7<br>
+8Client {<br>
+9   org.apache.kafka.common.security.plain.PlainLoginModule required<br>
+10   username=“smartloli”<br>
+11   password=“smartloli-secret”;<br>
+12};<br>
+然后在Kafka启动脚本（<a href="http://kafka-server-start.sh" rel="nofollow">kafka-server-start.sh</a>）中添加配置文件路径，设置内容如下：</p>
+<p>1[hadoop@dn1 bin]$ vi <a href="http://kafka-server-start.sh" rel="nofollow">kafka-server-start.sh</a><br>
+2<br>
+3# Add jaas file<br>
+4export KAFKA_OPTS="-Djava.security.auth.login.config=/data/soft/new/kafka/config/kafka_server_<br>
+接下来，配置server.properties文件，内容如下：</p>
+<p>1# Set ip &amp; port<br>
+2listeners=SASL_PLAINTEXT://dn1:9092<br>
+3advertised.listeners=SASL_PLAINTEXT://dn1:9092<br>
+4# Set protocol<br>
+5security.inter.broker.protocol=SASL_PLAINTEXT<br>
+6sasl.enabled.mechanisms=PLAIN<br>
+7sasl.mechanism.inter.broker.protocol=PLAIN<br>
+8<br>
+9# Add acl<br>
+10allow.everyone.if.no.acl.found=true<br>
+11auto.create.topics.enable=false<br>
+12delete.topic.enable=true<br>
+13advertised.host.name=dn1<br>
+14super.users=User:admin<br>
+15<br>
+16# Add class<br>
+17authorizer.class.name=kafka.security.auth.SimpleAclAuthorizer<br>
+2.4.2 配置Client</p>
+<p>当Kafka Server端配置启用了SASL/PLAIN，那么Client连接的时候需要配置认证信息，Client配置一个kafka_client_jaas.conf文件，内容如下：</p>
+<p>1KafkaClient {<br>
+2  org.apache.kafka.common.security.plain.PlainLoginModule required<br>
+3  username=“admin”<br>
+4  password=“admin-secret”;<br>
+5};<br>
+然后，在producer.properties和consumer.properties文件中设置认证协议，内容如下：</p>
+<p>1security.protocol=SASL_PLAINTEXT<br>
+2sasl.mechanism=PLAIN<br>
+最后，在kafka-console-producer.sh脚本和kafka-console-producer.sh脚本中添加JAAS文件的路径，内容如下：</p>
+<p>1# For example: <a href="http://kafka-console-producer.sh" rel="nofollow">kafka-console-producer.sh</a><br>
+2hadoop@dn1 bin]$ vi <a href="http://kafka-console-producer.sh" rel="nofollow">kafka-console-producer.sh</a><br>
+3<br>
+4# Add jaas file<br>
+5export KAFKA_OPTS="-Djava.security.auth.login.config=/data/soft/new/kafka<br>
+6/config/kafka_client_jaas.conf"</p>
+<p>2.5 ACL操作</p>
+<p>在配置好SASL后，启动Zookeeper集群和Kafka集群之后，就可以使用kafka-acls.sh脚本来操作ACL机制。</p>
+<p>（1）查看：在kafka-acls.sh脚本中传入list参数来查看ACL授权新</p>
+<p>1[hadoop@dn1 bin]$ <a href="http://kafka-acls.sh" rel="nofollow">kafka-acls.sh</a> --list --authorizer-properties zookeeper.connect=dn1:2181</p>
+<p>（2）创建：创建待授权主题之前，在kafka-acls.sh脚本中指定JAAS文件路径，然后在执行创建操作</p>
+<p>1[hadoop@dn1 bin]$ <a href="http://kafka-topics.sh" rel="nofollow">kafka-topics.sh</a> --create --zookeeper dn1:2181 --replication-factor 1 --partitions 1 --topic kafka_acl_topic<br>
+（3）生产者授权：对生产者执行授权操作</p>
+<p>1[hadoop@dn1 ~]$ <a href="http://kafka-acls.sh" rel="nofollow">kafka-acls.sh</a> --authorizer kafka.security.auth.SimpleAclAuthorizer --authorizer-properties zookeeper.connect=dn1:2181 --add --allow-principalUser:producer --operation Write --topic kafka_acl_topic<br>
+（4）消费者授权：对生产者执行授权后，通过消费者来进行验证</p>
+<p>1[hadoop@dn1 ~]$ <a href="http://kafka-acls.sh" rel="nofollow">kafka-acls.sh</a> --authorizer kafka.security.auth.SimpleAclAuthorizer --authorizer-properties zookeeper.connect=dn1:2181 --add --allow-principalUser:consumer --operation Read --topic kafka_acl_topic<br>
+（5）删除：通过remove参数来回收相关权限</p>
+<p>1[hadoop@dn1 bin]$ <a href="http://kafka-acls.sh" rel="nofollow">kafka-acls.sh</a> --authorizer-properties zookeeper.connect=dn1:2181 --remove --allow-principal User:producer --operation Write --topic kafka_acl_topic3<br>
+3.总结<br>
+在处理一些核心的业务数据时，Kafka的ACL机制还是非常重要的，对核心业务主题进行权限管控，能够避免不必要的风险。</p>
+<p>欢迎工作一到五年的Java工程师朋友们加入Java架构开发： 854393687<br>
+群内提供免费的Java架构学习资料（里面有高可用、高并发、高性能及分布式、Jvm性能调优、Spring源码，MyBatis，Netty,Redis,Kafka,Mysql,Zookeeper,Tomcat,Docker,Dubbo,Nginx等多个知识点的架构资料）合理利用自己每一分每一秒的时间来学习提升自己，不要再用"没有时间“来掩饰自己思想上的懒惰！趁年轻，使劲拼，给未来的自己一个交代！</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

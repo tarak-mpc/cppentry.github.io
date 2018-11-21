@@ -1,0 +1,736 @@
+---
+layout:     post
+title:      Kafka入门经典教程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p style="color:rgb(47,47,47);font-size:16px;">
+一、基本概念<br></p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+介绍</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka是一个分布式的、可分区的、可复制的消息系统。它提供了普通消息系统的功能，但具有自己独特的设计。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+这个独特的设计是什么样的呢？</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+首先让我们看几个基本的消息系统术语：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka将消息以topic为单位进行归纳。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+将向Kafka topic发布消息的程序成为producers.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+将预订topics并消费消息的程序成为consumer.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka以集群的方式运行，可以由一个或多个服务组成，每个服务叫做一个broker.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+producers通过网络将消息发送到Kafka集群，集群向消费者提供消息，如下图所示：</p>
+<div class="image-package" style="text-align:center;color:rgb(47,47,47);font-size:16px;">
+<img src="http://upload-images.jianshu.io/upload_images/5712789-7d6e327105edc5a6.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt="" style="vertical-align:middle;border:0px;"><br><div class="image-caption" style="min-width:20%;min-height:22px;display:inline-block;border-bottom:1px solid rgb(217,217,217);font-size:13px;color:rgb(153,153,153);line-height:1.7;">
+</div>
+</div>
+<p style="color:rgb(47,47,47);font-size:16px;">
+客户端和服务端通过TCP协议通信。Kafka提供了Java客户端，并且对多种语言都提供了支持。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Topics 和Logs</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+先来看一下Kafka提供的一个抽象概念:topic.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+一个topic是对一组消息的归纳。对每个topic，Kafka 对它的日志进行了分区，如下图所示：</p>
+<div class="image-package" style="text-align:center;color:rgb(47,47,47);font-size:16px;">
+<img src="http://upload-images.jianshu.io/upload_images/5712789-cf9cffb67322bec8.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt="" style="vertical-align:middle;border:0px;"><br><div class="image-caption" style="min-width:20%;min-height:22px;display:inline-block;border-bottom:1px solid rgb(217,217,217);font-size:13px;color:rgb(153,153,153);line-height:1.7;">
+</div>
+</div>
+<p style="color:rgb(47,47,47);font-size:16px;">
+每个分区都由一系列有序的、不可变的消息组成，这些消息被连续的追加到分区中。分区中的每个消息都有一个连续的序列号叫做offset,用来在分区中唯一的标识这个消息。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+在一个可配置的时间段内，Kafka集群保留所有发布的消息，不管这些消息有没有被消费。比如，如果消息的保存策略被设置为2天，那么在一个消息被发布的两天时间内，它都是可以被消费的。之后它将被丢弃以释放空间。Kafka的性能是和数据量无关的常量级的，所以保留太多的数据并不是问题。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+实际上每个consumer唯一需要维护的数据是消息在日志中的位置，也就是offset.这个offset有consumer来维护：一般情况下随着consumer不断的读取消息，这offset的值不断增加，但其实consumer可以以任意的顺序读取消息，比如它可以将offset设置成为一个旧的值来重读之前的消息。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+以上特点的结合，使Kafka consumers非常的轻量级：它们可以在不对集群和其他consumer造成影响的情况下读取消息。你可以使用命令行来"tail"消息而不会对其他正在消费消息的consumer造成影响。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+将日志分区可以达到以下目的：首先这使得每个日志的数量不会太大，可以在单个服务上保存。另外每个分区可以单独发布和消费，为并发操作topic提供了一种可能。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+分布式</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+每个分区在Kafka集群的若干服务中都有副本，这样这些持有副本的服务可以共同处理数据和请求，副本数量是可以配置的。副本使Kafka具备了容错能力。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+每个分区都由一个服务器作为“leader”，零或若干服务器作为“followers”,leader负责处理消息的读和写，followers则去复制leader.如果leader down了，followers中的一台则会自动成为leader。集群中的每个服务都会同时扮演两个角色：作为它所持有的一部分分区的leader，同时作为其他分区的followers，这样集群就会据有较好的负载均衡。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Producers</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Producer将消息发布到它指定的topic中,并负责决定发布到哪个分区。通常简单的由负载均衡机制随机选择分区，但也可以通过特定的分区函数选择分区。使用的更多的是第二种。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Consumers</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+发布消息通常有两种模式：队列模式（queuing）和发布-订阅模式(publish-subscribe)。队列模式中，consumers可以同时从服务端读取消息，每个消息只被其中一个consumer读到；发布-订阅模式中消息被广播到所有的consumer中。Consumers可以加入一个consumer 组，共同竞争一个topic，topic中的消息将被分发到组中的一个成员中。同一组中的consumer可以在不同的程序中，也可以在不同的机器上。如果所有的consumer都在一个组中，这就成为了传统的队列模式，在各consumer中实现负载均衡。如果所有的consumer都不在不同的组中，这就成为了发布-订阅模式，所有的消息都被分发到所有的consumer中。更常见的是，每个topic都有若干数量的consumer组，每个组都是一个逻辑上的“订阅者”，为了容错和更好的稳定性，每个组由若干consumer组成。这其实就是一个发布-订阅模式，只不过订阅者是个组而不是单个consumer。</p>
+<div class="image-package" style="text-align:center;color:rgb(47,47,47);font-size:16px;">
+<img src="http://upload-images.jianshu.io/upload_images/5712789-3d4e6915fea6d53b.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt="" style="vertical-align:middle;border:0px;"><br><div class="image-caption" style="min-width:20%;min-height:22px;display:inline-block;border-bottom:1px solid rgb(217,217,217);font-size:13px;color:rgb(153,153,153);line-height:1.7;">
+</div>
+</div>
+<p style="color:rgb(47,47,47);font-size:16px;">
+由两个机器组成的集群拥有4个分区 (P0-P3) 2个consumer组. A组有两个consumerB组有4个</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+相比传统的消息系统，Kafka可以很好的保证有序性。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+传统的队列在服务器上保存有序的消息，如果多个consumers同时从这个服务器消费消息，服务器就会以消息存储的顺序向consumer分发消息。虽然服务器按顺序发布消息，但是消息是被异步的分发到各consumer上，所以当消息到达时可能已经失去了原来的顺序，这意味着并发消费将导致顺序错乱。为了避免故障，这样的消息系统通常使用“专用consumer”的概念，其实就是只允许一个消费者消费消息，当然这就意味着失去了并发性。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+在这方面Kafka做的更好，通过分区的概念，Kafka可以在多个consumer组并发的情况下提供较好的有序性和负载均衡。将每个分区分只分发给一个consumer组，这样一个分区就只被这个组的一个consumer消费，就可以顺序的消费这个分区的消息。因为有多个分区，依然可以在多个consumer组之间进行负载均衡。注意consumer组的数量不能多于分区的数量，也就是有多少分区就允许多少并发消费。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka只能保证一个分区之内消息的有序性，在不同的分区之间是不可以的，这已经可以满足大部分应用的需求。如果需要topic中所有消息的有序性，那就只能让这个topic只有一个分区，当然也就只有一个consumer组消费它。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+二、环境搭建</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Step 1: 下载Kafka</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+点击下载最新的版本并解压.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; tar -xzf kafka_2.9.2-0.8.1.1.tgz</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; cd kafka_2.9.2-0.8.1.1</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Step 2: 启动服务</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka用到了Zookeeper，所有首先启动Zookper，下面简单的启用一个单实例的Zookkeeper服务。可以在命令的结尾加个&amp;符号，这样就可以启动后离开控制台。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/zookeeper-server-start.sh config/zookeeper.properties &amp;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+[2013-04-22 15:01:37,495] INFO Reading configuration from: config/zookeeper.properties (org.apache.zookeeper.server.quorum.QuorumPeerConfig)</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+...</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+现在启动Kafka:</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-server-start.sh config/server.properties</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+[2013-04-22 15:01:47,028] INFO Verifying properties (kafka.utils.VerifiableProperties)</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+[2013-04-22 15:01:47,051] INFO Property socket.send.buffer.bytes is overridden to 1048576 (kafka.utils.VerifiableProperties)</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+...</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Step 3: 创建 topic</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+创建一个叫做“test”的topic，它只有一个分区，一个副本。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 1 --topic test</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+可以通过list命令查看创建的topic:</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-topics.sh --list --zookeeper localhost:2181</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+test</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+除了手动创建topic，还可以配置broker让它自动创建topic.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Step 4:发送消息.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka 使用一个简单的命令行producer，从文件中或者从标准输入中读取消息并发送到服务端。默认的每条命令将发送一条消息。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+运行producer并在控制台中输一些消息，这些消息将被发送到服务端：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-console-producer.sh --broker-list localhost:9092 --topic test</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+This is a messageThis is another message</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+ctrl+c可以退出发送。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Step 5: 启动consumer</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka also has a command line consumer that will dump out messages to standard output.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka也有一个命令行consumer可以读取消息并输出到标准输出：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic test --from-beginning</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+This is a message</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+This is another message</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+你在一个终端中运行consumer命令行，另一个终端中运行producer命令行，就可以在一个终端输入消息，另一个终端读取消息。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+这两个命令都有自己的可选参数，可以在运行的时候不加任何参数可以看到帮助信息。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Step 6: 搭建一个多个broker的集群</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+刚才只是启动了单个broker，现在启动有3个broker组成的集群，这些broker节点也都是在本机上的：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+首先为每个节点编写配置文件：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; cp config/server.properties config/server-1.properties</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; cp config/server.properties config/server-2.properties</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+在拷贝出的新文件中添加以下参数：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+config/server-1.properties:</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+broker.id=1</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+port=9093</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+log.dir=/tmp/kafka-logs-1</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+config/server-2.properties:</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+broker.id=2</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+port=9094</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+log.dir=/tmp/kafka-logs-2</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+broker.id在集群中唯一的标注一个节点，因为在同一个机器上，所以必须制定不同的端口和日志文件，避免数据被覆盖。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+We already have Zookeeper and our single node started, so we just need to start the two new nodes:</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+刚才已经启动可Zookeeper和一个节点，现在启动另外两个节点：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-server-start.sh config/server-1.properties &amp;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+...</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-server-start.sh config/server-2.properties &amp;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+...</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+创建一个拥有3个副本的topic:</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 3 --partitions 1 --topic my-replicated-topic</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+现在我们搭建了一个集群，怎么知道每个节点的信息呢？运行“"describe topics”命令就可以了：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-topics.sh --describe --zookeeper localhost:2181 --topic my-replicated-topic</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Topic:my-replicated-topic       PartitionCount:1        ReplicationFactor:3     Configs:</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Topic: my-replicated-topic      Partition: 0    Leader: 1       Replicas: 1,2,0 Isr: 1,2,0</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+下面解释一下这些输出。第一行是对所有分区的一个描述，然后每个分区都会对应一行，因为我们只有一个分区所以下面就只加了一行。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+leader：负责处理消息的读和写，leader是从所有节点中随机选择的.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+replicas：列出了所有的副本节点，不管节点是否在服务中.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+isr：是正在服务中的节点.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+在我们的例子中，节点1是作为leader运行。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+向topic发送消息：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-console-producer.sh --broker-list localhost:9092 --topic my-replicated-topic</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+...</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+my test message 1my test message 2^C</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+消费这些消息：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-console-consumer.sh --zookeeper localhost:2181 --from-beginning --topic my-replicated-topic</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+...</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+my test message 1</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+my test message 2</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+^C</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+测试一下容错能力.Broker 1作为leader运行，现在我们kill掉它：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; ps | grep server-1.properties7564 ttys002    0:15.91 /System/Library/Frameworks/JavaVM.framework/Versions/1.6/Home/bin/java...</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; kill -9 7564</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+另外一个节点被选做了leader,node 1 不再出现在 in-sync 副本列表中：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-topics.sh --describe --zookeeper localhost:218192 --topic my-replicated-topic</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Topic:my-replicated-topic       PartitionCount:1        ReplicationFactor:3     Configs:</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Topic: my-replicated-topic      Partition: 0    Leader: 2       Replicas: 1,2,0 Isr: 2,0</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+虽然最初负责续写消息的leader down掉了，但之前的消息还是可以消费的：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+&gt; bin/kafka-console-consumer.sh --zookeeper localhost:2181 --from-beginning --topic my-replicated-topic</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+...</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+my test message 1</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+my test message 2</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+看来Kafka的容错机制还是不错的。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+<br></p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+三、搭建Kafka开发环境</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+我们搭建了kafka的服务器，并可以使用Kafka的命令行工具创建topic，发送和接收消息。下面我们来搭建kafka的开发环境。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+添加依赖</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+搭建开发环境需要引入kafka的jar包，一种方式是将Kafka安装包中lib下的jar包加入到项目的classpath中，这种比较简单了。不过我们使用另一种更加流行的方式：使用maven管理jar包依赖。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+创建好maven项目后，在pom.xml中添加以下依赖：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+org.apache.kafka</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+kafka_2.10</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+0.8.0</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+添加依赖后你会发现有两个jar包的依赖找不到。没关系我都帮你想好了，点击这里下载这两个jar包，解压后你有两种选择，第一种是使用mvn的install命令将jar包安装到本地仓库，另一种是直接将解压后的文件夹拷贝到mvn本地仓库的com文件夹下，比如我的本地仓库是d:\mvn,完成后我的目录结构是这样的：</p>
+<div class="image-package" style="text-align:center;color:rgb(47,47,47);font-size:16px;">
+<img src="http://upload-images.jianshu.io/upload_images/5712789-7ccf093b08af6c70.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt="" style="vertical-align:middle;border:0px;"><br><div class="image-caption" style="min-width:20%;min-height:22px;display:inline-block;border-bottom:1px solid rgb(217,217,217);font-size:13px;color:rgb(153,153,153);line-height:1.7;">
+</div>
+</div>
+<p style="color:rgb(47,47,47);font-size:16px;">
+配置程序</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+首先是一个充当配置文件作用的接口,配置了Kafka的各种连接参数：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+package com.sohu.kafkademon;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public interface KafkaProperties</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static String zkConnect = "10.22.10.139:2181";</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static String groupId = "group1";</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static String topic = "topic1";</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static String kafkaServerURL = "10.22.10.139";</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static int kafkaServerPort = 9092;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static int kafkaProducerBufferSize = 64 * 1024;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static int connectionTimeOut = 20000;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static int reconnectInterval = 10000;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static String topic2 = "topic2";</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static String topic3 = "topic3";</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+final static String clientId = "SimpleConsumerDemoClient";</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+producer</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+package com.sohu.kafkademon;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.Properties;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.producer.KeyedMessage;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.producer.ProducerConfig;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+/**</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+* @author leicui bourne_cui@163.com</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+*/</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public class KafkaProducer extends Thread</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private final kafka.javaapi.producer.Producer producer;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private final String topic;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private final Properties props = new Properties();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public KafkaProducer(String topic)</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("serializer.class", "kafka.serializer.StringEncoder");</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("metadata.broker.list", "10.22.10.139:9092");</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+producer = new kafka.javaapi.producer.Producer(new ProducerConfig(props));</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+this.topic = topic;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+@Override</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public void run() {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+int messageNo = 1;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+while (true)</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+String messageStr = new String("Message_" + messageNo);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+System.out.println("Send:" + messageStr);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+producer.send(new KeyedMessage(topic, messageStr));</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+messageNo++;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+try {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+sleep(3000);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+} catch (InterruptedException e) {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+// TODO Auto-generated catch block</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+e.printStackTrace();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+consumer</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+package com.sohu.kafkademon;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.HashMap;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.List;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.Map;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.Properties;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.consumer.ConsumerConfig;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.consumer.ConsumerIterator;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.consumer.KafkaStream;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.javaapi.consumer.ConsumerConnector;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+/**</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+* @author leicui bourne_cui@163.com</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+*/</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public class KafkaConsumer extends Thread</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private final ConsumerConnector consumer;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private final String topic;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public KafkaConsumer(String topic)</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+consumer = kafka.consumer.Consumer.createJavaConsumerConnector(</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+createConsumerConfig());</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+this.topic = topic;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private static ConsumerConfig createConsumerConfig()</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Properties props = new Properties();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("zookeeper.connect", KafkaProperties.zkConnect);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("group.id", KafkaProperties.groupId);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("zookeeper.session.timeout.ms", "40000");</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("zookeeper.sync.time.ms", "200");</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("auto.commit.interval.ms", "1000");</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+return new ConsumerConfig(props);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+@Override</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public void run() {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Map topicCountMap = new HashMap();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+topicCountMap.put(topic, new Integer(1));</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Map&gt;&gt; consumerMap = consumer.createMessageStreams(topicCountMap);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+KafkaStream stream = consumerMap.get(topic).get(0);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+ConsumerIterator it = stream.iterator();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+while (it.hasNext()) {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+System.out.println("receive：" + new String(it.next().message()));</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+try {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+sleep(3000);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+} catch (InterruptedException e) {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+e.printStackTrace();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+简单的发送接收</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+运行下面这个程序，就可以进行简单的发送接收消息了：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+package com.sohu.kafkademon;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+/**</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+* @author leicui bourne_cui@163.com</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+*/</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public class KafkaConsumerProducerDemo</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public static void main(String[] args)</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+KafkaProducer producerThread = new KafkaProducer(KafkaProperties.topic);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+producerThread.start();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+KafkaConsumer consumerThread = new KafkaConsumer(KafkaProperties.topic);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+consumerThread.start();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+复制代码</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+高级别的consumer</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+下面是比较负载的发送接收的程序：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+package com.sohu.kafkademon;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.HashMap;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.List;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.Map;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import java.util.Properties;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.consumer.ConsumerConfig;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.consumer.ConsumerIterator;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.consumer.KafkaStream;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+import kafka.javaapi.consumer.ConsumerConnector;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+/**</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+* @author leicui bourne_cui@163.com</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+*/</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public class KafkaConsumer extends Thread</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private final ConsumerConnector consumer;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private final String topic;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public KafkaConsumer(String topic)</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+consumer = kafka.consumer.Consumer.createJavaConsumerConnector(</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+createConsumerConfig());</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+this.topic = topic;</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+private static ConsumerConfig createConsumerConfig()</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+{</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Properties props = new Properties();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("zookeeper.connect", KafkaProperties.zkConnect);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("group.id", KafkaProperties.groupId);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("zookeeper.session.timeout.ms", "40000");</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("zookeeper.sync.time.ms", "200");</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+props.put("auto.commit.interval.ms", "1000");</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+return new ConsumerConfig(props);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+@Override</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+public void run() {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Map topicCountMap = new HashMap();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+topicCountMap.put(topic, new Integer(1));</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Map&gt;&gt; consumerMap = consumer.createMessageStreams(topicCountMap);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+KafkaStream stream = consumerMap.get(topic).get(0);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+ConsumerIterator it = stream.iterator();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+while (it.hasNext()) {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+System.out.println("receive：" + new String(it.next().message()));</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+try {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+sleep(3000);</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+} catch (InterruptedException e) {</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+e.printStackTrace();</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+}</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+四、数据持久化</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+不要畏惧文件系统!</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+Kafka大量依赖文件系统去存储和缓存消息。对于硬盘有个传统的观念是硬盘总是很慢，这使很多人怀疑基于文件系统的架构能否提供优异的性能。实际上硬盘的快慢完全取决于使用它的方式。设计良好的硬盘架构可以和内存一样快。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+在6块7200转的SATA RAID-5磁盘阵列的线性写速度差不多是600MB/s，但是随即写的速度却是100k/s，差了差不多6000倍。现代的操作系统都对次做了大量的优化，使用了 read-ahead 和 write-behind的技巧，读取的时候成块的预读取数据，写的时候将各种微小琐碎的逻辑写入组织合并成一次较大的物理写入。对此的深入讨论可以查看这里，它们发现线性的访问磁盘，很多时候比随机的内存访问快得多。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+为了提高性能，现代操作系统往往使用内存作为磁盘的缓存，现代操作系统乐于把所有空闲内存用作磁盘缓存，虽然这可能在缓存回收和重新分配时牺牲一些性能。所有的磁盘读写操作都会经过这个缓存，这不太可能被绕开除非直接使用I/O。所以虽然每个程序都在自己的线程里只缓存了一份数据，但在操作系统的缓存里还有一份，这等于存了两份数据。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+另外再来讨论一下JVM,以下两个事实是众所周知的：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+•Java对象占用空间是非常大的，差不多是要存储的数据的两倍甚至更高。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+•随着堆中数据量的增加，垃圾回收回变的越来越困难。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+基于以上分析，如果把数据缓存在内存里，因为需要存储两份，不得不使用两倍的内存空间，Kafka基于JVM，又不得不将空间再次加倍,再加上要避免GC带来的性能影响，在一个32G内存的机器上，不得不使用到28-30G的内存空间。并且当系统重启的时候，又必须要将数据刷到内存中（ 10GB 内存差不多要用10分钟），就算使用冷刷新（不是一次性刷进内存，而是在使用数据的时候没有就刷到内存）也会导致最初的时候新能非常慢。但是使用文件系统，即使系统重启了，也不需要刷新数据。使用文件系统也简化了维护数据一致性的逻辑。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+所以与传统的将数据缓存在内存中然后刷到硬盘的设计不同，Kafka直接将数据写到了文件系统的日志中。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+常量时间的操作效率</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+在大多数的消息系统中，数据持久化的机制往往是为每个cosumer提供一个B树或者其他的随机读写的数据结构。B树当然是很棒的，但是也带了一些代价：比如B树的复杂度是O(log N)，O(log N)通常被认为就是常量复杂度了，但对于硬盘操作来说并非如此。磁盘进行一次搜索需要10ms，每个硬盘在同一时间只能进行一次搜索，这样并发处理就成了问题。虽然存储系统使用缓存进行了大量优化，但是对于树结构的性能的观察结果却表明，它的性能往往随着数据的增长而线性下降，数据增长一倍，速度就会降低一倍。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+直观的讲，对于主要用于日志处理的消息系统，数据的持久化可以简单的通过将数据追加到文件中实现，读的时候从文件中读就好了。这样做的好处是读和写都是 O(1) 的，并且读操作不会阻塞写操作和其他操作。这样带来的性能优势是很明显的，因为性能和数据的大小没有关系了。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+既然可以使用几乎没有容量限制（相对于内存来说）的硬盘空间建立消息系统，就可以在没有性能损失的情况下提供一些一般消息系统不具备的特性。比如，一般的消息系统都是在消息被消费后立即删除，Kafka却可以将消息保存一段时间（比如一星期），这给consumer提供了很好的机动性和灵活性，这点在今后的文章中会有详述。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+五、消息传输的事务定义</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+之前讨论了consumer和producer是怎么工作的，现在来讨论一下数据传输方面。数据传输的事务定义通常有以下三种级别：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+最多一次: 消息不会被重复发送，最多被传输一次，但也有可能一次不传输。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+最少一次: 消息不会被漏发送，最少被传输一次，但也有可能被重复传输.</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+精确的一次（Exactly once）: 不会漏传输也不会重复传输,每个消息都传输被一次而且仅仅被传输一次，这是大家所期望的。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+大多数消息系统声称可以做到“精确的一次”，但是仔细阅读它们的的文档可以看到里面存在误导，比如没有说明当consumer或producer失败时怎么样，或者当有多个consumer并行时怎么样，或写入硬盘的数据丢失时又会怎么样。kafka的做法要更先进一些。当发布消息时，Kafka有一个“committed”的概念，一旦消息被提交了，只要消息被写入的分区的所在的副本broker是活动的，数据就不会丢失。关于副本的活动的概念，下节文档会讨论。现在假设broker是不会down的。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+如果producer发布消息时发生了网络错误，但又不确定实在提交之前发生的还是提交之后发生的，这种情况虽然不常见，但是必须考虑进去，现在Kafka版本还没有解决这个问题，将来的版本正在努力尝试解决。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+并不是所有的情况都需要“精确的一次”这样高的级别，Kafka允许producer灵活的指定级别。比如producer可以指定必须等待消息被提交的通知，或者完全的异步发送消息而不等待任何通知，或者仅仅等待leader声明它拿到了消息（followers没有必要）。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+现在从consumer的方面考虑这个问题，所有的副本都有相同的日志文件和相同的offset，consumer维护自己消费的消息的offset，如果consumer不会崩溃当然可以在内存中保存这个值，当然谁也不能保证这点。如果consumer崩溃了，会有另外一个consumer接着消费消息，它需要从一个合适的offset继续处理。这种情况下可以有以下选择：</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+consumer可以先读取消息，然后将offset写入日志文件中，然后再处理消息。这存在一种可能就是在存储offset后还没处理消息就crash了，新的consumer继续从这个offset处理，那么就会有些消息永远不会被处理，这就是上面说的“最多一次”。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+consumer可以先读取消息，处理消息，最后记录offset，当然如果在记录offset之前就crash了，新的consumer会重复的消费一些消息，这就是上面说的“最少一次”。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+“精确一次”可以通过将提交分为两个阶段来解决：保存了offset后提交一次，消息处理成功之后再提交一次。但是还有个更简单的做法：将消息的offset和消息被处理后的结果保存在一起。比如用Hadoop ETL处理消息时，将处理后的结果和offset同时保存在HDFS中，这样就能保证消息和offser同时被处理了。</p>
+<p style="color:rgb(47,47,47);font-size:16px;">
+更多详细源码参考来源：<a href="http://minglisoft.cn/technology" rel="nofollow" style="color:rgb(49,148,208);">技术网站请查看这里</a>欢迎大家一起学习研究相关技术，源码获取请加求求（企鹅）: 2042849237</p>
+            </div>
+                </div>

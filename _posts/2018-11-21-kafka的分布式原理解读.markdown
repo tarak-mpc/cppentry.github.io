@@ -1,0 +1,23 @@
+---
+layout:     post
+title:      kafka的分布式原理解读
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/huanjileaimeidan/article/details/51744951				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<span style="font-family:'KaiTi_GB2312';font-size:18px;">      kafka是apache的一个优秀的开源消息系统，如果您已经是kafka方面的高手，那么这篇博客可能并不适合您。本篇博客简单介绍一下kafka的分布式原理，作为kafka的入门。<br>
+      首先，还是介绍一下kafka。在kafka的官网上，对kafka的定义叫做A distributed publish-subscribe messaging system。听起来有些高大上了哈，叫做“一个分布式发布-订阅消息传递系统”，其中的publish-subscribe是发布和订阅的意思。所以准确的来说，kafka是一个消息订阅和发布的系统。这个不是我说的，我也没有这么专业和权威，是看一本叫做“kafka系列文档”的PDF里面说的，里面讲得不错，有兴趣的可以看看。<br></span>
+<p><span style="font-family:'KaiTi_GB2312';font-size:18px;">      回头咱们继续说kafka，kafka作为一个分布式发布-订阅消息传递系统，它的模式特别像设计模式中的观察者模式（虽然我没有请教相关大牛来验证我刚刚说的正确与否，暂且认为我说的是对的），又有点像PV操作。还是回到kafka的发布-订阅模式上来说，有人将消息发布比作生产者，消息订阅比作消费者，中间需要一个交互中心，我们称为存储阵列，或者官方一些我们称为代理（broker），这样我们就能勾画出这样一幅场景：</span></p>
+<p><span style="font-family:'KaiTi_GB2312';font-size:18px;">                      <img src="https://img-blog.csdn.net/20160623165108317?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p><span style="font-family:'KaiTi_GB2312';font-size:18px;"></span></p>
+<p><span style="font-family:'KaiTi_GB2312';font-size:18px;">      生产者将数据生产出来，push到broker进行存储，消费者需要消费就从broker拿数据进行对数据的处理。这样一个协作的过程，其实只是众多数据存储消费中的一个小小的分支，正常而言producer是将数据生产出来就不断的往broker进行push，而从数据流向而言，consumer要消费数据时，是主动去broker进行pull的，而不是broker主动pull数据给consumer，这点是需要特别注意的。</span></p>
+<p><span style="font-family:'KaiTi_GB2312';font-size:18px;">      下图是kafka官方给出的图：</span></p>
+<p style="text-align:center;"><img src="https://img-blog.csdn.net/20160623165151240?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p style="text-align:left;"><br></p>
+<p><span style="font-family:'KaiTi_GB2312';font-size:18px;">      这张图</span><span style="font-family:'KaiTi_GB2312';font-size:18px;">看似很复杂，仔细看其实跟上面的图是一回事：分别是producer、broker和consumer。不过是多个broker协同合作，至于producer和consumer则想象是被部署在不同的业务逻辑中被频繁调用。仔细观察你会发现，这张图中多了一个zookeeper。简单介绍一下zookeeper，zookeeper用来注册服务和进行负载均衡，哪一个服务由哪一个机器来提供必须让调用者知道，简单来说就是ip地址和服务名称的对应关系是记录在zookeeper里面的。当然可以通过硬编码的方式把这种对应关系在调用方业务代码中实现，但是如果提供服务的机器挂掉调用者根本无法知晓，如果不更改代码会继续请求挂掉机器提供服务。Zookeeper通过心跳机制可以检测挂掉的机器并将挂掉机器的ip和服务对应关系从列表中删除。至于支持高并发，简单来说就是横向扩展，在不更改代码的情况下通过添加机器来提高运算能力，通过添加新的机器向zookeeper注册服务，服务的提供者多了能服务的客户就多了。所以用一句话来概括的话，zookeeper就是一个注册中心，你的服务提供方和消费方都要在这里注册，这样服务消费方就可以找到服务提供方了。那么返回来我们继续说kafka中的zookeeper，producer、consumer、broker三者通过zookeeper管理协调请求和转发，这其间的连接都是需要zookeeper来进行分发的。这样有了zookeeper之后，producer产生了数据，会先通过zookeeper找到broker，然后把数据存放进broker中；consumer如果要消费数据，会先通过zookeeper找到对应的broker，然后进行消费。</span></p>
+<p><span style="font-family:'KaiTi_GB2312';font-size:18px;">      对kafka分布式原理的解读就到这里，具体我们公司没有用kafka，因为圈子里总时不时的会出现讨论kafka的话题，所以我就想着研究看看kafka到底是什么。现在看看又把kafka和MQ找齐了，但是二者具体的区别我现在还没有研究，也没有理解那么深刻，所以不方便说什么。不过打听来的而已，说kafka的重量级的，大数据量达到了的确会有很高的处理效率，不过听好前提，是数据量大的情况下处理效率很高。相反数据量达不到相应的级别，很可能会造成不必要的负担的。kafka就先说到这里，以后有相关的研究在更新博客。</span></p>
+<br>            </div>
+                </div>

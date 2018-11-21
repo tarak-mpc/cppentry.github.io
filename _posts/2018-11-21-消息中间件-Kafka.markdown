@@ -1,0 +1,66 @@
+---
+layout:     post
+title:      消息中间件-Kafka
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/chen517611641/article/details/78577503				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="消息发布">消息发布</h1>
+
+<p>Producer在发布消息到某个Partition时，先通过ZooKeeper找到该Partition的Leader，然后无论该Topic的ReplicationFactor为多少（也即该Partition有多少个Replica），Producer只将该消息发送到该Partition的Leader，Leader会将该消息写入其本地Log。每个Follower都从Leaderpull数据。这种方式上，Follower存储的数据顺序与Leader保持一致。Follower在收到该消息并写入其Log后，向Leader发送 ACK。一旦Leader收到了ISR中的所有Replica的ACK，该消息就被认为已经commit了，Leader将增加HW（高水位：表示最近一次提交消息的偏移位置）并且向 Producer发送ACK。 <br>
+为了提高性能，每个Follower在接收到数据后就立马向Leader发送ACK，而非等到数据写入Log中。因此，对于已经commit的消息，Kafka只能保证它被存于多个Replica的内存中，而不能保证它们被持久化到磁盘中，也就不能完全保证异常发生后该条消息一定能被 Consumer消费。但考虑到这种场景非常少见，可以认为这种方式是在性能和数据持久化上做了一个比较好的平衡。Consumer读消息也是从Leader读取，只有被commit过的消息（offset低于HW的消息）才会暴露给Consumer。</p>
+
+
+
+<h1 id="消息订阅">消息订阅</h1>
+
+<p>High level api是consumer读的partition的offsite是存在zookeeper上。High level api 会启动另外一个线程去每隔一段时间，offsite自动同步到zookeeper上。换句话说，如果使用了High level api， 每个message只能被读一次，一旦读了这条message之后，无论我consumer的处理是否ok。High level api的另外一个线程会自动的把offiste+1同步到zookeeper上。如果consumer读取数据出了问题，offsite也会在zookeeper上同步。因此，如果consumer处理失败了，会继续执行下一条。这往往是不对的行为。因此，Best Practice是一旦consumer处理失败，直接让整个conusmer group抛Exception终止，但是最后读的这一条数据是丢失了，因为在zookeeper里面的offsite已经+1了。等再次启动conusmer group的时候，已经从下一条开始读取处理了。</p>
+
+<p>Low level api是consumer读的partition的offsite在consumer自己的程序中维护。不会同步到zookeeper上。但是为了kafka manager能够方便的监控，一般也会手动的同步到zookeeper上。这样的好处是一旦读取某个message的consumer失败了，这条message的offsite我们自己维护，我们不会+1。下次再启动的时候，还会从这个offsite开始读。这样可以做到exactly once对于数据的准确性有保证。</p>
+
+
+
+<h2 id="spring-cloud-stream">Spring Cloud Stream</h2>
+
+<p>如果是使用Spring Cloud Stream，我们就不用单独处理offset了，Spring Cloud Stream为我们处理了；我们可以通过如下的四个参数，来配置消费者消费的次数，配置回退算法的参数； <br>
+maxAttempts <br>
+If processing fails, the number of attempts to process the message (including the first). Set to 1 to disable retry.</p>
+
+<p>Default: 3.</p>
+
+<p>backOffInitialInterval <br>
+The backoff initial interval on retry.</p>
+
+<p>Default: 1000.</p>
+
+<p>backOffMaxInterval <br>
+The maximum backoff interval.</p>
+
+<p>Default: 10000.</p>
+
+<p>backOffMultiplier <br>
+The backoff multiplier.</p>
+
+<p>Default: 2.0.</p>
+
+<h1 id="参考">参考</h1>
+
+<p><a href="http://blog.csdn.net/langzi7758521/article/details/52679497" rel="nofollow" target="_blank">Kafka设计和原理详解</a> <br>
+<a href="http://www.sohu.com/a/144225753_236714" rel="nofollow" target="_blank">小白也能看懂的简单明了kafka原理解析</a> <br>
+<a href="http://blog.csdn.net/ychenfeng/article/details/74980531" rel="nofollow" target="_blank">Kafka史上最详细原理总结</a> <br>
+<a href="http://blog.csdn.net/lizhitao/article/details/44858217" rel="nofollow" target="_blank">mafka平台架构</a> <br>
+<a href="http://blog.csdn.net/lizhitao/article/details/51718185" rel="nofollow" target="_blank">Kafka副本同步机制理解</a> <br>
+<a href="http://blog.csdn.net/lizhitao/article/details/52296102" rel="nofollow" target="_blank">Kafka数据可靠性与一致性解析</a> <br>
+<a href="http://kane-xie.iteye.com/blog/2225085" rel="nofollow" target="_blank">kafka consumer防止数据丢失</a> <br>
+<a href="http://blog.csdn.net/ebay/article/details/46549661" rel="nofollow" target="_blank">Kafka的分布式架构设计与High Availability机制</a> <br>
+<a href="http://skaka.me/blog/2016/04/21/springcloud1/" rel="nofollow" target="_blank">微服务框架Spring Cloud介绍 Part1: 使用事件和消息队列实现分布式事务</a> <br>
+<a href="http://www.cnblogs.com/birdstudio/p/7204469.html" rel="nofollow" target="_blank">基于Kafka消息驱动最终一致事务（一）</a> <br>
+<a href="http://www.cnblogs.com/birdstudio/p/7373057.html" rel="nofollow" target="_blank">基于Kafka消息驱动最终一致事务（二）</a> <br>
+<a href="http://blog.csdn.net/lizhitao/article/details/44199257" rel="nofollow" target="_blank">Kafka delivery保证(kafka消息投递保证)</a> <br>
+<a href="https://www.zhihu.com/question/34842764" rel="nofollow" target="_blank">kafka使用high api如何确保不丢失消息，不重复发送，消息只读取一次？</a> <br>
+<a href="https://www.cnblogs.com/3gods/p/7530828.html" rel="nofollow" target="_blank">Kafka消息投递语义-消息不丢失，不重复，不丢不重</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

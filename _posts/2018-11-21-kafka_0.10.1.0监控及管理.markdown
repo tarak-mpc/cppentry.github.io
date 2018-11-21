@@ -1,0 +1,339 @@
+---
+layout:     post
+title:      kafka_0.10.1.0监控及管理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h1 id="1-kafka监控"><strong><strong>1. kafka监控</strong></strong></h1>
+
+<p>kafka自身没有监控管理页面，无论是进行一些管理操作还是状态的监控都要命令加一大堆记不住的参数，实在是很不方便，不过好在在github上开源了一些工具，在kafka的<a href="https://cwiki.apache.org/confluence/display/KAFKA/Ecosystem" rel="nofollow">生态系统</a>中也有提及到：</p>
+
+<ul><li>Kafka Manager: 都是以表格的形式展现数据，比较方便用来管理kafka，例如topic的创建、删除以及分区的管理等。</li>
+	<li>Kafka Offset Monitor: 监控消费者以及所在分区的offset，帮助分析当前的消费以及生产是否顺畅，功能比较单调但界面还可以。</li>
+	<li>Kafka Web Console：<a href="https://github.com/claudemamo/kafka-web-console" rel="nofollow">github</a>上已经说明了不再更新了，且建议使用Kafka manager</li>
+	<li>kafkat: 一个简化了的命令行工具，用来管理kafka的broker,partition,topic.</li>
+	<li>Capillary: 如果是kafka+storm集成使用，可以选择该工具，是一个web应用</li>
+</ul><p>除了前面两个，其它几个都没试用过，就算在网上查也是推荐前两个而已，kafka manager基于jmx功能比较强大，利用它做管理方面；而KafkaOffsetMonitor从它的启动参数来看应该是定时从zookeeper上获取消费者的offset，以图的形式展示，比较直观（对于一些实现Exactly once的系统，offset并不保存在zookeeper上面，它将不能使用），两者结合使用，相得益彰。</p>
+
+<h2 id="21-kafka-manager"><a name="t1"></a><strong><strong>2.1. Kafka-manager</strong></strong></h2>
+
+<p>kafka manager的源码：<a href="https://github.com/yahoo/kafka-manager" rel="nofollow">https://github.com/yahoo/kafka-manager</a><br>
+官方要求的kafka版本：Kafka 0.8.1.1 或者 0.8.2.x 或者 0.9.0.x，不过使用kafka_0.10.1.0时也能正常。<br>
+java版本要求：<strong>Java 8+</strong></p>
+
+<h3 id="211-编译源码"><a name="t2"></a><strong><strong>2.1.1 编译源码</strong></strong></h3>
+
+<p>为了得到部署包kafka-manager-xxxx.zip,先根据上面的地址下载源码再编译(不想这么麻烦的话，可以去一些kafka的qq群，一般群共享里都会有这个包)。kafka-manager工程是利用SBT进行构建的，所以编译之前还需要<strong>安装SBT，安装Java 8</strong>。最后执行命令编译：</p>
+
+<pre class="prettyprint">
+<code>sbt clean dist</code></pre>
+
+<ul><li>1</li>
+</ul><p>网络不好的话可能需要重复编译，成功后在target/universal目录下可以看到kafka-manager-1.3.2.1.zip</p>
+
+<h3 id="212-修改配置"><a name="t3"></a><strong><strong>2.1.2 修改配置</strong></strong></h3>
+
+<p>把编译得到的zip包解压，在conf目录中有一个application.conf文件，最小化的配置只需要在该文件中修改<code>kafka-manager.zkhosts</code>参数即可：</p>
+
+<pre class="prettyprint">
+<code>kafka-manager.zkhosts="master:2181,slave1:2181,slave2:2181"</code></pre>
+
+<ul><li>1</li>
+</ul><h3 id="213-kafka启动jmx"><a name="t4"></a><strong><strong>2.1.3 kafka启动jmx</strong></strong></h3>
+
+<p>kafka服务必需要开启JMX，否则在下一步启动kafka-manager时会出现：<br><span style="color:#FF0000;">java.lang.IllegalArgumentException: requirement failed: No jmx port but jmx polling enabled!</span><br>
+启动kafka服务时指定JMX_PORT值:</p>
+
+<pre class="prettyprint">
+<code>JMX_PORT=9999 bin/kafka-server-start.sh -daemon config/server.properties</code></pre>
+
+<ul><li>1</li>
+</ul><p>或者修改kafka-server-start.sh，在前面加上：</p>
+
+<pre class="prettyprint">
+<code>export JMX_PORT=9999</code></pre>
+
+<ul><li>1</li>
+</ul><h3 id="214-启动kafka-manager"><a name="t5"></a><strong><strong>2.1.4 启动kafka-manager</strong></strong></h3>
+
+<p>以运行在linux上为例，启动脚本为bin/kafkak-manager，该脚本会默认占用9000端口，也可以通过参数修改端口以及指定java版本运行：</p>
+
+<pre class="prettyprint">
+<code>nohup bin/kafka-manager -java-home /usr/java/jdk1.8.0_101/ -Dhttp.port=8081 &amp;</code></pre>
+
+<ul><li>1</li>
+</ul><p>启动成功后，即可以通过<a href="http://ip:8081" rel="nofollow">http://ip:8081</a>来访问</p>
+
+<h2 id="22-kafkaoffsetmonitor"><a name="t6"></a><strong><strong>2.2. KafkaOffsetMonitor</strong></strong></h2>
+
+<p>源码地址：<a href="https://github.com/quantifind/KafkaOffsetMonitor" rel="nofollow">https://github.com/quantifind/KafkaOffsetMonitor</a><br>
+jar包下载：<a href="https://github.com/quantifind/KafkaOffsetMonitor/releases/tag/v0.2.1" rel="nofollow">https://github.com/quantifind/KafkaOffsetMonitor/releases/tag/v0.2.1</a><br>
+KafkaOffsetMonitor使用比较方便，将会被打成一个jar包，直接运行即可，作者已经把打好的包上传到github上面，执行以下命令启动：</p>
+
+<pre class="prettyprint">
+<code>java -cp KafkaOffsetMonitor-assembly-0.2.1.jar  com.quantifind.kafka.offsetapp.OffsetGetterWeb --zk master,slave1,slave2:2181 --port 8082 --refresh 10.seconds  --retain 2.days</code></pre>
+
+<ul><li>1</li>
+</ul><p>启动成功后，即可以通过<a href="http://ip:8082" rel="nofollow">http://ip:8082</a>来访问</p>
+
+<h1 id="3-kafka自带脚本工具"><a name="t7"></a><strong><strong>3. kafka自带脚本工具</strong></strong></h1>
+
+<p>基本所有脚本都是调用kafka-run-class.sh脚本去执行一个命令模式的class.建议使用脚本时参考脚本的使用说明。</p>
+
+<h2 id="31-主题管理kafka-topicssh"><a name="t8"></a><strong><strong>3.1. 主题管理：kafka-topics.sh</strong></strong></h2>
+
+<p>创建、删除、查看或者改变一个topic.</p>
+
+<h3 id="311-创建topic"><a name="t9"></a><strong><strong>3.1.1. 创建topic</strong></strong></h3>
+
+<pre class="prettyprint">
+<code>bin/kafka-topics.sh --zookeeper master:2181 --create --topic test --partitions 3 --replication-factor 2 --config flush.ms=1000 --config flush.messages=1</code></pre>
+
+<ul><li>1</li>
+</ul><p>创建一个名称为test的topic，它有3个分区，每个分区两个replica，通过<strong>–config</strong>给topic设置属性，格式为key=value，如果有多个配置属性则如上命令。这种创建方式kafka会自动把各个分区的replica分配到相应的broker，也可以在创建topic时<strong>手动指定</strong>哪个分区的哪个replica落在指定的broker，示例命令如下：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-topics.sh --zookeeper master:2181 --create --topic test  --config flush.ms=1000 --config flush.messages=1 --replica-assignment 0:1,1:2</code></pre>
+
+<ul><li>1</li>
+</ul><p>关键的配置参数为–replica-assignment，该参数不能与–partitions和–replication-factor同时出现，参数的使用格式如下：</p>
+
+<blockquote>
+<p>broker_id_for_part0_replica1: broker_id_for_part0_replica2,<br>
+broker_id_for_part1_replica1: broker_id_for_part1_replica2,<br>
+broker_id_for_part2_replica1: broker_id_for_part2_replica2</p>
+</blockquote>
+
+<p>–replica-assignment 0:1,1:2表示有两个分区，分区0的replica1在broker.id=0的kafka服务上，分区0的replica2在broker.id=1的kafka服务上；分区1的replica1在broker.id=1的kafka服务上，分区1的replica2在broker.id=2的kafka服务上。</p>
+
+<h3 id="312-删除topic"><a name="t10"></a><strong><strong>3.1.2. 删除topic</strong></strong></h3>
+
+<p>当使用delete命令删除topic，默认只是进行标记，并没有真正的删除</p>
+
+<p><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215175112004?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p><span style="color:#FF0000;">Note: This will have no impact if delete.topic.enable is not set to true.</span><br>
+需要在config/server.properties配置文件中开启delete.topic.enable=true</p>
+
+<h3 id="313-查看topic"><a name="t11"></a><strong><strong>3.1.3. 查看topic</strong></strong></h3>
+
+<pre class="prettyprint">
+<code>bin/kafka-topics.sh --zookeeper master:2181 --describe --topic test</code></pre>
+
+<ul><li>1</li>
+</ul><p>describe名称为test的topic，将会显示topic的分区数、replica因子、配置参数以及各分区的分布情况(leader,replica,isr)，如下图：</p>
+
+<p><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215175244567?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"><br>
+使用–describe时还可以结合其它一些参数对结果进行过滤：</p>
+
+<ul><li>topics-with-overrides：加上该参数时，只显示config被覆盖过的topic(例如使用下面的–alter修改config，或者创建topic时指定–config也算)。</li>
+	<li>unavailable-partitions：加上该参数时，只显示leader不可用的分区。</li>
+	<li>under-replicated-partitions：加上该参数时，只显示replica不足的分区。</li>
+</ul><h3 id="314-修改topic"><a name="t12"></a><strong><strong>3.1.4. 修改topic</strong></strong></h3>
+
+<p>根据–alter参数的说明，可以修改topic的分区数(<strong>目前只能是增加</strong>)，修改配置config，以及修改replica(这里貌似不准确，根据官网的文档说明，如果想要增加replication factor，应该使用kafka-reassign-partitions.sh脚本)。</p>
+
+<ul><li><strong>增加分区</strong>：从2个分区增加到3个</li>
+</ul><pre class="prettyprint">
+<code>bin/kafka-topics.sh --zookeeper master:2181 --alter --topic test --partitions 3</code></pre>
+
+<ul><li>1</li>
+</ul><p>成功后describe一下topic：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215204414748?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p><span style="color:#FF0000;">添加分区不能改变现有的数据</span></p>
+
+<ul><li><strong>添加修改配置</strong><br>
+	根据上图test主题的Configs:flush.messages=1,flush.ms=1000,尝试把flush.ms修改为2000，命令如下：</li>
+</ul><pre class="prettyprint">
+<code>bin/kafka-topics.sh --zookeeper master:2181 --alter --topic test --config flush.ms=2000</code></pre>
+
+<ul><li>1</li>
+</ul><p>成功后：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215204535148?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<ul><li><strong>删除配置</strong><br>
+	–alter结合–delete-config一起使用可以删除某项配置，尝试删除flush.ms配置项目：</li>
+</ul><pre class="prettyprint">
+<code>bin/kafka-topics.sh --zookeeper master:2181 --alter --topic test --delete-config flush.ms</code></pre>
+
+<ul><li>1</li>
+</ul><p>成功后：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215204628508?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>PS：对于使用–alter增加、修改和删除config，从0.9.0.0版本后建议使用kafka-configs.sh脚本。</p>
+
+<h2 id="32-配置管理kafka-configssh"><a name="t13"></a><strong><strong>3.2. 配置管理：kafka-configs.sh</strong></strong></h2>
+
+<p>这个脚本专门是用来添加，修改和删除实体的config的，其中操作的实体对象有：topic, client, user 和 broker。</p>
+
+<h3 id="321-更新配置"><a name="t14"></a><strong><strong>3.2.1. 更新配置</strong></strong></h3>
+
+<p>添加和修改都可以统一说成更新，没有则添加，存在即修改。结合alter，add-config以及其它一些配置，例如修改broker的某个config:</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-configs.sh --zookeeper master:2181 --entity-type brokers --entity-name 0 --alter --add-config 'leader.replication.throttled.rate=700000000'</code></pre>
+
+<ul><li>1</li>
+</ul><ul><li>entity-type：实体类型，必须为(topics/clients/users/brokers)其中之一。</li>
+	<li>entity-name：实体名称(topic的名称，client的id，user的principal名称，broker的id)。</li>
+	<li>add-config：格式为’ key1:value1,key2:[v21,v22],key3:value3’，多个配置可以写在一起，比kafka-topic.sh的修改更人性化。</li>
+</ul><h3 id="322-查看配置"><a name="t15"></a><strong><strong>3.2.2. 查看配置</strong></strong></h3>
+
+<p>执行上面命令给id=0的broker添加配置leader.replication.throttled.rate后，接着查看一下该broker的config:</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-configs.sh --zookeeper master:2181 --entity-type brokers --entity-name 0 --describe</code></pre>
+
+<ul><li>1</li>
+</ul><p>结果：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215204830649?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<h3 id="323-删除配置"><a name="t16"></a><strong><strong>3.2.3. 删除配置</strong></strong></h3>
+
+<p>接上，删除id=0的broker的配置leader.replication.throttled.rate</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-configs.sh --zookeeper master:2181 --entity-type brokers --entity-name 0 --alter --delete-config 'leader.replication.throttled.rate'</code></pre>
+
+<ul><li>1</li>
+</ul><p>结果：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215204909740?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<h2 id="33-消费者组管理kafka-consumer-groupssh"><a name="t17"></a><strong><strong>3.3. 消费者组管理：kafka-consumer-groups.sh</strong></strong></h2>
+
+<p>可以列出所有消费者组，查看某个消费者组的详细情况以及删除消费者组的信息(<span style="color:#FF0000;">删除只适用于旧版本基于zookeeper的消费都组</span>)。</p>
+
+<h3 id="331-列出消费者组"><a name="t18"></a><strong><strong>3.3.1. 列出消费者组</strong></strong></h3>
+
+<p>Kafka默认一直会有一个“KafkaManagerOffsetCache”的消费者组，为了更加直观，先用kafka-console-consumer.sh启动一个消费都，并加入一个叫做“test_group”的组：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-console-consumer.sh --bootstrap-server master:9092 --topic test --consumer-property group.id=test_group</code></pre>
+
+<ul><li>1</li>
+</ul><p>接着使用以下命令列出所有的消费都组：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-consumer-groups.sh --bootstrap-server master:9092 --list</code></pre>
+
+<ul><li>1</li>
+</ul><p>已经可以看到“test_group”的消费都组了：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205015804?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<h3 id="332-查看消费者组"><a name="t19"></a><strong><strong>3.3.2. 查看消费者组</strong></strong></h3>
+
+<p>查看消费者组的具体消费状况，结合来分析目前集群的稳健程度，执行以下命令：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-consumer-groups.sh --bootstrap-server master:9092 --describe --group test_group</code></pre>
+
+<ul><li>1</li>
+</ul><p>结果：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205039869?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<h2 id="34-均衡leaderkafka-preferred-replica-electionsh"><a name="t20"></a><strong><strong>3.4. 均衡leader：kafka-preferred-replica-election.sh</strong></strong></h2>
+
+<p>每个分区的所有replicas叫做”assigned replicas”，”assigned replicas”中的第一个replicas叫”preferred replica”，刚创建的topic一般”preferred replica”(<strong>优先副本</strong>)是leader。<br>
+各分区的读取写请求都是由leader来接收处理的，那么当然希望各分区的leader可以均衡地分布在各个broker之上，做到均衡负载，提高集群稳定性以及充分利用资源。一般在创建topic时，kafka都会默认把leader平均分配，但当某个broker宕掉后，会导致该broker上的leader转移到其它的broker上去，导致机群的负载不均衡，就算宕掉的broker恢复正常，它上面已经没有leader。可以使用kafka-preferred-replica-election.sh工具令到恢复后的broker上的优先副本重新选举成为leader，这样又恢复到了宕掉之前的状态。</p>
+
+<p>下面来模拟一下整个过程，首先创建一个topic，3个分区，每个分区的leader分别在3个broker上面：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205127244?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>分区0的leader已经从broker0转移到了broker1了，在Isr中也看不到原本broker0的两个replica。最后重新启动broker0并执行以下命令：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-preferred-replica-election.sh --zookeeper master:2181</code></pre>
+
+<ul><li>1</li>
+</ul><p>再观察test的分区情况：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205202260?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>可以看到test已经恢复到最初的leader分布情况了。默认是对所有分区进行优先副本选举(preferred replica election)，如果想指定操作某些分区，则需要配合–path-to-json-file参数，例如test有0，1，2三个分区，只想操作1，2分区，首先编译test_election.json文件，内容如下：</p>
+
+<blockquote>
+<p>{“partitions”:[{“topic”: “test”, “partition”: 1}, {“topic”: “test”,<br>
+“partition”: 2}]}</p>
+</blockquote>
+
+<p>然后执行以下命令：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-preferred-replica-election.sh --zookeeper master:2181 --path-to-json-file test_election.json</code></pre>
+
+<ul><li>1</li>
+</ul><p>PS：其实可以配置kafka自动平衡leader的，在server.properties文件中设置：<strong><em>auto.leader.rebalance.enable=true</em></strong>即可，而该配置默认是已经打开的，想验证的话可以重启一个broker，隔一段时间后会发现leader会自动恢复。</p>
+
+<h2 id="35-扩容重分区kafka-reassign-partitionssh"><a name="t21"></a><strong><strong>3.5. 扩容重分区：kafka-reassign-partitions.sh</strong></strong></h2>
+
+<p>当有新的broker节点加入到已经在使用的集群，kafka是不会自动均衡原本的数据到新节点的，需要手动对分区进行迁移，使得新节点可以对外提供服务。（对于后来创建和topic则不需要）。</p>
+
+<h3 id="351-生成迁移计划"><a name="t22"></a><strong><strong>3.5.1. 生成迁移计划</strong></strong></h3>
+
+<p>首先肯定要知道需要对哪些topic进行迁移，且明确哪个分区需要迁移到哪个broker节点。现有一个分区test，具体如下图：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205319387?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>手动编辑一个json文件(例如命名为topics-to-move.json)，表示哪些topic是需要迁移的，内容如下(可以指定多个topics)：</p>
+
+<blockquote>
+<p>{“topics”: [{“topic”: “test”}], “version”:1 }</p>
+</blockquote>
+
+<p>想要把test的所有分区迁移到broker1,2，执行以下命令生成迁移计划：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-reassign-partitions.sh --zookeeper master:2181 --topics-to-move-json-file topics-to-move.json --broker-list "1,2" --generate</code></pre>
+
+<ul><li>1</li>
+</ul><ul><li>topics-to-move-json-file：上面创建的topics-to-move.js文件</li>
+	<li>broker-list：分区需要迁移到的broker，格式如命令</li>
+	<li>generate：表示生成分配规则，内容是json串<br>
+	执行结果如下：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205416185?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></li>
+</ul><p>显示了当前的分配规则（可以用作回滚）以及新生成的分配规则，把内容保存到文件(expand-cluster-reassignment.json)，当然，也可以手动修改里面的内容，只要符合格式即可：</p>
+
+<blockquote>
+<p>{“version”:1,”partitions”:[{“topic”:”test”,”partition”:1,”replicas”:[2,1]},{“topic”:”test”,”partition”:2,”replicas”:[1,2]},{“topic”:”test”,”partition”:0,”replicas”:[1,2]}]}</p>
+</blockquote>
+
+<h3 id="352-执行迁移计划"><a name="t23"></a><strong><strong>3.5.2. 执行迁移计划</strong></strong></h3>
+
+<p>根据上一步生成的分配规则expand-cluster-reassignment.json启动迁移，执行以下命令：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-reassign-partitions.sh --zookeeper master:2181 --reassignment-json-file expand-cluster-reassignment.json --execute</code></pre>
+
+<ul><li>1</li>
+</ul><p>然后describe一下，查看新的分区分配情况：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205553278?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>可以看到现在所有分区的replica都已经全部迁移到了broker1,2上面。</p>
+
+<h3 id="353-验证迁移计划"><a name="t24"></a><strong><strong>3.5.3. 验证迁移计划</strong></strong></h3>
+
+<p>还是根据分配规则expand-cluster-reassignment.json验证分区是否分配成功，执行以下命令：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-reassign-partitions.sh --zookeeper master:2181 --reassignment-json-file expand-cluster-reassignment.json --verify</code></pre>
+
+<ul><li>1</li>
+</ul><p>执行结果如下：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205631001?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>至此，分区的迁移已经完成。其实已经对分区规则熟悉的话，可以跳过生成迁移计划这步，直接编写expand-cluster-reassignment.json，然后执行验证。</p>
+
+<h2 id="36-增加副本kafka-reassign-partitionssh"><a name="t25"></a><strong><strong>3.6. 增加副本：kafka-reassign-partitions.sh</strong></strong></h2>
+
+<p>为分区增加副本，还是使用kafka-reassign-partitions.sh命令，然后编辑副本规则json文件即可。现有以下topic：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205658372?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>分区0有两个replica，分别在broker1,2上，现在准备在broker0上添加一个replica，先创建副本分配json文件(increase-replication-factor.json)，内容如下：</p>
+
+<blockquote>
+<p>{“version”:1,<br>
+“partitions”:[{“topic”:”test”,”partition”:0,”replicas”:[0,1,2]}]}</p>
+</blockquote>
+
+<p>然后指定increase-replication-factor.json执行下面的命令：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-reassign-partitions.sh --zookeeper master:2181 --reassignment-json-file increase-replication-factor.json --execute</code></pre>
+
+<ul><li>1</li>
+</ul><p>接着，同样使用increase-replication-factor.json来验证是否成功：</p>
+
+<pre class="prettyprint">
+<code>bin/kafka-reassign-partitions.sh --zookeeper localhost:2181 --reassignment-json-file increase-replication-factor.json --verify</code></pre>
+
+<ul><li>1</li>
+</ul><p>执行结果如下：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205745018?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+
+<p>或者describe一下topic：<br><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20170215205802503?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvY3ptYWNk/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>            </div>
+                </div>

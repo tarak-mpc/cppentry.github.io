@@ -1,0 +1,55 @@
+---
+layout:     post
+title:      Kafka(1)
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/ae5555/article/details/47006059				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>Kafka是一个分布式的消息系统。</p>
+<p><br></p>
+<h3>系统结构</h3>
+<div><img src="http://cdn1.infoqstatic.com/statics_s2_20150722-0039/resource/articles/kafka-analysis-part-1/zh/resources/0310020.png" width="500" height="250" alt=""><br></div>
+<div>Broker                   Kafka集群包含一个或多个服务器</div>
+<div>Producer              发送消息到broker</div>
+<div>Consumer            从broker读取消息</div>
+<div>kafka使用Zookeeper控制分布式服务协调同步。</div>
+<div><br></div>
+<h3>消息分发与管理</h3>
+<div>kafka使用topic进行消息管理，可以把topic当作queue。每条消息都必须指定它的topic。每个topic包含多个partition，每个partition在文件系统中对应一个文件夹，该文件夹下存储这个partition的所有消息和索引文件。每个partition由多个segment组成，每个segment中存储多条消息，消息id由其逻辑位置决定，这样可以由消息id直接定位到消息的存储位置。</div>
+<div>每个partition在内存中对应一个index，记录其中每个segment的第一条消息偏移。</div>
+<div>Producer发布到某个topic的消息会被均匀分布到多个partition上。broker收到消息后，找到对应的partition并将消息添加到最后一个segment上。当segment上的消息数达到配置值或消息发布时间超过阈值时，segment上的消息会被flush到磁盘上。只有flush到磁盘的消息consumer 才能收到。segment达到一定的大小后不会往该segment写数据，broker会创建新的segment。</div>
+<div>每个consumer属于一个特定的consumer group。若不指定group name则属于默认的group。允许consumer group 对一个topic进行读取，但是只能读取不同的partition。不同的consumer group之间独立订阅。<span style="font-family:'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', STHeiti, 'WenQuanYi Micro Hei', SimSun, Helvetica, sans-serif;font-size:14px;line-height:25.2000007629395px;">同一Topic的一条消息只能被同一个Consumer
+ Group内的一个Consumer消费，但多个Consumer Group可同时消费这一消息。<span style="font-family:'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', STHeiti, 'WenQuanYi Micro Hei', SimSun, Helvetica, sans-serif;font-size:14px;line-height:25.2000007629395px;">如果需要实现广播，只要每个Consumer有一个独立的Group就可以了。要实现单播只要所有的Consumer在同一个Group里。用Consumer
+ Group还可以将Consumer进行自由的分组而不需要多次发送消息到不同的Topic。</span></span></div>
+<div><br></div>
+<div>kafka为每条消息计算CRC校验，用于错误检测，crc校验不通过的消息会直接被丢弃掉。</div>
+<div><br></div>
+<h4>partition机制</h4>
+<div>在发送<span style="font-family:'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', STHeiti, 'WenQuanYi Micro Hei', SimSun, Helvetica, sans-serif;font-size:14px;line-height:25.2000007629395px;">一条消息时，可以指定这条消息的key，Producer根据这个key和Partition机制来判断应该将这条消息发送到哪个Parition。</span><span style="font-family:'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', STHeiti, 'WenQuanYi Micro Hei', SimSun, Helvetica, sans-serif;font-size:14px;line-height:25.2000007629395px;">Paritition机制可以通过指定Producer的paritition.
+ class这一参数来指定，该class必须实现kafka.producer.Partitioner接口。</span><span style="font-family:'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', STHeiti, 'WenQuanYi Micro Hei', SimSun, Helvetica, sans-serif;font-size:14px;line-height:25.2000007629395px;">每个Parition都会有个序号,序号从0开始。</span></div>
+<h4>无状态broker</h4>
+<div>Broker没有副本机制，一旦broker<span style="text-indent:-28px;">宕机，该broker的消息将不能用。Broker不保存订阅者的状态，由订阅者自己保存。</span></div>
+<div>kafka集群会保留所有的消息，提供了两种策略来清除旧数据。一种是基于时间，另一种基于partition文件大小。</div>
+<div><br></div>
+<div>//删除一周前的数据</div>
+<div>log.retention.hours=168  </div>
+<div><br></div>
+<div>//partition文件最大容量</div>
+<div>log.segment.bytes=1073741844</div>
+<div><br></div>
+<h4>Push &amp; Pull</h4>
+<div><span style="font-family:'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', STHeiti, 'WenQuanYi Micro Hei', SimSun, Helvetica, sans-serif;font-size:14px;line-height:25.2000007629395px;">由Producer向broker push消息并由Consumer从broker pull消息。<span style="font-family:'Lantinghei SC', 'Open Sans', Arial, 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', STHeiti, 'WenQuanYi Micro Hei', SimSun, Helvetica, sans-serif;font-size:14px;line-height:25.2000007629395px;">push模式很难适应消费速率不同的消费者，因为消息发送速率是由broker决定的。push模式的目标是尽可能以最快速度传递消息，但是这样很容易造成Consumer来不及处理消息，典型的表现就是拒绝服务以及网络拥塞。而pull模式则可以根据Consumer的消费能力以适当的速率消费消息。</span></span><br></div>
+<div><br></div>
+<div style="text-indent:-28px;"><br></div>
+<div style="text-indent:-28px;">d</div>
+<div style="text-indent:-28px;"><br></div>
+<h3>日志</h3>
+<div>server端日志分为5种类型：server、request、state、log-cleaner、controller。</div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+            </div>
+                </div>

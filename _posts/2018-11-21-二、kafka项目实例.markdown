@@ -1,0 +1,429 @@
+---
+layout:     post
+title:      二、kafka项目实例
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>http://www.cnblogs.com/darkprince/p/5114425.html</p>
+<p><br></p>
+<p></p>
+<p><strong>开发Kafka通用数据平台中间件</strong></p>
+<p>(含本次项目全部代码及资源)</p>
+<p>目录：</p>
+<p><strong>一. Kafka概述</strong></p>
+<p><strong>二. Kafka启动命令</strong></p>
+<p><strong>三.我们为什么使用Kafka</strong></p>
+<p><strong>四. Kafka数据平台中间件设计及代码解析</strong></p>
+<p><strong>五.未来Kafka开发任务</strong></p>
+<p> </p>
+<p><strong>一. Kafka概述</strong></p>
+<p>　　Kafka是Linkedin于2010年12月份创建的开源消息系统，它主要用于处理活跃的流式数据。活跃的流式数据在web网站应用中非常常见，这些活动数据包括页面访问量（Page View）、被查看内容方面的信息以及搜索情况等内容。 这些数据通常以日志的形式记录下来，然后每隔一段时间进行一次统计分析。</p>
+<p>　　传统的日志分析系统是一种离线处理日志信息的方式，但若要进行实时处理，通常会有较大延迟。而现有的消息队列系统能够很好的处理实时或者近似实时的应用，但未处理的数据通常不会写到磁盘上，这对于Hadoop之类，间隔时间较长的离线应用而言，在数据安全上会出现问题。Kafka正是为了解决以上问题而设计的，它能够很好地进行离线和在线应用。</p>
+<p><strong>1.1 Kfka部署结构：</strong></p>
+<p>(图1)</p>
+<p> <img src="http://images2015.cnblogs.com/blog/299741/201601/299741-20160108201353528-2136947909.png" alt=""></p>
+<p><strong>1.2 Kafka关键字：</strong></p>
+<p>•Broker ： Kafka消息服务器，消息中心。一个Broker可以容纳多个Topic。</p>
+<p>•Producer ：消息生产者，就是向Kafka broker发消息的客户端。</p>
+<p>•Consumer ：消息消费者，向Kafka broker取消息的客户端。</p>
+<p>•Zookeeper ：管理Producer，Broker，Consumer的动态加入与离开。</p>
+<p>•Topic ：可以为各种消息划分为多个不同的主题，Topic就是主题名称。Producer可以针对某个主题进行生产，Consumer可以针对某个主题进行订阅。</p>
+<p>•Consumer Group： Kafka采用广播的方式进行消息分发，而Consumer集群在消费某Topic时， Zookeeper会为该集群建立Offset消费偏移量，最新Consumer加入并消费该主题时，可以从最新的Offset点开始消费。</p>
+<p>•Partition：Kafka采用对数据文件切片（Partition）的方式可以将一个Topic可以分布存储到多个Broker上，一个Topic可以分为多个Partition。在多个Consumer并发访问一个partition会有同步锁控制。</p>
+<p>(图2)</p>
+<p> <img src="http://images2015.cnblogs.com/blog/299741/201601/299741-20160108201507715-1313670488.png" alt=""></p>
+<p> </p>
+<p><strong>1.3 消息收发流程：</strong></p>
+<p>•启动Zookeeper及Broker.</p>
+<p>•Producer连接Broker后，将消息发布到Broker中指定Topic上(可以指定Patition)。</p>
+<p>•Broker集群接收到Producer发过来的消息后，将其持久化到硬盘，并将消息该保留指定时长（可配置），而不关注消息是否被消费。</p>
+<p>•Consumer连接到Broker后，启动消息泵对Broker进行侦听，当有消息到来时，会触发消息泵循环获取消息，获取消息后Zookeeper将记录该Consumer的消息Offset。</p>
+<p> </p>
+<p><strong>1.4 Kafka特性：</strong></p>
+<p>•高吞吐量</p>
+<p>•负载均衡：通过zookeeper对Producer,Broker,Consumer的动态加入与离开进行管理。</p>
+<p>•拉取系统：由于kafka broker会持久化数据，broker没有内存压力，因此，consumer非常适合采取pull的方式消费数据</p>
+<p>•动态扩展：当需要增加broker结点时，新增的broker会向zookeeper注册，而producer及consumer会通过zookeeper感知这些变化，并及时作出调整。</p>
+<p>•消息删除策略：数据文件将会根据broker中的配置要求,保留一定的时间之后删除。kafka通过这种简单的手段,来释放磁盘空间。</p>
+<p> </p>
+<p><strong>二. Kafka启动命令：</strong></p>
+<p><strong>启动Zookeeper服务：</strong></p>
+<p>zookeeper-server-start.bat ../../config/zookeeper.properties</p>
+<p><strong>启动Broker服务：</strong></p>
+<p>kafka-server-start.bat ../../config/server.properties</p>
+<p><strong>通过Zookeeper的协调在Broker中创建一个Topic(主题)</strong></p>
+<p>kafka-topics.bat --create --zookeeper localhost:2181 --replication-factor 1 --partitions 1 --topic testTopic</p>
+<p><strong>查询当前Broker中某个指定主题的配置信息</strong></p>
+<p>kafka-run-class.bat kafka.admin.TopicCommand --describe --zookeeper localhost:2181 --topic testTopic</p>
+<p><strong>启动一个数据生产者Producer</strong></p>
+<p>kafka-console-producer.bat --broker-list localhost:9092 --topic testTopic  </p>
+<p><strong>启动一个数据消费者Consumer</strong></p>
+<p>kafka-console-consumer.bat --zookeeper localhost:2181 --topic testTopic --from-beginning</p>
+<p> </p>
+<p>Zookeeper配置文件，zookeeper.properties配置片段</p>
+<p><img src="http://images2015.cnblogs.com/blog/299741/201601/299741-20160108201704090-1468796472.png" alt=""></p>
+<p>Broker配置文件，server.properties配置片段</p>
+<p> <img src="http://images2015.cnblogs.com/blog/299741/201601/299741-20160108201717606-690012162.png" alt=""></p>
+<p><strong>关于kafka收发消息相关的配置项</strong></p>
+<p><strong>1.在Broker Server中属性(这些属性需要在Server启动时加载)：</strong></p>
+<p>//每次Broker Server能够接收的最大包大小，该参数要与consumer的fetch.message.max.bytes属性进行匹配使用</p>
+<p>* message.max.bytes 1000000(默认) </p>
+<p>//Broker Server中针对Producer发送方的数据缓冲区。Broker Server会利用该缓冲区循环接收来至Producer的数据 包，缓冲区过小会导致对该数据包的分段数量增加，但不会影响数据包尺寸限制问题。</p>
+<p>socket.send.buffer.bytes 100 * 1024(默认)</p>
+<p>//Broker Server中针对Consumer接收方的数据缓冲区。意思同上。</p>
+<p>socket.receive.buffer.bytes 100 * 1024(默认)</p>
+<p>//Broker Server中针对每次请求最大的缓冲区尺寸，包括Prodcuer和Consumer双方。该值必须大于 message.max.bytes属性</p>
+<p>* socket.request.max.bytes 100 * 1024 * 1024(默认)</p>
+<p><strong>2.在Consumer中的属性(这些属性需要在程序中配置Consumer时设置)</strong></p>
+<p>//Consumer用于接收来自Broker的数据缓冲区,意思同socket.send.buffer.bytes。</p>
+<p>socket.receive.buffer.bytes 64 * 1024(默认)</p>
+<p>//Consumer用于每次接收消息包的最大尺寸，该属性需要与Broker中的message.max.bytes属性配对使用</p>
+<p>* fetch.message.max.bytes 1024 * 1024(默认)</p>
+<p><strong>3.在Producer中的属性(这些属性需要在程序中配置Consumer时设置)</strong></p>
+<p>//Producer用于发送数据缓冲区,意思同socket.send.buffer.bytes。</p>
+<p>send.buffer.bytes 100 * 1024（默认）</p>
+<p> </p>
+<p><strong>三. 我们为什么使用Kafka</strong></p>
+<p>当前项目中，我们更希望从企业获得尽可能多的有价值数据。最直接获取大数据的方式是采用写应用直连目标企业数据库来获得数据。但这种方式在实际应用中，会由于企业担心开放本地数据库而导致的安全隐患很难实施。另外，这种方式会与企业本地数据库结构耦合度过高，会出现多家企业多个应用的情况，缺少统一的数据交互平台，导致后期维护困难。</p>
+<p><strong>3.1 Kafka在当前项目中问题：</strong></p>
+<p>当前案例，我们想把某企业的本地数据实时同步到数据中心中，之后对这些数据进行二次分析处理。我们的目标是建立统一的数据同步平台，便于在日后的多企业多系统中能有统一的实施标准，所以选用了Kafka消息系统作为支撑。</p>
+<p>Producer(数据发送方)以独立线程方式常驻某企业内部应用中，依靠一定的时间周期，从本地数据库获得数据并推送至Broker中。而Consumer(快销组数据接收方)也是独立与WEB框架常驻内存，获得数据消息后保存至数据中心中。</p>
+<p>但目前Kafka在实施中面临以下问题：</p>
+<p><strong>1.Producer/Consumer均独立于Web框架，Producer依靠消息片轮询检索/发送最新数据，执行效率低。</strong></p>
+<p><strong>2.Producer会直接针对某企业内部数据库表结构操作，导致代码与企业业务耦合度过高，而无法平滑移植到其他企业系统中。</strong></p>
+<p><strong>3.由于Producer/Consumer是独立于Web框架的，在外围负责数据的采集及推送，与Web项目主程序无切合度。</strong></p>
+<p><strong>4.目前针对Kafka的数据传输异常处理比较简陋，当Broker或 Zookeeper等出现异常时，有可能会导致数据安全性问题。</strong></p>
+<p> </p>
+<p><strong>3.2实现目标：</strong></p>
+<p>针对以上问题，我们要实现如下目标：</p>
+<p> <img src="http://images2015.cnblogs.com/blog/299741/201601/299741-20160108202454825-35311563.png" alt=""></p>
+<p> </p>
+<p>1.把Producer/Consumer的数据推送/获取的过程封装成Class或者Jar包的形式，供Java Web框架调用，从而形成与企业内部Web应用或计算中心数据分析Web应用融合一体。</p>
+<p>2.数据的推送/获取只针对Java Object对象，不要针对数据库表结构，不能与企业特有数据耦合度过高，形成通用的数据接口。Producer需要对Object进行序列化，Consumer需要对序列化后的二进制信息进行反序列化重建Object返回给调用者。</p>
+<p>3.消息的推送/获取的整个生命周期中，要把重要事件通知给外部调用者，比如：Broker,Zookeeper是否有异常，数据推送/获取是否成功，如果失败需要保留失败记录便于进行后期数据恢复等。(需要在中间件中建立回调机制通知调用者)</p>
+<p>4.可对多企业多应用进行平滑移植，移植过程中尽可能保持整体Kafka数据平台结构的零修改。</p>
+<p> </p>
+<p><strong>四. Kafka数据平台中间件设计</strong></p>
+<p><strong>4.1解决方案：</strong></p>
+<p>基于以上待完成目标，我们有了以下解决方案。</p>
+<p> <img src="http://images2015.cnblogs.com/blog/299741/201601/299741-20160108202737762-796511026.png" alt=""></p>
+<p><strong>3.2 实现要点：</strong></p>
+<p><strong>KfkProducer(数据生产者)</strong></p>
+<p>•KfkProducer对象需要在Web框架中的Application_OnStart()中启动，常驻进程，只与Broker连接一次，数据发送过程不能与Broker建立连接。（实践中发现Kafka的 Broker如果有异常，重启Broker后Producer不用再次连接即可发送）</p>
+<p>•Web框架可以随时调用推送接口将对象(Object)推送至Broker.</p>
+<p>•Object序列化后形成二进制信息，并且要保证在Consumer所处框架中能顺利还原.</p>
+<p>•可发送多种对象(Object,File ,Byte[]等),简化外围框架针对待发送数据所做操作，简化调用接口。</p>
+<p>•数据发送使用Kafka中最新的异步式数据发送API，不能由于发送时间过长或Broker异常等问题阻塞调用者。</p>
+<p>•需要对整个发送生命期进行跟踪反馈异常信息，若发送失败，需要将待发送数据使用回调机制通知到框架调用者。</p>
+<p>•详细测试Broker,或Zookeeper产生异常时，Producer可能会出现的情况。</p>
+<p>•在针对多企业多应用中，可依靠Topic进行区分数据主题，这样可实现多应用部署时框架零修改问题。</p>
+<p><strong>KfkConsumer(数据消费者)</strong></p>
+<p>•KfkConsumer需要在计算中心内部Web框架中的Application_OnStart()中启动，常驻进程，只与Broker连接一次，并启动消息泵等待消息到来。（实践中发现Kafka的 Broker如果有异常，重启Broker后Consumer不用再次连接即可正常获取消息）</p>
+<p>•需要定义回调接口，该回调接口由外围框架程序注册处理程序，当数据消息到来时，Consumer需要把数据发送至该接口，之后由调用者处理。</p>
+<p>•调用者需要注册所接受的对象类型，因为Broker中同一Topic下会有各种数据对象(UserInfo,CompanyInfo,ProductInfo...)存在，所以必须提供接收对象的注册接口，以方便调用者有针对性的获取。</p>
+<p>•数据到来时，要针对发送方序列化的二进制信息进行反序列化操作，并能准确还原成原始对象。</p>
+<p>•需要对整个接收生命期进行跟踪反馈异常信息，若消息泵停止或异常，需要通知到框架调用者。</p>
+<p>实现以上要点后，需要将KfkProducer及KfkConsumer对象打包成Jar包的形式，更灵活的部署到企业本地Web框架及计算中心内部Web框架中。</p>
+<p> </p>
+<p><strong>3.3 代码实现及分析：</strong></p>
+<p>3.3.1 KfkProducer 对象：数据生产者对象，封装了关于数据发送的相关功能。</p>
+<p> </p>
+<table style="color:rgb(0,0,0);"><tbody><tr><td valign="top">
+<p>接口函数/子对象</p>
+</td>
+<td valign="top">
+<p>说明</p>
+</td>
+</tr><tr><td valign="top">
+<p>KfkProducer ()</p>
+</td>
+<td valign="top">
+<p>构造函数中需要调用者提供Broker集群的Ip,Port等信息。</p>
+<p>Kafka支持Broker集群列表。(127.0.0.1:9092,127.0.0.1:9093)</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>Connect()</p>
+</td>
+<td valign="top">
+<p>该函数需要完成对Broker集群的连接。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>Send()</p>
+</td>
+<td valign="top">
+<p>该函数入口为Object对象，需要对该对象进行Serialize操作，根据待发送数据构造KfkMsg对象，并取得由KfkMsg序列化后的Byte[]数组，之后调用Kafka的异步发送方式及挂接回调处理函数。</p>
+<p> </p>
+<p>要实现多个Send()接口，需要提供对Object,File ,Byte[]等多种数据类型的支持，方便调用者操作。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>Close()</p>
+</td>
+<td valign="top">
+<p>该函数完成对Broker连接进行关闭。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>SendCallback发送回调对象</p>
+<p>onCompletion()发送回调接口</p>
+</td>
+<td valign="top">
+<p>在kafka异步发送函数send()中注册，在收到Broker返回的发送是否成功信息后，会触发该函数，并调用ProducerEvent对象的onSendMsg()函数，向调用者发送成功与否结果。</p>
+<p> </p>
+<p>成功则返回调用者RecordMetadata信息(BrokerServer中的数据offset，Partition位置ID，Topic主题)</p>
+<p> </p>
+<p>失败者返回调用者原始数据信息，便于日后恢复。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>ProducerEvent接口对象</p>
+<p>onSendMsg()</p>
+</td>
+<td valign="top">
+<p>为调用者提供的回调接口，调用者在注册后，即可重写onSendMsg()函数，以便接到通知后，处理当前事件（发送数据成功与否）状态。</p>
+<p> </p>
+</td>
+</tr></tbody></table><p> </p>
+<p>3.3.2 KfkConsumer对象：数据消费者对象，封装了关于数据接收的相关功能。</p>
+<p> </p>
+<table style="color:rgb(0,0,0);"><tbody><tr><td valign="top">
+<p>接口函数/子对象</p>
+</td>
+<td valign="top">
+<p>说明</p>
+</td>
+</tr><tr><td valign="top">
+<p>KfkConsumer()</p>
+</td>
+<td valign="top">
+<p>构造函数中需要调用者提供Zookeeper集群的Ip,Port等信息。(即将推出的Kafka0.9.X版本将支持直连Broker集群的机制)</p>
+<p> </p>
+<p>该对象继承至Thread对象，为线程对象。</p>
+</td>
+</tr><tr><td valign="top">
+<p>connect()</p>
+</td>
+<td valign="top">
+<p>配置Zookeeper连接相关属性，并连接Zookeeper服务器。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>run()</p>
+</td>
+<td valign="top">
+<p>线程主函数，该函数将启动Kafka消息泵等待Broker的消息到来。</p>
+<p> </p>
+<p>消息到来后，将调用KfkMsg对象对二进制序列化信息进行还原对象操作(KfkMsg将对序列化数据进行反序列化操作，并重新还原原始对象操作)。</p>
+<p> </p>
+<p>对象还原后，将调用调用者注册的回调接口，将对象传出。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>close()</p>
+</td>
+<td valign="top">
+<p>关闭Consumer与Broker,Zookeeper的Socket连接。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>ConsumerEvent接收回调对象</p>
+<p>onRecvMsg()接收回调函数</p>
+</td>
+<td valign="top">
+<p>为调用者提供的回调接口，调用者在注册后，即可重写onRecvMsg()函数，以便接到通知后，收取对象或处理当前事件。</p>
+<p> </p>
+</td>
+</tr></tbody></table><p> </p>
+<p>3.3.3 KfkMsg对象：数据消息对象，封装了数据对象的序列化/反序列化操作，构造多种类型的发送对象，封装发送协议等操作。</p>
+<p> </p>
+<table style="color:rgb(0,0,0);"><tbody><tr><td valign="top">
+<p>接口函数/子对象</p>
+</td>
+<td valign="top">
+<p>说明</p>
+</td>
+</tr><tr><td valign="top">
+<p>MsgBase对象</p>
+</td>
+<td valign="top">
+<p>消息包基类，可以在Consumer接到数据消息后，形成多种对象的反序列化多态性。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>MsgObject对象</p>
+<p>serializeMsg()序列化函数</p>
+<p>deserializeMsg()反序列化函数</p>
+</td>
+<td valign="top">
+<p>针对Object数据的序列化和反序列化操作，及消息体封装，通讯协议构造等操作。</p>
+<p> </p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>MsgByteArr对象</p>
+<p>serializeMsg()序列化函数</p>
+<p>deserializeMsg()反序列化函数</p>
+</td>
+<td valign="top">
+<p>针对Byte[]数据的序列化和反序列化操作，及消息体封装，通讯协议构造等操作。</p>
+<p> </p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>MsgFile对象</p>
+<p>serializeMsg()序列化函数</p>
+<p>deserializeMsg()反序列化函数</p>
+</td>
+<td valign="top">
+<p>针对二进制文件的序列化和反序列化操作，及消息体封装，通讯协议构造等操作。</p>
+<p> </p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>getMsgType()函数 </p>
+<p> </p>
+</td>
+<td valign="top">
+<p>负责对Consumer接收的序列化信息进行首次协议解析，判断对象类型(Object,File,byte[])之后构造对应的MsgXXX对象，以便使调用者进行反序列化多态功能。</p>
+<p> </p>
+</td>
+</tr></tbody></table><p> </p>
+<p>3.3.4 SerializeUtils对象：序列化操作工具类，完成在Jar包内部对外部对象的序列化/反序列化基础从操作。</p>
+<p> </p>
+<table style="color:rgb(0,0,0);"><tbody><tr><td valign="top">
+<p>接口函数/子对象</p>
+</td>
+<td valign="top">
+<p>说明</p>
+</td>
+</tr><tr><td valign="top">
+<p>deserialize()函数</p>
+</td>
+<td valign="top">
+<p>将序列化后的二进制数组byte[]还原成原始Object.</p>
+<p> </p>
+<p>由于如果使用默认的ObjectInputStream对象进行反序列化操作，在Jar内将无法找到外部调用者定义的对象名，也即无法反序列化成功，报无法找到外部对象的异常。</p>
+<p> </p>
+<p>所以必须重写resolveClass()函数，加载当前线程范围内的Class上下文。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>Serialize()函数</p>
+</td>
+<td valign="top">
+<p>将Object序列化成二进制数组，byte[]。</p>
+<p> </p>
+</td>
+</tr></tbody></table><p> </p>
+<p>3.3.5 调用者Web框架部署：</p>
+<p><strong>KfkProducer部署：</strong></p>
+<table style="color:rgb(0,0,0);"><tbody><tr><td valign="top">
+<p>部署要点</p>
+</td>
+<td valign="top">
+<p>说明</p>
+</td>
+</tr><tr><td valign="top">
+<p>1.注册发送消息回调函数</p>
+</td>
+<td valign="top">
+<p>在WEB框架中的Application_OnStart()事件中向Jar注册发送消息回调函数。并重写onSendMsg()回调接口，用于接受发送成功/失败消息，发送失败后，可以在Web框架中针对返回的原始数据信息做备份/恢复处理。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>2.建立与Broker之间的连接</p>
+</td>
+<td valign="top">
+<p>在WEB框架中的</p>
+<p>Application_OnStart()事件中调用KfkProducer </p>
+<p>connect()函数,连接远程Broker。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>3.将KfkProducer传入框架</p>
+</td>
+<td valign="top">
+<p>经过前两步操作后，我们已经顺利建立KfkProducer对象，现在我们需要把该对象传入Web框架中后续页面处理类中，以方便调用其send()函数进行数据发送。</p>
+<p> </p>
+<p>在Play中我们使用了cache对象机制，可以在Play Web App全生命期内获得KfkProducer对象实例。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>4.关闭与Broker之间的连接</p>
+</td>
+<td valign="top">
+<p>在WEB框架中的Application_OnStop()事件中调用KfkProducer的close()函数，关闭远程Broker连接。</p>
+<p> </p>
+</td>
+</tr></tbody></table><p> </p>
+<p><strong>KfkConsumer部署：</strong></p>
+<table style="color:rgb(0,0,0);"><tbody><tr><td valign="top">
+<p>部署要点</p>
+</td>
+<td valign="top">
+<p>说明</p>
+</td>
+</tr><tr><td valign="top">
+<p>1.注册发送消息回调函数</p>
+</td>
+<td valign="top">
+<p>在WEB框架中的Application_OnStart()事件中向Jar注册消息接收回调函数。并重写onRecvMsg()回调接口，用于接受来自Broker的数据信息。</p>
+<p> </p>
+<p>在onRecvMsg()函数中，还需针对传入的Object对象进行instanceof比对操作，区分特定对象。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>2.注册需要接收的Object类型</p>
+</td>
+<td valign="top">
+<p>向Jar包中注册需要接收的对象类型，比如本应用需要接收(UserInfo,CompanyInfo,ProdcutInfo等对象)。</p>
+<p>注册后，来自Broker的广播消息将被Jar包过滤，只返回调用者所需的对象数据。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>3.建立与Zookeeper(Broker)之间的连接</p>
+</td>
+<td valign="top">
+<p>在WEB框架中的</p>
+<p>Application_OnStart()事件中调用KfkConsumer </p>
+<p>connect()函数,连接远程Zookeeper/Broker。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>4.启动消息泵线程</p>
+</td>
+<td valign="top">
+<p>经过前两步操作后，我们已经顺利建立与Zookeeper/Broker建立连接。</p>
+<p> </p>
+<p>我们需要启动消息泵来收听消息的到来，这里需要调用KfkConsumer对象的start()函数启动消息泵线程常驻内存。</p>
+<p> </p>
+</td>
+</tr><tr><td valign="top">
+<p>4.关闭与Zookeeper之间的连接</p>
+</td>
+<td valign="top">
+<p>在WEB框架中的Application_OnStop()事件中调用KfkConsumer的close()函数，关闭远程Zookeeper/Broker连接。</p>
+<p> </p>
+</td>
+</tr></tbody></table><p> </p>
+<p> </p>
+<p><strong>五. 未来Kafka中间件</strong></p>
+<p>目前该中间件只完成了初级阶段功能，很多功能都不完善不深入，随着应用业务的拓展及Kafka未来版本功能支持，。以Kafka消息中间件为中心的大数据处理平台还有很多任务去实现。</p>
+<p>一般在互联网中所流动的数据由以下几种类型：</p>
+<p> </p>
+<p>•需要实时响应的交易数据，用户提交一个表单，输入一段内容，这种数据最后是存放在关系数据库(Oracle, MySQL)中的，有些需要事务支持。</p>
+<p>•活动流数据，准实时的，例如页面访问量、用户行为、搜索情况等。我们可以针对这些数据广播、排序、个性化推荐、运营监控等。这种数据一般是前端服务器先写文件，然后通过批量的方式把文件倒到Hadoop(离线数据分析平台)这种大数据分析器里面，进行慢慢的分析。</p>
+<p>•各个层面程序产生的日志，例如http的日志、tomcat的日志、其他各种程序产生的日志。这种数据一个是用来监控报警，还有就是用来做分析。</p>
+<p> </p>
+<p>谢谢观赏！</p>
+<p> </p>
+<p>注：基于全球开源共享理念，本人会分享更多原创及译文，让更多的IT人从中受益，与大家一起进步！</p>
+<p>基因Cloud 原创，转发请注明出处</p>
+<p>1738387@qq.com (工作繁忙，有事发邮件，QQ不加，非要事勿扰，多谢！)</p>
+<p>2015 / 06 / 14</p>
+<br>            </div>
+                </div>

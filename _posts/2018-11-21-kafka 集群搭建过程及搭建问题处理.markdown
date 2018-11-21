@@ -1,0 +1,258 @@
+---
+layout:     post
+title:      kafka 集群搭建过程及搭建问题处理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>文章目录</p>
+
+<pre><code>1、Kafka 简介
+2、Zookeeper 集群搭建
+3、Kafka 集群搭建
+4、Kafka 集群搭建问题记录
+</code></pre>
+
+<hr>
+
+<p>1、Kafka 简介</p>
+
+<pre><code>    Kafka是一个消息系统，由LinkedIn贡献给Apache 基金会，称为Apache 的一个顶级项目；Kafka对消息保存时根据 Topic进行归类，发送消息者成为Producer,消息接受者成为Consumer，无论是Kafka集群，还是Producer和consumer都依赖于 Zookeeper 来保证系统可用性。搭建 Kafka 集群环境要首先搭建 Zookeeper 集群。
+</code></pre>
+
+<p>Kafka集群搭建准备工作：</p>
+
+<pre><code>* 准备3台机器，IP地址分别为：192.168.1.184、192.168.1.203、192.168.1.208；其中有两台物理机一台虚拟机，192.168.1.208为虚拟机Centos系统，192.168.1.184、192.168.1.203为物理机ubuntu系统。
+* 下载kafka，当前版本为：kafka_2.11-0.9.0.1.tgz，将该文件拷贝到以上三台机器的安装目录，本次环境搭建目录：/home/shuzilm/Downloads/kafka_2.11-0.9.0.1/。
+* 安装java1.7，安装方式参考：
+http://www.centoscn.com/image-text/install/2014/0827/3585.html
+Java1.7的下载 地址：
+http://www.oracle.com/technetwork/java/javase/downloads/jdk7-downloads-1880260.html
+解压源码包
+通过终端在/usr/local目录下新建java文件夹，命令行：
+sudo mkdir /usr/local/java
+然后将下载到压缩包拷贝到java文件夹中，命令行：
+进入jdk源码包所在目录
+cp jdk-7u79-linux-x64.tar.gz /usr/local/java
+然后进入java目录，命令行：
+cd /usr/local/java
+解压压缩包，命令行：
+tar xvf jdk-7u79-linux-x64.tar.gz
+然后可以把压缩包删除，命令行：
+rm jdk-7u79-linux-x64.tar.gz
+
+设置jdk环境变量
+这里采用全局设置方法，就是修改etc/profile，它是是所有用户的共用的环境变量
+vi /etc/profile
+打开之后在末尾添加:
+export JAVA_HOME=/usr/local/java/jdk1.7.0_79
+export CLASSPATH=.:$JAVA_HOME/jre/lib/rt.jar:$JAVA_HOME/lib/tools.jar
+export PATH=$PATH:$JAVA_HOME/bin
+export JRE_HOME=/usr/local/java/jdk1.7.0_79/jre
+export PATH=$PATH:$JRE_HOME/bin
+</code></pre>
+
+<p>请记住，在上述添加过程中，等号两侧不要加入空格，不然会出现“不是有效的标识符”，因为source /etc/profile 时不能识别多余到空格，会理解为是路径一部分。 <br>
+然后保存，source /etc/profile，使profile生效。</p>
+
+<hr>
+
+<p>2、Zookeeper 集群搭建</p>
+
+<pre><code>2.1、简介
+
+    ZooKeeper是一个分布式的，开放源码的分布式应用程序协调服务，是Google的Chubby一个开源的实现，是Hadoop和Hbase的重要组件。它是一个为分布式应用提供一致性服务的软件，提供的功能包括：配置维护、域名服务、分布式同步、组服务等。
+    本文档使用的Zookeeper为Kafka_2.11-0.9.0.1自带版本。
+
+2.2、环境搭建
+
+（1）配置 /kafka_2.11-0.9.0.1/config/zookeeper.properties，配置内容如下所示：
+
+tickTime=2000
+dataDir=/srv/zookeeper/
+clientPort=2181
+initLimit=10
+syncLimit=5
+server.1=192.168.1.184:2888:3888
+server.2=192.168.1.203:2888:3888
+server.3=192.168.1.208:2888:3888
+
+然后，使用命令创建 Zookeeper 主机标识，每个主机标识不同，这里我们用1、2、3分别标识三台主机，本机标识为1，创建命令如下所示：
+echo “1” &gt; myid
+
+最后，重复以上过程搭建另两台主机，完成后Zookeeper环境即搭建完毕。
+
+（2）启动Zookeeper集群：
+
+启动顺序：server.1、server.2、server.2。
+进入启动脚本目录 /srv/kafka/bin，然后使用启动脚本启动每台主机，启动命令：
+./zookeeper-server-start.sh ../config/zookeeper.properties &amp;
+最后，使用上面命令分别启动另外两个主机，如无错误，Zookeeper即启动完成。搭建环境过程遇到问题，可参考本文档第4节的解决方式。
+停止zookeeper的命令：
+/srv/kafka/bin/zookeeper-server-stop.sh
+参考文档：
+http://www.cnblogs.com/davidwang456/p/4238536.html
+
+2.3、环境监测
+
+    Zookeepe环境搭建并启动，如何监测该集群的工作状态？这里使用nc命令进行状态监控，在任意一台Zookeeper主机上使用如下命令进行监控：
+
+echo stat | nc 192.168.1.184 2181
+命令返回：
+Zookeeper version: 3.4.6-1569965, built on 02/20/2014 09:09 GMT
+Clients:
+/192.168.1.184:35620[0](queued=0,recved=1,sent=0)
+Latency min/avg/max: 0/4/117
+Received: 37394
+Sent: 37399
+Connections: 1
+Outstanding: 0
+Zxid: 0x10000e33f
+Mode: follower
+Node count: 30
+
+echo stat | nc 192.168.1.203 2181
+命令返回：
+Zookeeper version: 3.4.6-1569965, built on 02/20/2014 09:09 GMT
+Clients:
+/192.168.1.184:60265[0](queued=0,recved=1,sent=0)
+/192.168.1.184:54585[1](queued=0,recved=32586,sent=32587)
+/192.168.1.203:1842[1](queued=0,recved=32563,sent=32565)
+Latency min/avg/max: 0/1/297
+Received: 95473
+Sent: 95474
+Connections: 3
+Outstanding: 0
+Zxid: 0x10000e4bf
+Mode: leader（注意该主机为Zookeeper集群的leader节点）
+Node count: 30
+
+echo stat | nc 192.168.1.208 2181
+命令返回：
+Zookeeper version: 3.4.6-1569965, built on 02/20/2014 09:09 GMT
+Clients:
+/192.168.1.208:35836[1](queued=0,recved=32701,sent=32707)
+/192.168.1.184:46630[0](queued=0,recved=1,sent=0)
+Latency min/avg/max: 0/2/85
+Received: 61940
+Sent: 61945
+Connections: 2
+Outstanding: 0
+Zxid: 0x10000e55f
+Mode: follower
+Node count: 30
+
+如无返回说明该Zookeeper主机存在问题。如Zookeeper集群中的节点均无问题代表集群搭建成功。
+
+参考文档：
+http://blog.csdn.net/hackerwin7/article/details/43559991
+</code></pre>
+
+<hr>
+
+<p>3、Kafka 集群搭建</p>
+
+<pre><code>3.1、环境搭建
+
+（1）配置 /srv/kafka/config/server.properties，配置内容如下所示：
+
+broker.id=201  (数字随便取，每个服务器id号唯一即可)
+port=9092
+listeners=PLAINTEXT://IP:9092
+advertised.host.name=IP
+log.dirs=/data/log/kafka-logs
+zookeeper.contact=192.168.1.184:2181,192.168.1.203:2181,192.168.1.208:2181
+
+其中，broker.id用来标识Kafka节群中单节点的，本环境分别使用201、202、203来标识集群中的3个节点的。Host.name为本机的ip地址在此版本中可以注销不用。
+最后，同样方式配置其他2个节点，完成后代表Kafka集群已搭建完毕。
+
+（2）Kafka集群启动
+
+启动顺序：server.1、server.2、server.2。
+进入启动脚本目录 /srv/kafka/bin，然后使用启动脚本启动每台主机，启动命令：
+./kafka-server-start.sh ../config/server.properties  &amp;
+最后，使用上面命令分别启动另外两个主机，如无错误，Kafka集群即启动完成。搭建环境过程遇到问题，可参考本文档第4节的解决方式。
+停止kafka的命令：
+/srv/kafka/bin/kafka-server-stop.sh
+
+参考文档：
+http://www.cnblogs.com/davidwang456/p/4238536.html
+
+（3）集群外的ip作为客户端访问集群，需要先将该外部ip加入server.properties文件，如下所示：
+
+advertised.host.name=192.168.2.252
+
+3.2、应用测试
+
+（1）进入启动脚本目录 /srv/kafka/bin，创建Topic，命令如下：
+
+./kafka-topics.sh --create --zookeeper 192.168.1.203:2181 --replication-factor 2 --partitions 3 --topic mykafka_all_zk
+
+这里partitions一般设置与集群中kafka节点相同的数量，replication-factor一般为2，意义是每一个partitions有两个副本，一主一从互为热备（包含功能和数据）。
+
+（2）查看创建Topic信息，命令如下：
+
+./kafka-topics.sh --describe --zookeeper 192.168.1.203:2181 --topic mykafka_all_zk
+命令返回：
+Topic:mykafka_all_zk    PartitionCount:3    ReplicationFactor:2 Configs:
+Topic: mykafka_all_zk   Partition: 0    Leader: 132 Replicas: 132,133   Isr: 132,133
+Topic: mykafka_all_zk   Partition: 1    Leader: 133 Replicas: 133,134   Isr: 133,134
+Topic: mykafka_all_zk   Partition: 2    Leader: 134 Replicas: 134,132   Isr: 134
+
+Isr : kafka维护一个isr---可以跟上leader的列表。这个列表的单元才会选取leader. 这种方式可以容忍N-1的失败。复制因子和吞吐量的权衡。以上建立的topic，最后一个Isr 缺少一个副本，在第4节问题4中解决。
+http://www.tuicool.com/articles/FBZZRnu
+</code></pre>
+
+<hr>
+
+<pre><code>4、Kafka 集群搭建问题记录
+
+（1）Kafka集群搭建问题，错误日志：Caused by: java.net.UnknownHostException: shuzilm: Name or service not known
+
+处理方法如下：
+修改配置文件/etc/hosts，加入如下内容：
+192.168.1.208 shuzilm
+注意该问题在192.168.1.208 虚拟Centos系统中发生，Ubuntu系统无该问题。
+
+（2）Zookeeper集群搭建问题，错误日志：missing election port for server
+该问题由于文件zookeeper.properties配置错误导致，处理方法如下：
+server.1=192.168.1.184.2888:3888 改为 
+server.1=192.168.1.184:2888:3888
+
+（3）Zookeeper集群环境监测（echo stat | nc 192.168.1.208 2181）无反应问题
+注意防火墙的关闭 service iptables stop，该问题在物理机上监测虚拟Centos系统Zookeeper主机时发生。
+
+（4）各种生产消费的报错：
+生产报错：
+WARN Error while fetching metadata with correlation id 41 : {=LEADER_NOT_AVAILABLE}
+消费报错：
+WARN [console-consumer-31807_shuzilm-1470397544037-f293512f-leader-finder-thread], Failed to add leader for partitions 
+ERROR Error when sending message to topic   with key: null
+
+解决：
+server.properties 配置中
+listeners=PLAINTEXT://:9092 改为
+listeners=PLAINTEXT://本节点ip:9092
+
+上面问题解决过程曾关闭过ubuntu节点的防火墙，但关闭后问题未解决，不排出该操作与后面修改配置共同作用解决该问题的可能。
+
+参考：
+http://blog.csdn.net/kuluzs/article/details/51577678
+
+以上解决后，可以生产消费，但某节点消费时报错：
+[ConsumerFetcherThread-console-consumer-46869_shuzilm-1470451434898-37c43f8f-0-132], Error for partition [mykafka2,0] to broker 132:kafka.common.NotLeaderForPartitionException (kafka.consumer.ConsumerFetcherThread)
+
+解决：
+该问题由本小节配置问题导致建立的topic存在问题而引起，解决该问题后，新建的topic不存在该消费时报错的问题。
+
+备注：
+创建topic:
+./kafka-topics.sh --create --zookeeper 192.168.1.184:2181,192.168.1.208:2181,192.168.1.203:2181 --replication-factor 2 --partitions 3 --topic mykafka4
+生产：
+./kafka-console-producer.sh --broker-list 192.168.1.184:9092,192.168.1.203:9092,192.168.1.208:9092 --topic mykafka4
+消费：
+./kafka-console-consumer.sh --zookeeper 192.168.1.184:2181,192.168.1.203:2181,192.168.1.208:2181--topic mykafka4 --from-beginning
+</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

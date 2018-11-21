@@ -1,0 +1,446 @@
+---
+layout:     post
+title:      Kafka部署与代码实例
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="iteye-blog-content-contain">
+<p style="font-size:14px;">    kafka作为分布式日志收集或系统监控服务，我们有必要在合适的场合使用它。kafka的部署包括zookeeper环境/kafka环境，同时还需要进行一些配置操作.接下来介绍如何使用kafka.</p>
+<p style="font-size:14px;">    我们使用3个zookeeper实例构建zk集群，使用2个kafka broker构建kafka集群.</p>
+<p style="font-size:14px;">    其中kafka为0.8V，zookeeper为3.4.5V</p>
+<p style="font-size:14px;"> </p>
+<p style="font-size:14px;"><strong>一.Zookeeper集群构建</strong></p>
+<p style="font-size:14px;">    我们有3个zk实例，分别为zk-0,zk-1,zk-2;如果你仅仅是测试使用，可以使用1个zk实例.（本示例基于伪分布式部署）</p>
+<p style="font-size:14px;">    <strong>1) zk-0</strong></p>
+<p style="font-size:14px;"><strong>    </strong>调整配置文件：</p>
+<pre><code class="language-php">clientPort=2181
+server.0=127.0.0.1:2888:3888
+server.1=127.0.0.1:2889:3889
+server.2=127.0.0.1:2890:3890
+##只需要修改上述配置，其他配置保留默认值</code></pre>
+<p style="font-size:14px;">    启动zookeeper</p>
+<pre><code class="language-java">./zkServer.sh start</code></pre>
+<p style="font-size:14px;">    <strong>2) zk-1</strong></p>
+<p style="font-size:14px;"><strong>    </strong>调整配置文件(其他配置和zk-0一只)：</p>
+<pre><code class="language-php">clientPort=2182
+##只需要修改上述配置，其他配置保留默认值</code></pre>
+<p style="font-size:14px;">    启动zookeeper</p>
+<p style="font-size:14px;"> </p>
+<pre><code class="language-java">./zkServer.sh start</code></pre>
+<p style="font-size:14px;">    <strong>3) zk-2</strong></p>
+<p style="font-size:14px;"><strong>    </strong>调整配置文件(其他配置和zk-0一只)：</p>
+<pre><code class="language-php">clientPort=2183
+##只需要修改上述配置，其他配置保留默认值</code></pre>
+<p style="font-size:14px;">    启动zookeeper</p>
+<p style="font-size:14px;"> </p>
+<pre><code class="language-java">./zkServer.sh start</code></pre>
+<p style="font-size:14px;">  </p>
+<p style="font-size:14px;"><strong>二. Kafka集群构建</strong></p>
+<p style="font-size:14px;">    因为Broker配置文件涉及到zookeeper的相关约定，因此我们先展示broker配置文件.我们使用2个kafka broker来构建这个集群环境，分别为kafka-0,kafka-1.</p>
+<p style="font-size:14px;">    <strong>1) kafka-0</strong></p>
+<p style="font-size:14px;">    在config目录下修改配置文件为：</p>
+<pre><code class="language-java">broker.id=0
+port=9092
+num.network.threads=2
+num.io.threads=2
+socket.send.buffer.bytes=1048576
+socket.receive.buffer.bytes=1048576
+socket.request.max.bytes=104857600
+log.dir=./logs
+num.partitions=2
+log.flush.interval.messages=10000
+log.flush.interval.ms=1000
+log.retention.hours=168
+#log.retention.bytes=1073741824
+log.segment.bytes=536870912
+##replication机制,让每个topic的partitions在kafka-cluster中备份2个
+##用来提高cluster的容错能力..
+default.replication.factor=1
+log.cleanup.interval.mins=10
+##zookeeper.connect指定zookeeper的地址，默认情况下将会在zk的“/”目录下
+##创建meta信息和路径，为了对znode进行归类，我们可以在connect之后追加路径，比如
+##127.0.0.1:2183/kafka
+##不过需要注意，此后的producer、consumer都需要带上此根路径
+zookeeper.connect=127.0.0.1:2181,127.0.0.1:2182,127.0.0.1:2183
+zookeeper.connection.timeout.ms=1000000</code></pre>
+<p style="font-size:14px;">    因为kafka用scala语言编写，因此运行kafka需要首先准备scala相关环境。</p>
+<pre><code class="language-java">&gt; cd kafka-0
+&gt; ./sbt update
+&gt; ./sbt package
+&gt; ./sbt assembly-package-dependency </code></pre>
+<p style="font-size:14px;">    其中最后一条指令执行有可能出现异常，暂且不管。 启动kafka broker：</p>
+<pre><code class="language-java">&gt; JMS_PORT=9997 bin/kafka-server-start.sh config/server.properties &amp;</code></pre>
+<p style="font-size:14px;">    因为zookeeper环境已经正常运行了，我们无需通过kafka来挂载启动zookeeper.如果你的一台机器上部署了多个kafka broker，你需要声明JMS_PORT.</p>
+<p style="font-size:14px;">    <strong>2) kafka-1</strong></p>
+<pre><code class="language-java">broker.id=1
+port=9093
+##其他配置和kafka-0保持一致</code></pre>
+<p style="font-size:14px;">    然后和kafka-0一样执行打包命令，然后启动此broker.</p>
+<pre><code class="language-java">&gt; JMS_PORT=9998 bin/kafka-server-start.sh config/server.properties &amp;</code></pre>
+<p style="font-size:14px;">    仍然可以通过如下指令查看topic的"partition"/"replicas"的分布和存活情况.</p>
+<pre><code class="language-java">&gt; bin/kafka-list-topic.sh --zookeeper localhost:2181
+topic: my-replicated-topic	partition: 0	leader: 2	replicas: 1,2,0	isr: 2
+topic: test	partition: 0	leader: 0	replicas: 0	isr: 0 </code></pre>
+<p style="font-size:14px;">    到目前为止环境已经OK了,那我们就开始展示编程实例吧。[<a href="/blog/1930345" rel="nofollow">配置参数详解</a>]</p>
+<p style="font-size:14px;"> </p>
+<p style="font-size:14px;"><strong>三.项目准备</strong></p>
+<p style="font-size:14px;">    项目基于maven构建，不得不说kafka java客户端实在是太糟糕了；构建环境会遇到很多麻烦。建议参考如下pom.xml;其中各个依赖包必须版本协调一致。如果kafka client的版本和kafka server的版本不一致,将会有很多异常,比如"broker id not exists"等;因为kafka从0.7升级到0.8之后(正名为2.8.0),client与server通讯的protocol已经改变.</p>
+<pre><code class="language-java">&lt;dependencies&gt;
+	&lt;dependency&gt;
+		&lt;groupId&gt;log4j&lt;/groupId&gt;
+		&lt;artifactId&gt;log4j&lt;/artifactId&gt;
+		&lt;version&gt;1.2.14&lt;/version&gt;
+	&lt;/dependency&gt;
+	&lt;dependency&gt;
+		&lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;
+		&lt;artifactId&gt;kafka_2.8.2&lt;/artifactId&gt;
+		&lt;version&gt;0.8.0&lt;/version&gt;
+		&lt;exclusions&gt;
+			&lt;exclusion&gt;
+				&lt;groupId&gt;log4j&lt;/groupId&gt;
+				&lt;artifactId&gt;log4j&lt;/artifactId&gt;
+			&lt;/exclusion&gt;
+		&lt;/exclusions&gt;
+	&lt;/dependency&gt;
+	&lt;dependency&gt;
+		&lt;groupId&gt;org.scala-lang&lt;/groupId&gt;
+		&lt;artifactId&gt;scala-library&lt;/artifactId&gt;
+		&lt;version&gt;2.8.2&lt;/version&gt;
+	&lt;/dependency&gt;
+	&lt;dependency&gt;
+		&lt;groupId&gt;com.yammer.metrics&lt;/groupId&gt;
+		&lt;artifactId&gt;metrics-core&lt;/artifactId&gt;
+		&lt;version&gt;2.2.0&lt;/version&gt;
+	&lt;/dependency&gt;
+	&lt;dependency&gt;
+		&lt;groupId&gt;com.101tec&lt;/groupId&gt;
+		&lt;artifactId&gt;zkclient&lt;/artifactId&gt;
+		&lt;version&gt;0.3&lt;/version&gt;
+	&lt;/dependency&gt;
+&lt;/dependencies&gt;</code></pre>
+<p style="font-size:14px;"> </p>
+<p style="font-size:14px;"><strong>四.Producer端代码</strong></p>
+<p style="font-size:14px;">    <strong>1) producer.properties</strong>文件：此文件放在/resources目录下</p>
+<pre><code class="language-java">#partitioner.class=
+##broker列表可以为kafka server的子集,因为producer需要从broker中获取metadata
+##尽管每个broker都可以提供metadata,此处还是建议,将所有broker都列举出来
+##此值,我们可以在spring中注入过来
+##metadata.broker.list=127.0.0.1:9092,127.0.0.1:9093
+##,127.0.0.1:9093
+##同步,建议为async
+producer.type=sync
+compression.codec=0
+serializer.class=kafka.serializer.StringEncoder
+##在producer.type=async时有效
+#batch.num.messages=100</code></pre>
+<p style="font-size:14px;">    <strong>2) KafkaProducerClient.java</strong>代码样例</p>
+<pre><code class="language-java">import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Properties;
+
+import kafka.javaapi.producer.Producer;
+import kafka.producer.KeyedMessage;
+import kafka.producer.ProducerConfig;
+
+/**
+ * User: guanqing-liu
+ */
+public class KafkaProducerClient {
+
+	private Producer&lt;String, String&gt; inner;
+	
+	private String brokerList;//for metadata discovery,spring setter
+	private String location = "kafka-producer.properties";//spring setter
+	
+	private String defaultTopic;//spring setter
+
+	public void setBrokerList(String brokerList) {
+		this.brokerList = brokerList;
+	}
+
+	public void setLocation(String location) {
+		this.location = location;
+	}
+
+	public void setDefaultTopic(String defaultTopic) {
+		this.defaultTopic = defaultTopic;
+	}
+
+	public KafkaProducerClient(){}
+	
+	public void init() throws Exception {
+		Properties properties = new Properties();
+		properties.load(Thread.currentThread().getContextClassLoader().getResourceAsStream(location));
+		
+		
+		if(brokerList != null) {
+			properties.put("metadata.broker.list", brokerList);
+		}
+
+		ProducerConfig config = new ProducerConfig(properties);
+		inner = new Producer&lt;String, String&gt;(config);
+	}
+
+	public void send(String message){
+		send(defaultTopic,message);
+	}
+	
+	public void send(Collection&lt;String&gt; messages){
+		send(defaultTopic,messages);
+	}
+	
+	public void send(String topicName, String message) {
+		if (topicName == null || message == null) {
+			return;
+		}
+		KeyedMessage&lt;String, String&gt; km = new KeyedMessage&lt;String, String&gt;(topicName,message);
+		inner.send(km);
+	}
+
+	public void send(String topicName, Collection&lt;String&gt; messages) {
+		if (topicName == null || messages == null) {
+			return;
+		}
+		if (messages.isEmpty()) {
+			return;
+		}
+		List&lt;KeyedMessage&lt;String, String&gt;&gt; kms = new ArrayList&lt;KeyedMessage&lt;String, String&gt;&gt;();
+		int i= 0;
+		for (String entry : messages) {
+			KeyedMessage&lt;String, String&gt; km = new KeyedMessage&lt;String, String&gt;(topicName,entry);
+			kms.add(km);
+			i++;
+			if(i % 20 == 0){
+				inner.send(kms);
+				kms.clear();
+			}
+		}
+		
+		if(!kms.isEmpty()){
+			inner.send(kms);
+		}
+	}
+
+	public void close() {
+		inner.close();
+	}
+
+	/**
+	 * @param args
+	 */
+	public static void main(String[] args) {
+		KafkaProducerClient producer = null;
+		try {
+			producer = new KafkaProducerClient();
+			//producer.setBrokerList("");
+			int i = 0;
+			while (true) {
+				producer.send("test-topic", "this is a sample" + i);
+				i++;
+				Thread.sleep(2000);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			if (producer != null) {
+				producer.close();
+			}
+		}
+
+	}
+
+}</code></pre>
+<p style="font-size:14px;">    <strong>3) spring配置</strong></p>
+<pre><code class="language-java">    &lt;bean id="kafkaProducerClient" class="com.test.kafka.KafkaProducerClient" init-method="init" destroy-method="close"&gt;
+        &lt;property name="zkConnect" value="${zookeeper_cluster}"&gt;&lt;/property&gt;
+        &lt;property name="defaultTopic" value="${kafka_topic}"&gt;&lt;/property&gt;
+    &lt;/bean&gt;</code></pre>
+<p style="font-size:14px;"> </p>
+<p style="font-size:14px;"><strong>五.Consumer端 </strong></p>
+<p style="font-size:14px;"><strong>     1) consumer.properties</strong>:文件位于/resources目录下</p>
+<pre><code class="language-java">## 此值可以配置,也可以通过spring注入
+##zookeeper.connect=127.0.0.1:2181,127.0.0.1:2182,127.0.0.1:2183
+##,127.0.0.1:2182,127.0.0.1:2183
+# timeout in ms for connecting to zookeeper
+zookeeper.connectiontimeout.ms=1000000
+#consumer group id
+group.id=test-group
+#consumer timeout
+#consumer.timeout.ms=5000
+auto.commit.enable=true
+auto.commit.interval.ms=60000</code></pre>
+<p style="font-size:14px;">    <strong>2) KafkaConsumerClient.java</strong>代码样例</p>
+<pre><code class="language-java">package com.test.kafka;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.Charset;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import kafka.consumer.Consumer;
+import kafka.consumer.ConsumerConfig;
+import kafka.consumer.ConsumerIterator;
+import kafka.consumer.KafkaStream;
+import kafka.javaapi.consumer.ConsumerConnector;
+import kafka.message.Message;
+import kafka.message.MessageAndMetadata;
+
+/**
+ * User: guanqing-liu 
+ */
+public class KafkaConsumerClient {
+
+	private String groupid; //can be setting by spring
+	private String zkConnect;//can be setting by spring
+	private String location = "kafka-consumer.properties";//配置文件位置
+	private String topic;
+	private int partitionsNum = 1;
+	private MessageExecutor executor; //message listener
+	private ExecutorService threadPool;
+	
+	private ConsumerConnector connector;
+	
+	private Charset charset = Charset.forName("utf8");
+
+	public void setGroupid(String groupid) {
+		this.groupid = groupid;
+	}
+
+	public void setZkConnect(String zkConnect) {
+		this.zkConnect = zkConnect;
+	}
+
+	public void setLocation(String location) {
+		this.location = location;
+	}
+
+	public void setTopic(String topic) {
+		this.topic = topic;
+	}
+
+	public void setPartitionsNum(int partitionsNum) {
+		this.partitionsNum = partitionsNum;
+	}
+
+	public void setExecutor(MessageExecutor executor) {
+		this.executor = executor;
+	}
+
+	public KafkaConsumerClient() {}
+
+	//init consumer,and start connection and listener
+	public void init() throws Exception {
+		if(executor == null){
+			throw new RuntimeException("KafkaConsumer,exectuor cant be null!");
+		}
+		Properties properties = new Properties();
+		properties.load(Thread.currentThread().getContextClassLoader().getResourceAsStream(location));
+		
+		if(groupid != null){
+			properties.put("groupid", groupid);
+		}
+		if(zkConnect != null){
+			properties.put("zookeeper.connect", zkConnect);
+		}
+		ConsumerConfig config = new ConsumerConfig(properties);
+
+		connector = Consumer.createJavaConsumerConnector(config);
+		Map&lt;String, Integer&gt; topics = new HashMap&lt;String, Integer&gt;();
+		topics.put(topic, partitionsNum);
+		Map&lt;String, List&lt;KafkaStream&lt;byte[], byte[]&gt;&gt;&gt; streams = connector.createMessageStreams(topics);
+		List&lt;KafkaStream&lt;byte[], byte[]&gt;&gt; partitions = streams.get(topic);
+		threadPool = Executors.newFixedThreadPool(partitionsNum * 2);
+		
+		//start
+		for (KafkaStream&lt;byte[], byte[]&gt; partition : partitions) {
+			threadPool.execute(new MessageRunner(partition));
+		}
+	}
+
+	public void close() {
+		try {
+			threadPool.shutdownNow();
+		} catch (Exception e) {
+			//
+		} finally {
+			connector.shutdown();
+		}
+
+	}
+
+	class MessageRunner implements Runnable {
+		private KafkaStream&lt;byte[], byte[]&gt; partition;
+
+		MessageRunner(KafkaStream&lt;byte[], byte[]&gt; partition) {
+			this.partition = partition;
+		}
+
+		public void run() {
+			ConsumerIterator&lt;byte[], byte[]&gt; it = partition.iterator();
+			while (it.hasNext()) {
+				// connector.commitOffsets();手动提交offset,当autocommit.enable=false时使用
+				MessageAndMetadata&lt;byte[], byte[]&gt; item = it.next();
+				try{
+					executor.execute(new String(item.message(),charset));// UTF-8,注意异常
+				}catch(Exception e){
+					//
+				}
+			}
+		}
+		
+		public String getContent(Message message){
+            ByteBuffer buffer = message.payload();
+            if (buffer.remaining() == 0) {
+                return null;
+            }
+            CharBuffer charBuffer = charset.decode(buffer);
+            return charBuffer.toString();
+		}
+	}
+
+	public static interface MessageExecutor {
+
+		public void execute(String message);
+	}
+
+	/**
+	 * @param args
+	 */
+	public static void main(String[] args) {
+		KafkaConsumerClient consumer = null;
+		try {
+			MessageExecutor executor = new MessageExecutor() {
+
+				public void execute(String message) {
+					System.out.println(message);
+				}
+			};
+			consumer = new KafkaConsumerClient();
+			
+			consumer.setTopic("test-topic");
+			consumer.setPartitionsNum(2);
+			consumer.setExecutor(executor);
+			consumer.init();
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			 if(consumer != null){
+				 consumer.close();
+			 }
+		}
+
+	}
+
+}</code></pre>
+<p style="font-size:14px;"><strong>    3) spring配置(略)</strong></p>
+<p style="font-size:14px;"> </p>
+<p style="font-size:14px;">    需要提醒的是,上述LogConsumer类中,没有太多的关注异常情况,必须在MessageExecutor.execute()方法中抛出异常时的情况.</p>
+<p style="font-size:14px;">    在测试时，建议优先启动consumer，然后再启动producer，这样可以实时的观测到最新的消息。</p>
+</div>            </div>
+                </div>

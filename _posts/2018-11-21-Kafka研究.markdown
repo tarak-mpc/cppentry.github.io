@@ -1,0 +1,2266 @@
+---
+layout:     post
+title:      Kafka研究
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p align="center">Kafka<span style="font-family:宋体">研究</span></p>
+<p><br clear="all">
+</p>
+<h1><strong>架构</strong></h1>
+<p> </p>
+<p>kafka<span style="font-family:宋体">是显式分布式架构，</span><span style="font-family:Calibri">producer</span><span style="font-family:宋体">、</span><span style="font-family:Calibri">broker</span><span style="font-family:宋体">（</span><span style="font-family:Calibri">Kafka</span><span style="font-family:宋体">）和</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">都可以有多个。</span><span style="font-family:Calibri">K</span>afka<span style="font-family:宋体">的运行依赖于</span><span style="font-family:Calibri">ZooK</span>eeper<span style="font-family:宋体">，</span>Producer<span style="font-family:宋体">推送消息给</span><span style="font-family:Calibri">kafka</span><span style="font-family:宋体">，</span><span style="font-family:Calibri">Consumer</span><span style="font-family:宋体">从</span><span style="font-family:Calibri">kafka</span><span style="font-family:宋体">拉消息。</span></p>
+<h2><strong>kafka关键技术点</strong></h2>
+<p><strong><span style="font-family:宋体">（</span>1<span style="font-family:宋体">）</span><span style="font-family:Calibri"> </span><a target="_blank" name="OLE_LINK1">zero-copy</a></strong></p>
+<p><span style="font-family:宋体">在</span>Kafka<span style="font-family:宋体">上，有两个原因可能导致低效：</span><span style="font-family:Calibri">1</span><span style="font-family:宋体">）太多的网络请求</span><span style="font-family:Calibri">2</span><span style="font-family:宋体">）过多的字节拷贝。为了提高效率，</span><span style="font-family:Calibri">Kafka</span><span style="font-family:宋体">把</span><span style="font-family:Calibri">message</span><span style="font-family:宋体">分成一组一组的，每次请求会把一组</span><span style="font-family:Calibri">message</span><span style="font-family:宋体">发给相应的</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">。
+ 此外， 为了减少字节拷贝，采用了</span><span style="font-family:Calibri">sendfile</span><span style="font-family:宋体">系统调用。为了理解</span><span style="font-family:Calibri">sendfile</span><span style="font-family:宋体">原理，先说一下传统的利用</span><span style="font-family:Calibri">socket</span><span style="font-family:宋体">发送文件要进行拷贝：</span></p>
+<p> </p>
+<p>Sendfile<span style="font-family:宋体">系统调用：</span></p>
+<p> </p>
+<p><strong><span style="font-family:宋体">（</span>2<span style="font-family:宋体">）</span><span style="font-family:Calibri"> Exactly once message transfer</span></strong></p>
+<p><span style="font-family:宋体">怎样记录每个</span>consumer<span style="font-family:宋体">处理的信息的状态？在</span><span style="font-family:Calibri">Kafka</span><span style="font-family:宋体">中仅保存了每个</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">已经处理数据的</span><span style="font-family:Calibri">offset</span><span style="font-family:宋体">。这样有两个好处：</span><span style="font-family:Calibri">1</span><span style="font-family:宋体">）保存的数据量少</span><span style="font-family:Calibri">2</span><span style="font-family:宋体">）当</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">出错时，重新启动</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">处理数据时，只需从最近的</span><span style="font-family:Calibri">offset</span><span style="font-family:宋体">开始处理数据即可。</span></p>
+<p><strong><span style="font-family:宋体">（</span>3<span style="font-family:宋体">）</span><span style="font-family:Calibri">Push/pull</span></strong></p>
+<p>Producer <span style="font-family:宋体">向</span><span style="font-family:Calibri">Kafka</span><span style="font-family:宋体">（</span><span style="font-family:Calibri">push</span><span style="font-family:宋体">）推数据，</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">从</span><span style="font-family:Calibri">kafka</span><span style="font-family:宋体">拉（</span><span style="font-family:Calibri">pull</span><span style="font-family:宋体">）数据。</span></p>
+<p><strong><span style="font-family:宋体">（</span>4<span style="font-family:宋体">）负载均衡和容错</span></strong></p>
+<p>Producer<span style="font-family:宋体">和</span><span style="font-family:Calibri">broker</span><span style="font-family:宋体">之间没有负载均衡机制。</span><br>
+broker<span style="font-family:宋体">和</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">之间利用</span><span style="font-family:Calibri">zookeeper</span><span style="font-family:宋体">进行负载均衡。所有</span><span style="font-family:Calibri">broker</span><span style="font-family:宋体">和</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">都会在</span><span style="font-family:Calibri">zookeeper</span><span style="font-family:宋体">中进行注册，且</span><span style="font-family:Calibri">zookeeper</span><span style="font-family:宋体">会保存他们的一些元数据信息。如果某个</span><span style="font-family:Calibri">broker</span><span style="font-family:宋体">和</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">发生了变化，所有其他的</span><span style="font-family:Calibri">broker</span><span style="font-family:宋体">和</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">都会得到通知。</span></p>
+<p> </p>
+<h1><strong>kafka<span style="font-family:宋体">术语</span></strong></h1>
+<h2><strong>Topic</strong></h2>
+<p><span style="color:rgb(51,51,51)">Topic,是</span><span style="color:rgb(51,51,51)">KAFKA</span><span style="color:rgb(51,51,51)">对消息分类的依据</span><span style="color:rgb(51,51,51)">;</span><span style="color:rgb(51,51,51)">一条消息</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">必须有一个与之对应的</span><span style="color:rgb(51,51,51)">Topic;</span></p>
+<p><span style="color:rgb(51,51,51)">比如现在又两个</span><span style="color:rgb(51,51,51)">Topic,</span><span style="color:rgb(51,51,51)">分别是</span><span style="color:rgb(51,51,51)">TopicA<span style="font-family:宋体">和</span></span><span style="color:rgb(51,51,51)">TopicB,Producer</span><span style="color:rgb(51,51,51)">向</span><span style="color:rgb(51,51,51)">TopicA</span><span style="color:rgb(51,51,51)">发送一个消息</span><span style="color:rgb(51,51,51)">message</span><span style="color:rgb(51,51,51)">A,</span><span style="color:rgb(51,51,51)">然后向</span><span style="color:rgb(51,51,51)">TopicB</span><span style="color:rgb(51,51,51)">发送一个消息</span><span style="color:rgb(51,51,51)">messaeB</span><span style="color:rgb(51,51,51)">;</span><span style="color:rgb(51,51,51)">那么</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">订阅</span><span style="color:rgb(51,51,51)">TopicA</span><span style="color:rgb(51,51,51)">的</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">就会收到消息</span><span style="color:rgb(51,51,51)">message</span><span style="color:rgb(51,51,51)">A,</span><span style="color:rgb(51,51,51)">订阅</span><span style="color:rgb(51,51,51)">TopicB</span><span style="color:rgb(51,51,51)">的</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">就会收到消息</span><span style="color:rgb(51,51,51)">messaeB</span><span style="color:rgb(51,51,51)">;(</span><span style="color:rgb(51,51,51)">每个</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">可以同时订阅多个</span><span style="color:rgb(51,51,51)">Topic,</span><span style="color:rgb(51,51,51)">也即是说</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">同时订阅</span><span style="color:rgb(51,51,51)">TopicA</span><span style="color:rgb(51,51,51)">和</span><span style="color:rgb(51,51,51)">TopicB</span><span style="color:rgb(51,51,51)">的</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">可以收到</span><span style="color:rgb(51,51,51)">message</span><span style="color:rgb(51,51,51)">A</span><span style="color:rgb(51,51,51)">和</span><span style="color:rgb(51,51,51)">messaeB</span><span style="color:rgb(51,51,51)">)<span style="font-family:宋体">。</span></span></p>
+<p><span style="color:rgb(51,51,51)"><span style="font-family:宋体">同一个</span>Group</span><span style="color:rgb(51,51,51)"> </span><span style="color:rgb(51,51,51)">id<span style="font-family:宋体">的</span><span style="font-family:Calibri">consumers</span><span style="font-family:宋体">在同一个</span><span style="font-family:Calibri">Topic</span><span style="font-family:宋体">的同一条消息只能被一个</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">消费，实现了点对点模式，不同</span><span style="font-family:Calibri">Group</span></span><span style="color:rgb(51,51,51)"> </span><span style="color:rgb(51,51,51)">id<span style="font-family:宋体">的</span><span style="font-family:Calibri">Consumers</span><span style="font-family:宋体">在同一个</span><span style="font-family:Calibri">Topic</span><span style="font-family:宋体">上的同一条消息可以同时消费到，则实现了发布订阅模式。通过</span><span style="font-family:Calibri">Consumer</span><span style="font-family:宋体">的</span><span style="font-family:Calibri">Group</span></span><span style="color:rgb(51,51,51)"> </span><span style="color:rgb(51,51,51)">id<span style="font-family:宋体">实现了</span><span style="font-family:Calibri">JMS</span><span style="font-family:宋体">的消息模式</span></span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<h2><strong>Message</strong></h2>
+<p><span style="color:rgb(51,51,51)">Message就是消息</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">是</span><span style="color:rgb(51,51,51)">KAfKA</span><span style="color:rgb(51,51,51)">操作的对象</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">消息是按照</span><span style="color:rgb(51,51,51)">Topic</span><span style="color:rgb(51,51,51)">存储的</span><span style="color:rgb(51,51,51)">;</span></p>
+<p><span style="color:rgb(51,51,51)">KAFKA中按照一定的期限保存着所有发布过的</span><span style="color:rgb(51,51,51)">Message,</span><span style="color:rgb(51,51,51)">不管这些</span><span style="color:rgb(51,51,51)">Message</span><span style="color:rgb(51,51,51)">是否被消费过</span><span style="color:rgb(51,51,51)">;</span><span style="color:rgb(51,51,51)">例如这些</span><span style="color:rgb(51,51,51)">Message</span><span style="color:rgb(51,51,51)">的保存期限被这只为两天</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">那么一条</span><span style="color:rgb(51,51,51)">Message</span><span style="color:rgb(51,51,51)">从发布开始的两天时间内是可用的</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">超过保存期限的消息会被清空以释放存储空间。</span></p>
+<p><span style="color:rgb(51,51,51)">消息都是以字节数组进行网络传递。</span></p>
+<h2><strong>Partition</strong></h2>
+<p><span style="color:rgb(51,51,51)">每一个</span><span style="color:rgb(51,51,51)">Topic</span><span style="color:rgb(51,51,51)">可以有多个</span><span style="color:rgb(51,51,51)">Partition,</span><span style="color:rgb(51,51,51)">这样做是为了提高</span><span style="color:rgb(51,51,51)">KAFKA</span><span style="color:rgb(51,51,51)">系统的并发能力</span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">，</span></span><span style="color:rgb(51,51,51)">每个</span><span style="color:rgb(51,51,51)">Partition</span><span style="color:rgb(51,51,51)">中按照消息发送的顺序保存着</span><span style="color:rgb(51,51,51)">Producer</span><span style="color:rgb(51,51,51)">发来的消息</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">每个消息用</span><span style="color:rgb(51,51,51)">ID</span><span style="color:rgb(51,51,51)">标识</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">代表这个消息在改</span><span style="color:rgb(51,51,51)">Partition</span><span style="color:rgb(51,51,51)">中的偏移量</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">这样</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">知道了</span><span style="color:rgb(51,51,51)">ID,</span><span style="color:rgb(51,51,51)">就可以方便的定位一个消息了</span><span style="color:rgb(51,51,51)">;</span><span style="color:rgb(51,51,51)">每个新提交过来的消息</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">被追加到</span><span style="color:rgb(51,51,51)">Partition</span><span style="color:rgb(51,51,51)">的尾部</span><span style="color:rgb(51,51,51)">;</span><span style="color:rgb(51,51,51)">如果一个</span><span style="color:rgb(51,51,51)">Partition</span><span style="color:rgb(51,51,51)">被写满了</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">就不再追加</span><span style="color:rgb(51,51,51)">;(</span><span style="color:rgb(51,51,51)">注意</span><span style="color:rgb(51,51,51)">,KAFKA</span><span style="color:rgb(51,51,51)">不保证不同</span><span style="color:rgb(51,51,51)">Partition</span><span style="color:rgb(51,51,51)">之间的消息有序保存</span><span style="color:rgb(51,51,51)">)</span></p>
+<h2><strong>Leader</strong></h2>
+<p><span style="color:rgb(51,51,51)">Partition中负责消息读写的节点</span><span style="color:rgb(51,51,51)">;Leader</span><span style="color:rgb(51,51,51)">是从</span><span style="color:rgb(51,51,51)">Partition</span><span style="color:rgb(51,51,51)">的节点中随机选取的</span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">。</span></span><span style="color:rgb(51,51,51)">每个</span><span style="color:rgb(51,51,51)">Partition都会在集中的其中一台服务器存在Leader。一个Topic如果有多个Partition，则会有多个Leader。</span></p>
+<h2><strong>ReplicationFactor</strong></h2>
+<p><span style="color:rgb(51,51,51)">一个</span><span style="color:rgb(51,51,51)">Partition</span><span style="color:rgb(51,51,51)">中复制数据的所有节点</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">包括已经挂了的</span><span style="color:rgb(51,51,51)">;</span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">数量不会超过集群中</span>broker<span style="font-family:宋体">的数量</span></span></p>
+<h2><strong>isr</strong></h2>
+<p><span style="color:rgb(51,51,51)">ReplicationFactor的子集</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">存活的且和</span><span style="color:rgb(51,51,51)">Leader</span><span style="color:rgb(51,51,51)">保持同步的节点</span><span style="color:rgb(51,51,51)">;</span></p>
+<h2><strong>Consumer Group</strong></h2>
+<p><span style="color:rgb(51,51,51)">传统的消息系统提供两种使用方式</span><span style="color:rgb(51,51,51)">:</span><span style="color:rgb(51,51,51)">队列和发布</span><span style="color:rgb(51,51,51)">-</span><span style="color:rgb(51,51,51)">订阅</span><span style="color:rgb(51,51,51)">;</span></p>
+<p><span style="color:rgb(51,51,51)">队列：是一个池中有若干个</span><span style="color:rgb(51,51,51)">Consumer,</span><span style="color:rgb(51,51,51)">一条消息发出来以后</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">被其中的一个</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">消费</span><span style="color:rgb(51,51,51)">;</span></p>
+<p><span style="color:rgb(51,51,51)">发布</span><span style="color:rgb(51,51,51)">-</span><span style="color:rgb(51,51,51)">订阅</span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">：</span></span><span style="color:rgb(51,51,51)">是一个消息被广播出去</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">之后被所有订阅该主题的</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">消费</span><span style="color:rgb(51,51,51)">;</span></p>
+<p><span style="color:rgb(51,51,51)">KAFKA提供的使用方式可以达到以上两种方式的效果</span><span style="color:rgb(51,51,51)">:Consumer Group;</span></p>
+<p><span style="color:rgb(51,51,51)">每一个</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">用</span><span style="color:rgb(51,51,51)">Consumer Group Name</span><span style="color:rgb(51,51,51)">标识自己</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">当一条消息产生后</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">改消息被订阅了其</span><span style="color:rgb(51,51,51)">Topic</span><span style="color:rgb(51,51,51)">的</span><span style="color:rgb(51,51,51)">Consumer Group</span><span style="color:rgb(51,51,51)">收到</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">之后被这个</span><span style="color:rgb(51,51,51)">Consumer Group</span><span style="color:rgb(51,51,51)">中的一个</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">消费</span><span style="color:rgb(51,51,51)">;</span></p>
+<p><span style="color:rgb(51,51,51)">如果所有的</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">都在同一个</span><span style="color:rgb(51,51,51)">Consumer Group</span><span style="color:rgb(51,51,51)">中</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">那么这就和传统的队列形式的消息系统一样了</span><span style="color:rgb(51,51,51)">;</span></p>
+<p><span style="color:rgb(51,51,51)">如果每一个</span><span style="color:rgb(51,51,51)">Consumer</span><span style="color:rgb(51,51,51)">都在一个不同的</span><span style="color:rgb(51,51,51)">Consumer Group</span><span style="color:rgb(51,51,51)">中</span><span style="color:rgb(51,51,51)">,</span><span style="color:rgb(51,51,51)">那么就和传统的发布</span><span style="color:rgb(51,51,51)">-</span><span style="color:rgb(51,51,51)">订阅的形式一样了</span><span style="color:rgb(51,51,51)">;</span></p>
+<h2><strong>Offset</strong></h2>
+<p><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">消费者自己维护当前读取数据的</span>offser<span style="font-family:宋体">，</span></span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">或者同步到</span>zookeeper<span style="font-family:宋体">。</span></span><em><span style="color:rgb(51,51,51); background:rgb(254,254,254)">auto.commit.interval.ms</span></em><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">是</span>consumer<span style="font-family:宋体">同步</span><span style="font-family:Helvetica">offset</span><span style="font-family:宋体">到</span><span style="font-family:Helvetica">zookeeper</span><span style="font-family:宋体">的时间间隔。这个值设置问题会影响到多线程</span><span style="font-family:Helvetica">consumer</span><span style="font-family:宋体">，重复读取的问题。</span></span></p>
+<h1><strong>安装启动配置环境</strong></h1>
+<h2><strong>安装</strong></h2>
+<p>下载kafka_2.11-0.8.2.1<span style="font-family:宋体">，</span><span style="font-family:宋体">并在</span>linux<span style="font-family:宋体">上解压</span></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">tar -xzf kafka_2.11-0.8.2.1.tgz</span></strong></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">cd kafka_2.11-0.8.2.1/bin</span></strong></p>
+<p><strong><span style="color:rgb(51,51,51)">   </span></strong><span style="color:rgb(51,51,51)"><span style="font-family:宋体">可用的命令如下</span>:</span></p>
+<h2><strong>启动命令</strong></h2>
+<p>Kafka<span style="font-family:宋体">需要用到</span><span style="font-family:Calibri">zookeeper</span>,<span style="font-family:宋体">所有首先需要启动</span>zookeeper<span style="font-family:宋体">。</span></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">.</span><span style="color:rgb(51,51,51)">/zookeeper-server-start.sh ../config/zookeeper.properties &amp;</span></strong></p>
+<p><span style="color:rgb(51,51,51)">然后启动</span><span style="color:rgb(51,51,51)">kafka</span><span style="color:rgb(51,51,51)">服务</span></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">./kafka-server-start.sh ../config/server.properties &amp;</span></strong></p>
+<h2><strong><span style="font-family:宋体">创建</span>Topic</strong></h2>
+<p>创建一个名字是”p2p”<span style="font-family:宋体">的</span>topic<span style="font-family:宋体">，使用一个单独的</span><span style="font-family:Calibri">p</span>artition<span style="font-family:宋体">和和一个</span>replica</p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">./kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 1 --topic p2p</span></strong></p>
+<p><span style="color:rgb(51,51,51)"><span style="font-family:宋体">使用命令查看</span>topic</span></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">.</span><span style="color:rgb(51,51,51)">/kafka-topics.sh --list --zookeeper localhost:2181</span></strong></p>
+<p>p2p</p>
+<p> </p>
+<p><span style="font-family:宋体">除了使用命令创建</span>Topic<span style="font-family:宋体">外，可以让</span><span style="font-family:Calibri">kafka</span><span style="font-family:宋体">自动创建，在客户端使用的时候，指定一个不存在的</span><span style="font-family:Calibri">topic</span><span style="font-family:宋体">，</span><span style="font-family:Calibri">kafka</span><span style="font-family:宋体">会自动给创建</span><span style="font-family:Calibri">topic</span><span style="font-family:宋体">，自动创建将不能自定义</span><span style="font-family:Calibri">partition</span><span style="font-family:宋体">和</span><span style="font-family:Calibri">relica</span><span style="font-family:宋体">。</span></p>
+<h2><strong><span style="font-family:宋体">集群多</span>broker</strong></h2>
+<p><span style="font-family:宋体">将上述的单节点</span>kafka<span style="font-family:宋体">扩展为</span><span style="font-family:Calibri">3</span><span style="font-family:宋体">个节点的集群。</span></p>
+<p>从原始配置文件拷贝配置文件。</p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">cp</span><span style="color:rgb(51,51,51)">../</span><span style="color:rgb(51,51,51)">config/server.properties ../config/server-1.properties</span></strong><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">cp ../config/server.properties ../config/server-2.properties</span></strong></p>
+<p>修改配置文件。</p>
+<p><em><span style="color:rgb(51,51,51)">config/server-1.properties:</span></em></p>
+<p><em><span style="color:rgb(51,51,51)">    broker.id=1</span></em></p>
+<p><em><span style="color:rgb(51,51,51)">    port=9093</span></em></p>
+<p><em><span style="color:rgb(51,51,51)">    log.dir=/tmp/kafka-logs-1</span></em></p>
+<p><em><span style="color:rgb(51,51,51)"> </span></em></p>
+<p><em><span style="color:rgb(51,51,51)">config/server-2.properties:</span></em></p>
+<p><em><span style="color:rgb(51,51,51)">    broker.id=2</span></em></p>
+<p><em><span style="color:rgb(51,51,51)">    port=9094</span></em></p>
+<p><em><span style="color:rgb(51,51,51)">    log.dir=/tmp/kafka-logs-2</span></em></p>
+<p>注意在集群中<em><span style="color:rgb(51,51,51)">broker.id</span></em><span style="color:rgb(51,51,51)">是唯一的。</span></p>
+<p><span style="color:rgb(51,51,51)"><span style="font-family:宋体">现在在前面单一节点和</span>zookeeper<span style="font-family:宋体">的基础上，再启动两个</span><span style="font-family:Courier New">kafka</span><span style="font-family:宋体">节点。</span></span></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">./kafka-server-start.sh ../config/server-1.properties &amp;</span></strong></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">./kafka-server-start.sh ../config/server-2.properties &amp;</span></strong></p>
+<p><span style="font-family:宋体">创建一个新的</span>topic<span style="font-family:宋体">，带三个</span>ReplicationFactor</p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">./kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 3 --partitions 1 --topic</span><span style="color:rgb(51,51,51)">p2p</span><span style="color:rgb(51,51,51)">-replicated-topic</span></strong></p>
+<p><span style="font-family:宋体">查看刚刚创建的</span>topic<span style="font-family:宋体">。</span></p>
+<p><span style="color:rgb(51,51,51)">&gt; </span><strong><span style="color:rgb(51,51,51)">./kafka-topics.sh --describe --zookeeper localhost:2181 --topic p2p-replicated-topic</span></strong></p>
+<p align="center"> </p>
+<p><span style="color:rgb(51,51,51)">partiton<span style="font-family:宋体">： </span>
+<span style="font-family:Arial">partion id</span><span style="font-family:宋体">，由于此处只有一个</span><span style="font-family:Arial">partition</span><span style="font-family:宋体">，因此</span><span style="font-family:Arial">partition id</span><span style="font-family:宋体">为</span><span style="font-family:Arial">0</span></span><span style="color:rgb(51,51,51)"><br>
+</span><span style="color:rgb(51,51,51)">leader<span style="font-family:宋体">：当前负责读写的</span><span style="font-family:Arial">lead broker id</span></span><span style="color:rgb(51,51,51)"><br>
+</span><span style="color:rgb(51,51,51)">relicas<span style="font-family:宋体">：当前</span><span style="font-family:Arial">partition</span><span style="font-family:宋体">的所有</span><span style="font-family:Arial">replication broker  list</span></span><span style="color:rgb(51,51,51)"><br>
+</span><span style="color:rgb(51,51,51)">isr<span style="font-family:宋体">：</span><span style="font-family:Arial">relicas</span><span style="font-family:宋体">的子集，只包含出于活动状态的</span><span style="font-family:Arial">broker</span></span></p>
+<h2><strong><span style="background:rgb(254,254,254)">Topic</span><span style="background:rgb(254,254,254)">-Partition-Leader-ReplicationFactor</span><span style="background:rgb(254,254,254)"><span style="font-family:宋体">之间的关系样图</span></span></strong></h2>
+<p><span style="font-family:宋体">以上创建了三个节点的</span>kafka<span style="font-family:宋体">集群，在集群上又用命令创建三个</span><span style="font-family:Calibri">topic</span><span style="font-family:宋体">，分别是：</span></p>
+<p><span style="color:rgb(51,51,51)">l </span><span style="color:rgb(51,51,51)">replicated3-partitions3-topic<span style="font-family:宋体">：</span></span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">三份复制三个</span>partition<span style="font-family:宋体">的</span><span style="font-family:Courier New">topic</span></span></p>
+<p><span style="color:rgb(51,51,51)">l </span><span style="color:rgb(51,51,51)">replicated2-partitions3-topic<span style="font-family:宋体">：</span></span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">二份复制三个</span>partition<span style="font-family:宋体">的</span><span style="font-family:Courier New">topic</span></span></p>
+<p><span style="color:rgb(51,51,51)">l </span><span style="color:rgb(51,51,51)">test</span><span style="color:rgb(51,51,51)">:1</span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">份复制，一个</span>partition<span style="font-family:宋体">的</span><span style="font-family:Courier New">topic</span></span></p>
+<p> </p>
+<p><span style="font-family:宋体">以我做测试创建的三个</span>topic<span style="font-family:宋体">说明他们之间的关系。</span></p>
+<p><span style="color:rgb(51,51,51)">&gt;./kafka-topics.sh --describe --zookeeper localhost:2181 --topic replicated3-partitions3-topic</span></p>
+<p> </p>
+<p><span style="color:rgb(51,51,51)">&gt;./kafka-topics.sh --describe --zookeeper localhost:2181 --topic replicated2-partitions3-topic</span></p>
+<p> </p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">&gt;./kafka-topics.sh --describe --zookeeper localhost:2181 --topic</span><span style="color:rgb(51,51,51)">test</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="font-family:宋体">以</span>kafka<span style="font-family:宋体">当前的描述画出以下关系图：</span></p>
+<p></p>
+<p><span style="font-family:宋体">从图上可以看到</span>test<span style="font-family:宋体">没有备份，当</span><span style="font-family:Calibri">broke</span> Id 0<span style="font-family:宋体">宕机后，虽然集群还有两个节点可以使用，但</span>test<span style="font-family:宋体">这个</span><span style="font-family:Calibri">topic</span><span style="font-family:宋体">却不能正常转发消息了。所以为了系统的可靠性，创建的</span><span style="font-family:Calibri">replicas</span><span style="font-family:宋体">尽量的多，但却不能超过</span><span style="font-family:Calibri">broker</span><span style="font-family:宋体">的数量。</span></p>
+<h1><strong><span style="font-family:宋体">客户端使用</span>API</strong></h1>
+<h2><strong>Producer API</strong></h2>
+<p>从0.8.2<span style="font-family:宋体">版本开始，</span>apache<span style="font-family:宋体">提供了新的</span><span style="font-family:Calibri">java</span><span style="font-family:宋体">版本的</span>Producer<span style="font-family:宋体">的</span>API<span style="font-family:宋体">。这个</span><span style="font-family:Calibri">java</span><span style="font-family:宋体">版本在测试中表现比之前的</span><span style="font-family:Calibri">scala</span><span style="font-family:宋体">客户端性能要好。</span>Pom<span style="font-family:宋体">获取</span><span style="font-family:Calibri">java</span><span style="font-family:宋体">客户端：</span></p>
+<p><span style="color:rgb(51,51,51)">&lt;dependency&gt;</span></p>
+<p><span style="color:rgb(51,51,51)">    &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;</span></p>
+<p><span style="color:rgb(51,51,51)">    &lt;artifactId&gt;kafka-clients&lt;/artifactId&gt;</span></p>
+<p><span style="color:rgb(51,51,51)">    &lt;version&gt;0.8.2.1&lt;/version&gt;</span></p>
+<p><span style="color:rgb(51,51,51)">&lt;/dependency&gt;</span></p>
+<h3><strong>Example</strong></h3>
+<p> </p>
+<h2><strong>Consumer API</strong></h2>
+<p>Kafka 0.8.2.1<span style="font-family:宋体">版本已经放出了</span>java<span style="font-family:宋体">版的</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">，看</span><span style="font-family:Calibri">javadoc</span><span style="font-family:宋体">文档和代码不太匹配，也没有样例来说明</span><span style="font-family:Calibri">java</span><span style="font-family:宋体">版的</span><span style="font-family:Calibri">consumer</span><span style="font-family:宋体">的使用样例，这里还是用</span><span style="font-family:Calibri">scala</span><span style="font-family:宋体">版的</span><span style="font-family:Calibri">consumer</span> API<span style="font-family:宋体">来使用。</span></p>
+<p>Kafka<span style="font-family:宋体">提供了两套</span><span style="font-family:Calibri">API</span><span style="font-family:宋体">给</span><span style="font-family:Calibri">Consumer</span><span style="font-family:宋体">：</span></p>
+<p>The high-level Consumer API<span style="font-family:宋体">：</span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">高度抽象的</span>Consumer API<span style="font-family:宋体">，</span></span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">封装了很多</span>consumer<span style="font-family:宋体">需要的高级功能，</span></span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">使用起来简单、方便</span></span></p>
+<p>The SimpleConsumer API<span style="font-family:宋体">：</span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">只有最基本的链接、读取功能，可以自己去读</span>offset<span style="font-family:宋体">，并指定</span><span style="font-family:Helvetica">offset</span><span style="font-family:宋体">的读取方式。适合于各种自定义</span></span></p>
+<h3><strong>High Level</strong></h3>
+<p><span style="color:rgb(51,51,51)">class   Consumer{</span></p>
+<p><span style="color:rgb(51,51,51)">  /**</span></p>
+<p><span style="color:rgb(51,51,51)">   *  Create a ConsumerConnector:创建consumer connector</span></p>
+<p><span style="color:rgb(51,51,51)">   *</span></p>
+<p><span style="color:rgb(51,51,51)">   *  @param config at the minimum, need to specify the groupid of the consumer and the zookeeper connection string zookeeper.connect.config参数作用：需要置顶consumer的groupid以及zookeeper连接字符串zookeeper.connect</span></p>
+<p><span style="color:rgb(51,51,51)">   */</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">    public static kafka.javaapi.consumer.ConsumerConnector  createJavaConsumerConnector(ConsumerConfig  config);</span></p>
+<p><span style="color:rgb(51,51,51)">  }</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">  /**</span></p>
+<p><span style="color:rgb(51,51,51)">   *  V: type of the message： 消息类型</span></p>
+<p><span style="color:rgb(51,51,51)">   *  K: type of the optional key assciated with the message： 消息携带的可选关键字类型</span></p>
+<p><span style="color:rgb(51,51,51)">   */</span></p>
+<p><span style="color:rgb(51,51,51)">   public interface kafka.javaapi.consumer.ConsumerConnector {</span></p>
+<p><span style="color:rgb(51,51,51)">     /**</span></p>
+<p><span style="color:rgb(51,51,51)">      *  Create a list of message streams of type T for each topic.：为每个topic创建T类型的消息流的列表</span></p>
+<p><span style="color:rgb(51,51,51)">      * </span></p>
+<p><span style="color:rgb(51,51,51)">      *  @param topicCountMap a map of (topic, #streams) pair   ： topic与streams的键值对</span></p>
+<p><span style="color:rgb(51,51,51)">      *  @param decoder a decoder that converts from Message to T  ： 转换Message到T的解码器</span></p>
+<p><span style="color:rgb(51,51,51)">      *  @return  a map of (topic, list of KafakStream) pairs.   ： topic与KafkaStream列表的键值对</span></p>
+<p><span style="color:rgb(51,51,51)">      *           The number of items in the list is #streams . Each stream supports</span></p>
+<p><span style="color:rgb(51,51,51)">      *           an iterator over message/metadata pairs .：列表中项目的数量是#streams。每个stream都支持基于message/metadata 对的迭代器</span></p>
+<p><span style="color:rgb(51,51,51)">      */</span></p>
+<p><span style="color:rgb(51,51,51)">      public &lt;K,V&gt; Map&lt;String, List&lt;KafkaStream&lt;K,V&gt; &gt; &gt;</span></p>
+<p><span style="color:rgb(51,51,51)">        createMessageStreams( Map&lt;String, Integer&gt; topicCountMap, Decoder&lt;K&gt; keyDecoder, Decoder&lt;V&gt; valueDecoder);</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">    </span><span style="color:rgb(51,51,51)">/**</span></p>
+<p><span style="color:rgb(51,51,51)">     *  Create a list of message streams of type T for each topic, using the default decoder.为每个topic创建T类型的消息列表。使用默认解码器</span></p>
+<p><span style="color:rgb(51,51,51)">     */</span></p>
+<p><span style="color:rgb(51,51,51)">     public Map&lt;String, List&lt;KafkaStream&lt;byte[], byte[]&gt;&gt;&gt; createMessageStreams(Map&lt;String, Integer&gt; topicCountMap);</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">    /**</span></p>
+<p><span style="color:rgb(51,51,51)">   *  Create a list of message streams for topics matching a wildcard.为匹配wildcard的topics创建消息流的列表</span></p>
+<p><span style="color:rgb(51,51,51)">   *</span></p>
+<p><span style="color:rgb(51,51,51)">   *  @param topicFilter a TopicFilter that specifies which topics to</span></p>
+<p><span style="color:rgb(51,51,51)">   *                    subscribe to (encapsulates a whitelist or a blacklist).指定将要订阅的topics的TopicFilter（封装了whitelist或者黑名单）</span></p>
+<p><span style="color:rgb(51,51,51)">   *  @param numStreams the number of message streams to return.将要返回的流的数量</span></p>
+<p><span style="color:rgb(51,51,51)">   *  @param keyDecoder a decoder that decodes the message key  可以解码关键字key的解码器</span></p>
+<p><span style="color:rgb(51,51,51)">   *  @param valueDecoder a decoder that decodes the message itself  可以解码消息本身的解码器</span></p>
+<p><span style="color:rgb(51,51,51)">   *  @return a list of KafkaStream. Each stream supports an</span></p>
+<p><span style="color:rgb(51,51,51)">   *          iterator over its MessageAndMetadata elements.  返回KafkaStream的列表。每个流都支持基于MessagesAndMetadata 元素的迭代器。</span></p>
+<p><span style="color:rgb(51,51,51)">   */</span></p>
+<p><span style="color:rgb(51,51,51)"> public &lt;K,V&gt; List&lt;KafkaStream&lt;K,V&gt;&gt;</span></p>
+<p><span style="color:rgb(51,51,51)">    createMessageStreamsByFilter(TopicFilter topicFilter, int numStreams, Decoder&lt;K&gt; keyDecoder, Decoder&lt;V&gt; valueDecoder);</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">    /**</span></p>
+<p><span style="color:rgb(51,51,51)">   *  Create a list of message streams for topics matching a wildcard, using the default decoder.使用默认解码器，为匹配wildcard的topics创建消息流列表</span></p>
+<p><span style="color:rgb(51,51,51)">   */</span></p>
+<p><span style="color:rgb(51,51,51)">  public List&lt;KafkaStream&lt;byte[], byte[]&gt;&gt; createMessageStreamsByFilter(TopicFilter topicFilter, int numStreams);</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">  /**</span></p>
+<p><span style="color:rgb(51,51,51)">   *  Create a list of message streams for topics matching a wildcard, using the default decoder, with one stream.使用默认解码器，为匹配wildcard的topics创建消息流列表</span></p>
+<p><span style="color:rgb(51,51,51)">   */</span></p>
+<p><span style="color:rgb(51,51,51)">  public List&lt;KafkaStream&lt;byte[], byte[]&gt;&gt; createMessageStreamsByFilter(TopicFilter topicFilter);</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">  /**</span></p>
+<p><span style="color:rgb(51,51,51)">   *  Commit the offsets of all topic/partitions connected by this connector.通过connector提交所有topic/partitions的offsets</span></p>
+<p><span style="color:rgb(51,51,51)">   */</span></p>
+<p><span style="color:rgb(51,51,51)">  public void commitOffsets();</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">  /**</span></p>
+<p><span style="color:rgb(51,51,51)">   *  Shut down the connector： 关闭connector</span></p>
+<p><span style="color:rgb(51,51,51)">   */</span></p>
+<p><span style="color:rgb(51,51,51)">  public void shutdown();</span></p>
+<p><span style="color:rgb(51,51,51)">}</span></p>
+<p><span style="color:rgb(51,51,51)"><span style="font-family:宋体">对大多数应用来说，</span> high  level已经足够了，一些应用要求的一些特征还没有出现high level consumer接口（例如，当重启consumer时，设置初始offset）。他们可以使用Simple Api。逻辑可能会有些复杂。</span></p>
+<p> </p>
+<h3><strong>Simple</strong></h3>
+<p>使用Simple有以下缺点：</p>
+<p style="background:rgb(254,254,254)"><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">必须在程序中跟踪</span>offset<span style="font-family:宋体">值</span></span></p>
+<p style="background:rgb(254,254,254)"><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">必须找出指定</span>Topic Partition<span style="font-family:宋体">中的</span><span style="font-family:Helvetica">lead broker</span></span></p>
+<p style="background:rgb(254,254,254)"><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">必须处理</span>broker<span style="font-family:宋体">的变动</span></span></p>
+<p>class kafka.javaapi.consumer.SimpleConsumer {</p>
+<p>  /**</p>
+<p>   *  Fetch a set of messages from a topic.<span style="font-family:宋体">从</span><span style="font-family:Calibri">topis</span><span style="font-family:宋体">抓取消息序列</span></p>
+<p>   *</p>
+<p>   *  @param request specifies the topic name, topic partition, starting byte offset, maximum bytes to be fetched.<span style="font-family:宋体">指定</span><span style="font-family:Calibri">topic</span><span style="font-family:宋体">名字，</span><span style="font-family:Calibri">topic
+ partition</span><span style="font-family:宋体">，开始的字节</span><span style="font-family:Calibri">offset</span><span style="font-family:宋体">，抓取的最大字节数</span></p>
+<p>   *  @return a set of fetched messages</p>
+<p>   */</p>
+<p>  public FetchResponse fetch(kafka.javaapi.FetchRequest request);</p>
+<p> </p>
+<p> </p>
+<p>  /**</p>
+<p>   *  Fetch metadata for a sequence of topics.<span style="font-family:宋体">抓取一系列</span><span style="font-family:Calibri">topics</span><span style="font-family:宋体">的</span><span style="font-family:Calibri">metadata</span></p>
+<p>   *</p>
+<p>   *  @param request specifies the versionId, clientId, sequence of topics.<span style="font-family:宋体">指定</span><span style="font-family:Calibri">versionId</span><span style="font-family:宋体">，</span><span style="font-family:Calibri">clientId</span><span style="font-family:宋体">，</span><span style="font-family:Calibri">topics</span></p>
+<p>   *  @return metadata for each topic in the request.<span style="font-family:宋体">返回此要求中每个</span><span style="font-family:Calibri">topic</span><span style="font-family:宋体">的元素据</span></p>
+<p>   */</p>
+<p>  public kafka.javaapi.TopicMetadataResponse send(kafka.javaapi.TopicMetadataRequest request);</p>
+<p> </p>
+<p> </p>
+<p>  /**</p>
+<p>   *  Get a list of valid offsets (up to maxSize) before the given time.<span style="font-family:宋体">在给定的时间内返回正确偏移的列表</span></p>
+<p>   *</p>
+<p>   *  @param request a [[kafka.javaapi.OffsetRequest]] object. </p>
+<p>   *  @return a [[kafka.javaapi.OffsetResponse]] object.</p>
+<p>   */</p>
+<p>  public kafak.javaapi.OffsetResponse getOffsetsBefore(OffsetRequest request);</p>
+<p> </p>
+<p> </p>
+<p>  /**</p>
+<p>   * Close the SimpleConsumer.<span style="font-family:宋体">关闭</span></p>
+<p>   */</p>
+<p>  public void close();</p>
+<p>}</p>
+<p> </p>
+<h2><strong>配置</strong></h2>
+<h3><strong>Broker Config</strong></h3>
+<p>核心关键配置：broker.id<span style="font-family:宋体">、</span><span style="font-family:Courier New">log.dirs</span><span style="font-family:宋体">、</span><span style="color:rgb(85,85,85)">zookeeper.connect</span></p>
+<table>
+<tbody>
+<tr>
+<td valign="top">
+<p>参数</p>
+</td>
+<td valign="top">
+<p>默认值</p>
+</td>
+<td valign="top">
+<p>说明(解释)</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>broker.id</p>
+</td>
+<td valign="top">
+<p> </p>
+</td>
+<td valign="top">
+<p>每一个broker在集群中的唯一表示，非负正数。当该服务器的IP地址发生改变时，broker.id没有变化，则不会影响consumers的消息情况</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.dirs</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">/tmp/kafka-logs</span></p>
+</td>
+<td valign="top">
+<p>kafka数据的存放地址，多个地址的话用逗号分割/data/kafka-logs-<span style="color:rgb(0,153,0)">1</span>，/data/kafka-logs-<span style="color:rgb(0,153,0)">2</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>port</p>
+</td>
+<td valign="top">
+<p>9092</p>
+</td>
+<td valign="top">
+<p>broker server服务端口</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>message.max.bytes</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">1000000</span></p>
+</td>
+<td valign="top">
+<p>表示消息体的最大大小，单位是字节</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>num.network.threads</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">3</span></p>
+</td>
+<td valign="top">
+<p>broker处理消息的最大线程数，一般情况下不需要去修改</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>num.io.threads</p>
+</td>
+<td valign="top">
+<p>8</p>
+</td>
+<td valign="top">
+<p>broker处理磁盘IO的线程数，数值应该大于你的硬盘数</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>background.threads</p>
+</td>
+<td valign="top">
+<p>10</p>
+</td>
+<td valign="top">
+<p>一些后台任务处理的线程数，例如过期消息文件的删除等，一般情况下不需要去做修改</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>queued.max.requests</p>
+</td>
+<td valign="top">
+<p>500</p>
+</td>
+<td valign="top">
+<p>等待IO线程处理的请求队列最大数，若是等待IO的请求超过这个数值，那么会停止接受外部消息，应该是一种自我保护机制。</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>host.name</p>
+</td>
+<td valign="top">
+<p>null</p>
+</td>
+<td valign="top">
+<p>broker的主机地址，若是设置了，那么会绑定到这个地址上，若是没有，会绑定到所有的接口上，并将其中之一发送到ZK，一般不设置</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">advertised.host.name</span></p>
+</td>
+<td valign="top">
+<p>null</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">If this is set this is the hostname that will be given out to producers, consumers, and other brokers to connect to.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">advertised.port</span></p>
+</td>
+<td valign="top">
+<p>null</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">The port to give out to producers, consumers, and other brokers to use in establishing connections. This only needs to be set if this port is different from the port the server should bind to.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>socket.send.buffer.bytes</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">100 * 1024</span></p>
+</td>
+<td valign="top">
+<p>socket的发送缓冲区，socket的调优参数SO_SNDBUFF</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>socket.receive.buffer.bytes</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">100 * 1024</span></p>
+</td>
+<td valign="top">
+<p>socket的接受缓冲区，socket的调优参数SO_RCVBUFF</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>socket.request.max.bytes </p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">100 * 1024 * 1024</span></p>
+</td>
+<td valign="top">
+<p>socket请求的最大数值，防止内存溢出，必须小于<span style="color:rgb(51,51,51)">Java heap size.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.segment.bytes</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">1024 * 1024 * 1024</span></p>
+</td>
+<td valign="top">
+<p>topic的分区是以一堆segment文件存储的，这个控制每个segment的大小，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.roll.hours</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">24 * 7 hours</span></p>
+</td>
+<td valign="top">
+<p>这个参数会在日志segment没有达到log.segment.bytes设置的大小，也会强制新建一个segment会被 topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleanup.policy</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">delete</span></p>
+</td>
+<td valign="top">
+<p>日志清理策略选择有：delete和compact主要针对过期数据的处理，或是日志文件达到限制的额度，会被 topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.retention.minutes</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">7 days</span></p>
+</td>
+<td valign="top">
+<p>数据存储的最大时间超过这个时间会根据log.cleanup.policy设置的策略处理数据，也就是消费端能够多久去消费数据</p>
+<p>log.retention.bytes和log.retention.minutes任意一个达到要求，都会执行删除，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.retention.bytes=-<span style="color:rgb(0,153,0)">1</span></p>
+</td>
+<td valign="top">
+<p>-1</p>
+</td>
+<td valign="top">
+<p>topic每个分区的最大文件大小，一个topic的大小限制 =分区数*log.retention.bytes。-<span style="color:rgb(0,153,0)">1</span>没有大小限log.retention.bytes和log.retention.minutes任意一个达到要求，都会执行删除，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.retention.check.interval.ms</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">5 minutes</span></p>
+</td>
+<td valign="top">
+<p>文件大小检查的周期时间，是否处罚 log.cleanup.policy中设置的策略</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.enable</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">false</span></p>
+</td>
+<td valign="top">
+<p>是否开启日志压缩</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.threads</p>
+</td>
+<td valign="top">
+<p>1</p>
+</td>
+<td valign="top">
+<p>日志压缩运行的线程数</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.io.max.bytes.per.second</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Double.MaxValue</span></p>
+</td>
+<td valign="top">
+<p>日志压缩时候处理的最大大小</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.dedupe.buffer.size</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">500*1024*1024</span></p>
+</td>
+<td valign="top">
+<p>日志压缩去重时候的缓存空间，在空间允许的情况下，越大越好</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.io.buffer.size</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">512*1024</span></p>
+</td>
+<td valign="top">
+<p>日志清理时候用到的IO块大小一般不需要修改</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.io.buffer.load.factor</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">0.9</span></p>
+</td>
+<td valign="top">
+<p>日志清理中hash表的扩大因子一般不需要修改</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.backoff.ms </p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">15000</span></p>
+</td>
+<td valign="top">
+<p>检查是否清理日志清理的间隔</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.min.cleanable.ratio</p>
+</td>
+<td valign="top">
+<p>0.5</p>
+</td>
+<td valign="top">
+<p>日志清理的频率控制，越大意味着更高效的清理，同时会存在一些空间上的浪费，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.cleaner.delete.retention.ms</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">1 day</span></p>
+</td>
+<td valign="top">
+<p>对于压缩的日志保留的最长时间，也是客户端消费消息的最长时间，同log.retention.minutes的区别在于一个控制未压缩数据，一个控制压缩后的数据。会被topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.index.size.max.bytes </p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">10 * 1024 * 1024</span></p>
+</td>
+<td valign="top">
+<p>对于segment日志的索引文件大小限制，会被topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.index.interval.bytes</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">4096</span></p>
+</td>
+<td valign="top">
+<p>当执行一个fetch操作后，需要一定的空间来扫描最近的offset大小，设置越大，代表扫描速度越快，但是也更好内存，一般情况下不需要搭理这个参数</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.flush.interval.messages</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Long.MaxValue</span></p>
+</td>
+<td valign="top">
+<p>log文件<span style="color:rgb(255,38,0)">”sync”</span>到磁盘之前累积的消息条数<span style="color:rgb(85,85,85)">,</span>因为磁盘IO操作是一个慢操作,但又是一个<span style="color:rgb(255,38,0)">”</span><span style="color:rgb(255,38,0)">数据可靠性</span><span style="color:rgb(255,38,0)">"</span>的必要手段<span style="color:rgb(85,85,85)">,</span>所以此参数的设置,需要在<strong><span style="color:rgb(255,38,0)">"</span><span style="color:rgb(255,38,0)">数据可靠性</span><span style="color:rgb(255,38,0)">"</span></strong>与<span style="color:rgb(200,37,6)">"</span><span style="color:rgb(200,37,6)">性能</span><span style="color:rgb(200,37,6)">"</span>之间做必要的权衡.如果此值过大,将会导致每次<span style="color:rgb(4,51,255)">"fsync"</span>的时间较长(IO阻塞)<span style="color:rgb(85,85,85)">,</span>如果此值过小,将会导致<strong><span style="color:rgb(255,38,0)">"fsync"</span></strong>的次数较多,这也意味着整体的client请求有一定的延迟.物理server故障,将会导致没有fsync的消息丢失.</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.flush.scheduler.interval.ms</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Long.MaxValue</span></p>
+</td>
+<td valign="top">
+<p>检查是否需要固化到硬盘的时间间隔</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.flush.interval.ms = None</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Long.MaxValue</span></p>
+</td>
+<td valign="top">
+<p>仅仅通过interval来控制消息的磁盘写入时机,是不足的.此参数用于控制<strong><span style="color:rgb(255,38,0)">"fsync"</span></strong>的时间间隔,如果消息量始终没有达到阀值,但是离上一次磁盘同步的时间间隔达到阀值,也将触发.</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.delete.delay.ms </p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">60000</span></p>
+</td>
+<td valign="top">
+<p>文件在索引中清除后保留的时间一般不需要去修改</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>log.flush.offset.checkpoint.interval.ms</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">60000</span></p>
+</td>
+<td valign="top">
+<p>控制上次固化硬盘的时间点，以便于数据恢复一般不需要去修改</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">log.segment.delete.delay.ms</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">60000</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">the amount of time to wait before deleting a file from the filesystem.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>auto.create.topics.enable</p>
+</td>
+<td valign="top">
+<p>true</p>
+</td>
+<td valign="top">
+<p>是否允许自动创建topic，若是<strong><span style="color:rgb(0,102,153)">false</span></strong>，就需要通过命令创建topic</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><strong><span style="color:rgb(4,51,255)">default</span></strong>.replication.factor</p>
+</td>
+<td valign="top">
+<p>1</p>
+</td>
+<td valign="top">
+<p>自动创建的topic默认 replication factor</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>num.partitions</p>
+</td>
+<td valign="top">
+<p>1</p>
+</td>
+<td valign="top">
+<p>每个topic的分区个数，若是在topic创建时候没有指定的话会被topic创建时的指定参数覆盖</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>以下是kafka中Leader,replicas配置参数</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)"> </span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)"> </span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>controller.socket.timeout.ms </p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">30000</span></p>
+</td>
+<td valign="top">
+<p>partition leader与replicas之间通讯时,socket的超时时间</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>controller.message.queue.size</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Int.MaxValue</span></p>
+</td>
+<td valign="top">
+<p>partition leader与replicas数据同步时,消息的队列尺寸</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>replica.lag.time.max.ms</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(0,153,0)">10000</span></p>
+</td>
+<td valign="top">
+<p>replicas响应partition leader的最长等待时间，若是超过这个时间，就将replicas列入ISR(in-sync replicas)，并认为它是死的，不会再加入管理中</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>replica.lag.max.messages</p>
+</td>
+<td valign="top">
+<p>4000</p>
+</td>
+<td valign="top">
+<p>如果follower落后与leader太多,将会认为此follower[或者说partition relicas]已经失效</p>
+<p>##通常,在follower与leader通讯时,因为网络延迟或者链接断开,总会导致replicas中消息同步滞后</p>
+<p>##如果消息之后太多,leader将认为此follower网络延迟较大或者消息吞吐能力有限,将会把此replicas迁移</p>
+<p>##到其他follower中.</p>
+<p>##在broker数量较少,或者网络不足的环境中,建议提高此值.</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>replica.socket.timeout.ms</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">30 * 1000</span></p>
+</td>
+<td valign="top">
+<p>follower与leader之间的socket超时时间</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>replica.socket.receive.buffer.bytes</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">64 * 1024</span></p>
+</td>
+<td valign="top">
+<p>leader复制时候的socket缓存大小</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>replica.fetch.max.bytes</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(0,153,0)">1024</span>*<span style="color:rgb(0,153,0)">1024</span></p>
+</td>
+<td valign="top">
+<p>replicas每次获取数据的最大大小</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>replica.fetch.wait.max.ms </p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">500</span></p>
+</td>
+<td valign="top">
+<p>replicas同leader之间通信的最大等待时间，失败了会重试</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>replica.fetch.min.bytes</p>
+</td>
+<td valign="top">
+<p>1</p>
+</td>
+<td valign="top">
+<p>fetch的最小数据尺寸,如果leader中尚未同步的数据不足此值,将会阻塞,直到满足条件</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>num.replica.fetchers</p>
+</td>
+<td valign="top">
+<p>1</p>
+</td>
+<td valign="top">
+<p>leader进行复制的线程数，增大这个数值会增加follower的IO</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>replica.high.watermark.checkpoint.interval.ms</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">5000</span></p>
+</td>
+<td valign="top">
+<p>每个replica检查是否将最高水位进行固化的频率</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">fetch.purgatory.purge.interval.requests</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">1000</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">The purge interval (in number of requests) of the fetch request purgatory.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">producer.purgatory.purge.interval.requests</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">6000</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">The purge interval (in number of requests) of the producer request purgatory.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>controlled.shutdown.enable</p>
+</td>
+<td valign="top">
+<p>true</p>
+</td>
+<td valign="top">
+<p>是否允许控制器关闭broker ,若是设置为<strong><span style="color:rgb(0,102,153)">true</span></strong>,会关闭所有在这个broker上的leader，并转移到其他broker</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>controlled.shutdown.max.retries</p>
+</td>
+<td valign="top">
+<p>3</p>
+</td>
+<td valign="top">
+<p>控制器关闭的尝试次数</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>controlled.shutdown.retry.backoff.ms </p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">5000</span></p>
+</td>
+<td valign="top">
+<p>每次关闭尝试的时间间隔</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">auto.leader.rebalance.enable</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">ture</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">If this is enabled the controller will automatically try to balance leadership for partitions among the brokers by periodically returning leadership to the "preferred" replica for each partition if it is available.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>leader.imbalance.per.broker.percentage </p>
+</td>
+<td valign="top">
+<p>10</p>
+</td>
+<td valign="top">
+<p>leader的不平衡比例，若是超过这个数值，会对分区进行重新的平衡</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>leader.imbalance.check.interval.seconds</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">300</span></p>
+</td>
+<td valign="top">
+<p>检查leader是否不平衡的时间间隔</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>offset.metadata.max.bytes</p>
+</td>
+<td valign="top">
+<p>4096</p>
+</td>
+<td valign="top">
+<p>客户端保留offset信息的最大空间大小</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>zookeeper.connect</p>
+</td>
+<td valign="top">
+<p>null</p>
+</td>
+<td valign="top">
+<p>zookeeper集群的地址，可以是多个，多个之间用逗号分割hostname1:port1,hostname2:port2,hostname3:port3</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>zookeeper.session.timeout.ms</p>
+</td>
+<td valign="top">
+<p>6000</p>
+</td>
+<td valign="top">
+<p>ZooKeeper的最大超时时间，就是心跳的间隔，若是没有反映，那么认为已经死了，不易过大</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>zookeeper.connection.timeout.ms</p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(0,153,0)">6000</span></p>
+</td>
+<td valign="top">
+<p>ZooKeeper的连接超时时间</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>zookeeper.sync.time.ms</p>
+</td>
+<td valign="top">
+<p>2000</p>
+</td>
+<td valign="top">
+<p>ZooKeeper集群中leader和follower之间的同步实际那</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">max.connections.per.ip</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Int.MaxValue</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">The maximum number of connections that a broker allows from each ip address.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">max.connections.per.ip.overrides</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)"> </span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Per-ip or hostname overrides to the default maximum number of connections.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">connections.max.idle.ms</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">600000</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Idle connections timeout: the server socket processor threads close the connections that idle more than this.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">log.roll.jitter.{ms,hours}</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">0</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(63,63,63)">随机的一个抖动时间</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">num.recovery.threads.per.data.dir</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">1</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">The number of threads per data directory to be used for log recovery at startup and flushing at shutdown</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">unclean.leader.election.enable</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">t</span><span style="color:rgb(51,51,51)">rue</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Indicates whether to enable replicas not in the ISR set to be elected as leader as a last resort, even though doing so may result in data loss.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">delete.topic.enable</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">false</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">Enable delete topic.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">offsets.topic.num.partitions</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">5</span><span style="color:rgb(51,51,51)">0</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">The number of partitions for the offset commit topic. Since changing this after deployment is currently unsupported, we recommend using a higher setting for production</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">offsets.topic.retention.minutes</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">1</span><span style="color:rgb(51,51,51)">440</span></p>
+</td>
+<td valign="top">
+<p>存在时间超过这个时间限制的<span style="font-family:Arial">offsets</span><span style="font-family:宋体">都将被标记为待删除</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">offsets.retention.check.interval.ms</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">600000</span></p>
+</td>
+<td valign="top">
+<p>offset<span style="font-family:宋体">管理器检查陈旧</span><span style="font-family:Arial">offsets</span><span style="font-family:宋体">的频率</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">offsets.topic.replication.factor</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">3</span></p>
+</td>
+<td valign="top">
+<p>topic<span style="font-family:宋体">的</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">的备份份数。建议设置更高的数字保证更高的可用性</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">offsets.topic.segment.bytes</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">104857600</span></p>
+</td>
+<td valign="top">
+<p>offsets topic<span style="font-family:宋体">的</span><span style="font-family:Arial">segment</span>大小</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">offsets.load.buffer.size</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">5242880</span></p>
+</td>
+<td valign="top">
+<p>这项设置与批量尺寸相关，当从<span style="font-family:Arial">offsets segment</span><span style="font-family:宋体">中读取时使用。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">offsets.commit.required.acks</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">-1</span></p>
+</td>
+<td valign="top">
+<p>在<span style="font-family:Arial">offset  commit</span><span style="font-family:宋体">可以接受之前，需要设置确认的数目，一般不需要更改</span><span style="font-family:Arial">.</span><span style="color:rgb(51,51,51)"> This is similar to the producer's acknowledgement setting. In general,
+ the default should not be overridden.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">offsets.commit.timeout.ms</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">5000</span></p>
+</td>
+<td valign="top">
+<p><span style="color:rgb(51,51,51)">The offset commit will be delayed until this timeout or the required number of replicas have received the offset commit. This is similar to the producer request timeout.</span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p>topic-level<span style="font-family:宋体">的配置</span></p>
+<p> </p>
+<p><span style="font-family:宋体">有关</span>topics<span style="font-family:宋体">的配置既有全局的又有每个</span><span style="font-family:Arial">topic</span><span style="font-family:宋体">独有的配置。如果没有给定特定</span><span style="font-family:Arial">topic</span><span style="font-family:宋体">设置，则应用默认的全局设置。这些覆盖会在每次创建</span><span style="font-family:Arial">topic</span><span style="font-family:宋体">发生。下面的例子：创建一个</span><span style="font-family:Arial">topic</span><span style="font-family:宋体">，命名为</span><span style="font-family:Arial">my-topic</span><span style="font-family:宋体">，自定义最大消息尺寸以及刷新比率为：</span></p>
+<p>&gt;    bin/kafka-topics.sh --zookeeper localhost:2181 --create --topic my-topic --partitions 1 <br>
+        --replication-factor 1 --config max.message.bytes=64000 --config flush.messages=1</p>
+<p> </p>
+<p><span style="font-family:宋体">需要删除重写时，可以按照以下来做：</span></p>
+<p> </p>
+<p>&gt; bin/kafka-topics.sh --zookeeper localhost:2181 --alter --topic my-topic <br>
+    --deleteConfig max.message.bytes</p>
+<p> </p>
+<p><span style="font-family:宋体">以下是</span>topic-level<span style="font-family:宋体">的配置选项。</span><span style="font-family:Arial">server</span><span style="font-family:宋体">的默认配置在</span><span style="font-family:Arial">Server  Default Property</span><span style="font-family:宋体">列下给出了，设定这些默认值不会改变原有的</span><span style="font-family:宋体">设置</span></p>
+<table>
+<tbody>
+<tr>
+<td valign="center">
+<p>Property</p>
+</td>
+<td valign="center">
+<p>Default</p>
+</td>
+<td valign="center">
+<p>Server Default Property</p>
+</td>
+<td valign="center">
+<p>Description</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">cleanup.policy</span></p>
+</td>
+<td valign="center">
+<p>delete</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.cleanup.policy</span></p>
+</td>
+<td valign="center">
+<p>要么是<span style="font-family:Arial">”delete“</span><span style="font-family:宋体">要么是</span><span style="font-family:Arial">”compact“</span><span style="font-family:宋体">； 这个字符串指明了针对旧日志部分的利用方式；默认方式（</span><span style="font-family:Arial">"delete"</span><span style="font-family:宋体">）将会丢弃旧的部分当他们的回收时间或者尺寸限制到达时。</span><span style="font-family:Arial">”compact“</span><span style="font-family:宋体">将会进行日志压缩</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">delete.retention.ms</span></p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">86400000 (24 hours)</span></p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.cleaner.delete.retention.ms</span></p>
+</td>
+<td valign="center">
+<p>对于压缩日志保留的最长时间，也是客户端消费消息的最长时间，通<span style="font-family:Arial">log.retention.minutes</span><span style="font-family:宋体">的区别在于一个控制未压缩数据，一个控制压缩后的数据。此项配置可以在</span><span style="font-family:Arial">topic</span><span style="font-family:宋体">创建时的置顶参数覆盖</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>flush.messages</p>
+</td>
+<td valign="center">
+<p>None</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.flush.interval.messages</span></p>
+</td>
+<td valign="center">
+<p>此项配置指定时间间隔：强制进行<span style="font-family:Arial">fsync</span><span style="font-family:宋体">日志。例如，如果这个选项设置为</span><span style="font-family:Arial">1</span><span style="font-family:宋体">，那么每条消息之后都需要进行</span><span style="font-family:Arial">fsync</span><span style="font-family:宋体">，如果设置为</span><span style="font-family:Arial">5</span><span style="font-family:宋体">，则每</span><span style="font-family:Arial">5</span><span style="font-family:宋体">条消息就需要进行一次</span><span style="font-family:Arial">fsync</span><span style="font-family:宋体">。一般来说，建议你不要设置这个值。此参数的设置</span><span style="font-family:Arial">,</span><span style="font-family:宋体">需要在</span><span style="font-family:Arial">"</span><span style="font-family:宋体">数据可靠性</span><span style="font-family:Arial">"</span><span style="font-family:宋体">与</span><span style="font-family:Arial">"</span><span style="font-family:宋体">性能</span><span style="font-family:Arial">"</span><span style="font-family:宋体">之间做必要的权衡</span><span style="font-family:Arial">.</span><span style="font-family:宋体">如果此值过大</span><span style="font-family:Arial">,</span><span style="font-family:宋体">将会导致每次</span><span style="font-family:Arial">"fsync"</span><span style="font-family:宋体">的时间较长</span><span style="font-family:Arial">(IO</span><span style="font-family:宋体">阻塞</span><span style="font-family:Arial">),</span><span style="font-family:宋体">如果此值过小</span><span style="font-family:Arial">,</span><span style="font-family:宋体">将会导致</span><span style="font-family:Arial">"fsync"</span><span style="font-family:宋体">的次数较多</span><span style="font-family:Arial">,</span><span style="font-family:宋体">这也意味着整体的</span><span style="font-family:Arial">client</span><span style="font-family:宋体">请求有一定的延迟</span><span style="font-family:Arial">.</span><span style="font-family:宋体">物理</span><span style="font-family:Arial">server</span><span style="font-family:宋体">故障</span><span style="font-family:Arial">,</span><span style="font-family:宋体">将会导致没有</span><span style="font-family:Arial">fsync</span><span style="font-family:宋体">的消息丢失</span><span style="font-family:Arial">.</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">flush.ms</span></p>
+</td>
+<td valign="center">
+<p>None</p>
+</td>
+<td valign="center">
+<p>log.flush.interval.ms</p>
+</td>
+<td valign="center">
+<p>此项配置用来置顶强制进行<span style="font-family:Arial">fsync</span><span style="font-family:宋体">日志到磁盘的时间间隔；例如，如果设置为</span><span style="font-family:Arial">1000</span><span style="font-family:宋体">，那么每</span><span style="font-family:Arial">1000ms</span><span style="font-family:宋体">就需要进行一次</span><span style="font-family:Arial">fsync</span><span style="font-family:宋体">。一般不建议使用这个选项</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">index.interval.bytes</span></p>
+</td>
+<td valign="center">
+<p>4096</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.index.interval.bytes</span></p>
+</td>
+<td valign="center">
+<p>默认设置保证了我们每<span style="font-family:Arial">4096</span><span style="font-family:宋体">个字节就对消息添加一个索引，更多的索引使得阅读的消息更加靠近，但是索引规模却会由此增大；一般不需要改变这个选项</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">max.message.bytes</span></p>
+</td>
+<td valign="center">
+<p>1000000</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">max.message.bytes</span></p>
+</td>
+<td valign="center">
+<p>kafka<span style="font-family:宋体">追加消息的最大尺寸。注意如果你增大这个尺寸，你也必须增大你</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">的</span><span style="font-family:Arial">fetch</span><span style="font-family:宋体">尺寸，这样</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">才能</span><span style="font-family:Arial">fetch</span><span style="font-family:宋体">到这些最大尺寸的消息。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">min.cleanable.dirty.ratio</span></p>
+</td>
+<td valign="center">
+<p>0.5</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">min.cleanable.dirty.ratio</span></p>
+</td>
+<td valign="center">
+<p>此项配置控制<span style="font-family:Arial">log</span><span style="font-family:宋体">压缩器试图进行清除日志的频率。默认情况下，将避免清除压缩率超过</span><span style="font-family:Arial">50%</span><span style="font-family:宋体">的日志。这个比率避免了最大的空间浪费</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">min.insync.replicas</span></p>
+</td>
+<td valign="center">
+<p>1</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">min.insync.replicas</span></p>
+</td>
+<td valign="center">
+<p>当<span style="font-family:Arial">producer</span><span style="font-family:宋体">设置</span><span style="font-family:Arial">request.required.acks</span><span style="font-family:宋体">为</span><span style="font-family:Arial">-1</span><span style="font-family:宋体">时，</span><span style="font-family:Arial">min.insync.replicas</span><span style="font-family:宋体">指定</span><span style="font-family:Arial">replicas</span><span style="font-family:宋体">的最小数目（必须确认每一个</span><span style="font-family:Arial">repica</span><span style="font-family:宋体">的写数据都是成功的），如果这个数目没有达到，</span><span style="font-family:Arial">producer</span><span style="font-family:宋体">会产生异常。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">retention.bytes</span></p>
+</td>
+<td valign="center">
+<p>None</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.retention.bytes</span></p>
+</td>
+<td valign="center">
+<p>如果使用<span style="font-family:Arial">“delete”</span><span style="font-family:宋体">的</span><span style="font-family:Arial">retention  </span><span style="font-family:宋体">策略，这项配置就是指在删除日志之前，日志所能达到的最大尺寸。默认情况下，没有尺寸限制而只有时间限制</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">retention.ms</span></p>
+</td>
+<td valign="center">
+<p>7 days</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.retention.minutes</span></p>
+</td>
+<td valign="center">
+<p>如果使用<span style="font-family:Arial">“delete”</span><span style="font-family:宋体">的</span><span style="font-family:Arial">retention</span><span style="font-family:宋体">策略，这项配置就是指删除日志前日志保存的时间。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">segment.bytes</span></p>
+</td>
+<td valign="center">
+<p>1GB</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.segment.bytes</span></p>
+</td>
+<td valign="center">
+<p>kafka<span style="font-family:宋体">中</span><span style="font-family:Arial">log</span><span style="font-family:宋体">日志是分成一块块存储的，此配置是指</span><span style="font-family:Arial">log</span><span style="font-family:宋体">日志划分成块的大小</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">segment.index.bytes</span></p>
+</td>
+<td valign="center">
+<p>10MB</p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.index.size.max.bytes</span></p>
+</td>
+<td valign="center">
+<p>此配置是有关<span style="font-family:Arial">offsets</span><span style="font-family:宋体">和文件位置之间映射的索引文件的大小；一般不需要修改这个配置</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">segment.ms</span></p>
+</td>
+<td valign="center">
+<p>7 days</p>
+</td>
+<td valign="center">
+<p>log.roll.hours</p>
+</td>
+<td valign="center">
+<p>即使<span style="font-family:Arial">log</span><span style="font-family:宋体">的分块文件没有达到需要删除、压缩的大小，一旦</span><span style="font-family:Arial">log</span><span style="font-family:宋体">的时间达到这个上限，就会强制新建一个</span><span style="font-family:Arial">log</span><span style="font-family:宋体">分块文件</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">segment.jitter.ms</span></p>
+</td>
+<td valign="center">
+<p>0 </p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">log.roll.jitter.{ms,hours}</span></p>
+</td>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">The maximum jitter to subtract from logRollTimeMillis.</span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3><strong>Producer API Config</strong></h3>
+<p><span style="font-family:宋体">这里只介绍使用的</span>java API用的配置</p>
+<p>    <span style="font-family:宋体">核心配置：</span>boostrap.servers<span style="font-family:宋体">、</span><span style="font-family:Arial">acks</span><span style="font-family:宋体">、</span><span style="font-family:Arial">value.serializer</span><span style="font-family:宋体">、</span><span style="font-family:Arial">key.serializer</span></p>
+<table>
+<tbody>
+<tr>
+<td valign="center">
+<p>Name</p>
+</td>
+<td valign="center">
+<p>Type</p>
+</td>
+<td valign="center">
+<p>Default</p>
+</td>
+<td valign="center">
+<p>Importance</p>
+</td>
+<td valign="center">
+<p>Description</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>boostrap.servers</p>
+</td>
+<td valign="center">
+<p>list</p>
+</td>
+<td valign="center">
+<p> </p>
+</td>
+<td valign="center">
+<p>high</p>
+</td>
+<td valign="center">
+<p>用于建立与<span style="font-family:Arial">kafka</span><span style="font-family:宋体">集群连接的</span><span style="font-family:Arial">host/port</span><span style="font-family:宋体">组。数据将会在所有</span><span style="font-family:Arial">servers</span><span style="font-family:宋体">上均衡加载，不管哪些</span><span style="font-family:Arial">server</span><span style="font-family:宋体">是指定用于</span><span style="font-family:Arial">bootstrapping</span><span style="font-family:宋体">。这个列表仅仅影响初始化的</span><span style="font-family:Arial">hosts</span><span style="font-family:宋体">（用于发现全部的</span><span style="font-family:Arial">servers</span><span style="font-family:宋体">）。这个列表格式：</span><br>
+host1:port1,host2:port2,...<br>
+因为这些<span style="font-family:Arial">server</span><span style="font-family:宋体">仅仅是用于初始化的连接，以发现集群所有成员关系（可能会动态的变化），这个列表不需要包含所有的</span><span style="font-family:Arial">servers</span><span style="font-family:宋体">（你可能想要不止一个</span><span style="font-family:Arial">server</span><span style="font-family:宋体">，尽管这样，可能某个</span><span style="font-family:Arial">server</span><span style="font-family:宋体">宕机了）。如果没有</span><span style="font-family:Arial">server</span><span style="font-family:宋体">在这个列表出现，则发送数据会一直失败，直到列表可用。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>acks</p>
+</td>
+<td valign="center">
+<p>string</p>
+</td>
+<td valign="center">
+<p>1</p>
+</td>
+<td valign="center">
+<p>high</p>
+</td>
+<td valign="center">
+<p>producer<span style="font-family:宋体">需要</span><span style="font-family:Arial">server</span><span style="font-family:宋体">接收到数据之后发出的确认接收的信号，此项配置就是指</span><span style="font-family:Arial">procuder</span><span style="font-family:宋体">需要多少个这样的确认信号。此配置实际上代表了数据备份的可用性。以下设置为常用选项：</span><br>
+（<span style="font-family:Arial">1</span><span style="font-family:宋体">）</span><span style="font-family:Arial">acks=0</span><span style="font-family:宋体">： 设置为</span><span style="font-family:Arial">0</span><span style="font-family:宋体">表示</span><span style="font-family:Arial">producer</span><span style="font-family:宋体">不需要等待任何确认收到的信息。副本将立即加到</span><span style="font-family:Arial">socket
+  buffer</span><span style="font-family:宋体">并认为已经发送。没有任何保障可以保证此种情况下</span><span style="font-family:Arial">server</span><span style="font-family:宋体">已经成功接收数据，同时重试配置不会发生作用（因为客户端不知道是否失败）回馈的</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">会总是设置为</span><span style="font-family:Arial">-1</span><span style="font-family:宋体">；</span><br>
+（<span style="font-family:Arial">2</span><span style="font-family:宋体">）</span><span style="font-family:Arial">acks=1</span><span style="font-family:宋体">： 这意味着至少要等待</span><span style="font-family:Arial">leader</span><span style="font-family:宋体">已经成功将数据写入本地</span><span style="font-family:Arial">log</span><span style="font-family:宋体">，但是并没有等待所有</span><span style="font-family:Arial">follower</span><span style="font-family:宋体">是否成功写入。这种情况下，如果</span><span style="font-family:Arial">follower</span><span style="font-family:宋体">没有成功备份数据，而此时</span><span style="font-family:Arial">leader</span><span style="font-family:宋体">又挂掉，则消息会丢失。</span><br>
+（<span style="font-family:Arial">3</span><span style="font-family:宋体">）</span><span style="font-family:Arial">acks=all</span><span style="font-family:宋体">： 这意味着</span><span style="font-family:Arial">leader</span><span style="font-family:宋体">需要等待所有备份都成功写入日志，这种策略会保证只要有一个备份存活就不会丢失数据。这是最强的保证。</span><br>
+（<span style="font-family:Arial">4</span><span style="font-family:宋体">）其他的设置，例如</span><span style="font-family:Arial">acks=2</span><span style="font-family:宋体">也是可以的，这将需要给定的</span><span style="font-family:Arial">acks</span><span style="font-family:宋体">数量，但是这种策略一般很少用。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>buffer.memory</p>
+</td>
+<td valign="center">
+<p>long</p>
+</td>
+<td valign="center">
+<p>33554432</p>
+</td>
+<td valign="center">
+<p>high</p>
+</td>
+<td valign="center">
+<p>producer<span style="font-family:宋体">可以用来缓存数据的内存大小。如果数据产生速度大于向</span><span style="font-family:Arial">broker</span><span style="font-family:宋体">发送的速度，</span><span style="font-family:Arial">producer</span><span style="font-family:宋体">会阻塞或者抛出异常，以</span><span style="font-family:Arial">“block.on.buffer.full”</span><span style="font-family:宋体">来表明。</span><br>
+<br>
+这项设置将和<span style="font-family:Arial">producer</span><span style="font-family:宋体">能够使用的总内存相关，但并不是一个硬性的限制，因为不是</span><span style="font-family:Arial">producer</span><span style="font-family:宋体">使用的所有内存都是用于缓存。一些额外的内存会用于压缩（如果引入压缩机制），同样还有一些用于维护请求。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>compression.type</p>
+</td>
+<td valign="center">
+<p>string</p>
+</td>
+<td valign="center">
+<p>none</p>
+</td>
+<td valign="center">
+<p>high</p>
+</td>
+<td valign="center">
+<p>producer<span style="font-family:宋体">用于压缩数据的压缩类型。默认是无压缩。正确的选项值是</span><span style="font-family:Arial">none</span><span style="font-family:宋体">、</span><span style="font-family:Arial">gzip</span><span style="font-family:宋体">、</span><span style="font-family:Arial">snappy</span><span style="font-family:宋体">。</span><br>
+压缩最好用于批量处理，批量处理消息越多，压缩性能越好。</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>retries</p>
+</td>
+<td valign="center">
+<p>int</p>
+</td>
+<td valign="center">
+<p>0</p>
+</td>
+<td valign="center">
+<p>high</p>
+</td>
+<td valign="center">
+<p>设置大于<span style="font-family:Arial">0</span><span style="font-family:宋体">的值将使客户端重新发送任何数据，一旦这些数据发送失败。注意，这些重试与客户端接收到发送错误时的重试没有什么不同。</span><span style="color:rgb(255,0,0)">允许重试将潜在的改变数据的顺序，如果这两个消息记录都是发送到同一个<span style="font-family:Arial">partition</span><span style="font-family:宋体">，则第一个消息失败第二个发送成功，则第二条消息会比第一条消息出现要早。</span></span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>batch.size</p>
+</td>
+<td valign="center">
+<p>int</p>
+</td>
+<td valign="center">
+<p>16384</p>
+</td>
+<td valign="center">
+<p>medium</p>
+</td>
+<td valign="center">
+<p>producer<span style="font-family:宋体">将试图批处理消息记录，以减少请求次数。这将改善</span><span style="font-family:Arial">client</span><span style="font-family:宋体">与</span><span style="font-family:Arial">server</span><span style="font-family:宋体">之间的性能。这项配置控制默认的批量处理消息字节数。</span><br>
+不会试图处理大于这个字节数的消息字节数。<br>
+发送到<span style="font-family:Arial">brokers</span><span style="font-family:宋体">的请求将包含多个批量处理，其中会包含对每个</span><span style="font-family:Arial">partition</span><span style="font-family:宋体">的一个请求。</span><br>
+较小的批量处理数值比较少用，并且可能降低吞吐量（<span style="font-family:Arial">0</span><span style="font-family:宋体">则会仅用批量处理）。较大的批量处理数值将会浪费更多内存空间，这样就需要分配特定批量处理数值的内存大小。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>client.id</p>
+</td>
+<td valign="center">
+<p>string</p>
+</td>
+<td valign="center">
+<p> </p>
+</td>
+<td valign="center">
+<p>medium</p>
+</td>
+<td valign="center">
+<p>当向<span style="font-family:Arial">server</span><span style="font-family:宋体">发出请求时，这个字符串会发送给</span><span style="font-family:Arial">server</span><span style="font-family:宋体">。目的是能够追踪请求源头，以此来允许</span><span style="font-family:Arial">ip/port</span><span style="font-family:宋体">许可列表之外的一些应用可以发送信息。这项应用可以设置任意字符串，因为没有任何功能性的目的，除了记录和跟踪</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>linger.ms</p>
+</td>
+<td valign="center">
+<p>long</p>
+</td>
+<td valign="center">
+<p>0</p>
+</td>
+<td valign="center">
+<p>medium</p>
+</td>
+<td valign="center">
+<p>producer<span style="font-family:宋体">组将会汇总任何在请求与发送之间到达的消息记录一个单独批量的请求。通常来说，这只有在记录产生速度大于发送速度的时候才能发生。然而，在某些条件下，客户端将希望降低请求的数量，甚至降低到中等负载一下。这项设置将通过增加小的延迟来完成</span><span style="font-family:Arial">--</span><span style="font-family:宋体">即，不是立即发送一条记录，</span><span style="font-family:Arial">producer</span><span style="font-family:宋体">将会等待给定的延迟时间以允许其他消息记录发送，这些消息记录可以批量处理。这可以认为是</span><span style="font-family:Arial">TCP</span><span style="font-family:宋体">种</span><span style="font-family:Arial">Nagle</span><span style="font-family:宋体">的算法类似。这项设置设定了批量处理的更高的延迟边界：一旦我们获得某个</span><span style="font-family:Arial">partition</span><span style="font-family:宋体">的</span><span style="font-family:Arial">batch.size</span><span style="font-family:宋体">，他将会立即发送而不顾这项设置，然而如果我们获得消息字节数比这项设置要小的多，我们需要</span><span style="font-family:Arial">“linger”</span><span style="font-family:宋体">特定的时间以获取更多的消息。
+ 这个设置默认为</span><span style="font-family:Arial">0</span><span style="font-family:宋体">，即没有延迟。设定</span><span style="font-family:Arial">linger.ms=5</span><span style="font-family:宋体">，例如，将会减少请求数目，但是同时会增加</span><span style="font-family:Arial">5ms</span><span style="font-family:宋体">的延迟。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>max.request.size</p>
+</td>
+<td valign="center">
+<p>int</p>
+</td>
+<td valign="center">
+<p>1028576</p>
+</td>
+<td valign="center">
+<p>medium</p>
+</td>
+<td valign="center">
+<p>请求的最大字节数。这也是对最大记录尺寸的有效覆盖。注意：<span style="font-family:Arial">server</span><span style="font-family:宋体">具有自己对消息记录尺寸的覆盖，这些尺寸和这个设置不同。此项设置将会限制</span><span style="font-family:Arial">producer</span><span style="font-family:宋体">每次批量发送请求的数目，以防发出巨量的请求。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>receive.buffer.bytes</p>
+</td>
+<td valign="center">
+<p>int</p>
+</td>
+<td valign="center">
+<p>32768</p>
+</td>
+<td valign="center">
+<p>medium</p>
+</td>
+<td valign="center">
+<p>TCP receive<span style="font-family:宋体">缓存大小，当阅读数据时使用</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>send.buffer.bytes</p>
+</td>
+<td valign="center">
+<p>int</p>
+</td>
+<td valign="center">
+<p>131072</p>
+</td>
+<td valign="center">
+<p>medium</p>
+</td>
+<td valign="center">
+<p>TCP send<span style="font-family:宋体">缓存大小，当发送数据时使用</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>timeout.ms</p>
+</td>
+<td valign="center">
+<p>int</p>
+</td>
+<td valign="center">
+<p>30000</p>
+</td>
+<td valign="center">
+<p>medium</p>
+</td>
+<td valign="center">
+<p>此配置选项控制<span style="font-family:Arial">server</span><span style="font-family:宋体">等待来自</span><span style="font-family:Arial">followers</span><span style="font-family:宋体">的确认的最大时间。如果确认的请求数目在此时间内没有实现，则会返回一个错误。这个超时限制是以</span><span style="font-family:Arial">server</span><span style="font-family:宋体">端度量的，没有包含请求的网络延迟</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>block.on.buffer.full</p>
+</td>
+<td valign="center">
+<p>boolean</p>
+</td>
+<td valign="center">
+<p>true</p>
+</td>
+<td valign="center">
+<p>low</p>
+</td>
+<td valign="center">
+<p>当我们内存缓存用尽时，必须停止接收新消息记录或者抛出错误。默认情况下，这个设置为真，然而某些阻塞可能不值得期待，因此立即抛出错误更好。设置为<span style="font-family:Arial">false</span><span style="font-family:宋体">则会这样：</span><span style="font-family:Arial">producer</span><span style="font-family:宋体">会抛出一个异常错误：</span><span style="font-family:Arial">BufferExhaustedException</span><span style="font-family:宋体">，
+ 如果记录已经发送同时缓存已满</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>metadata.fetch.timeout.ms</p>
+</td>
+<td valign="center">
+<p>long</p>
+</td>
+<td valign="center">
+<p>60000</p>
+</td>
+<td valign="center">
+<p>low</p>
+</td>
+<td valign="center">
+<p>是指我们所获取的一些元素据的第一个时间数据。元素据包含：<span style="font-family:Arial">topic</span><span style="font-family:宋体">，</span><span style="font-family:Arial">host</span><span style="font-family:宋体">，</span><span style="font-family:Arial">partitions</span><span style="font-family:宋体">。此项配置是指当等待元素据</span><span style="font-family:Arial">fetch</span><span style="font-family:宋体">成功完成所需要的时间，否则会跑出异常给客户端。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>metadata.max.age.ms</p>
+</td>
+<td valign="center">
+<p>long</p>
+</td>
+<td valign="center">
+<p>300000</p>
+</td>
+<td valign="center">
+<p>low</p>
+</td>
+<td valign="center">
+<p>以微秒为单位的时间，是在我们强制更新<span style="font-family:Arial">metadata</span><span style="font-family:宋体">的时间间隔。即使我们没有看到任何</span><span style="font-family:Arial">partition leadership</span><span style="font-family:宋体">改变。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>metric.reporters</p>
+</td>
+<td valign="center">
+<p>list</p>
+</td>
+<td valign="center">
+<p>[]</p>
+</td>
+<td valign="center">
+<p>low</p>
+</td>
+<td valign="center">
+<p>类的列表，用于衡量指标。实现<span style="font-family:Arial">MetricReporter</span><span style="font-family:宋体">接口，将允许增加一些类，这些类在新的衡量指标产生时就会改变。</span><span style="font-family:Arial">JmxReporter</span><span style="font-family:宋体">总会包含用于注册</span><span style="font-family:Arial">JMX</span><span style="font-family:宋体">统计</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>metrics.num.samples</p>
+</td>
+<td valign="center">
+<p>int</p>
+</td>
+<td valign="center">
+<p>2</p>
+</td>
+<td valign="center">
+<p>low</p>
+</td>
+<td valign="center">
+<p>用于维护<span style="font-family:Arial">metrics</span><span style="font-family:宋体">的样本数</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>metrics.sample.window.ms</p>
+</td>
+<td valign="center">
+<p>long</p>
+</td>
+<td valign="center">
+<p>30000</p>
+</td>
+<td valign="center">
+<p>low</p>
+</td>
+<td valign="center">
+<p>metrics<span style="font-family:宋体">系统维护可配置的样本数量，在一个可修正的</span><span style="font-family:Arial">window  size</span><span style="font-family:宋体">。这项配置配置了窗口大小，例如。我们可能在</span><span style="font-family:Arial">30s</span><span style="font-family:宋体">的期间维护两个样本。当一个窗口推出后，我们会擦除并重写最老的窗口</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>recoonect.backoff.ms</p>
+</td>
+<td valign="center">
+<p>long</p>
+</td>
+<td valign="center">
+<p>10</p>
+</td>
+<td valign="center">
+<p>low</p>
+</td>
+<td valign="center">
+<p>连接失败时，当我们重新连接时的等待时间。这避免了客户端反复重连</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>retry.backoff.ms</p>
+</td>
+<td valign="center">
+<p>long</p>
+</td>
+<td valign="center">
+<p>100</p>
+</td>
+<td valign="center">
+<p>low</p>
+</td>
+<td valign="center">
+<p>在试图重试失败的<span style="font-family:Arial">produce</span><span style="font-family:宋体">请求之前的等待时间。避免陷入发送</span><span style="font-family:Arial">-</span><span style="font-family:宋体">失败的死循环中。</span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p> </p>
+<h3><strong>Consumer API Config</strong></h3>
+<p>consumer<span style="font-family:宋体">基本配置如下：</span></p>
+<p>       group.id</p>
+<p>       zookeeper.connect</p>
+<table>
+<tbody>
+<tr>
+<td valign="center">
+<p>Property</p>
+</td>
+<td valign="center">
+<p>Default</p>
+</td>
+<td valign="center">
+<p>Description</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>group.id</p>
+</td>
+<td valign="center">
+<p> </p>
+</td>
+<td valign="center">
+<p>用来唯一标识<span style="font-family:Arial">consumer</span><span style="font-family:宋体">进程所在组的字符串，如果设置同样的</span><span style="font-family:Arial">group  id</span><span style="font-family:宋体">，表示这些</span><span style="font-family:Arial">processes</span><span style="font-family:宋体">都是属于同一个</span><span style="font-family:Arial">consumer
+  group</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>zookeeper.connect</p>
+</td>
+<td valign="center">
+<p> </p>
+</td>
+<td valign="center">
+<p>指定<span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">的连接的字符串，格式是</span><span style="font-family:Arial">hostname</span><span style="font-family:宋体">：</span><span style="font-family:Arial">port</span><span style="font-family:宋体">，此处</span><span style="font-family:Arial">host</span><span style="font-family:宋体">和</span><span style="font-family:Arial">port</span><span style="font-family:宋体">都是</span><span style="font-family:Arial">zookeeper
+ server</span><span style="font-family:宋体">的</span><span style="font-family:Arial">host</span><span style="font-family:宋体">和</span><span style="font-family:Arial">port</span><span style="font-family:宋体">，为避免某个</span><span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">机器宕机之后失联，你可以指定多个</span><span style="font-family:Arial">hostname</span><span style="font-family:宋体">：</span><span style="font-family:Arial">port</span><span style="font-family:宋体">，使用逗号作为分隔：</span><br>
+hostname1<span style="font-family:宋体">：</span><span style="font-family:Arial">port1</span><span style="font-family:宋体">，</span><span style="font-family:Arial">hostname2</span><span style="font-family:宋体">：</span><span style="font-family:Arial">port2</span><span style="font-family:宋体">，</span><span style="font-family:Arial">hostname3</span><span style="font-family:宋体">：</span><span style="font-family:Arial">port3</span><br>
+可以在<span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">连接字符串中加入</span><span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">的</span><span style="font-family:Arial">chroot</span><span style="font-family:宋体">路径，此路径用于存放他自己的数据，方式：</span><br>
+hostname1<span style="font-family:宋体">：</span><span style="font-family:Arial">port1</span><span style="font-family:宋体">，</span><span style="font-family:Arial">hostname2</span><span style="font-family:宋体">：</span><span style="font-family:Arial">port2</span><span style="font-family:宋体">，</span><span style="font-family:Arial">hostname3</span><span style="font-family:宋体">：</span><span style="font-family:Arial">port3/chroot/path</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>consumer.id</p>
+</td>
+<td valign="center">
+<p>null</p>
+</td>
+<td valign="center">
+<p>不需要设置，一般自动产生</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>socket.timeout.ms</p>
+</td>
+<td valign="center">
+<p>30*100</p>
+</td>
+<td valign="center">
+<p>网络请求的超时限制。真实的超时限制是 <span style="font-family:Arial">  max.fetch.wait+socket.timeout.ms</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>socket.receive.buffer.bytes</p>
+</td>
+<td valign="center">
+<p>64*1024</p>
+</td>
+<td valign="center">
+<p>socket<span style="font-family:宋体">用于接收网络请求的缓存大小</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>fetch.message.max.bytes</p>
+</td>
+<td valign="center">
+<p>1024*1024</p>
+</td>
+<td valign="center">
+<p>每次<span style="font-family:Arial">fetch</span><span style="font-family:宋体">请求中，针对每次</span><span style="font-family:Arial">fetch</span><span style="font-family:宋体">消息的最大字节数。这些字节将会督导用于每个</span><span style="font-family:Arial">partition</span><span style="font-family:宋体">的内存中，因此，此设置将会控制</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">所使用的</span><span style="font-family:Arial">memory</span><span style="font-family:宋体">大小。这个</span><span style="font-family:Arial">fetch</span><span style="font-family:宋体">请求尺寸必须至少和</span><span style="font-family:Arial">server</span><span style="font-family:宋体">允许的最大消息尺寸相等，否则，</span><span style="font-family:Arial">producer</span><span style="font-family:宋体">可能发送的消息尺寸大于</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">所能消耗的尺寸。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>num.consumer.fetchers</p>
+</td>
+<td valign="center">
+<p>1</p>
+</td>
+<td valign="center">
+<p>用于<span style="font-family:Arial">fetch</span><span style="font-family:宋体">数据的</span><span style="font-family:Arial">fetcher</span><span style="font-family:宋体">线程数</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>auto.commit.enable</p>
+</td>
+<td valign="center">
+<p>true</p>
+</td>
+<td valign="center">
+<p>如果为真，<span style="font-family:Arial">consumer</span><span style="font-family:宋体">所</span><span style="font-family:Arial">fetch</span><span style="font-family:宋体">的消息的</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">将会自动的同步到</span><span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">。这项提交的</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">将在进程挂掉时，由新的</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">使用</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>auto.commit.interval.ms</p>
+</td>
+<td valign="center">
+<p>60*1000</p>
+</td>
+<td valign="center">
+<p>consumer<span style="font-family:宋体">向</span><span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">提交</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">的频率，单位是</span>毫秒</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>queued.max.message.chunks</p>
+</td>
+<td valign="center">
+<p>2</p>
+</td>
+<td valign="center">
+<p>用于缓存消息的最大数目，以供<span style="font-family:Arial">consumption</span><span style="font-family:宋体">。每个</span><span style="font-family:Arial">chunk</span><span style="font-family:宋体">必须和</span><span style="font-family:Arial">fetch.message.max.bytes</span><span style="font-family:宋体">相同</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>rebalance.max.retries</p>
+</td>
+<td valign="center">
+<p>4</p>
+</td>
+<td valign="center">
+<p>当新的<span style="font-family:Arial">consumer</span><span style="font-family:宋体">加入到</span><span style="font-family:Arial">consumer  group</span><span style="font-family:宋体">时，</span><span style="font-family:Arial">consumers</span><span style="font-family:宋体">集合试图重新平衡分配到每个</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">的</span><span style="font-family:Arial">partitions</span><span style="font-family:宋体">数目。如果</span><span style="font-family:Arial">consumers</span><span style="font-family:宋体">集合改变了，当分配正在执行时，这个重新平衡会失败并重入</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">fetch.min.bytes</span></p>
+</td>
+<td valign="center">
+<p>1</p>
+</td>
+<td valign="center">
+<p>每次<span style="font-family:Arial">fetch</span><span style="font-family:宋体">请求时，</span><span style="font-family:Arial">server</span><span style="font-family:宋体">应该返回的最小字节数。如果没有足够的数据返回，请求会等待，直到足够的数据才会返回。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">fetch.wait.max.ms</span></p>
+</td>
+<td valign="center">
+<p>100</p>
+</td>
+<td valign="center">
+<p>如果没有足够的数据能够满足<span style="font-family:Arial">fetch.min.bytes</span><span style="font-family:宋体">，则此项配置是指在应答</span><span style="font-family:Arial">fetch</span><span style="font-family:宋体">请求之前，</span><span style="font-family:Arial">server</span><span style="font-family:宋体">会阻塞的最大时间。</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">rebalance.backoff.ms</span></p>
+</td>
+<td valign="center">
+<p>2000</p>
+</td>
+<td valign="center">
+<p>在重试<span style="font-family:Arial">reblance</span><span style="font-family:宋体">之前</span><span style="font-family:Arial">backoff</span><span style="font-family:宋体">时间</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">refresh.leader.backoff.ms</span></p>
+</td>
+<td valign="center">
+<p>200</p>
+</td>
+<td valign="center">
+<p>在试图确定某个<span style="font-family:Arial">partition</span><span style="font-family:宋体">的</span><span style="font-family:Arial">leader</span><span style="font-family:宋体">是否失去他的</span><span style="font-family:Arial">leader</span><span style="font-family:宋体">地位之前，需要等待的</span><span style="font-family:Arial">backoff</span><span style="font-family:宋体">时间</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">auto.offset.reset</span></p>
+</td>
+<td valign="center">
+<p>largest</p>
+</td>
+<td valign="center">
+<p>zookeeper<span style="font-family:宋体">中没有初始化的</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">时，如果</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">是以下值的回应：</span><br>
+smallest<span style="font-family:宋体">：自动复位</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">为</span><span style="font-family:Arial">smallest</span><span style="font-family:宋体">的</span><span style="font-family:Arial">offset</span><br>
+largest<span style="font-family:宋体">：自动复位</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">为</span><span style="font-family:Arial">largest</span><span style="font-family:宋体">的</span><span style="font-family:Arial">offset</span><br>
+anything  else<span style="font-family:宋体">：向</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">抛出异常</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">consumer.timeout.ms</span></p>
+</td>
+<td valign="center">
+<p>-1</p>
+</td>
+<td valign="center">
+<p>如果没有消息可用，即使等待特定的时间之后也没有，则抛出超时异常</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>exclude.internal.topics</p>
+</td>
+<td valign="center">
+<p>true</p>
+</td>
+<td valign="center">
+<p>是否将内部<span style="font-family:Arial">topics</span><span style="font-family:宋体">的消息暴露给</span><span style="font-family:Arial">consumer</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>paritition.assignment.strategy</p>
+</td>
+<td valign="center">
+<p>range</p>
+</td>
+<td valign="center">
+<p>选择向<span style="font-family:Arial">consumer </span><span style="font-family:宋体">流分配</span><span style="font-family:Arial">partitions</span><span style="font-family:宋体">的策略，可选值：</span><span style="font-family:Arial">range</span><span style="font-family:宋体">，</span><span style="font-family:Arial">roundrobin</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>client.id</p>
+</td>
+<td valign="center">
+<p>group id value</p>
+</td>
+<td valign="center">
+<p>是用户特定的字符串，用来在每次请求中帮助跟踪调用。它应该可以逻辑上确认产生这个请求的应用</p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>zookeeper.session.timeout.ms</p>
+</td>
+<td valign="center">
+<p>6000</p>
+</td>
+<td valign="center">
+<p>zookeeper <span style="font-family:宋体">会话的超时限制。如果</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">在这段时间内没有向</span><span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">发送心跳信息，则它会被认为挂掉了，并且</span><span style="font-family:Arial">reblance</span><span style="font-family:宋体">将会产生</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>zookeeper.connection.timeout.ms</p>
+</td>
+<td valign="center">
+<p>6000</p>
+</td>
+<td valign="center">
+<p>客户端在建立通<span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">连接中的最大等待时间</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>zookeeper.sync.time.ms</p>
+</td>
+<td valign="center">
+<p>2000</p>
+</td>
+<td valign="center">
+<p>ZK follower<span style="font-family:宋体">可以落后</span><span style="font-family:Arial">ZK leader</span><span style="font-family:宋体">的最大时间</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>offsets.storage</p>
+</td>
+<td valign="center">
+<p>zookeeper</p>
+</td>
+<td valign="center">
+<p>用于存放<span style="font-family:Arial">offsets</span><span style="font-family:宋体">的地点：</span><span style="font-family:Arial">zookeeper</span><span style="font-family:宋体">或者</span><span style="font-family:Arial">kafka</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p>offset.channel.backoff.ms</p>
+</td>
+<td valign="center">
+<p>1000</p>
+</td>
+<td valign="center">
+<p>重新连接<span style="font-family:Arial">offsets channel</span><span style="font-family:宋体">或者是重试失败的</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">的</span><span style="font-family:Arial">fetch/commit</span><span style="font-family:宋体">请求的</span><span style="font-family:Arial">backoff</span><span style="font-family:宋体">时间</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">offsets.channel.socket.timeout.ms</span></p>
+</td>
+<td valign="center">
+<p>10000</p>
+</td>
+<td valign="center">
+<p>当读取<span style="font-family:Arial">offset</span><span style="font-family:宋体">的</span><span style="font-family:Arial">fetch/commit</span><span style="font-family:宋体">请求回应的</span><span style="font-family:Arial">socket</span><span style="font-family:宋体">超时限制。此超时限制是被</span><span style="font-family:Arial">consumerMetadata</span><span style="font-family:宋体">请求用来请求</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">管理</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">offsets.commit.max.retries</span></p>
+</td>
+<td valign="center">
+<p>5</p>
+</td>
+<td valign="center">
+<p>重试<span style="font-family:Arial">offset commit</span><span style="font-family:宋体">的次数。这个重试只应用于</span><span style="font-family:Arial">offset  commits</span><span style="font-family:宋体">在</span><span style="font-family:Arial">shut-down</span><span style="font-family:宋体">之间。他</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">dual.commit.enabled</span></p>
+</td>
+<td valign="center">
+<p>true</p>
+</td>
+<td valign="center">
+<p>如果使用<span style="font-family:Arial">“kafka”</span><span style="font-family:宋体">作为</span><span style="font-family:Arial">offsets.storage</span><span style="font-family:宋体">，你可以二次提交</span><span style="font-family:Arial">offset</span><span style="font-family:宋体">到</span><span style="font-family:Arial">zookeeper(</span><span style="font-family:宋体">还有一次是提交到</span><span style="font-family:Arial">kafka</span><span style="font-family:宋体">）。在</span><span style="font-family:Arial">zookeeper-based</span><span style="font-family:宋体">的</span><span style="font-family:Arial">offset
+  storage</span><span style="font-family:宋体">到</span><span style="font-family:Arial">kafka-based</span><span style="font-family:宋体">的</span><span style="font-family:Arial">offset storage</span><span style="font-family:宋体">迁移时，这是必须的。对任意给定的</span><span style="font-family:Arial">consumer
+  group</span><span style="font-family:宋体">来说，比较安全的建议是当完成迁移之后就关闭这个选项</span></p>
+</td>
+</tr>
+<tr>
+<td valign="center">
+<p><span style="color:rgb(51,51,51)">partition.assignment.strategy</span></p>
+</td>
+<td valign="center">
+<p>range</p>
+</td>
+<td valign="center">
+<p>在<span style="font-family:Arial">“range”</span><span style="font-family:宋体">和</span><span style="font-family:Arial">“roundrobin”</span><span style="font-family:宋体">策略之间选择一种作为分配</span><span style="font-family:Arial">partitions</span><span style="font-family:宋体">给</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">数据流的策略；
+ 循环的</span><span style="font-family:Arial">partition</span><span style="font-family:宋体">分配器分配所有可用的</span><span style="font-family:Arial">partitions</span><span style="font-family:宋体">以及所有可用</span><span style="font-family:Arial">consumer  </span><span style="font-family:宋体">线程。它会将</span><span style="font-family:Arial">partition</span><span style="font-family:宋体">循环的分配到</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">线程上。如果所有</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">实例的订阅都是确定的，则</span><span style="font-family:Arial">partitions</span><span style="font-family:宋体">的划分是确定的分布。循环分配策略只有在以下条件满足时才可以：（</span><span style="font-family:Arial">1</span><span style="font-family:宋体">）每个</span><span style="font-family:Arial">topic</span><span style="font-family:宋体">在每个</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">实力上都有同样数量的数据流。（</span><span style="font-family:Arial">2</span><span style="font-family:宋体">）订阅的</span><span style="font-family:Arial">topic</span><span style="font-family:宋体">的集合对于</span><span style="font-family:Arial">consumer
+  group</span><span style="font-family:宋体">中每个</span><span style="font-family:Arial">consumer</span><span style="font-family:宋体">实例来说都是确定的。</span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p><span style="font-family:宋体">更多细节可以查看</span>  scala<span style="font-family:宋体">类：</span><span style="font-family:Arial"> kafka.consumer.ConsumerConfig</span></p>
+<h2><strong>样例代码</strong></h2>
+<h3><strong>Producer</strong></h3>
+<p> </p>
+<p>具体参看附件</p>
+<h3><strong>Consumer</strong></h3>
+<p>创建配置</p>
+<p> </p>
+<p><span style="font-family:宋体">创建</span>Consumer<span style="font-family:宋体">对象</span></p>
+<p> </p>
+<p><span style="font-family:宋体">创建</span>KafakaStream对象</p>
+<p> </p>
+<p>读取消息</p>
+<p> </p>
+<p>具体参看附件</p>
+<h1><strong>生产者均衡</strong></h1>
+<p>producer<span style="font-family:宋体">将会和</span><span style="font-family:Calibri">Topic</span><span style="font-family:宋体">下所有</span><span style="font-family:Calibri">partition leader</span><span style="font-family:宋体">保持</span><span style="font-family:Calibri">socket</span><span style="font-family:宋体">连接</span><span style="font-family:Calibri">;</span><span style="font-family:宋体">消息由</span><span style="font-family:Calibri">producer</span><span style="font-family:宋体">直接通过</span><span style="font-family:Calibri">socket</span><span style="font-family:宋体">发送到</span><span style="font-family:Calibri">broker,</span><span style="font-family:宋体">中间不会经过任何</span><span style="font-family:Calibri">"</span><span style="font-family:宋体">路由层</span><span style="font-family:Calibri">".</span><span style="font-family:宋体">事实上</span><span style="font-family:Calibri">,</span><span style="font-family:宋体">消息被路由到哪个</span><span style="font-family:Calibri">partition</span><span style="font-family:宋体">上</span><span style="font-family:Calibri">,</span><span style="font-family:宋体">有</span><span style="font-family:Calibri">producer</span><span style="font-family:宋体">客户端决定</span><span style="font-family:Calibri">.</span><span style="font-family:宋体">比如可以采用</span><span style="font-family:Calibri">"random""key-hash""</span><span style="font-family:宋体">轮询</span><span style="font-family:Calibri">"</span><span style="font-family:宋体">等</span><span style="font-family:Calibri">,</span><span style="font-family:宋体">如果一个</span><span style="font-family:Calibri">topic</span><span style="font-family:宋体">中有多个</span><span style="font-family:Calibri">partitions,</span><span style="font-family:宋体">可以在</span><span style="font-family:Calibri">producer</span><span style="font-family:宋体">端实现消息均衡分发</span><span style="font-family:Calibri">.</span></p>
+<p><span style="font-family:宋体">异步发送：将多条消息暂且在客户端</span>buffer<span style="font-family:宋体">起来，并将他们批量的发送到</span><span style="font-family:Calibri">broker</span><span style="font-family:宋体">，小数据</span><span style="font-family:Calibri">IO</span><span style="font-family:宋体">太多，会拖慢整体的网络延迟，批量延迟发送事实上提升了网络效率。不过这也有一定的隐患，比如说当</span><span style="font-family:Calibri">producer</span><span style="font-family:宋体">失效时，那些尚未发送的消息将会丢失。</span></p>
+<p> </p>
+<h1><strong>监控</strong></h1>
+<p>yahoo<span style="font-family:宋体">为了简化开发者和服务工程师维护</span>Kafka<span style="font-family:宋体">集群的工作，构建了一个叫做</span><span style="font-family:Helvetica">Kafka</span><span style="font-family:宋体">管理器的基于</span><span style="font-family:Helvetica">Web</span><span style="font-family:宋体">工具，叫做</span><span style="font-family:Helvetica">Kafka
+ Manager</span><span style="font-family:宋体">。这个管理工具可以很容易地发现分布在集群中的哪些</span><span style="font-family:Helvetica">topic</span><span style="font-family:宋体">分布不均匀，或者是分区在整个集群分布不均匀的的情况。</span></p>
+<p><span style="font-family:宋体">通过</span>Kafka Manager<span style="font-family:宋体">用户能够更容易地发现集群中哪些主题或者分区分布不均匀，同时能够管理多个集群，能够更容易地检查集群的状态，能够创建主题，执行首选的副本选择，能够基于集群当前的状态生成分区分配，并基于生成的分配执行分区的重分配，此外，</span><span style="font-family:Arial">Kafka Manager</span><span style="font-family:宋体">还是一个非常好的可以快速查看集群状态的工具。</span></p>
+<p><span style="font-family:宋体">该软件是用</span>Scala<span style="font-family:宋体">语言编写的。</span>yahoo<span style="font-family:宋体">已经开源了</span>Kafka Manager<span style="font-family:宋体">工具。这款</span><span style="font-family:Helvetica">Kafka</span><span style="font-family:宋体">集群管理工具主要支持以下几个功能：</span><br>
+1<span style="font-family:宋体">、管理几个不同的集群；</span><br>
+2<span style="font-family:宋体">、很容易地检查集群的状态</span><span style="font-family:Helvetica">(topics, brokers,</span><span style="font-family:宋体">副本的分布</span><span style="font-family:Helvetica">,</span><span style="font-family:宋体">分区的分布</span><span style="font-family:Helvetica">)</span><span style="font-family:宋体">；</span><br>
+3<span style="font-family:宋体">、选择副本；</span><br>
+4<span style="font-family:宋体">、产生分区分配</span><span style="font-family:Helvetica">(Generate partition assignments)</span><span style="font-family:宋体">基于集群的当前状态；</span><br>
+5<span style="font-family:宋体">、重新分配分区。</span></p>
+<p>6<span style="font-family:宋体">、支持</span><span style="font-family:Helvetica">kafka</span> 0.8.2<span style="font-family:宋体">之上的版本删除</span>Topic<span style="font-family:宋体">。</span></p>
+<p>7<span style="font-family:宋体">、标记删除的分区的主题（</span><span style="font-family:Helvetica">0.8.2+</span><span style="font-family:宋体">）</span></p>
+<p>8<span style="font-family:宋体">、</span><span style="font-family:宋体">批量产生分区分配为多个</span>Topic</p>
+<p>9<span style="font-family:宋体">、</span><span style="font-family:宋体">批量执行重新分配分区为个</span>Topic</p>
+<p>10<span style="font-family:宋体">、</span><span style="font-family:宋体">为已存在的</span>Tpic<span style="font-family:宋体">增加分区。</span></p>
+<p>11<span style="font-family:宋体">、</span><span style="font-family:宋体">选择是否启用</span>JMX<span style="font-family:宋体">轮询代理和</span><span style="font-family:Helvetica">Topic</span><span style="font-family:宋体">的度量</span></p>
+<h2><strong><span style="font-family:宋体">编译安装</span>kafka Manager<span style="font-family:宋体">的过程</span></strong></h2>
+<h3><strong><span style="font-family:宋体">安装</span>sbt</strong></h3>
+<p>sbt<span style="font-family:宋体">是</span><span style="font-family:Calibri">scala</span><span style="font-family:宋体">的打包构建工具。编译</span>kafka Manager<span style="font-family:宋体">之前需要安装</span>sbt<span style="font-family:宋体">，下载地址：</span><a target="_blank" href="http://www.scala-sbt.org/download.html" rel="nofollow"><u><span style="color:rgb(147,112,219); background:rgb(250,250,250)">http://www.scala-sbt.org/download.html</span></u></a></p>
+<p><span style="font-family:宋体">我本地用的是</span>windows<span style="font-family:宋体">版，执行安装文件就可以。</span></p>
+<h3><strong><span style="font-family:宋体">下载</span>kafka Manager编译</strong></h3>
+<p>kafka Manager<span style="font-family:宋体">是从</span>github<span style="font-family:宋体">下载下来的，</span><span style="font-family:Calibri">windows</span><span style="font-family:宋体">下先安装个</span><span style="font-family:Calibri">git</span><span style="font-family:宋体">环境，</span><span style="font-family:Calibri">git</span><span style="font-family:宋体">的环境安装这里就不介绍了。</span></p>
+<p><span style="font-family:宋体">在</span>git<span style="font-family:宋体">的</span><span style="font-family:Calibri">bash</span><span style="font-family:宋体">下，执行以下命令：</span></p>
+<p style="background:rgb(238,238,238)"><span style="color:rgb(77,77,76)">git </span>
+<span style="color:rgb(245,135,31)">clone</span><span style="color:rgb(77,77,76)"> https://github.com/yahoo/kafka-manager</span></p>
+<p>kafka Manager将会拷贝到本地目录内。</p>
+<p><span style="font-family:宋体">在</span>windows<span style="font-family:宋体">的命令行下，进入</span><span style="font-family:Calibri">kafka</span>-manager的主目录：</p>
+<p style="background:rgb(238,238,238)"><span style="color:rgb(245,135,31)">cd</span><span style="color:rgb(77,77,76)"> kafka-manager</span></p>
+<p>执行以下命令：</p>
+<p style="background:rgb(238,238,238)"><span style="color:rgb(77,77,76)">sbt clean dist</span></p>
+<p>sbt<span style="font-family:宋体">在编译的时候会通过</span><span style="font-family:Calibri">ivy</span><span style="font-family:宋体">下载很多依赖包，网络不好的情况下往往会很长时间，而且很有可能下载不成功。我本地就一直没有下载成功过，通过在国外</span><span style="font-family:Calibri">vps</span><span style="font-family:宋体">上执行</span><span style="font-family:Calibri">sbt</span><span style="font-family:宋体">，将依赖包下载到</span><span style="font-family:Calibri">vps</span><span style="font-family:宋体">上，然后再打包</span><span style="font-family:Calibri">ftp</span><span style="font-family:宋体">下载到本地，覆盖本地的</span><span style="font-family:Calibri">ivy</span> cache<span style="font-family:宋体">，通过这种方式实现</span><span style="font-family:Calibri">kafka</span> manager<span style="font-family:宋体">的完成编译。</span></p>
+<h3><strong><span style="font-family:宋体">运行</span>kafka Manager</strong></h3>
+<p>Kafka Manager编译打包后的，生成的打包文件在target\universal<span style="font-family:宋体">目录下，目录下有个</span>zip<span style="font-family:宋体">文件，这个文件就是</span><span style="font-family:Calibri">kafka</span> Manager<span style="font-family:宋体">编译打包后的可运行包。将</span>zip<span style="font-family:宋体">文件拷贝到</span><span style="font-family:Calibri">linux</span><span style="font-family:宋体">下。执行</span><span style="font-family:Calibri">uzip</span><span style="font-family:宋体">，进行解压缩。进入</span><span style="font-family:Calibri">kafka</span> Manager<span style="font-family:宋体">目录，修改</span>conf<span style="font-family:宋体">目录下的</span>application.conf<span style="font-family:宋体">，</span>修改值kafka-manager.zkhosts="kafka-manager-zookeeper:2181"<span style="font-family:宋体">为真是的</span>zookeeper<span style="font-family:宋体">的地址。保存</span></p>
+<p><span style="font-family:宋体">进入</span>bin<span style="font-family:宋体">目录下执行命令：</span></p>
+<p style="background:rgb(238,238,238)"><span style="color:rgb(77,77,76)">../kafka-manager -Dconfig.file=../conf/application.conf</span></p>
+<p>如果命令不能执行，请先给文件授权：</p>
+<p style="background:rgb(238,238,238)"><span style="color:rgb(77,77,76)">.</span><span style="color:rgb(77,77,76)">chmod</span><span style="color:rgb(77,77,76)"> 777 kafka-manager</span></p>
+<p>打开浏览器输入<a target="_blank" href="http://x.x.x.x:9000" rel="nofollow"><u><span style="color:rgb(0,0,255)">http://x.x.x.x:9000</span></u></a><span style="font-family:宋体">，即可进入</span>kafka manager<span style="font-family:宋体">的管理页面。</span></p>
+<p> </p>
+<p><span style="font-family:宋体">填写集群名字，</span>zk<span style="font-family:宋体">的地址和端口，选择</span><span style="font-family:Calibri">kafka</span><span style="font-family:宋体">的版本，我测试用的版本是</span><span style="font-family:Calibri">0.8.2</span>.1<span style="font-family:宋体">。</span>然后保存。</p>
+<p> </p>
+<p><span style="font-family:宋体">这里可以看到集群的</span>Topic<span style="font-family:宋体">数量和</span><span style="font-family:Calibri">Brokers</span><span style="font-family:宋体">的数据。点击数据可以看详细信息。</span></p>
+<p> </p>
+<p><span style="font-family:宋体">在</span>Topic<span style="font-family:宋体">列表，可以点击某个</span><span style="font-family:Calibri">topic</span><span style="font-family:宋体">，查看详细。</span></p>
+<p> </p>
+<p><span style="font-family:宋体">用</span>kafka Manager<span style="font-family:宋体">可以用很多维护</span><span style="font-family:Calibri">kafka</span><span style="font-family:宋体">的操作，如删除</span><span style="font-family:Calibri">Topic</span><span style="font-family:宋体">、增加</span><span style="font-family:Calibri">Partition</span><span style="font-family:宋体">、重新分配</span><span style="font-family:Calibri">Partition</span><span style="font-family:宋体">、</span>Jmx<span style="font-family:宋体">监控等。</span></p>
+<h1><strong>扩展集群</strong></h1>
+<p><span style="font-family:宋体">将新的</span>kafka <span style="font-family:宋体">服务器假如到集群中是相当简单的。但是这些新加入的服务器不会自动分配任何数据</span>partition<span style="font-family:宋体">，除非现有的</span><span style="font-family:Calibri">partition</span><span style="font-family:宋体">迁移到新的服务器上，否则新加入的服务器是不起作用的，直到新的</span><span style="font-family:Calibri">Topic</span><span style="font-family:宋体">被创建。所以通常当你增加新的服务器到集群中的时候，你需要迁移存在的数据到新的服务器上。</span></p>
+<p><span style="font-family:宋体">迁移数据是一个手工初始化全程自动化的过程，</span>kafka<span style="font-family:宋体">将会在新的服务器上创建一个</span><span style="font-family:Calibri">follwer</span><span style="font-family:宋体">，</span><span style="font-family:宋体">并且允许完全复制</span>partition<span style="font-family:宋体">上存在的数据。当新的服务器完全复制了</span><span style="font-family:Calibri">partion</span><span style="font-family:宋体">的内容并加入到同步复制，之前存在的</span><span style="font-family:Calibri">replicas</span><span style="font-family:宋体">将会删除他们的数据。</span></p>
+<p>Partition<span style="font-family:宋体">重新分配工具能够跨</span><span style="font-family:Calibri">broker</span><span style="font-family:宋体">迁移。在</span><span style="font-family:Calibri">0.8.1</span><span style="font-family:宋体">版本，重新分配工具还不能</span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">自动获得分布且计算出如何移动。</span></span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">因此管理员需要手工指出那个</span>topic<span style="font-family:宋体">那个</span><span style="font-family:Helvetica">partition</span><span style="font-family:宋体">应该如何移动。</span></span></p>
+<p>Partition<span style="font-family:宋体">重新分配工具有三种运行模式：</span></p>
+<p><span style="color:rgb(51,51,51)">a) </span><span style="color:rgb(51,51,51)">--generate:</span><span style="color:rgb(51,51,51)"> </span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"><span style="font-family:宋体">对指定的</span>topics<span style="font-family:宋体">移动所有的</span><span style="font-family:Helvetica">partition</span><span style="font-family:宋体">到新的</span><span style="font-family:Helvetica">brokers</span></span></p>
+<p><span style="color:rgb(51,51,51)">b) </span><span style="color:rgb(51,51,51)">--execute:</span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"> <span style="font-family:宋体">指定</span></span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"> </span><span style="color:rgb(51,51,51); background:rgb(254,254,254)">--reassignment-json-file<span style="font-family:宋体">用自定义的重新分配方案</span></span></p>
+<p><span style="color:rgb(51,51,51)">c) </span><span style="color:rgb(51,51,51)">--verify:</span><span style="color:rgb(51,51,51); background:rgb(254,254,254)"> <span style="font-family:宋体">确认最后一个</span>-execute<span style="font-family:宋体">的所有</span><span style="font-family:Helvetica">Partition</span><span style="font-family:宋体">的重新分配状态</span></span></p>
+<h2><strong>Partition<span style="font-family:宋体">和</span><span style="font-family:Calibri Light">Relicas</span><span style="font-family:宋体">扩展</span></strong></h2>
+<p><span style="font-family:宋体">官方网站上说</span>kafka<span style="font-family:宋体">只支持</span><span style="font-family:Calibri">partitions</span><span style="font-family:宋体">的增加，不支持</span><span style="font-family:Calibri">Relicas</span><span style="font-family:宋体">的修改，但我通过下面的操作实现了即扩展</span><span style="font-family:Calibri">partition</span><span style="font-family:宋体">，又实现了</span><span style="font-family:Calibri">Relicas</span><span style="font-family:宋体">，需要进一步验证。</span></p>
+<p> </p>
+<p>以对<span style="color:rgb(51,51,51)">replicated3-partitions3-topi</span><span style="color:rgb(51,51,51)">c<span style="font-family:宋体">操作为例，对集群增加一个</span><span style="font-family:Courier New">broker</span><span style="font-family:宋体">为</span><span style="font-family:Courier New">3</span><span style="font-family:宋体">的服务器，则集群中有四个</span><span style="font-family:Courier New">broker</span><span style="font-family:宋体">了</span><span style="font-family:Courier New">,</span><span style="font-family:宋体">原始</span></span><span style="color:rgb(51,51,51)">replicated3-partitions3-topi</span><span style="color:rgb(51,51,51)">c<span style="font-family:宋体">状态</span></span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)">下面的步骤对</span><span style="color:rgb(51,51,51)">replicated3-partitions3-topi</span><span style="color:rgb(51,51,51)">c<span style="font-family:宋体">进行扩展：</span></span></p>
+<p><span style="color:rgb(51,51,51)">1、 </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">扩展</span>Partition</span></p>
+<p>&gt; ../kafka-topics.sh --zookeeper 10.41.1.121:2181 --alter --topic <span style="color:rgb(51,51,51)">
+replicated3-partitions3-topi</span><span style="color:rgb(51,51,51)">c</span><span style="color:rgb(51,51,51)"> </span><span style="color:rgb(51,51,51)">–partitions 4</span></p>
+<p><span style="color:rgb(51,51,51)">执行命令后，查看状态如下</span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p>2、 <span style="font-family:宋体">使用重新分配工具，创建重新分配</span>json<span style="font-family:宋体">文件</span></p>
+<p>&gt; Vim topics-to-move.json</p>
+<p> </p>
+<p>3、 执行重新分配</p>
+<p>    &gt; .<span style="color:rgb(51,51,51)">/kafka-reassign-partitions.sh --zookeeper 10.41.1.121:2181 --reassignment-json-file expand-</span> topics-to-move.json<span style="color:rgb(51,51,51)"> --execute</span></p>
+<p>4<span style="font-family:宋体">、</span>查看执行分配的结果</p>
+<p>&gt; ../kafka-reassign-partitions.sh --zookeeper 10.41.1.121:2181 --reassignment-json-file topics-to-mov.json –verify</p>
+<p> </p>
+<p>4、 再次查看<span style="color:rgb(51,51,51)">replicated3-partitions3-topi</span><span style="color:rgb(51,51,51)">c<span style="font-family:宋体">的状态</span></span></p>
+<p> </p>
+<p> </p>
+<h2><strong>Producer<span style="font-family:宋体">平滑扩展</span></strong></h2>
+<p>Producer<span style="font-family:宋体">在启动的时候，会手工配置初始化连接，通过</span>boostrap.servers<span style="font-family:宋体">参数，集群扩展后，增加新的</span>broker<span style="font-family:宋体">，</span><span style="font-family:Arial">Producer</span><span style="font-family:宋体">是怎么扩展到新的</span><span style="font-family:Arial">broker</span><span style="font-family:宋体">进行连接的呢。以新的</span><span style="font-family:Arial">Producer</span> API<span style="font-family:宋体">为例，</span>Producer<span style="font-family:宋体">封装了集群的扩展。</span></p>
+<p> </p>
+<p>Producer<span style="font-family:宋体">在接收到</span><span style="font-family:Calibri">Broker</span><span style="font-family:宋体">的返回后，会找到新的</span><span style="font-family:Calibri">Cluster</span><span style="font-family:宋体">的信息，并更新到发送线程中。</span></p>
+<h1><strong>进一步需要考虑的问题</strong></h1>
+<h2><strong>消息的有序性</strong></h2>
+<p><span style="font-family:宋体">同一个</span>Topic <span style="font-family:宋体">内同一个</span>Partition<span style="font-family:宋体">能保证有序性，因此有需要保证有序的场景，注意使用带有一个</span><span style="font-family:Calibri">partition</span><span style="font-family:宋体">的</span><span style="font-family:Calibri">Topic</span><span style="font-family:宋体">。</span></p>
+<h2><strong>消息的过滤</strong></h2>
+<h3><strong>Offset<span style="font-family:宋体">与消息回溯</span></strong></h3>
+<p> </p>
+<p> </p>
+<h1><strong>比较<span style="color:rgb(51,51,51)">RocketMQ</span>优缺点</strong></h1>
+<h2><strong>可靠性</strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">支持异步实时刷盘，同步刷盘，同步</span><span style="font-family:Helvetica">Replication</span><span style="font-family:宋体">，异步</span><span style="font-family:Helvetica">Replication</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">使用异步刷盘方式，异步</span><span style="font-family:Helvetica">Replication</span></span></p>
+<h2><strong><span style="font-family:宋体">性能对比</span></strong></h2>
+<p>· <a target="_blank" href="http://engineering.linkedin.com/kafka/benchmarking-apache-kafka-2-million-writes-second-three-cheap-machines" rel="nofollow"><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">单机写入</span><span style="font-family:Calibri">TPS</span><span style="font-family:宋体">约在百万条</span><span style="font-family:Calibri">/</span><span style="font-family:宋体">秒，消息大小</span><span style="font-family:Calibri">10</span><span style="font-family:宋体">个字节</span></span></a></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">单机写入</span><span style="font-family:Helvetica">TPS</span><span style="font-family:宋体">单实例约</span><span style="font-family:Helvetica">7</span><span style="font-family:宋体">万条</span><span style="font-family:Helvetica">/</span><span style="font-family:宋体">秒，单机部署</span><span style="font-family:Helvetica">3</span><span style="font-family:宋体">个</span><span style="font-family:Helvetica">Broker</span><span style="font-family:宋体">，可以跑到最高</span><span style="font-family:Helvetica">12</span><span style="font-family:宋体">万条</span><span style="font-family:Helvetica">/</span><span style="font-family:宋体">秒，消息大小</span><span style="font-family:Helvetica">10</span><span style="font-family:宋体">个字节</span></span></p>
+<h2><strong><span style="font-family:宋体">消息投递实时性</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">使用短轮询方式，实时性取决于轮询间隔时间</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">使用长轮询，同</span><span style="font-family:Helvetica">Push</span><span style="font-family:宋体">方式实时性一致，消息的投递延时通常在几个毫秒。</span></span></p>
+<h2><strong><span style="font-family:宋体">消费失败重试</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">消费失败不支持重试</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">消费失败支持定时重试，每次重试间隔时间顺延</span></span></p>
+<h2><strong><span style="font-family:宋体">严格的消息顺序</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">支持消息顺序，但是一台</span><span style="font-family:Helvetica">Broker</span><span style="font-family:宋体">宕机后，就会产生消息乱序。</span></span><span style="color:rgb(51,51,51)">不同的</span>Partition<span style="font-family:宋体">，不能保证消息的顺序。</span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">支持严格的消息顺序，在顺序消息场景下，一台</span><span style="font-family:Helvetica">Broker</span><span style="font-family:宋体">宕机后，发送消息会失败，但是不会乱序</span></span></p>
+<h2><strong><span style="font-family:宋体">定时消息</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">不支持定时消息</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">支持两类定时消息</span></span></p>
+<p><span style="color:rgb(51,51,51)">o </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">开源版本</span>RocketMQ<span style="font-family:宋体">仅支持定时</span><span style="font-family:Helvetica">Level</span></span></p>
+<p><span style="color:rgb(51,51,51)">o </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">阿里云</span>ONS<span style="font-family:宋体">支持定时</span><span style="font-family:Helvetica">Level</span><span style="font-family:宋体">，以及指定的毫秒级别的延时时间</span></span></p>
+<h2><strong><span style="font-family:宋体">分布式事务消息</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">不支持分布式事务消息</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">阿里云</span>ONS<span style="font-family:宋体">支持分布式定时消息，未来开源版本的</span><span style="font-family:Helvetica">RocketMQ</span><span style="font-family:宋体">也有计划支持分布式事务消息</span></span></p>
+<h2><strong><span style="font-family:宋体">消息查询</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">不支持消息查询</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">支持根据</span><span style="font-family:Helvetica">Message Id</span><span style="font-family:宋体">查询消息，也支持根据消息内容查询消息（发送消息时指定一个</span><span style="font-family:Helvetica">Message
+ Key</span><span style="font-family:宋体">，任意字符串，例如指定为订单</span><span style="font-family:Helvetica">Id</span><span style="font-family:宋体">）</span></span></p>
+<h2><strong><span style="font-family:宋体">消息回溯</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">理论上可以按照</span><span style="font-family:Helvetica">Offset</span><span style="font-family:宋体">来回溯消息</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">支持按照时间来回溯消息，精度毫秒，例如从一天之前的某时某分某秒开始重新消费消息</span></span></p>
+<h2><strong><span style="font-family:宋体">消息轨迹</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">不支持消息轨迹</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">阿里云</span>ONS<span style="font-family:宋体">支持消息轨迹</span></span></p>
+<h2><strong>Broker<span style="font-family:宋体">端消息过滤</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">不支持</span><span style="font-family:Helvetica">Broker</span><span style="font-family:宋体">端的消息过滤</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">支持两种</span><span style="font-family:Helvetica">Broker</span><span style="font-family:宋体">端消息过滤方式</span></span></p>
+<p><span style="color:rgb(51,51,51)">o </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">根据</span>Message Tag<span style="font-family:宋体">来过滤，相当于子</span><span style="font-family:Helvetica">topic</span><span style="font-family:宋体">概念</span></span></p>
+<p><span style="color:rgb(51,51,51)">o </span><span style="color:rgb(51,51,51)"><span style="font-family:宋体">向服务器上传一段</span>Java<span style="font-family:宋体">代码，可以对消息做任意形式的过滤，甚至可以做</span><span style="font-family:Helvetica">Message Body</span><span style="font-family:宋体">的过滤拆分。</span></span></p>
+<h2><strong><span style="font-family:宋体">成熟度</span></strong></h2>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">Kafka<span style="font-family:宋体">在日志领域比较成熟</span></span></p>
+<p><span style="color:rgb(51,51,51)">· </span><span style="color:rgb(51,51,51)">RocketMQ<span style="font-family:宋体">在阿里集团内部有大量的应用在使用，每天都产生海量的消息，并且顺利支持了多次天猫双十一海量消息考验，是数据削峰填谷的利器。</span></span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p><span style="color:rgb(51,51,51)"> </span></p>
+<p> </p>
+<p> </p>
+            </div>
+                </div>

@@ -1,0 +1,62 @@
+---
+layout:     post
+title:      kafka简单使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+kafka学习与使用:<br>
+单节点启动kafka：（1） zk_home/bin/zkServer.sh  start(start zook)<br>
+                (2) kafka_home/bin/kafka-server-start.sh   ../config/server.properties(start kafka)<br><br><br><br><br>
+1. 一个topic 分为多个 partition 保存在多个 kafka server上， consumer instance 从属于一个consumer group, <br>
+并且consumer instance 数目不能超过 所消费的 topic 对于的partition数目。<br><br><br>
+集群测试：<br><br><br>
+(1) 查看topic: ./kafka-topics --list --zookeeper  192.168.16.107:2181,192.168.16.109:2181<br>
+(2) 创建一个新的topic test_zhou: ./kafka-topics  --create --zookeeper  192.168.16.107:2181 --replication-factor 1 --partitions 1 --topic test_zhou<br>
+(3) 构造一个生产者（linux标准输入）：./kafka-console-producer  --broker-list 192.168.16.107:9092,spark5:9092  --topic test_zhou <br>
+(4) 构造一个消费者：kafka-console-consumer.sh --zookeeper 192.168.16.107:2181 --topic test_zhou --from-beginning<br>
+(5) 查看 topic:  kafka-topics --describe --zookeeper spark4:2181 --topic test_zhou<br><br><br><br><br>
+kafka 连接spark-streaming<br><br><br>
+cdh 5.8.0  hadoop2.6.0-cdh5.8.0  kafka2.0.2-1.2.0.2.p0.5(0.9.0.0+kafka2.0.2+305)   spark1.6.0<br><br><br>
+(1) command connect: /opt/cloudera/parcels/CDH/lib/spark/bin/run-example streaming.KafkaWordCount &lt;zkQuorum&gt; &lt;group&gt; &lt;topics&gt; &lt;numThreads&gt;<br><br><br>
+/opt/cloudera/parcels/CDH/lib/spark/bin/run-example streaming.KafkaWordCount 192.168.16.107:2181,192.168.16.109:2181  test_zhou_group  test_zhou  1<br><br><br><br><br>
+kafka内部的生产消费机制是什么样的？ kafka broker, consumer, producer, zookeeper如何协同合作，处理数据的发送和接受？<br><br><br>
+kafka 0.8 0.9， api 有变动<br><br><br>
+(2) java connect<br><br><br>
+maven的依赖包一定要正确， 选用apache官方自带的依赖可能连接不成功，数据发送失败<br>
+  &lt;dependency&gt;<br><span></span>   &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;<br><span></span>   &lt;artifactId&gt;kafka-clients&lt;/artifactId&gt;<br><span></span>   &lt;version&gt;0.9.0-kafka-2.0.1&lt;/version&gt;<br><span></span>&lt;/dependency&gt;<br><br><br><br><br>
+自定义一个简单的 producer:<br>
+package spark.kafka.test.zhou;<br><br><br><br><br>
+import java.util.Properties;<br><br><br>
+import org.apache.kafka.clients.producer.ProducerRecord;<br><br><br>
+import org.apache.kafka.clients.producer.KafkaProducer;<br><br><br>
+import org.apache.kafka.clients.producer.Producer;<br><br><br><br><br><br><br><br><br>
+public class CustomKafkaProducer {<br>
+ <br><span></span>public static void main(String[] args) throws Exception{<br><span></span>   <br><span></span>   // Check arguments length value<br><span></span>   if(args.length == 0){<br><span></span>      System.out.println("Enter topic name");<br><span></span>      return;<br><span></span>   }<br><span></span>   <br><span></span>   String topic = args[0];<br><span></span>   <br><span></span>   Properties props = new Properties();<br><span></span>   props.put("bootstrap.servers", "spark4:9092,spark5:9092");<br><span></span>   props.put("acks", "all");<br><span></span>   props.put("retries", 0);<br><span></span>   props.put("batch.size", 16384);<br><span></span>   props.put("linger.ms", 1);<br><span></span>   props.put("buffer.memory", 33554432);<br><span></span>   props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");<br><span></span>   props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");<br><br><br><span></span>   Producer&lt;String, String&gt; producer = new KafkaProducer&lt;String, String&gt;(props);<br><span></span>   <br><span></span>   for(int i = 30; i &lt; 40; i++) {<br><span></span>   <span> </span>producer.send(new ProducerRecord&lt;String, String&gt;(topic, "str_" + Integer.toString(i)));<br><span></span>   }<br><span></span>       <br><span></span>   producer.flush(); //一定要加上，不然数据可能未发送完成， 程序就关掉了<br><br><br><span></span>   producer.close();<span>
+</span>   <br><span></span>  <br><span></span><br><span></span>}<br>
+}<br><br><br><br><br>
+kafka 日志存放目录由参数 log.dirs 决定，CDH kafka 默认值在本地磁盘 /var/local/kafka/data<br><br><br>
+kafka consumer:<br><br><br>
+kafka重复消费数据失败：<br><br><br>
+使用consumer消费数据时，有些情况下我们需要对已经消费过的数据进行重新消费,<br>
+可以修改offset或者使用不同的group id 进行消费：http://blog.csdn.net/xiaoyu_bd/article/details/52319302<br>
+                                          http://blog.csdn.net/sky302761277/article/details/52574387<br><br><br>
+kafka 中查看topic对应的offset:<br>
+   cd /opt/cloudera/parcels/KAFKA/bin<br>
+   查询topic test_zhou  offset的最小值<br>
+    ./kafka-run-class kafka.tools.GetOffsetShell  --broker-list spar4:9092,spark5:9092  --topic  test_zhou --time -2<br>
+   查询topic test_zhou  offset的最大值<br>
+   ./kafka-run-class kafka.tools.GetOffsetShell  --broker-list spar4:9092,spark5:9092  --topic  test_zhou --time -1<br>
+   <br>
+kafka查看consumer 消费情况：<br>
+kafka-run-class kafka.tools.ConsumerOffsetChecker --group gps.group.test1  --topic gps  --zookeeper spark4:2181,spark5:2181<br><br><br>
+kafka删除topic方法<br>
+1) kafka-topics.sh --delete --zookeeper host:port --topic topicname<br>
+2) 删除kafka存储目录（server.properties文件log.dirs配置，默认为"/tmp/kafka-logs"）相关topic目录删除zookeeper "/brokers/topics/"目录下相关topic节点<br>
+reference:  http://blog.sina.com.cn/s/blog_6277623c0102vl8j.html<br><br><br><br><br>
+zookeeper 修改topic对应的offset(http://blog.csdn.net/sky302761277/article/details/52574387): 实际测试有出入？？？？<br><span></span>cd  /opt/cloudera/parcels/CDH/lib/zookeeper/bin<br><span></span>启动zk客户端 zkCli.sh  -server  localhost:2181 <br><span></span>offset在zk中的具体路径：/consumers/[groupId]/offsets/[topic]/[partitionId]  (zk使用 ls /directory 查看目录，get /direct 查看文件内容)<br><span></span>                    查看 consumer group 对应的offset: get /consumers/[groupId]/offsets/[topic]/[partitionId]  <br><span></span>                    修改 consumer group 对应的offset为0: set /consumers/[groupId]/offsets/[topic]/[partitionId]  0<br><span></span>                    例如：修改 group id 为test_zhou, topic 为test_zhou对应offset为0: set /consumers/test_zhou_group/offsets/test_zhou/0  0<br><br><br><br><br>
+kafka数据读写问题：<br><br><br><br><br><br><br>
+数据写不进去： 实际ip地址更换192.168.21.228  为data2<br><br><br>
+数据读不到： 原因需要排查<br><br><br><br>            </div>
+                </div>

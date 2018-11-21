@@ -1,0 +1,44 @@
+---
+layout:     post
+title:      坏盘导致Kafka故障一例
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/mayp1/article/details/51228143				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>            最近工作中又踩到Kafka的一坑。</p>
+<p>            某日收到业务侧告警说无数据，首先怀疑Flume问题，因为之前踩的Flume坑多嘛，发现某个Flume实例中有ChannelFullException，因为用的是memory channel，确认可丢数据后杀死Flume进程，起来后channel又满了。</p>
+<p>            于是确定应该是下游Kafka问题，查了每个Kafka实例的日志，发现一个实例的日志中反复打kafka.common.NotLeaderForPartitionException，而这个异常的等级又仅是ERROR，没把Kafka自己弄死。</p>
+<p>            之后又从主机告警中看到这台机器有慢盘问题。因为这个Kafka集群分发的数据量很大，因此组了一个20+台机器的集群，每台挂12块3T盘，以保证日志空间够用。为了恢复慢盘，决定把Kafka干掉，unmount掉盘准备再mount时，发现mount不上了，看来是硬盘故障。但奇怪的是硬盘故障没有导致Kafka实例挂掉，也没有避免写入该盘的机制，只是挂起在那里。</p>
+<p>            其实这个问题只要看一下Kafka源码就不难理解了。</p>
+<p>            Kafka源码分析（5）中，LogManager的构造方法中有以下调用：</p>
+<p></p><pre><code class="language-java">createAndValidateLogDirs(logDirs)</code></pre><br><p>            这个方法的具体代码如下：</p>
+<pre><code class="language-java">  /**
+   * Create and check validity of the given directories, specifically:
+   * &lt;ol&gt;
+   * &lt;li&gt; Ensure that there are no duplicates in the directory list
+   * &lt;li&gt; Create each directory if it doesn"t exist
+   * &lt;li&gt; Check that each path is a readable directory 
+   * &lt;/ol&gt;
+   */
+  private def createAndValidateLogDirs(dirs: Seq[File]) {
+    if(dirs.map(_.getCanonicalPath).toSet.size &lt; dirs.size)
+      throw new KafkaException("Duplicate log directory found: " + logDirs.mkString(", "))
+    for(dir &lt;- dirs) {
+      if(!dir.exists) {
+        info("Log directory "" + dir.getAbsolutePath + "" not found, creating it.")
+        val created = dir.mkdirs()
+        if(!created)
+          throw new KafkaException("Failed to create data directory " + dir.getAbsolutePath)
+      }
+      if(!dir.isDirectory || !dir.canRead)
+        throw new KafkaException(dir.getAbsolutePath + " is not a readable log directory.")
+    }
+  }
+</code></pre><br><p>            这段代码只检查log.dirs参数中配置的所有路径（这一特性是0.8以后引入的，这以前只能配置一个log目录）是否存在以及是否可读，至于是否可写是不管的，因此在出现慢盘或只读盘时不会抛异常，也不会将其从目录集合中移除。但写不进的影响是非常大的，如果该节点是某个partition的leader，该partition的数据将无法写入，leader也无法切换，这会导致对上游系统的反压，在这个例子中即Flume的channel满。</p>
+<p>            由于商用硬盘坏的概率很高，如果坏一块就会导致Kafka僵死还不好发现的话，还是很坑爹的。建议：等社区修复；或者自己打补丁，当然要改的地方就比较多了，比如createAndValidateLogDirs方法中要校验可否写入，另外在实际写入log文件时要捕获AccessDeniedException，一旦捕获就快速失败；或者不要挂12块裸盘，而是做1-3个raid5，只配1-3个写入路径，但这种方法也会有一些影响，首先就是损失1-3块盘的存储了，其次单节点写入速度和吞吐量会有一些下降，当然整个集群的写入速度和吞吐量是可以水平扩展的，要大还是要稳定就看自己需求了。</p>
+<br><p><br></p>
+            </div>
+                </div>

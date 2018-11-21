@@ -1,0 +1,198 @@
+---
+layout:     post
+title:      Flume 1.7 源码分析（三）程序入口
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/Lnho2015/article/details/58057814				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<blockquote>
+  <p><a href="http://blog.csdn.net/lnho2015/article/details/57416739" rel="nofollow">Flume 1.7 源码分析（一）源码编译</a> <br>
+  <a href="http://blog.csdn.net/Lnho2015/article/details/58055919" rel="nofollow">Flume 1.7 源码分析（二）整体架构</a> <br>
+  <a href="http://blog.csdn.net/Lnho2015/article/details/58057814" rel="nofollow">Flume 1.7 源码分析（三）程序入口</a> <br>
+  <a href="http://blog.csdn.net/Lnho2015/article/details/59103551" rel="nofollow">Flume 1.7 源码分析（四）从Source写数据到Channel</a>   </p>
+</blockquote>
+
+<h1 id="4-程序入口">4 程序入口</h1>
+
+<p>启动Flume的过程可以简单分为2个步骤： <br>
+1.  获取相关配置文件（一般来说就是flume-conf.properties）。 <br>
+2.  启动各组件。不特别说明，本文中的组件是指实现了LifecycleAware接口的类的对象，一般就是Source、Channel、Sink这3种对象。</p>
+
+
+
+<h2 id="41-获取启动配置">4.1  获取启动配置</h2>
+
+
+
+<h3 id="411-main函数">4.1.1   Main函数</h3>
+
+<p>启动Flume的Main函数在flume-ng-node模块的org.apache.flume.node.Application。该函数的功能可以简单划分为以下三个步骤： <br>
+1.  使用commons.cli类获取命令行参数（就是启动时传入的参数） <br>
+2.  根据启动参数确定的读取配置的方式。读取配置的方式总共有4种，分别根据配置是保存在zookeeper上还是本地properties文件、以及是否reload（自动重载配置文件）分为4种方式。 <br>
+3.  根据相应的配置启动程序，并注册关闭钩子。 <br>
+接下来以properties文件、不重载的方式为例，主要的代码如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java">PropertiesFileConfigurationProvider configurationProvider =
+    <span class="hljs-keyword">new</span> PropertiesFileConfigurationProvider(agentName, configurationFile);
+<span class="hljs-comment">//创建Application对象，包含初始化组件列表（components），初始化LifecycleSupervisor。</span>
+application = <span class="hljs-keyword">new</span> Application();
+application.handleConfigurationEvent(configurationProvider.getConfiguration());
+<span class="hljs-comment">//start方法用于检查所有组件是否是启动状态，如果不是则启动该组件。</span>
+application.start();
+<span class="hljs-comment">//监听程序关闭事件，用于当程序被kill后能够执行一些清理工作。</span>
+<span class="hljs-keyword">final</span> Application appReference = application;
+Runtime.getRuntime().addShutdownHook(<span class="hljs-keyword">new</span> Thread(<span class="hljs-string">"agent-shutdown-hook"</span>) {
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">run</span>() {
+    appReference.stop();
+  }
+});</code></pre>
+
+<p>上面的代码，有两处比较关键：</p>
+
+<ul>
+<li>configurationProvider.getConfiguration()会返回一个MaterializedConfiguration类型的对象，用于从文件形式的配置转为物化的配置，即包含实际的channel、sinkRunner等对象的实例，在“物化配置”一节分析。</li>
+<li>handleConfigurationEvent用于停止所有components，并使用新的配置进行启动，在“使用新配置重启”一节分析。</li>
+</ul>
+
+
+
+<h3 id="412-物化配置">4.1.2   物化配置</h3>
+
+<p>configurationProvider.getConfiguration()方法主要做了以下两件事： <br>
+1.  读取配置文件（flume-conf.properties），保存在AgentConfiguration对象中。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-keyword">public</span> static class AgentConfiguration {
+  <span class="hljs-keyword">private</span> final <span class="hljs-built_in">String</span> agentName;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">String</span> sources;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">String</span> sinks;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">String</span> channels;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">String</span> sinkgroups;
+  <span class="hljs-keyword">private</span> final <span class="hljs-built_in">Map</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span>, ComponentConfiguration<span class="hljs-subst">&gt;</span> sourceConfigMap;
+  <span class="hljs-keyword">private</span> final <span class="hljs-built_in">Map</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span>, ComponentConfiguration<span class="hljs-subst">&gt;</span> sinkConfigMap;
+  <span class="hljs-keyword">private</span> final <span class="hljs-built_in">Map</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span>, ComponentConfiguration<span class="hljs-subst">&gt;</span> channelConfigMap;
+  <span class="hljs-keyword">private</span> final <span class="hljs-built_in">Map</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span>, ComponentConfiguration<span class="hljs-subst">&gt;</span> sinkgroupConfigMap;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">Map</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span>, Context<span class="hljs-subst">&gt;</span> sourceContextMap;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">Map</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span>, Context<span class="hljs-subst">&gt;</span> sinkContextMap;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">Map</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span>, Context<span class="hljs-subst">&gt;</span> channelContextMap;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">Map</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span>, Context<span class="hljs-subst">&gt;</span> sinkGroupContextMap;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">Set</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span><span class="hljs-subst">&gt;</span> sinkSet;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">Set</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span><span class="hljs-subst">&gt;</span> sourceSet;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">Set</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span><span class="hljs-subst">&gt;</span> channelSet;
+  <span class="hljs-keyword">private</span> <span class="hljs-built_in">Set</span><span class="hljs-subst">&lt;</span><span class="hljs-built_in">String</span><span class="hljs-subst">&gt;</span> sinkgroupSet;
+}</code></pre>
+
+<p>到这个步骤还仅仅是做好了分类的文本形式的配置项。 <br>
+2.  创建出配置中的各组件实例，并添加到MaterializedConfiguration实例中。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-keyword">public</span> <span class="hljs-keyword">interface</span> MaterializedConfiguration {
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">addSourceRunner</span>(String name, SourceRunner sourceRunner);
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">addSinkRunner</span>(String name, SinkRunner sinkRunner);
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">addChannel</span>(String name, Channel channel);
+  <span class="hljs-keyword">public</span> ImmutableMap&lt;String, SourceRunner&gt; <span class="hljs-title">getSourceRunners</span>();
+  <span class="hljs-keyword">public</span> ImmutableMap&lt;String, SinkRunner&gt; <span class="hljs-title">getSinkRunners</span>();
+  <span class="hljs-keyword">public</span> ImmutableMap&lt;String, Channel&gt; <span class="hljs-title">getChannels</span>();
+}</code></pre>
+
+<p>在这个实例中，可以获取配置文件中配置的所有的source、channel、sink，并且是“物化”的，即可以直接取得相关组件的实例。</p>
+
+
+
+<h2 id="42-启动所有组件">4.2  启动所有组件</h2>
+
+
+
+<h3 id="421-使用新配置重启">4.2.1   使用新配置重启</h3>
+
+<p>有了上面的MaterializedConfiguration实例，我们就可以启动组件了。 <br>
+在handleConfigurationEvent方法中，首先会停止所有组件，然后再启动所有组件。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs scss"><span class="hljs-function">stopAllComponents()</span>;
+<span class="hljs-function">startAllComponents(conf)</span>; <span class="hljs-comment">//这里的conf就是上节的MaterializedConfiguration。</span></code></pre>
+
+<p>在startAllComponents方法中，会遍历组件列表（SourceRunners、SinkRunners、Channels），分别调用supervise方法。以Channel为例：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">for (Entry&lt;String, Channel&gt; entry :
+    materializedConfiguration<span class="hljs-preprocessor">.getChannels</span>()<span class="hljs-preprocessor">.entrySet</span>()) {
+  try {
+    logger<span class="hljs-preprocessor">.info</span>(<span class="hljs-string">"Starting Channel "</span> + entry<span class="hljs-preprocessor">.getKey</span>())<span class="hljs-comment">;</span>
+    supervisor<span class="hljs-preprocessor">.supervise</span>(entry<span class="hljs-preprocessor">.getValue</span>(),
+        new SupervisorPolicy<span class="hljs-preprocessor">.AlwaysRestartPolicy</span>(), LifecycleState<span class="hljs-preprocessor">.START</span>)<span class="hljs-comment">;</span>
+  } catch (Exception e) {
+    logger<span class="hljs-preprocessor">.error</span>(<span class="hljs-string">"Error while starting {}"</span>, entry<span class="hljs-preprocessor">.getValue</span>(), e)<span class="hljs-comment">;</span>
+  }
+}</code></pre>
+
+<p>这个supervise方法简单来说，就是将相应组件的状态转化为期望的状态。例如上面代码中的LifecycleState.START就是期望的状态。</p>
+
+
+
+<h3 id="422-lifecyclesupervisor">4.2.2   LifecycleSupervisor</h3>
+
+<p>上节的supervisor是一个LifecycleSupervisor对象。前面有说到，在创建Application的时候初始化了一个LifecycleSupervisor对象，就是这里的supervisor。这个对象，我理解为各组件生命周期的管理者，用于实时监控所有组件的状态，如果不是期望的状态（desiredState），则进行状态转换。</p>
+
+<p>上节的代码中调用了supervisor.supervise方法，接下来分析一下supervise这个方法：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">public synchronized void supervise(LifecycleAware lifecycleAware,
+    SupervisorPolicy policy, LifecycleState desiredState) {
+  //省略状态检查的代码
+Supervisoree process = new Supervisoree()<span class="hljs-comment">;</span>
+  process<span class="hljs-preprocessor">.status</span> = new Status()<span class="hljs-comment">;</span>
+  process<span class="hljs-preprocessor">.policy</span> = policy<span class="hljs-comment">;</span>
+  process<span class="hljs-preprocessor">.status</span><span class="hljs-preprocessor">.desiredState</span> = desiredState<span class="hljs-comment">;</span>
+  process<span class="hljs-preprocessor">.status</span><span class="hljs-preprocessor">.error</span> = false<span class="hljs-comment">;</span>
+  MonitorRunnable monitorRunnable = new MonitorRunnable()<span class="hljs-comment">;</span>
+  monitorRunnable<span class="hljs-preprocessor">.lifecycleAware</span> = lifecycleAware<span class="hljs-comment">;</span>
+  monitorRunnable<span class="hljs-preprocessor">.supervisoree</span> = process<span class="hljs-comment">;</span>
+  monitorRunnable<span class="hljs-preprocessor">.monitorService</span> = monitorService<span class="hljs-comment">;</span>
+  supervisedProcesses<span class="hljs-preprocessor">.put</span>(lifecycleAware, process)<span class="hljs-comment">;</span>
+  ScheduledFuture&lt;?&gt; future = monitorService<span class="hljs-preprocessor">.scheduleWithFixedDelay</span>(
+      monitorRunnable, <span class="hljs-number">0</span>, <span class="hljs-number">3</span>, TimeUnit<span class="hljs-preprocessor">.SECONDS</span>)<span class="hljs-comment">;</span>
+  monitorFutures<span class="hljs-preprocessor">.put</span>(lifecycleAware, future)<span class="hljs-comment">;</span>
+}</code></pre>
+
+<p>由于所有的组件都实现了LifecycleAware接口，所以这里的supervise方法传入的是LifecycleAware接口的对象。</p>
+
+<p>可以看到创建了一个Supervisoree对象，顾名思义，就是被监控的的对象，该对象有以下几种状态：IDLE, START, STOP, ERROR。 <br>
+scheduleWithFixedDelay每隔3秒触发一次监控任务（monitorRunnable）。</p>
+
+
+
+<h3 id="423-monitorrunnable">4.2.3   MonitorRunnable</h3>
+
+<p>在MonitorRunnable中主要是检查组件的状态，并实现从lifecycleState到desiredState的转变。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cs"><span class="hljs-keyword">switch</span> (supervisoree.status.desiredState) {
+  <span class="hljs-keyword">case</span> START:
+    <span class="hljs-keyword">try</span> {
+      lifecycleAware.start();
+    } <span class="hljs-keyword">catch</span> (Throwable e) {省略}
+    <span class="hljs-keyword">break</span>;
+  <span class="hljs-keyword">case</span> STOP:
+    <span class="hljs-keyword">try</span> {
+      lifecycleAware.stop();
+    } <span class="hljs-keyword">catch</span> (Throwable e) {省略}
+    <span class="hljs-keyword">break</span>;
+  <span class="hljs-keyword">default</span>:
+    logger.warn(<span class="hljs-string">"I refuse to acknowledge {} as a desired state"</span>, supervisoree.status.desiredState);
+}</code></pre>
+
+<p>到这里为止，可以看到监控的进程，调用了组件自己的start和stop方法来启动、停止。前面有提到有3种类型的组件，SourceRunner、Channel、SinkRunner，而Channel的start只做了初始化计数器，没什么实质内容，所以接下来从SourceRunner的启动（从Source写数据到Channel）和SinkRunner的启动（从Channel获取数据写入Sink）来展开说明。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

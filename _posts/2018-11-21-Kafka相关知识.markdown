@@ -1,0 +1,97 @@
+---
+layout:     post
+title:      Kafka相关知识
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_22313585/article/details/81430093				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>1）producer：消息生产者，发布消息到kafka集群的终端或服务</p>
+
+<p>2）broker：kafaka集群中包含的服务器</p>
+
+<p>3）topic：每条发布到kafka集群的消息属于的类别，即kafka是面向topic的</p>
+
+<p>4）partition：每个topic包含一个或者多个partition，kafka的分配单位是partition</p>
+
+<p>5）comsumer：从kafka集群中消费消息的终端或服务</p>
+
+<p>6）comsumer group：每个consumer都属于一个consumer group，每条消息只能被consumer group中的一个comsumer group消费</p>
+
+<p>7）replica：partition的副本，保障partition的高可用</p>
+
+<p>8）leader：replica中的一个角色，producer和consumer只跟leader交互</p>
+
+<p>9）follower：replica中的一个角色，从leader中复制数据</p>
+
+<p>10）controller：kafka集群中的一个服务器，用来进行leader election以及各种failover</p>
+
+<p>11）zookeeper：kafka通过zookeeper来存储集群的meta信息</p>
+
+<p> </p>
+
+<p>很多传统的message queue都会在消息被消费完之后将消息删除，一方面避免重复消费，另一方面可以保证queue的长度比较少，提高效率。Kafka并不删除已消费的消息，为了实现传统message queue消息只被消费一次的语义，Kafka保证同一个consumer group里只有一个consumer会消费一条消息。与传统message queue不同的是，Kafka还允许不同consumer group同时消费同一条消息，这一特性可以为消息的多元化处理提供了支持。实际上，Kafka的设计理念之一就是同时提供离线处理和实时处理。根据这一特性，可以使用strom这种实时流处理系统对消息进行实时在线处理，同时使用hadoop这种批处理系统进行离线处理，还可以同时将数据实时备份到另一个数据中心，只需要保证这三个操作所使用的consumer在不同的consumer group即可。</p>
+
+<p>对于传统的message queue而言，一般会删除已经被消费的消息，而kafka集群会保留所有的消息，无论其被消费与否。当然，因为磁盘的限制，不可能永久保留所有的数据，因此kafka提供两种策略去删除旧数据。一是基于时间，二是基于partition文件大小。</p>
+
+<p>Kafka会为每一个consumer group保留一些metadata信息——当前消费的消息的position，即offset。这个offect由consumer控制。正常情况下consumer会在消费完一条消息后线性增加这个offset。当然，consumer也可将offset设成一个较小的值，重新消费一些消息。因为offset是无状态的，它不需要标记哪些消息被消费过，不需要通过broker去保证同一个consumer group只有一个consumer能消费某一条消息，因此也就不需要锁机制，这也为kafka的高吞吐率提供了有力保障。</p>
+
+<p><strong>C++使用librdkafka库实现kafka的消费实例</strong></p>
+
+<p>1） 创建kafka配置</p>
+
+<p>RdKafka::conf *conf = nullptr;</p>
+
+<p>Conf = RdKafka::conf::create(RdKafka::conf::CONF_GLOBAL);</p>
+
+<p>2） 设置kafka各项参数</p>
+
+<p>Conf-&gt;set(“bootstrap.servers”, brokers_, errstr);  //设置broker list</p>
+
+<p>Conf-&gt;set(“group.id”, groupid_, errstr);  //设置consumer group</p>
+
+<p>Conf-&gt;set(“max.partition.fetch.bytes”, strfetch_num, errstr);  //每次从单个分区中拉取消息的最大尺寸</p>
+
+<p>3） 创建kafka topic配置</p>
+
+<p>RdKafka::conf *tconf = nullptr;</p>
+
+<p>tconf = RdKafka::conf::create(RdKafka::conf::CONF_TOPIC);</p>
+
+<p>4） 设置kafka topic参数</p>
+
+<p>If(tconf-&gt;set(“auto.offset.reset”, “smallest”, errstr))</p>
+
+<p>5） 创建kafka consumer实例</p>
+
+<p>Kafka_consumer_=RdKafka::Consumer::create(conf, errstr);</p>
+
+<p>6） 创建kafka topic</p>
+
+<p>RdKafka::Topic::create(kafka_consumer_, topics_, tconf, errstr);</p>
+
+<p>7） 启动kafka consumer实例</p>
+
+<p>RdKafka::ErrorCode resp = kafka_consumer_-&gt;start(topic_, partition_, offset_);</p>
+
+<p>8） 消费kafka</p>
+
+<p>Kafka_consumer_-&gt;consume(topic_, partition_, timeout_ms);</p>
+
+<p>9） 阻塞等待消息</p>
+
+<p>Kafka_consumer_-&gt;poll(0);</p>
+
+<p>10）停止消费</p>
+
+<p>Kafka_consumer_-&gt;stop(topic_, partition_);</p>
+
+<p>11）销毁consumer实例</p>
+
+<p>RdKafka::wait_destroyed(5000);</p>
+
+<p> </p>
+
+<p>一个典型的kafka集群中包含若干个producer（可以是web前端产生的page view，或者是服务器日志，系统CPU、memory等），若干broker（kafka支持水平扩展，一般broker数量越多，集群吞吐率越高），若干consumer group，以及一个zookeeper集群。Kafka通过zookeeper管理集群配置，选举leader，以及在consumer group发生变化时进行rebalance。Producer使用push模式将消息发布到broker，consumer使用pull模式从broker订阅并消费消息。</p>            </div>
+                </div>

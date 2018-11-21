@@ -1,0 +1,80 @@
+---
+layout:     post
+title:      kafka基本特性简介
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2 style="font-family:Verdana, Arial, Helvetica, sans-serif;">1、简介</h2>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">kafka是LinkedIn开发的用于日志数据处理的流式消息处理系统。官网上说kafka is a distributed、partitioned、replicated commit logservice.这句话充分体现了kafka的特性。kafka是首先是一个用于处理流式数据的日志处理系统，然后他是分布式的，他支持分区便于横向拓展，他具有冗余备份功能。</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">目前kafka主要有三个方面的用途，分别是消息订阅与发布系统、消息存储、流式数据处理。本文主要围绕kafka的消息订阅与发布功能进行介绍。</p>
+<h2 style="font-family:Verdana, Arial, Helvetica, sans-serif;">2、基本概念</h2>
+<h3 style="font-family:Verdana, Arial, Helvetica, sans-serif;">2.1 topic</h3>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">topic主题是kafka对流的一个抽象。主题是一个分类，例如新闻可以分为体育、战争、科技等话题，不同的主题有不同的发布者和订阅者。</p>
+<h3 style="font-family:Verdana, Arial, Helvetica, sans-serif;">2.2 partition</h3>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">partiton是kafka的一个重要概念，是一个主题在物理上的分组。如下图所示，一个topic被分成了3个partition，每个partition都是一个队列结构。partition可以存在于不同的机器上，这样的好处是实现了负载均衡，不同的consumer可以从不同的partition中获取数据，partition的这种结构还便于集群的横向拓展。</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;"><a href="http://og68ismax.bkt.clouddn.com/log_anatomy.png" rel="nofollow" class="fancybox"><img src="http://og68ismax.bkt.clouddn.com/log_anatomy.png" alt="" width="416" height="267" style="border:0px;"></a></p>
+<h3 style="font-family:Verdana, Arial, Helvetica, sans-serif;">2.3 producers和consumers</h3>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">producer用于向kafka集群发送消息，消息必须具有主题。</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">consumers是消费者，向kafka获取消息。kafka作为消息队列灵活的地方在于它提出了Consumer Group的概念，Consumer Group内部可以有一个到多个Consumer。Consumer Group的好处在于：</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">1、负载均衡</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">一个Consumer Group里的Consumer应该是功能相近的，这些Consumer可以在不同的机器上，多个Consumer共同完成同一个Group的任务能够实现负载均衡。</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">2、保持队列的顺序一致性</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">一个topic的一个partition只对应一个Consumer，这样的好处就是由于一个partition里的消息是按照先后顺序的，那么交给一个Consumer来处理也会保持先后顺序。</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">下面是一个例子，假如某个topic具有3个partition，而一个具有3个Consumer的Group订阅了该消息，此时，每个partition会一对一地被Consumer消费。此时增加一个partition，那么3个Consumer中会有一个要多处理一个partition的消息。而如果增加的是一个Consumer的话，这个Consumer会空闲。</p>
+<h3 style="font-family:Verdana, Arial, Helvetica, sans-serif;">2.4 offset</h3>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;">kafka另外一个灵活的地方是offset偏移。kafka的数据在被消费之后不会立即被删除。一般来说只有在消息超过一定的时间限制后才会被删除，消费者消费的过程其实是将偏移指针向队列尾部移动的过程。当然消费者可以自定义地对偏移指针进行修改，如下代码所示为自动提交offset更改：</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;"></p><pre><code class="language-java">Properties props = new Properties();
+props.put("bootstrap.servers", "localhost:9092");
+props.put("group.id", "test");
+props.put("enable.auto.commit", "true");
+props.put("auto.commit.interval.ms", "1000");
+props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+KafkaConsumer&lt;String, String&gt; consumer = new KafkaConsumer&lt;&gt;(props);
+consumer.subscribe(Arrays.asList("foo","bar"))
+while(true){
+    ConsumerRecords&lt;String,String&gt; records=consumer.poll(100);
+    for(ConsumerRecord&lt;String,String&gt; record:records){
+        System.out.printf("offset = %d, key = %s, value = %s%n", record.offset(), record.key(), record.value());
+    }
+}</code></pre><br><p style="font-family:Verdana, Arial, Helvetica, sans-serif;">如下代码所示为手动提交offset更改，值得注意的是在Consumer的配置中，“enable.auto.commit”被设置成了false，通过Consumer.commitSync()来提交offset。</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;"></p><pre><code class="language-java">Properties props = new Properties();
+props.put("bootstrap.servers", "localhost:9092");
+props.put("group.id", "test");
+props.put("enable.auto.commit", "false");
+props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+KafkaConsumer&lt;String, String&gt; consumer = new KafkaConsumer&lt;&gt;(props);
+consumer.subscribe(Arrays.asList("foo", "bar"));
+final int minBatchSize = 200;
+List&lt;ConsumerRecord&lt;String, String&gt;&gt; buffer = new ArrayList&lt;&gt;();
+while (true) {
+    ConsumerRecords&lt;String, String&gt; records = consumer.poll(100);
+    for (ConsumerRecord&lt;String, String&gt; record : records) {
+        buffer.add(record);
+    }
+    if (buffer.size() &gt;= minBatchSize) {
+        insertIntoDb(buffer);
+        consumer.commitSync();
+        buffer.clear();
+    }
+}</code></pre><br><p style="font-family:Verdana, Arial, Helvetica, sans-serif;">除此之外还能进行更加精细地更改，精细到partition级别，如下代码所示针对每个partition的消息，使用consumer.commitSync(Collections.singletonMap(partition, new OffsetAndMetadata(lastOffset + 1)))。</p>
+<p style="font-family:Verdana, Arial, Helvetica, sans-serif;"></p><pre><code class="language-java">try {
+    while(running) {
+        ConsumerRecords&lt;String, String&gt; records = consumer.poll(Long.MAX_VALUE);
+        for (TopicPartition partition : records.partitions()) {
+            List&lt;ConsumerRecord&lt;String, String&gt;&gt; partitionRecords = records.records(partition);
+            for (ConsumerRecord&lt;String, String&gt; record : partitionRecords) {
+                System.out.println(record.offset() + ": " + record.value());
+            }
+            long lastOffset = partitionRecords.get(partitionRecords.size() - 1).offset();
+            consumer.commitSync(Collections.singletonMap(partition, new OffsetAndMetadata(lastOffset + 1)));
+        }
+    }
+} finally {
+  consumer.close();
+} </code></pre><br><p style="font-family:Verdana, Arial, Helvetica, sans-serif;"> </p>
+            </div>
+                </div>

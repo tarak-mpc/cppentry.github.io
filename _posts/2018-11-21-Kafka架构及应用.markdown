@@ -1,0 +1,317 @@
+---
+layout:     post
+title:      Kafka架构及应用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/bocai8058/article/details/82056229				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<pre class="prettyprint"><code class=" hljs ruby"><span class="hljs-variable">@Author</span>  <span class="hljs-symbol">:</span> <span class="hljs-constant">Spinach</span> | <span class="hljs-constant">GHB</span>
+<span class="hljs-variable">@Link</span>    <span class="hljs-symbol">:</span> <span class="hljs-symbol">http:</span>/<span class="hljs-regexp">/blog.csdn.net/bocai</span>8058</code></pre>
+
+<hr>
+
+<p></p><div class="toc"><div class="toc">
+<ul>
+<li><ul>
+<li><ul>
+<li><a href="#kafka%E7%AE%80%E4%BB%8B" rel="nofollow">Kafka简介</a></li>
+<li><a href="#kafka%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5" rel="nofollow">Kafka基本概念</a></li>
+<li><a href="#kafka%E6%9E%B6%E6%9E%84" rel="nofollow">Kafka架构</a><ul>
+<li><a href="#%E5%88%86%E5%B8%83%E5%BC%8Fdistribution" rel="nofollow">分布式(Distribution)</a></li>
+<li><a href="#kafka%E8%BF%90%E8%A1%8C%E8%BF%87%E7%A8%8B" rel="nofollow">kafka运行过程</a></li>
+</ul>
+</li>
+<li><a href="#kafka%E9%85%8D%E7%BD%AE" rel="nofollow">Kafka配置</a></li>
+<li><a href="#kafka%E5%BA%94%E7%94%A8%E5%9C%BA%E6%99%AF" rel="nofollow">Kafka应用场景</a></li>
+<li><a href="#%E6%80%BB%E7%BB%93" rel="nofollow">总结</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+
+
+
+
+<h3 id="kafka简介">Kafka简介</h3>
+
+<p>kafka是一种高吞吐量的分布式发布订阅消息系统，它可以处理消费者规模的网站中的所有动作流数据。这种动作（网页浏览，搜索和其他用户的行动）是在现代网络上的许多社会功能的一个关键因素。这些数据通常是由于吞吐量的要求而通过处理日志和日志聚合来解决。</p>
+
+
+
+<h3 id="kafka基本概念">Kafka基本概念</h3>
+
+<ul>
+<li><p>++producer++：生产者。Producer将消息发布到指定的Topic中，同时Producer也能决定将此消息归属于哪个partition；比如基于“round-robin”方式或者通过其他的一些算法等。</p></li>
+<li><p><strong>consumer</strong>：消费者。每个consumer属于一个consumer group；反过来说，每个group中可以有多个consumer。发送到Topic的消息，只会被订阅此Topic的每个group中的一个consumer消费。</p></li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-number">1.</span> 如果所有的consumer都具有相同的<span class="hljs-keyword">group</span>，这种情况和<span class="hljs-built_in">queue</span>模式很像;消息将会在consumers之间负载均衡。
+<span class="hljs-number">2.</span> 如果所有的consumer都具有不同的<span class="hljs-keyword">group</span>，那这就是“发布<span class="hljs-subst">-</span>订阅”；消息将会广播给所有的消费者。</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs mel">在kafka中，一个<span class="hljs-keyword">partition</span>中的消息只会被<span class="hljs-keyword">group</span>中的一个consumer消费，每个<span class="hljs-keyword">group</span>中consumer消息消费互相独立；
+但一个<span class="hljs-keyword">partition</span>中的消息可以被不同<span class="hljs-keyword">group</span>中一个consumer消费，而一个consumer可以消费多个partitions中的消息。
+
+kafka只能保证一个<span class="hljs-keyword">partition</span>中的消息被某个consumer消费时，消息是顺序的。
+事实上，从Topic角度来说，消息仍不是有序的。</code></pre>
+
+<p>kafka的原理决定，对于一个topic，同一个group中不能有多于partitions个数的consumer同时消费，否则将意味着某些consumer将无法得到消息。</p>
+
+<ul>
+<li><strong>topic</strong>：消息以topic为类别记录，Kafka将消息分门别类，每一类的消息称之为一个主题(Topic)。 </li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">一个Topic可以认为是一类消息，每个topic将被分成多个partition(区)，每个partition在存储层面是append <span class="hljs-built_in">log</span>文件。
+任何发布到此partition的消息都会被直接追加到<span class="hljs-built_in">log</span>文件的尾部，每条消息在文件中的位置称为<span class="hljs-built_in">offset</span>(偏移量)，<span class="hljs-built_in">offset</span>为一个<span class="hljs-keyword">long</span>型数字，它是唯一标记一条消息。
+它唯一的标记一条消息。kafka并没有提供其他额外的索引机制来存储<span class="hljs-built_in">offset</span>，因为在kafka中几乎不允许对消息进行“随机读写”。</code></pre>
+
+<ul>
+<li><strong>broker</strong>：以集群的方式运行，可以由一个或多个服务组成，每个服务叫做一个broker；消费者可以订阅一个或多个主题(topic)，并从Broker拉数据，从而消费这些已发布的消息。每个消息（也叫作record记录，也被称为消息）是由一个key，一个value和时间戳构成。</li>
+</ul>
+
+<p></p><center> <br>
+<img src="https://raw.githubusercontent.com/GSpinach/MarkdownPictures/master/Hadoop%E8%A1%A5%E5%85%85%E4%B8%8E%E6%80%BB%E7%BB%93/kafka.png" width="50%"><img src="https://raw.githubusercontent.com/GSpinach/MarkdownPictures/master/Hadoop%E8%A1%A5%E5%85%85%E4%B8%8E%E6%80%BB%E7%BB%93/kafka1.png" width="50%"> <br>
+</center><p></p>
+
+
+
+<h3 id="kafka架构">Kafka架构</h3>
+
+
+
+<h4 id="分布式distribution">分布式(Distribution)</h4>
+
+<p>一个Topic的多个partitions，被分布在kafka集群中的多个server上；每个server(kafka实例)负责partitions中消息的读写操作；此外kafka还可以配置partitions需要备份的个数(replicas)，每个partition将会被备份到多台机器上，以提高可用性。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbscript">基于replicated方案,那么就意味着需要对多个备份进行调度；
+每个partition都有一个为“leader”；
+leader负责所有的读写操作，如果leader失效，那么将会有其他follower来接管(成为新的leader)；
+follower只是单调的和leader跟进，同步消息即可。
+由此可见作为leader的<span class="hljs-built_in">server</span>承载了全部的请求压力
+因此从集群的整体考虑，有多少个partitions就意味着有多少个“leader”，kafka会将“leader”均衡的分散在每个实例上，来确保整体的性能稳定。
+
+<span class="hljs-built_in">Log</span>的分区被分布到集群中的多个服务器上。每个服务器处理它分到的分区。根据配置每个分区还可以复制到其它服务器作为备份容错。 
+每个分区有一个leader，零或多个follower。Leader处理此分区的所有的读写请求，而follower被动的复制数据。
+如果leader宕机，其它的一个follower会被推举为新的leader。一台服务器可能同时是一个分区的leader，另一个分区的follower。
+这样可以平衡负载，避免所有的请求都只让一台或者某几台服务器处理。</code></pre>
+
+
+
+<h4 id="kafka运行过程">kafka运行过程</h4>
+
+<p></p><center> <br>
+<img src="https://raw.githubusercontent.com/GSpinach/MarkdownPictures/master/Hadoop%E8%A1%A5%E5%85%85%E4%B8%8E%E6%80%BB%E7%BB%93/KafkaCluster.png" width="40%"> <br>
+</center> <br>
+<center> <br>
+<img src="https://raw.githubusercontent.com/GSpinach/MarkdownPictures/master/Hadoop%E8%A1%A5%E5%85%85%E4%B8%8E%E6%80%BB%E7%BB%93/kafka%E6%80%BB%E7%BB%93.png" width="80%"> <br>
+</center><p></p>
+
+
+
+<h3 id="kafka配置">Kafka配置</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"># Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# see kafka.server.KafkaConfig for additional details and defaults
+
+############################# Server Basics #############################
+
+# The id of the broker. This must be <span class="hljs-operator"><span class="hljs-keyword">set</span> <span class="hljs-keyword">to</span> a <span class="hljs-keyword">unique</span> <span class="hljs-keyword">integer</span> <span class="hljs-keyword">for</span> <span class="hljs-keyword">each</span> broker.
+broker.id=<span class="hljs-number">1</span>
+
+############################# Socket Server Settings #############################
+
+# The address the socket server listens <span class="hljs-keyword">on</span>. It will <span class="hljs-keyword">get</span> the <span class="hljs-keyword">value</span> returned <span class="hljs-keyword">from</span> 
+# java.net.InetAddress.getCanonicalHostName() <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> configured.
+#   FORMAT:
+#     listeners = listener_name://host_name:port
+#   EXAMPLE:
+#     listeners = PLAINTEXT://your.host.name:<span class="hljs-number">9092</span>
+#listeners=PLAINTEXT://:<span class="hljs-number">9092</span>
+
+# Hostname <span class="hljs-keyword">and</span> port the broker will advertise <span class="hljs-keyword">to</span> producers <span class="hljs-keyword">and</span> consumers. <span class="hljs-keyword">If</span> <span class="hljs-keyword">not</span> <span class="hljs-keyword">set</span>, 
+# it uses the <span class="hljs-keyword">value</span> <span class="hljs-keyword">for</span> <span class="hljs-string">"listeners"</span> <span class="hljs-keyword">if</span> configured.  Otherwise, it will use the <span class="hljs-keyword">value</span>
+# returned <span class="hljs-keyword">from</span> java.net.InetAddress.getCanonicalHostName().
+#advertised.listeners=PLAINTEXT://your.host.name:<span class="hljs-number">9092</span>
+
+# Maps listener <span class="hljs-keyword">names</span> <span class="hljs-keyword">to</span> security protocols, the <span class="hljs-keyword">default</span> <span class="hljs-keyword">is</span> <span class="hljs-keyword">for</span> them <span class="hljs-keyword">to</span> be the same. See the config documentation <span class="hljs-keyword">for</span> more details
+#listener.security.protocol.map=PLAINTEXT:PLAINTEXT,SSL:SSL,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_SSL:SASL_SSL
+
+# The <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> threads that the server uses <span class="hljs-keyword">for</span> receiving requests <span class="hljs-keyword">from</span> the network <span class="hljs-keyword">and</span> sending responses <span class="hljs-keyword">to</span> the network
+num.network.threads=<span class="hljs-number">3</span>
+
+# The <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> threads that the server uses <span class="hljs-keyword">for</span> processing requests, which may include disk I/O
+num.io.threads=<span class="hljs-number">8</span>
+
+# The send buffer (SO_SNDBUF) used <span class="hljs-keyword">by</span> the socket server
+socket.send.buffer.bytes=<span class="hljs-number">102400</span>
+
+# The receive buffer (SO_RCVBUF) used <span class="hljs-keyword">by</span> the socket server
+socket.receive.buffer.bytes=<span class="hljs-number">102400</span>
+
+# The maximum <span class="hljs-keyword">size</span> <span class="hljs-keyword">of</span> a request that the socket server will accept (protection against OOM)
+socket.request.<span class="hljs-aggregate">max</span>.bytes=<span class="hljs-number">104857600</span>
+
+
+############################# Log Basics #############################
+
+# A comma seperated list <span class="hljs-keyword">of</span> directories under which <span class="hljs-keyword">to</span> store log files
+log.dirs=/home/ghb/HadoopCluster/kafka_2<span class="hljs-number">.11</span>-<span class="hljs-number">1.0</span><span class="hljs-number">.1</span>/logs
+
+# The <span class="hljs-keyword">default</span> <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> log partitions per topic. More partitions allow greater
+# parallelism <span class="hljs-keyword">for</span> consumption, but this will also result <span class="hljs-keyword">in</span> more files across
+# the brokers.
+num.partitions=<span class="hljs-number">1</span>
+
+# The <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> threads per data directory <span class="hljs-keyword">to</span> be used <span class="hljs-keyword">for</span> log recovery <span class="hljs-keyword">at</span> startup <span class="hljs-keyword">and</span> flushing <span class="hljs-keyword">at</span> shutdown.
+# This <span class="hljs-keyword">value</span> <span class="hljs-keyword">is</span> recommended <span class="hljs-keyword">to</span> be increased <span class="hljs-keyword">for</span> installations <span class="hljs-keyword">with</span> data dirs located <span class="hljs-keyword">in</span> RAID array.
+num.recovery.threads.per.data.dir=<span class="hljs-number">1</span>
+
+############################# Internal Topic Settings  #############################
+# The replication factor <span class="hljs-keyword">for</span> the <span class="hljs-keyword">group</span> metadata internal topics <span class="hljs-string">"__consumer_offsets"</span> <span class="hljs-keyword">and</span> <span class="hljs-string">"__transaction_state"</span>
+# <span class="hljs-keyword">For</span> anything other than development testing, a <span class="hljs-keyword">value</span> greater than <span class="hljs-number">1</span> <span class="hljs-keyword">is</span> recommended <span class="hljs-keyword">for</span> <span class="hljs-keyword">to</span> ensure availability such <span class="hljs-keyword">as</span> <span class="hljs-number">3.</span>
+offsets.topic.replication.factor=<span class="hljs-number">1</span>
+<span class="hljs-keyword">transaction</span>.state.log.replication.factor=<span class="hljs-number">1</span>
+<span class="hljs-keyword">transaction</span>.state.log.<span class="hljs-aggregate">min</span>.isr=<span class="hljs-number">1</span>
+
+############################# Log Flush Policy #############################
+
+# Messages <span class="hljs-keyword">are</span> immediately written <span class="hljs-keyword">to</span> the filesystem but <span class="hljs-keyword">by</span> <span class="hljs-keyword">default</span> we <span class="hljs-keyword">only</span> fsync() <span class="hljs-keyword">to</span> sync
+# the OS cache lazily. The following configurations control the flush <span class="hljs-keyword">of</span> data <span class="hljs-keyword">to</span> disk.
+# There <span class="hljs-keyword">are</span> a few important trade-offs here:
+#    <span class="hljs-number">1.</span> Durability: Unflushed data may be lost <span class="hljs-keyword">if</span> you <span class="hljs-keyword">are</span> <span class="hljs-keyword">not</span> <span class="hljs-keyword">using</span> replication.
+#    <span class="hljs-number">2.</span> Latency: Very large flush intervals may lead <span class="hljs-keyword">to</span> latency spikes <span class="hljs-keyword">when</span> the flush does occur <span class="hljs-keyword">as</span> there will be a lot <span class="hljs-keyword">of</span> data <span class="hljs-keyword">to</span> flush.
+#    <span class="hljs-number">3.</span> Throughput: The flush <span class="hljs-keyword">is</span> generally the most expensive operation, <span class="hljs-keyword">and</span> a small flush <span class="hljs-keyword">interval</span> may lead <span class="hljs-keyword">to</span> excessive seeks.
+# The settings below allow one <span class="hljs-keyword">to</span> configure the flush policy <span class="hljs-keyword">to</span> flush data <span class="hljs-keyword">after</span> a period <span class="hljs-keyword">of</span> <span class="hljs-keyword">time</span> <span class="hljs-keyword">or</span>
+# every N messages (<span class="hljs-keyword">or</span> <span class="hljs-keyword">both</span>). This can be done globally <span class="hljs-keyword">and</span> overridden <span class="hljs-keyword">on</span> a per-topic basis.
+
+# The <span class="hljs-keyword">number</span> <span class="hljs-keyword">of</span> messages <span class="hljs-keyword">to</span> accept <span class="hljs-keyword">before</span> forcing a flush <span class="hljs-keyword">of</span> data <span class="hljs-keyword">to</span> disk
+#log.flush.<span class="hljs-keyword">interval</span>.messages=<span class="hljs-number">10000</span>
+
+# The maximum amount <span class="hljs-keyword">of</span> <span class="hljs-keyword">time</span> a message can sit <span class="hljs-keyword">in</span> a log <span class="hljs-keyword">before</span> we force a flush
+#log.flush.<span class="hljs-keyword">interval</span>.ms=<span class="hljs-number">1000</span>
+
+############################# Log Retention Policy #############################
+
+# The following configurations control the disposal <span class="hljs-keyword">of</span> log segments. The policy can
+# be <span class="hljs-keyword">set</span> <span class="hljs-keyword">to</span> <span class="hljs-keyword">delete</span> segments <span class="hljs-keyword">after</span> a period <span class="hljs-keyword">of</span> <span class="hljs-keyword">time</span>, <span class="hljs-keyword">or</span> <span class="hljs-keyword">after</span> a given <span class="hljs-keyword">size</span> has accumulated.
+# A segment will be deleted <span class="hljs-keyword">whenever</span> *either* <span class="hljs-keyword">of</span> these criteria <span class="hljs-keyword">are</span> met. Deletion always happens
+# <span class="hljs-keyword">from</span> the <span class="hljs-keyword">end</span> <span class="hljs-keyword">of</span> the log.
+
+# The minimum age <span class="hljs-keyword">of</span> a log file <span class="hljs-keyword">to</span> be eligible <span class="hljs-keyword">for</span> deletion due <span class="hljs-keyword">to</span> age
+log.retention.hours=<span class="hljs-number">1</span>
+
+# A <span class="hljs-keyword">size</span>-based retention policy <span class="hljs-keyword">for</span> logs. Segments <span class="hljs-keyword">are</span> pruned <span class="hljs-keyword">from</span> the log unless the remaining
+# segments <span class="hljs-keyword">drop</span> below log.retention.bytes. Functions independently <span class="hljs-keyword">of</span> log.retention.hours.
+#log.retention.bytes=<span class="hljs-number">1073741824</span>
+
+# The maximum <span class="hljs-keyword">size</span> <span class="hljs-keyword">of</span> a log segment file. <span class="hljs-keyword">When</span> this <span class="hljs-keyword">size</span> <span class="hljs-keyword">is</span> reached a new log segment will be created.
+#log.segment.bytes=<span class="hljs-number">1073741824</span>
+log.segment.bytes=<span class="hljs-number">10485760</span>
+# The <span class="hljs-keyword">interval</span> <span class="hljs-keyword">at</span> which log segments <span class="hljs-keyword">are</span> checked <span class="hljs-keyword">to</span> see <span class="hljs-keyword">if</span> they can be deleted according
+# <span class="hljs-keyword">to</span> the retention policies
+log.retention.<span class="hljs-keyword">check</span>.<span class="hljs-keyword">interval</span>.ms=<span class="hljs-number">300000</span>
+
+############################# Zookeeper #############################
+
+# Zookeeper <span class="hljs-keyword">connection</span> string (see zookeeper docs <span class="hljs-keyword">for</span> details).
+# This <span class="hljs-keyword">is</span> a comma separated host:port pairs, <span class="hljs-keyword">each</span> <span class="hljs-keyword">corresponding</span> <span class="hljs-keyword">to</span> a zk
+# server. e.g. <span class="hljs-string">"127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002"</span>.
+# You can also append an optional chroot string <span class="hljs-keyword">to</span> the urls <span class="hljs-keyword">to</span> specify the
+# root directory <span class="hljs-keyword">for</span> <span class="hljs-keyword">all</span> kafka znodes.
+zookeeper.<span class="hljs-keyword">connect</span>=<span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span>:<span class="hljs-number">2181</span>,<span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span>:<span class="hljs-number">2182</span>
+port=<span class="hljs-number">6667</span>
+<span class="hljs-keyword">delete</span>.topic.enable=<span class="hljs-keyword">true</span>
+# Timeout <span class="hljs-keyword">in</span> ms <span class="hljs-keyword">for</span> connecting <span class="hljs-keyword">to</span> zookeeper
+zookeeper.<span class="hljs-keyword">connection</span>.timeout.ms=<span class="hljs-number">6000</span>
+
+
+############################# <span class="hljs-keyword">Group</span> Coordinator Settings #############################
+
+# The following configuration specifies the <span class="hljs-keyword">time</span>, <span class="hljs-keyword">in</span> milliseconds, that the <span class="hljs-keyword">group</span> coordinator will delay the initial consumer rebalance.
+# The rebalance will be further delayed <span class="hljs-keyword">by</span> the <span class="hljs-keyword">value</span> <span class="hljs-keyword">of</span> <span class="hljs-keyword">group</span>.initial.rebalance.delay.ms <span class="hljs-keyword">as</span> new members <span class="hljs-keyword">join</span> the <span class="hljs-keyword">group</span>, up <span class="hljs-keyword">to</span> a maximum <span class="hljs-keyword">of</span> <span class="hljs-aggregate">max</span>.poll.<span class="hljs-keyword">interval</span>.ms.
+# The <span class="hljs-keyword">default</span> <span class="hljs-keyword">value</span> <span class="hljs-keyword">for</span> this <span class="hljs-keyword">is</span> <span class="hljs-number">3</span> seconds.
+# We override this <span class="hljs-keyword">to</span> <span class="hljs-number">0</span> here <span class="hljs-keyword">as</span> it makes <span class="hljs-keyword">for</span> a better out-<span class="hljs-keyword">of</span>-the-box experience <span class="hljs-keyword">for</span> development <span class="hljs-keyword">and</span> testing.
+# However, <span class="hljs-keyword">in</span> production environments the <span class="hljs-keyword">default</span> <span class="hljs-keyword">value</span> <span class="hljs-keyword">of</span> <span class="hljs-number">3</span> seconds <span class="hljs-keyword">is</span> more suitable <span class="hljs-keyword">as</span> this will help <span class="hljs-keyword">to</span> avoid unnecessarily, <span class="hljs-keyword">and</span> potentially expensive rebalances during application startup.
+<span class="hljs-keyword">group</span>.initial.rebalance.delay.ms=<span class="hljs-number">0</span>
+</span></code></pre>
+
+
+
+<h3 id="kafka应用场景">Kafka应用场景</h3>
+
+<ul>
+<li><p>构建实时的流数据管道，可靠地获取系统和应用程序之间的数据。</p></li>
+<li><p>构建实时流的应用程序，对数据流进行转换或反应。</p></li>
+</ul>
+
+<p>1.Messaging</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ">对于一些常规的消息系统，kafka是个不错的选择；
+partitions/replication和容错，可以使kafka具有良好的扩展性和性能优势。
+不过到目前为止，我们应该很清楚认识到，kafka并没有提供JMS中的“事务性”、“消息传输担保(消息确认机制)”、“消息分组”等企业级特性；
+kafka只能使用作为“常规”的消息系统，在一定程度上，尚未确保消息的发送与接收绝对可靠(比如：消息重发，消息发送丢失等)。</code></pre>
+
+<p>2.Website activity tracking</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ">kafka可以作为“网站活性跟踪”的最佳工具；
+可以将网页/用户操作等信息发送到kafka中。
+并实时监控，或者离线统计分析等。</code></pre>
+
+<p>3.Log Aggregation</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">kafka的特性决定它非常适合作为“日志收集中心”；
+<span class="hljs-type">application</span>可以将操作日志“批量”、“异步”的发送到kafka集群中，而不是保存在本地或者DB中；
+kafka可以批量提交消息/压缩消息等，这对producer端而言，几乎感觉不到性能的开支。
+此时consumer端可以使hadoop等其他系统化的存储和分析系统。</code></pre>
+
+
+
+<h3 id="总结">总结</h3>
+
+<ul>
+<li><p>Producer生产者发布数据尾部追加给topic（其中一个topic可以有多个partition，且同一个topic中的不同partition可以在不同的broker中，且每个partiotion被默认备份成3份，但一个partition只能被同一个consumer group中的一个consumer消费，同样一个partition可以被不同consumer group中一个consumer消费）的partition log中（每个partition是以log文件形式存在）。</p></li>
+<li><p>Consumer消费者订阅topic中的消息。consumer端向broker发送“fetch”请求，并告知其获取消息的offset；此后consumer将会获得一定条数的消息；consumer端也可以重置offset来重新消费消息。</p></li>
+</ul>
+
+<p></p><center> <br>
+<img src="https://raw.githubusercontent.com/GSpinach/MarkdownPictures/master/Hadoop%E8%A1%A5%E5%85%85%E4%B8%8E%E6%80%BB%E7%BB%93/Kafka_partition.png" width="65%"><img src="https://raw.githubusercontent.com/GSpinach/MarkdownPictures/master/Hadoop%E8%A1%A5%E5%85%85%E4%B8%8E%E6%80%BB%E7%BB%93/Kafka_2_consumer.png" width="35%"> <br>
+</center><p></p>
+
+<p>推荐：<a href="https://blog.csdn.net/vinfly_li/article/details/79397201" rel="nofollow">https://blog.csdn.net/vinfly_li/article/details/79397201</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

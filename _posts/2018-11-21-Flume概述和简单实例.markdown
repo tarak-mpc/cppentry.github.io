@@ -1,0 +1,103 @@
+---
+layout:     post
+title:      Flume概述和简单实例
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_36381640/article/details/79084095				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h2 id="flume概述">Flume概述</h2>
+
+<pre>
+Flume是一个分布式、可靠、和高可用的海量日志采集、聚合和传输的系统。支持在日志系统中定制各类数据发送方，用于收集数据;同时，Flume提供对数据进行简单处理，并写到各种数据接受方(比如文本、HDFS、Hbase等)的能力 。</pre>
+
+<h2><img alt="flume" class="has" src="http://sandyfog.qiniudn.com/cnblog-flume-all.jpg"></h2>
+
+<pre>
+Flume主要由3个重要的组件购成：
+      1.Source:完成对日志数据的收集，分成transtion 和 event 打入到channel之中。
+      2.Channel:主要提供一个队列的功能，对source提供中的数据进行简单的缓存。
+      3.Sink:取出Channel中的数据，进行相应的存储文件系统，数据库，或者提交到远程服务器。
+   对现有程序改动最小的使用方式是:
+      使用是直接读取程序原来记录的日志文件，基本可以实现无缝接入，不需要对现有程序进行任何改动。
+   对于直接读取文件Source,有两种方式：
+      1.ExecSource:以运行Linux命令的方式，持续的输出最新的数据，如tail -F 文件名指令，在这种方式下，取的文件名必须是指定的。
+      2.SpoolSource:是监测配置的目录下新增的文件，并将文件中的数据读取出来。
+   需要注意两点：
+      1.拷贝到spool目录下的文件不可以再打开编辑。
+      2.spool目录下不可包含相应的子目录。
+   在实际使用的过程中，可以结合log4j使用:
+      使用log4j的时候，将log4j的文件分割机制设为1分钟一次，将文件拷贝到spool的监控目录。log4j有一个TimeRolling的插件，可以把log4j分割的文件到spool目录。基本实现了实时的监控。
+   Flume在传完文件之后，将会修改文件的后缀，变为.COMPLETED（后缀也可以在配置文件中灵活指定）
+      ExecSource，SpoolSource对比：
+      ExecSource可以实现对日志的实时收集，但是存在Flume不运行或者指令执行出错时，将无法收集到日志数据，无法何证日志数据的完整性。SpoolSource虽然无法实现实时的收集数据，但是可以使用以分钟的方式分割文件，趋近于实时。如果应用无法实现以分钟切割日志文件的话，可以两种收集方式结合使用。
+   Channel有多种方式：
+      有MemoryChannel,JDBC Channel,MemoryRecoverChannel,FileChannel:
+        MemoryChannel可以实现高速的吞吐，但是无法保证数据的完整性,MemoryRecoverChannel在官方文档的建议上已经建义使用FileChannel来替换,FileChannel保证数据的完整性与一致性。在具体配置不现的FileChannel时，建议FileChannel设置的目录和程序日志文件保存的目录设成不同的磁盘，以便提高效率。
+        Sink在设置存储数据时，可以向文件系统中，数据库中，hadoop中储数据，在日志数据较少时，可以将数据存储在文件系中，并且设定一定的时间间隔保存数据。在日志数据较多时，可以将相应的日志数据存储到Hadoop中，便于日后进行相应的数据分析。
+   flume安装配置比较简单，下载flume1.5.0二进制包
+       解压即可 tar -zvxf apache-flume-1.5.0-bin.tar.gz
+       简单实例
+       进入flume目录，新建example.conf
+       # example.conf: A single-node Flume configuration
+       # Name the components on this agent
+       a1.sources = r1
+       a1.sinks = k1
+       a1.channels = c1
+       # Describe/configure the source
+       a1.sources.r1.type = exec
+       a1.sources.r1.command = echo 'hello'
+       # Describe the sink
+       a1.sinks.k1.type = logger
+       # Use a channel which buffers events in memory
+       a1.channels.c1.type = memory
+       a1.channels.c1.capacity = 1000
+       a1.channels.c1.transactionCapacity = 100
+       # Bind the source and sink to the channel
+       a1.sources.r1.channels = c1
+       a1.sinks.k1.channel = c1
+   启动flume： bin/flume-ng agent --f example.conf --name a1 -Dflume.root.logger=INFO,console
+   Flume(ng) 自定义sink实现和属性注入
+     问题导读：
+       1.如何实现flume端自定一个sink，来按照我们的规则来保存日志？
+       2.想从flume的配置文件中获取rootPath的值，该如何配置？
+
+   flume来做收集远端日志案例：
+      远端日志收集的整体思路是远端自定义实现log4j的appender把消息发送到flume端，flume端自定义实现一个sink来按照我们的规则保存日志。
+      自定义Sink代码:
+        public class LocalFileLogSink extends AbstractSink implements Configurable {
+             private static final Logger logger = LoggerFactory
+                      . getLogger(LocalFileLogSink .class );
+                    private static final String PROP_KEY_ROOTPATH = "rootPath";
+              private String rootPath;
+             @Override
+             public void configure(Context context) {
+                  String rootPath = context.getString(PROP_KEY_ROOTPATH );
+                  setRootPath(rootPath);
+             }
+
+                  @Override
+                  public Status process() throws EventDeliveryException {
+                   logger .debug("Do process" );
+               ｝
+        }
+      实现Configurable接口，即可在初始化时，通过configure方法从context中获取配置的参数的值。这里，我们是想从flume的配置文件中获取rootPath的值，也就是日志保存的根路径。在flume-conf.properties中配置如下：
+        agent.sinks = loggerSink
+        agent.sinks.loggerSink.rootPath = ./logsloggerSink是自定义sink的名称，我们取值时的key，只需要loggerSink后面的部分即可，即这里的rootPath。实际业务逻辑的执行，是通过继承复写AbstractSink中的process方法实现。从基类的getChannel方法中获取信道，从中取出Event处理即可。
+        Channel ch = getChannel();
+                   Transaction txn = ch.getTransaction();
+                 txn.begin();
+                  try {
+                      logger .debug("Get event." );
+                     Event event = ch.take();
+                  txn.commit();
+                  status = Status. READY ;
+                  return status;
+                        ｝finally {
+                  Log. info( "trx close.");
+                  txn.close();
+              }
+
+</pre>            </div>
+                </div>

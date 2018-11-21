@@ -1,0 +1,423 @@
+---
+layout:     post
+title:      Flume  分流
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/wangshuminjava/article/details/83933033				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h1 style="margin-left:0px;">Flume - 快速入门</h1>
+
+<p><a class="a-img" href="http://blog.51cto.com/12942149" rel="nofollow"><img alt="" class="is-vip-img is-vip-img-4" height="32" src="http://ucenter.51cto.com/images/noavatar_middle.gif" width="32"></a></p>
+
+<p><a class="name fl" href="http://blog.51cto.com/12942149" rel="nofollow">zsdnr</a><a class="comment comment-num fr">0人评论</a><a class="read fr">129人阅读</a><a class="time fr">2017-05-25 14:47:53</a></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">关于Flume，官方定义如下:</span></span></p>
+
+<blockquote>
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">Apache Flume is a distributed, reliable, and available system for efficiently collecting, aggregating and moving large amounts of log data from many different sources to a centralized data store.</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">The use of Apache Flume is not only restricted to log data aggregation. Since data sources are customizable, Flume can be used to transport massive quantities of event data including but not limited to network traffic data, social-media-generated data, email messages and pretty much any data source possible.</span></span></p>
+</blockquote>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;"> </span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">Flume是分布式海量日志收集工具，根据不同的数据来源，Flume并不局限于对日志的收集。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">flume有如下特性:</span></span></p>
+
+<ul style="margin-left:30px;"><li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">内置对多种source和目标类型的支持</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">支持水平扩展</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">支持多种传输方式，例如:multi-hop flows, fan-in fan-out flows, ****...</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">支持<strong>contextual routing</strong></span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">支持拦截器</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">可靠传递。在flume中每个事件有两个事务，分别在send和receive阶段。 sender发送事件给receiver。接收到数据后，receiver提交自己的事务并发送一个成功信号给sender。sender收到该信号后提交自己的事务。</span></span></p>
+	</li>
+</ul><p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">话说Flume最初是为了从多个web服务把数据流复制到HDFS而设计的，那为什么不直接用put把数据放到HDFS? 假如我们有对快速增长的数据进行实时分析的需求，put过来的数据已经不是实时的了。<br>
+同样的，rsync、scp这样的工具也是一样的道理，并不适合实时分析的场景。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">下图是比较常见的部署方式，以此说明Flume的相关概念:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">                    +--------------------------------------------+
+                    |                                            |
+                    |  +---------------+                         |
+                    |  |               |                         |
+          +----------&gt; |    agent1     +-------------+           |
+          |         |  |               |             |           |
+          |         |  +---------------+             |           |
+          |         |                                |           |
++---------+----+    |  +---------------+     +-------v-------+   |    +--------------+|              |    |  |               |     |               |   |    |              |
+|  generators  +-----&gt; |    agent2     +---&gt; |   collector   +------&gt; | centrialized ||              |    |  |               |     |               |   |    |    store     |
++---------+----+    |  +---------------+     +-------^-------+   |    +--------------+
+          |         |                                |           |
+          |         |  +---------------+             |           |
+          |         |  |               |             |           |
+          +----------&gt; |    agent3     +-------------+           |
+                    |  |               |                         |
+                    |  +---------------+                         |
+                    |                                            |
+                    +--------------------------------------------+</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;"> </span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">图中data generator为数据源，它可以是一个接口、队列、文件等。<br>
+Flume的agent做为一个独立的进程，从数据源收集数据。<br>
+后面的collector事实上也是一个agent，只是将前面agent的输出做为数据源，并对数据进行聚合，最后发送到一个中心存储，比如HDFS。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;"><strong>event</strong>在Flume中是数据传输的基本单位，由header和byte payload组成，agent之间传递的就是一个个event。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">一个agent包含3个组件，分别为source、channel、sink，一个agent可以有多个source、sink、channel:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">+----------+|  source  |
++-------+--+
+        |
+     +--v----+
+     |   C   |
+     |   H   |
+     |   A   |
+     |   N   |
+     |   N   |
+     |   E   |
+     |   L   |
+     +-----+-+
+           |
+        +--v-----+
+        |  sink  |
+        +--------+</span></span></pre>
+
+<ul style="margin-left:30px;"><li>
+	<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">Source: 用于从数据源接收数据，并将数据传给至少一个channel。Flume支持多种source类型。</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">Channel: 可以把channel理解为一个buffer，或者也可以把channel理解为source和sink之间的一座桥。channel也有多种类型，例如JDBC、file、memory...</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">Sink: sink从channel获取数据并发送到目标，目标也可以是一个agent。</span></span></p>
+	</li>
+</ul><p style="margin-left:10px;"><br><span style="color:#333333;"><span style="color:#3d464d;">通常来说，source,channel,sink可以满足大多数需求，此外还有一些组件用于应付特殊场景。</span></span></p>
+
+<ul style="margin-left:30px;"><li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">Interceptor: 可以在source和channel之间进行拦截。</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">Selector: 当一个source关联了两个channel，同一份event应该同时发给两个channel，还是有针对性的发给其中一个channel，selector可以做到这一点。</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">Sink Processor: 当配置了一个sink group，我们可以用sink processor进行故障转移和负载均衡。</span></span></p>
+	</li>
+</ul><p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;"> </span></span></p>
+
+<h2 id="toc_0" style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">基本用法</span></span></h2>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">安装没什么特别的操作，参考:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">cd /usr/local
+wget http://www-us.apache.org/dist/flume/1.7.0/apache-flume-1.7.0-bin.tar.gztar xzvf apache-flume-1.7.0-bin.tar.gz
+mv apache-flume-1.7.0-bin flume
+cd flume
+cp flume-conf.properties.template flume-conf.properties
+cp flume-env.sh.template flume-env.sh</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">如果已经安装过Java则再好不过，但要记得export JAVA_HOME:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">export JAVA_HOME=/usr/local/jdk1.7.0_75</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">Flume的配置会根据source和sink的类型会稍有不同，总体而言，无非以下几项:</span></span></p>
+
+<ul style="margin-left:30px;"><li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">为agent和其各个组件命名</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">配置source</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">配置sink</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">配置channel</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">给channel绑定source和sink</span></span></p>
+	</li>
+</ul><p style="margin-left:10px;"><br><span style="color:#333333;"><span style="color:#3d464d;">下面是Flume支持的source、channel、sink类型:</span></span></p>
+
+<table border="1" cellspacing="0"><thead><tr><th><span style="color:#333333;">source</span></th>
+			<th><span style="color:#333333;">channel</span></th>
+			<th><span style="color:#333333;">sink</span></th>
+		</tr></thead><tbody><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Avro Source</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Memory Channel</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">HDFS Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Thrift Source</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">JDBC Channel</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Hive Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Exec Source</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Kafka Channel</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Logger Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">JMS Source</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">File Channel</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Avro Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Spooling Directory Source</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Spillable Memory Channel</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Thrift Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Twitter 1% firehose Source</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Pseudo Transaction Channel</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">IRC Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Kafka Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">File Roll Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">NetCat Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Null Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Sequence Generator Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">HBaseSink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Syslog Sources</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">AsyncHBaseSink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Syslog TCP Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">MorphlineSolrSink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Multiport Syslog TCP Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">ElasticSearchSink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Syslog UDP Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Kite Dataset Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">HTTP Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">Kafka Sink</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Stress Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"> </td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Legacy Sources</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"> </td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Thrift Legacy Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"> </td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Custom Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"> </td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Scribe Source</span></td>
+			<td style="border-color:#c0c0c0;"> </td>
+			<td style="border-color:#c0c0c0;"> </td>
+		</tr></tbody></table><p style="margin-left:10px;"><br><span style="color:#333333;"><span style="color:#3d464d;">不同的类型可能会有一些特殊的选项，比如Kafka Source需要指定broker地址、topics等。<br>
+这里找一个易上手的source类型，运行看看效果。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">以netcat为例，在conf中加入<strong>netcat2logger.conf</strong>，内容如下:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;"># namingnc.sources = s_netcat
+nc.channels = c_mem
+nc.sinks = k_logger# sourcenc.sources.s_netcat.type = netcat
+nc.sources.s_netcat.bind = localhost
+nc.sources.s_netcat.port = 6666# sinknc.sinks.k_logger.type = logger# channelnc.channels.c_mem.type = memory
+nc.channels.c_mem.capacity = 1000nc.channels.c_mem.transactionCapacity = 100# bindnc.sources.s_netcat.channels = c_mem
+nc.sinks.k_logger.channel = c_mem</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">启动flume-ng，参考:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">bin/flume-ng agent -n nc -f conf/netcat2logger.conf -Dflume.root.logger=INFO,console</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">打开telnet，试试输入一些内容:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">curl telnet://localhost:6666</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">上面的例子比较容易上手，但看起来并没有什么用处。<br>
+下面再贴出一个比较有用例子，假如我有多个nginx实例在分别不同的机器上，我打算把access log的内容实时传给Kafka。<br>
+这样我可以给每台机器配置一个agent，并且将本地日志文件作为source，Kafka作为sink。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">配置参考:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">t2k.sources=s1
+t2k.channels=c1
+t2k.sinks=k1
+
+t2k.sources.s1.type=exect2k.sources.s1.command=tail -f /usr/local/openresty/nginx/logs/access.logt2k.channels.c1.type=memory
+t2k.channels.c1.capacity=10000t2k.channels.c1.transactionCapacity=1000t2k.sinks.k1.type=org.apache.flume.sink.kafka.KafkaSink
+t2k.sinks.k1.kafka.topic=my-topic
+t2k.sinks.k1.kafka.bootstrap.servers=localhost:9092t2k.sinks.k1.flumeBatchSize=20t2k.sources.s1.channels=c1
+t2k.sinks.k1.channel=c1</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">启动命令参考:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">bin/flume-ng agent -n t2k -f conf/tail2Kafka.conf</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;"> </span></span></p>
+
+<h2 id="toc_1" style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">Flow与Selector</span></span></h2>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">"在一个agent中定义flow"，换句话说就是"将source和sink用channel连接起来"。<br>
+所以说，虽然在上面的例子中没有做flow相关的配置，但事实上我们用的是<strong>default flow</strong>。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">Flow表达的是event的流向，例如:</span></span></p>
+
+<ul style="margin-left:30px;"><li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">从一个source流向多个agent，agent的sink各不相同。</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">从一个agent流向另一个agent。</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">从一个source流向多个channel，e.g. fanout、fanin...</span></span></p>
+	</li>
+</ul><p style="margin-left:10px;"><br><span style="color:#333333;"><span style="color:#3d464d;">这里我们以fanout为例，从一个source流向多个channel。<br>
+但是需要考虑一个问题，这几个channel应该作为worker分摊从同一个source过来的event，还是说作为subscriber监听到相同的event?<br>
+这就需要用到另外一个概念——<strong>selector</strong></span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">所以，selector只有两种类型:</span></span></p>
+
+<ul style="margin-left:30px;"><li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">multiplexer</span></span></p>
+	</li>
+	<li>
+	<p style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">replicating(default)</span></span></p>
+	</li>
+</ul><p style="margin-left:10px;"><br><span style="color:#333333;"><span style="color:#3d464d;">两种类型的功能顾名思义，下面举例说明一下。<br>
+假设我对一个source配置了replicating selector，该source关联了两个channel，两个channel分别关联两个sink，两个sink输出到不同的目标。<br>
+但这样做的效果并不明显，从结果来看，和将两个sink关联到同一个channel没什么区别。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">所以我需要一个机制让来自同一个source的event分开流向不同的channel，但这里就需要考虑一个问题——<strong>根据什么决定event的流向?</strong></span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">答案是<strong>根据header中的属性</strong>，为channel设置相关属性值，匹配则流向对应的channel。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">参考格式如下:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.type = multiplexing&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.header = &lt;someHeader&gt;&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.mapping.&lt;Value1&gt; = &lt;Channel1&gt;&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.mapping.&lt;Value2&gt; = &lt;Channel1&gt; &lt;Channel2&gt;&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.mapping.&lt;Value3&gt; = &lt;Channel2&gt;&lt;Agent&gt;.sources.&lt;Source1&gt;.selector.default = &lt;Channel2&gt;</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">所谓<strong>optional</strong>，就是说selector先试图写到相关的channel，如果事务失败则写入optional channel，如果optional也失败，则忽略。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">下面继续用http source写一个例子，根据header流向两个不同的channel，两个channel分别对应两个file sink。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;"><strong>http2logger.conf</strong>，参考如下:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">HttpAgent.sources = HttpSource
+HttpAgent.channels = AChannel BChannel
+HttpAgent.sinks = ASink BSink
+
+HttpAgent.sources.HttpSource.type = http
+HttpAgent.sources.HttpSource.port = 6666HttpAgent.sources.HttpSource.selector.type = multiplexing
+HttpAgent.sources.HttpSource.selector.header = Host
+
+HttpAgent.sources.HttpSource.selector.mapping.A = AChannel
+HttpAgent.sources.HttpSource.selector.mapping.B = BChannel
+HttpAgent.sources.HttpSource.selector.mapping.C = AChannel BChannel
+
+HttpAgent.sources.HttpSource.channels = AChannel BChannel
+
+HttpAgent.channels.AChannel.type = memory
+HttpAgent.channels.BChannel.type = memory
+
+HttpAgent.sinks.ASink.type = logger
+HttpAgent.sinks.ASink.channel = AChannel
+
+HttpAgent.sinks.BSink.type = file_roll
+HttpAgent.sinks.BSink.channel = BChannel
+HttpAgent.sinks.BSink.sink.directory = /var/b</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">启动:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">bin/flume-ng agent -n HttpAgent --conf conf -f conf/http2logger.conf -Dflume.root.logger=INFO,console</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">测试:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">curl -X post localhost:6666 -d '[{"headers": {"Host": "A"}, "body": "this is for A"}]'curl -X post localhost:6666 -d '[{"headers": {"Host": "B"}, "body": "this is for B"}]'curl -X post localhost:6666 -d '[{"headers": {"Host": "C"}, "body": "this is for C"}]'</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;"> </span></span></p>
+
+<h2 id="toc_2" style="margin-left:0px;"><span style="color:#333333;"><span style="color:#3d464d;">Interceptor</span></span></h2>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">假如我希望event header的符合某个条件时丢弃该event，可能我还需要设置一个selector，并让该event流向一个null sink?<br>
+甚至，如果想修改某个event...这时需要用到interceptor。<br>
+Flume为我们提供了几种常见的interceptor实现，不同的interceptor会有一些额外的参数，如下:</span></span></p>
+
+<table border="1" cellspacing="0"><thead><tr><th><span style="color:#333333;">implement</span></th>
+			<th><span style="color:#333333;">desc</span></th>
+		</tr></thead><tbody><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Timestamp Interceptor</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">将timestamp写入header</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Host Interceptor</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">将ip地址或host写入header</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Static Interceptor</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">定义一个常量写入header</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">UUID Interceptor</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">将UUID写入header</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Morphline Interceptor</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">根据声明的morphline配置文件进行基本的ETL</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Search and Replace Interceptor</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">根据声明的regex替换内容</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Regex Filtering Interceptor</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">根据声明的regex过滤event</span></td>
+		</tr><tr><td style="border-color:#c0c0c0;"><span style="color:#333333;">Regex Extractor Interceptor</span></td>
+			<td style="border-color:#c0c0c0;"><span style="color:#333333;">将匹配regex的group写入header</span></td>
+		</tr></tbody></table><p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">配置interceptor和配置channel一样，多个interceptor需要用空格隔开。<br>
+但需要注意，interceptor的声明顺序即执行顺序。<br>
+比如配置一个HostInterceptor，参考:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+a1.sources.r1.interceptors = i1 i2
+a1.sources.r1.interceptors.i1.type = org.apache.flume.interceptor.HostInterceptor$Buildera1.sources.r1.interceptors.i1.preserveExisting = false
+a1.sources.r1.interceptors.i1.hostHeader = hostname
+a1.sources.r1.interceptors.i2.type = org.apache.flume.interceptor.TimestampInterceptor$Buildera1.sinks.k1.filePrefix = FlumeData.%{CollectorHost}.%Y-%m-%da1.sinks.k1.channel = c1</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">虽然Flume提供了几种Interceptor实现，但偶尔也需要根据自己的需求实现，接口为<strong>org.apache.flume.interceptor.Interceptor</strong>。</span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">依赖:<br><code>compile group: 'org.apache.flume', name: 'flume-ng-core', version: '1.7.0'</code></span></span></p>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">这里写一个没什么用的例子，但可以说明相关方法和读取选项的问题:</span></span></p>
+
+<pre style="margin-left:0px;">
+<span style="color:#333333;"><span style="color:#567482;">package com.kavlez.flume.interceptor;import org.apache.flume.Context;import org.apache.flume.Event;import org.apache.flume.interceptor.Interceptor;import java.util.List;public class IllusionInterceptor implements Interceptor{
+
+    public static class Builder implements Interceptor.Builder{
+
+        private boolean isAllIllusion = false;        @Override
+        public Interceptor build() {            return new IllusionInterceptor(isAllIllusion);
+        }        @Override
+        public void configure(Context context) {            this.isAllIllusion = context.getBoolean("illusion");
+        }
+    }    private boolean isAllIllusion;    public IllusionInterceptor(boolean isAllIllusion) {        this.isAllIllusion = isAllIllusion;
+    }    @Override
+    public void initialize() {
+    }    @Override
+    public Event intercept(Event event) {        byte[] modifiedEvent = "Everything is an Illusion".getBytes();
+        event.setBody(modifiedEvent);        return event;
+    }    @Override
+    public List&lt;Event&gt; intercept(List&lt;Event&gt; list) {        for (Event event : list) {            this.intercept(event);
+        }        return list;
+    }    @Override
+    public void close() {
+    }
+}</span></span></pre>
+
+<p style="margin-left:10px;"><span style="color:#333333;"><span style="color:#3d464d;">编译后的jar需要放到<strong>/path/to/flume/lib/.</strong>下即可。</span></span></p>
+
+<p> </p>            </div>
+                </div>

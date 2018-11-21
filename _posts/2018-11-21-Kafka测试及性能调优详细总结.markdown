@@ -1,0 +1,340 @@
+---
+layout:     post
+title:      Kafka测试及性能调优详细总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p align="left">Kafka性能测试</p>
+<p align="left"> </p>
+<p align="left"> </p>
+<p align="left"><strong>测试背景</strong></p>
+<p align="left"> </p>
+<p align="left">由于业务需求，针对kafka在不同参数下的性能进行测试。从而进行kafka性能调优</p>
+<p align="left"> </p>
+<p align="left"><strong>测试目标</strong></p>
+<p align="left"> </p>
+<p align="left">测试kafka 0.8n的性能(Producer/Consumer性能)。当消息大小、批处理大小、压缩等参数变化时对吞吐率的影响。</p>
+<p align="left"> </p>
+<p align="left"><strong>测试环境</strong></p>
+<p align="left"><br><strong>软件版本</strong>：kafka 0.8.1.1<br><strong>硬件环境：</strong>3台多云服务组成的kafka集群。各服务器CPU4核，内存16G，配置如下：</p>
+<p align="left"> </p>
+<p align="left"> </p>
+<p align="left"><strong>服务器IP：</strong></p>
+<p align="left">203.150.54.215</p>
+<p align="left">203.150.54.216</p>
+<p align="left">203.150.54.217</p>
+<p align="left"> </p>
+<p align="left"><strong>测试方法</strong></p>
+<p align="left"> </p>
+<p align="left">使用kafka官方提供的kafa-perf工具做性能测试</p>
+<p align="left"> </p>
+<p align="left"><strong>测试步骤</strong></p>
+<p align="left"><br><strong>一、测试环境准备</strong><br>
+1、测试工具kafka-perf的准备 </p>
+<p align="left">cp kafka-perf_2.10-0.8.1.1.jar /application/kafka/libs/</p>
+<p align="left"><br>
+2、启动kafka</p>
+<p align="left">cd /application/kafka</p>
+<p align="left">vim config/server.properties  #内容见下图</p>
+<p align="left">./bin/kafka-server-start.sh --daemon config/server.properties </p>
+<p align="left">3、测试集群可靠性</p>
+<p align="left">创建一个主题，复制因子为3.</p>
+<p align="left">[root@203-150-54-215 kafka]# bin/kafka-topics.sh --create –zookeeper 203.150.54.215:21203,203.150.54.216:21203,203.150.54.217:21203 --replication-factor 3 --partitions 3 --topic 88</p>
+<p align="left">Created topic "88".</p>
+<p align="left">查看创建的主题分区情况</p>
+<p align="left">[root@203-150-54-215 kafka]# bin/kafka-topics.sh --describe --zookeeper  203.150.54.215:21203 --topic 88</p>
+<p align="left">Topic:88        PartitionCount:3        ReplicationFactor:3     Configs:</p>
+<p align="left">        Topic: 88       Partition: 0    Leader: 3       Replicas: 3,1,2 Isr: 3,1,2</p>
+<p align="left">        Topic: 88       Partition: 1    Leader: 1       Replicas: 1,2,3 Isr: 1,2,3</p>
+<p align="left">        Topic: 88       Partition: 2    Leader: 2       Replicas: 2,3,1 Isr: 2,3,1</p>
+<p align="left">在215上启动生产者</p>
+<p align="left">[root@203-150-54-215 kafka]# bin/kafka-console-producer.sh --broker-list 203.150.54.215:21204 --topic 88
+</p>
+<p align="left">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".</p>
+<p align="left">SLF4J: Defaulting to no-operation (NOP) logger implementation</p>
+<p align="left">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.</p>
+<p align="left">test</p>
+<p align="left">hh</p>
+<p align="left">在216上进行消费</p>
+<p align="left">[root@203-150-54-216 kafka]#       bin/kafka-console-consumer.sh --zookeeper 203.150.54.216:21203 --topic 88 --from-beginning                
+</p>
+<p align="left">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".</p>
+<p align="left">SLF4J: Defaulting to no-operation (NOP) logger implementation</p>
+<p align="left">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.</p>
+<p align="left"> </p>
+<p align="left"> </p>
+<p align="left">test</p>
+<p align="left">hh</p>
+<p align="left">从上可知：3个服务器集群之间链接正常，下面进行性能测试<br>
+kafka-producer-perf-test.sh中参数说明：</p>
+<p align="left">messages 生产者发送走的消息数量</p>
+<p align="left">message-size 每条消息的大小</p>
+<p align="left">batch-size 每次批量发送消息的数量</p>
+<p align="left">topics 生产者发送的topic</p>
+<p align="left">threads 生产者</p>
+<p align="left">broker-list 安装kafka服务的机器ip:porta列表</p>
+<p align="left">producer-num-retries 一个消息失败发送重试次数</p>
+<p align="left">request-timeouts-ms 一个消息请求发送超时时间</p>
+<p align="left">bin/kafka-consumer-perf-test.sh中参数说明：</p>
+<p align="left">zookeeper  zk配置</p>
+<p align="left">messages 消费者消费消息的总数量</p>
+<p align="left">topic 消费者需要消费的topic</p>
+<p align="left">threads 消费者使用几个线程同时消费</p>
+<p align="left">group 消费者组名称</p>
+<p align="left">socket-buffer-sizes socket缓存大小</p>
+<p align="left">fetch-size 每次想kafka broker请求消费消息大小</p>
+<p align="left">consumer.timeout.ms 消费者去kafka broker拿一条消息的超时时间</p>
+<p align="left"><br><strong>二、测试生产者吞吐率</strong><br>
+此项只测试producer在不同的batch-zie，patition等参数下的吞吐率，也就是数据只被及计划，没有consumer读取数据消费情况。<br><strong>生成Topic：</strong><br>
+生成不同复制因子，partition的topic</p>
+<p align="left">bin/kafka-topics.sh --zookeeper 203.150.54.215:21203 --create --topic test-pati1-rep1 --partitions 1 --replication-factor 1</p>
+<p align="left">bin/kafka-topics.sh --zookeeper 203.150.54.215:21203 --create --topic test-pati1-rep2 --partitions 1 --replication-factor 2</p>
+<p align="left"> </p>
+<p align="left">bin/kafka-topics.sh --zookeeper 203.150.54.215:21203 --create --topic test-pati2-rep1 --partitions 2 --replication-factor 1</p>
+<p align="left">bin/kafka-topics.sh --zookeeper 203.150.54.215:21203 --create --topic test-pati2-rep2 --partitions 2 --replication-factor 2</p>
+<p align="left"> </p>
+<p align="left">bin/kafka-topics.sh --zookeeper 203.150.54.215:21203 --create --topic test-pati3-rep1 --partitions 3 --replication-factor 1</p>
+<p align="left">bin/kafka-topics.sh --zookeeper 203.150.54.215:21203 --create --topic test-pati3-rep2 --partitions 3 --replication-factor 2</p>
+<p align="left"><strong>测试producer吞吐率</strong><br>
+调整batch-size，thread，topic，压缩等参数测试producer吞吐率。<br>
+示例：</p>
+<p align="left">a)批处理为1，线程数为1，复制因子为1</p>
+<p align="left">bin/kafka-producer-perf-test.sh --messages 500000 --message-size 512 --batch-size 1 --topic test-pati1-rep1  --threads 1 --broker-list 203.150.54.215:21204,203.150.54.216:21204,203.150.54.217:21204</p>
+<p align="left"> </p>
+<p align="left">b)批处理为5，线程数为4，复制因子为2</p>
+<p align="left">bin/kafka-producer-perf-test.sh --messages 50000 --message-size 512 --batch-size 5 --topic test-pati1-rep2 --threads 1 --broker-list 203.150.54.215:21204,203.150.54.216:21204,203.150.54.217:21204</p>
+<p align="left">c)批处理为10，线程数为4，复制因子为2,不压缩，sync</p>
+<p align="left">bin/kafka-producer-perf-test.sh --messages 50000 --message-size 512 --batch-size 10 --topic test-pati2-rep2 --threads 4 --compression-codec 0 --sync 1 --broker-list 203.150.54.215:21204,203.150.54.216:21204,203.150.54.217:21204</p>
+<p align="left"> </p>
+<p align="left">d)批处理为10，线程数为4，复制因子为2,gzip压缩，sync</p>
+<p align="left">bin/kafka-producer-perf-test.sh --messages 50000 --message-size 512 --batch-size 10 --topic test-pati2-rep2 --threads 4 --compression-codec 1 --sync 1 --broker-list 203.150.54.215:21204, 203.150.54.216:21204, 203.150.54.217:21204</p>
+<p align="left">说明：消息大小统一使用和业务场景中日志大小相近的512Bype，消息数为50w或200w条。<br>
+ <br><strong>三、测试消费者吞吐率</strong><br><strong>测试consumer吞吐率</strong><br>
+调整批处理数，线程数，partition数，复制因子，压缩等进行测试。<br>
+示例：</p>
+<p align="left">a)批处理为1，线程数为1，复制因子为1</p>
+<pre><code>bin/kafka-consumer-perf-test.sh</code> --messages 500000 --message-size 512 --batch-size 1 --topic test-pati1-rep1  --threads 1 <code>--zookeeper </code>203.150.54.215:<code>2181</code></pre>
+<p align="left"> </p>
+<p align="left">b)批处理为5，线程数为4，复制因子为2</p>
+<p align="left"><code>bin/kafka-consumer-perf-test.sh</code> --messages 50000 --message-size 512 --batch-size 5 --topic test-pati1-rep2 --threads 1 
+<code>--zookeeper </code>203.150.54.215:<code>2181</code></p>
+<p align="left">c)批处理为10，线程数为4，复制因子为2,不压缩，sync</p>
+<p align="left"><code>bin/kafka-consumer-perf-test.sh</code> --messages 50000 --message-size 512 --batch-size 10 --topic test-pati2-rep2 --threads 4 --compression-codec 0 --sync 1 
+<code>--zookeeper </code>203.150.54.215:<code>2181</code></p>
+<p align="left"> </p>
+<p align="left">d)批处理为10，线程数为4，复制因子为2,gzip压缩，sync</p>
+<p align="left"><code>bin/kafka-consumer-perf-test.sh</code> --messages 50000 --message-size 512 --batch-size 10 --topic test-pati2-rep2 --threads 4 --compression-codec 1 --sync 1 
+<code>--zookeeper </code>203.150.54.215:<code>2181</code><br><br></p>
+<p align="left"><strong> </strong></p>
+<p align="left"><strong>注：以上测试均使用python脚本多线程测试实现。</strong></p>
+<p align="left"><strong>测试结果及分析</strong></p>
+<p align="left"><strong> </strong></p>
+<p align="left"><strong>1、 </strong><strong>生产者测试结果及分析</strong></p>
+<p align="left">调整线程数，批处理数，复制因子等参考，对producer吞吐率进行测试。在测试时消息大小为512Byte，消息数为50w，结果如下：</p>
+<table border="1" cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="61">
+<p align="left">复制因子</p>
+</td>
+<td valign="top" width="67">
+<p align="left">1</p>
+</td>
+<td valign="top" width="67">
+<p align="left">2</p>
+</td>
+</tr><tr><td valign="top" width="61">
+<p align="left">线程数</p>
+</td>
+<td valign="top" width="61">
+<p align="left">批处理</p>
+</td>
+<td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="67">
+<p align="left"> </p>
+</td>
+<td valign="top" width="67">
+<p align="left"> </p>
+</td>
+</tr><tr><td valign="top" width="61">
+<p align="left">1</p>
+</td>
+<td valign="top" width="61">
+<p align="left">1</p>
+</td>
+<td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="67">
+<p align="left">1.8598</p>
+</td>
+<td valign="top" width="67">
+<p align="left">0.5878</p>
+</td>
+</tr><tr><td valign="top" width="61">
+<p align="left">4</p>
+</td>
+<td valign="top" width="61">
+<p align="left">5</p>
+</td>
+<td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="67">
+<p align="left">17.6594</p>
+</td>
+<td valign="top" width="67">
+<p align="left">7.2501</p>
+</td>
+</tr><tr><td valign="top" width="61">
+<p align="left">4</p>
+</td>
+<td valign="top" width="61">
+<p align="left">10</p>
+</td>
+<td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="67">
+<p align="left">26.4221</p>
+</td>
+<td valign="top" width="67">
+<p align="left">13.0208</p>
+</td>
+</tr><tr><td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="61">
+<p align="left">压/no</p>
+</td>
+<td valign="top" width="67">
+<p align="left"> </p>
+</td>
+<td valign="top" width="67">
+<p align="left"> </p>
+</td>
+</tr><tr><td valign="top" width="61">
+<p align="left">4</p>
+</td>
+<td valign="top" width="61">
+<p align="left">10</p>
+</td>
+<td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="67">
+<p align="left">4.6855</p>
+</td>
+<td valign="top" width="67">
+<p align="left">1.9058</p>
+</td>
+</tr><tr><td valign="top" width="61">
+<p align="left">4</p>
+</td>
+<td valign="top" width="61">
+<p align="left">10</p>
+</td>
+<td valign="top" width="61">
+<p align="left"> </p>
+</td>
+<td valign="top" width="67">
+<p align="left">3.0945</p>
+</td>
+<td valign="top" width="67">
+<p align="left">1.4846</p>
+</td>
+</tr></tbody></table><p align="left">                           Producer吞吐率（MB/s）</p>
+<p align="left"><br>
+调整sync模式，压缩方式得到吞吐率数据如表3.在本次测试中msg=512Byte，message=500000，batch_zie=10</p>
+<p align="left"> <br><strong>结果分析：</strong><br>
+1）kafka在批处理，多线程，不适用同步复制的情况下，吞吐率是比较高的，可以达26MB/s,消息数达17w条/s以上。<br>
+2）使用批处理或多线程对提升生产者吞吐率效果明显。<br>
+3）复制因子会对吞吐率产生较明显影响<br>
+   使用同步复制时，复制因子会对吞吐率产生较明显的影响。复制因子为2比因子为1（即无复制）时，吞吐率下降40%左右。</p>
+<p align="left"><br>
+4）使用sync方式，性能有明显下降。<br>
+   使用Sync方式producer吞吐率会有明显下降<br>
+5)压缩与吞吐率<br>
+  使用Gzip及Snappy方式压缩，吞吐率反而有下降，原因待分析。而Snappy方式吞吐率高于gzip方式。<br>
+6）分区数与吞吐率<br>
+   分区数增加生产者吞吐率反而有所下降 <br>
+ <br><strong>2</strong><strong>、消费者结果及分析</strong></p>
+<p align="left"><br><strong>结果分析：</strong></p>
+<p align="left">1）kafka consumer吞吐率在parition，threads较大的情况下，在测试场景下，最大吞吐率达到了34MB/s <br>
+2）复制因子，影响较小。replication factor并不会影响consumer的吞吐率测试， consumer从每个partition的leader读数据，而与replication factor无关。同样，consumer吞吐率也与同步复制还是异步复制无关。<br>
+3)线程数和partition与吞吐率关系</p>
+<p align="left">当分区数较大时，增加thread数可显著提升consumer的吞吐率。<br>
+但要注意在分区较大时线程数不改大于分区数，否则会出现No broker partitions consumed by consumer，对提升吞吐率也没有帮助。</p>
+<p align="left">4）批处理数对吞吐率影响</p>
+<p align="left">改变批处理数对吞吐率影响不大<br>
+5）压缩与吞吐率</p>
+<p align="left">压缩对吞吐率影响小。</p>
+<p align="left"> </p>
+<p align="left">附优化后的配置文件：</p>
+<p align="left">broker.id=1</p>
+<p align="left">listeners=PLAINTEXT://0.0.0.0:6667</p>
+<p align="left">advertised.listeners=PLAINTEXT://203.150.54.215:6667</p>
+<p align="left">port=6667</p>
+<p align="left">host.name=203.150.54.215</p>
+<p align="left"> </p>
+<p align="left"># Replication configurations</p>
+<p align="left">num.replica.fetchers=1</p>
+<p align="left">replica.fetch.max.bytes=1048576</p>
+<p align="left">replica.fetch.wait.max.ms=500</p>
+<p align="left">replica.high.watermark.checkpoint.interval.ms=5000</p>
+<p align="left">replica.socket.timeout.ms=30000</p>
+<p align="left">replica.socket.receive.buffer.bytes=65536</p>
+<p align="left">replica.lag.time.max.ms=10000</p>
+<p align="left">replica.lag.max.messages=4000</p>
+<p align="left"> </p>
+<p align="left">compression.codec:none</p>
+<p align="left">controller.socket.timeout.ms=30000</p>
+<p align="left">controller.message.queue.size=10</p>
+<p align="left">controlled.shutdown.enable=true</p>
+<p align="left">default.replication.factor:2</p>
+<p align="left"> </p>
+<p align="left"># Log configuration</p>
+<p align="left">num.partitions=1  </p>
+<p align="left">num.recovery.threads.per.data.dir=1</p>
+<p align="left">message.max.bytes=1000000</p>
+<p align="left">auto.create.topics.enable=true</p>
+<p align="left">auto.leader.rebalance.enable=true</p>
+<p align="left">log.dirs=/mnt/kafka-logs/kafka00</p>
+<p align="left">log.index.interval.bytes=4096</p>
+<p align="left">log.index.size.max.bytes=10485760</p>
+<p align="left">log.retention.hours=72 #保留三天，也可以更短</p>
+<p align="left">log.flush.interval.ms=10000  #每间隔1秒钟时间，刷数据到磁盘</p>
+<p align="left">log.flush.interval.messages=20000 #log数据文件刷新策略</p>
+<p align="left">log.flush.scheduler.interval.ms=2000</p>
+<p align="left">log.roll.hours=72</p>
+<p align="left">log.retention.check.interval.ms=300000</p>
+<p align="left">log.segment.bytes=1073741824 #kafka启动时是单线程扫描目录(log.dir)下所有数据文件</p>
+<p align="left"> </p>
+<p align="left"># ZK configuration</p>
+<p align="left">zookeeper.connection.timeout.ms=6000</p>
+<p align="left">zookeeper.sync.time.ms=2000</p>
+<p align="left">zookeeper.connect=203.150.54.215:2181,203.150.54.216:2182,203.150.54.217:2183</p>
+<p align="left"> </p>
+<p align="left"># Socket server configuration</p>
+<p align="left">num.io.threads=5 #配置线程数量为cpu核数加1</p>
+<p align="left">num.network.threads=8 #配置线程数量为cpu核数2倍，最大不超过3倍</p>
+<p align="left">socket.request.max.bytes=104857600</p>
+<p align="left">socket.receive.buffer.bytes=1048576</p>
+<p align="left">socket.send.buffer.bytes=1048576</p>
+<p align="left">queued.max.requests=500</p>
+<p align="left">fetch.purgatory.purge.interval.requests=1000</p>
+<p align="left">producer.purgatory.purge.interval.requests=1000</p>
+<p align="left"> </p>
+<p align="left"> </p>
+            </div>
+                </div>

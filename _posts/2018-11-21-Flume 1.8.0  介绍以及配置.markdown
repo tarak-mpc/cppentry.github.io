@@ -1,0 +1,217 @@
+---
+layout:     post
+title:      Flume 1.8.0  介绍以及配置
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p style="margin-left:0cm;"><strong>Flume 1.8.0介绍与配置</strong></p>
+
+<ul><li>概述</li>
+</ul><p style="margin-left:0cm;">Apache Flume是一个分布式，可靠且可用的系统，用于有效地从许多不同的源收集、聚合和移动大量日志数据到集中式数据存储。Apache Flume的使用不仅限于日志数据聚合。由于数据源是可定制的，因此Flume可用于传输大量事件数据，包括但不限于网络流量数据，社交媒体生成的数据，电子邮件消息以及几乎任何可能的数据源。</p>
+
+<p style="margin-left:0cm;">Apache Flume是Apache Software Foundation的顶级项目。</p>
+
+<p style="margin-left:0cm;">目前有两种版本代码行，版本0.9.x和1.x.鼓励使用1.x版本。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<ul><li>系统要求</li>
+</ul><p style="margin-left:0cm;">（1）Java运行时环境 - Java 1.8或更高版本</p>
+
+<p style="margin-left:0cm;">（2）内存 - sources，channels或sinks使用的配置的足够内存</p>
+
+<p style="margin-left:0cm;">（3）磁盘空间 - channels或sinks使用的配置的足够磁盘空间</p>
+
+<p style="margin-left:0cm;">（4）目录权限 - 代理使用的目录的读/写权限</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<ul><li>架构</li>
+</ul><p style="margin-left:0cm;">数据流模型：</p>
+
+<p style="margin-left:0cm;">Flume事件被定义为具有字节有效负载和可选字符串属性集的数据流单元。Flume agent是一个（JVM）进程，它承载事件从外部源流向下一个目标（跃点）的组件。</p>
+
+<p style="margin-left:0cm;"><img alt="" class="has" height="348" src="https://img-blog.csdn.net/20180727175703880?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MDY1NzU1Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="968"></p>
+
+<p style="margin-left:0cm;">Flume source消耗由外部源（如Web服务器）传递给它的事件。外部源以目标Flume source识别的格式向Flume发送事件。例如，Avro Flume源可用于从Avro客户端或从Avro sink发送事件的流中的其他Flume代理接收Avro事件。可以使用Thrift Flume Source定义类似的流程，以接收来自Thrift Sink或Flume Thrift Rpc客户端或Thrift客户端的事件，这些客户端使用Flume thrift协议生成的任何语言编写。当Flume源接收事件时，它将其存储到一个或多个channels。该channel是一个被动存储器，可以保持事件直到它被Flume sink消耗。文件通道就是一个例子 - 它由本地文件系统支持。接收器从channel中移除事件并将其放入外部存储库（如HDFS（通过Flume HDFS接收器））或将其转发到流中下一个Flume  agent（下一跳）的Flume源。给定代理程序中的sources和sinks与通道中暂存的事件异步运行。</p>
+
+<p style="margin-left:0cm;">复杂流：</p>
+
+<p style="margin-left:0cm;">  Flume允许用户构建多跳流，即事件在到达最终目的地之前经过多个agent。它还允许扇入（fan-in）和扇出(fan-out)流，上下文路由和故障跳转的备份路由（故障转移）。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">可靠性：</p>
+
+<p style="margin-left:0cm;"> （1）事件在每个代理的通道中进行。然后将事件传递到流中的下一个代理或终端存储库（如HDFS）。只有将事件存储在下一个代理的通道或终端存储库中后，才会从通道中删除这些事件。这就是Flume中的单跳消息传递语义如何提供流的端到端可靠性。</p>
+
+<p style="margin-left:0cm;">（2）Flume使用事务方法来保证事件的可靠传递。源和接收器分别在事务中封装由信道提供的事务中放置或提供的事件的存储/检索。这可确保事件集在流中从一个点到另一个点可靠地传递。在多跳流的情况下，来自前一跳的接收器和来自下一跳的源都运行其事务以确保数据安全地存储在下一跳的信道中。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">可恢复性：</p>
+
+<p style="margin-left:0cm;">  事件在通道中进行，这管理从故障中恢复。Flume支持一个由本地文件系统支持的持久文件通道。还有一个内存通道，它只是将事件简单存储在内存中的队列中，这更快，但是当代理进程死亡时仍然留在内存通道中的任何事件都无法恢复（性能差）。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<ul><li>设置</li>
+</ul><p style="margin-left:0cm;">设置代理：</p>
+
+<p style="margin-left:0cm;">  Flume代理配置存储在本地配置文件中。这是一个遵循Java属性文件格式的文本文件。可以在同一配置文件中指定一个或多个代理的配置。配置文件包括代理中每个源，接收器和通道的属性以及它们如何连接在一起以形成数据流。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">配置单个组件：</p>
+
+<p style="margin-left:0cm;"><span style="color:#000000;">流中的每个组件（源，接收器或通道）都具有特定于 类型和实例化的名称、类型和属性集。例如，Avro source需要主机名（或IP地址）和端口号来接收数据。内存通道可以具有最大队列大小（容量），HDFS接收器需要知道文件系统URI，创建文件的路径，文件轮换频率等。组件的所有此类属性需要在托管Flume代理的属性文件中设置。</span></p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">将各个部分连接在一起：</p>
+
+<p style="margin-left:0cm;">代理需要知道要加载哪些组件以及它们如何连接以构成流。这是通过列出代理中每个源，接收器和通道的名称，然后为每个接收器和源指定连接通道来完成的。例如，代理通过名为file-channel的文件通道将事件从名为avroWeb的Avro源流向HDFS sink hdfs-cluster1。配置文件将包含这些组件的名称和文件通道，作为avroWeb源和hdfs-cluster1接收器的共享通道。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;"><span style="color:#000000;">启动代理：</span></p>
+
+<p style="margin-left:0cm;"> </p>
+
+<table><tbody><tr><td>
+			<p>$ bin/flume-ng agent -n $agent_name -c conf -f conf/flume-conf.properties.template</p>
+
+			<p> </p>
+			</td>
+		</tr></tbody></table><p><span style="color:#000000;">使用名为</span><span style="color:#000000;">flume-ng</span><span style="color:#000000;">的</span><span style="color:#000000;">shell</span><span style="color:#000000;">脚本启动代理程序，该脚本位于</span><span style="color:#000000;">Flume</span><span style="color:#000000;">发行版的</span><span style="color:#000000;">bin</span><span style="color:#000000;">目录中。您需要在命令行上指定代理名称，配置目录和配置文件，具体命令如下：</span></p>
+
+<p> </p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">下面给出一个单节点Flume配置（此配置允许用户生成事件，然后将其记录到控制台）的简单示例：</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<table><tbody><tr><td>
+			<p><em>#example.conf</em><em>：单节点</em><em>Flume</em><em>配置</em></p>
+
+			<p> </p>
+
+			<p><em>＃命名此代理上的组件</em></p>
+
+			<p>a1.sources  <strong>= </strong> r1</p>
+
+			<p>a1.sinks  <strong>= </strong> k1</p>
+
+			<p>a1.channels  <strong>= </strong> c1</p>
+
+			<p> </p>
+
+			<p><em>＃描述</em><em>/</em><em>配置源</em></p>
+
+			<p>a1.sources.r1.type  <strong>= </strong> netcat</p>
+
+			<p>a1。 sources.r1.bind  <strong>= </strong> localhost</p>
+
+			<p>a1.sources.r1.port  <strong>= </strong> 44444</p>
+
+			<p> </p>
+
+			<p><em>＃描述接收器</em></p>
+
+			<p>a1.sinks.k1.type  <strong>= </strong> logger</p>
+
+			<p> </p>
+
+			<p><em>＃使用一个缓冲内存中事件的通道</em></p>
+
+			<p>a1.channels.c1.type  <strong>= </strong> memory</p>
+
+			<p>a1.channels .c1.capacity  <strong>= </strong> 1000</p>
+
+			<p>a1.channels.c1.transactionCapacity  <strong>=</strong> 100</p>
+
+			<p> </p>
+
+			<p><em>＃将源和接收器绑定到通道</em></p>
+
+			<p>a1.sources.r1.channels  <strong>= </strong> c1</p>
+
+			<p>a1.sinks.k1.channel  <strong>= </strong> c1</p>
+
+			<p> </p>
+			</td>
+		</tr></tbody></table><p>（1）在解压后的文件apache-flume-1.X.0-bin/conf下创建一个example.conf，内容如下：</p>
+
+<p> </p>
+
+<p style="margin-left:0cm;">此配置定义名为a1的单个代理。a1有一个侦听端口44444上的数据的源，一个缓冲内存中事件数据的通道，以及一个将事件数据记录到控制台的接收器。配置文件命名各种组件，然后描述其类型和配置参数。给定的配置文件可能会定义几个命名的代理 当一个给定的Flume进程启动时，会传递一个标志，告诉它要显示哪个命名代理。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">(2)根据这个配置文件，启动Flume;</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<table><tbody><tr><td>
+			<p>$ bin / flume-ng agent --conf conf --conf-file example.conf --name a1 -Dflume.root.logger = INFO，console</p>
+
+			<p> </p>
+			</td>
+		</tr></tbody></table><p>请注意，在完整部署中，我们通常会包含一个选项： - conf = &lt;conf-dir&gt;。所述&lt;CONF-DIR&gt;目录将包括一个外壳脚本<em>flume-env.sh</em>和潜在的一个log4j的属性文件。在这个例子中，我们传递一个Java选项来强制Flume登录到控制台，我们没有自定义环境脚本。</p>
+
+<p> </p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;"> </p>
+
+<table><tbody><tr><td>
+			<p>$ telnet localhost 44444</p>
+
+			<p>Trying 127.0.0.1 ...</p>
+
+			<p>Conneted to localhost.localdomain（127.0.0.1）。</p>
+
+			<p>Escape charater is'^]'。</p>
+
+			<p>Hello world！&lt;ENTER&gt;</p>
+
+			<p>OK</p>
+
+			<p> </p>
+			</td>
+		</tr></tbody></table><p>(3) 从一个单独的终端，我们可以telnet端口44444并向Flume发送一个事件：</p>
+
+<p> </p>
+
+<p style="margin-left:0cm;">（4）原始的Flume终端在日志消息中输出事件，则配置成功.</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<ul><li>记录原始数据：</li>
+</ul><p style="margin-left:0cm;">在许多生产环境中记录流经摄取管道的原始数据流不是所希望的行为，因为这可能导致泄漏敏感数据或安全相关配置（例如密钥）泄漏到Flume日志文件。默认情况下，Flume不会记录此类信息。另一方面，如果数据管道被破坏，Flume将尝试提供调试问题的线索。</p>
+
+<p style="margin-left:0cm;">调试事件管道问题的一种方法是设置连接到Logger Sink的附加内存通道，它将所有事件数据输出到Flume日志。但是，在某些情况下，这种方法是不够的。</p>
+
+<p style="margin-left:0cm;">为了能够记录事件和配置相关的数据，除了log4j属性之外，还必须设置一些Java系统属性。</p>
+
+<p style="margin-left:0cm;">要启用与配置相关的日志记录，请设置Java系统属性 -Dorg.apache.flume.log.printconfig = true。这可以在命令行上传递，也可以在flume-env.sh中的JAVA_OPTS变量中设置。</p>
+
+<p style="margin-left:0cm;">要启用数据记录，请 按照上述相同方式设置Java系统属性-Dorg.apache.flume.log.rawdata = true。对于大多数组件，还必须将log4j日志记录级别设置为DEBUG或TRACE，以使特定于事件的日志记录显示在Flume日志中。下面是启用配置日志记录和原始数据日志记录的示例，同时还将Log4j日志级别设置为DEBUG以用于控制台输出：</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<table><tbody><tr><td>
+			<p>$ bin/flume-ng agent --conf conf --conf-file example.conf --name a1 -Dflume.root.logger=DEBUG,console -Dorg.apache.flume.log.printconfig=true -Dorg.apache.flume.log.rawdata=true</p>
+
+			<p> </p>
+			</td>
+		</tr></tbody></table><p> </p>
+
+<p> </p>            </div>
+                </div>

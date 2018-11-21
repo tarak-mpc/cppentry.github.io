@@ -1,0 +1,669 @@
+---
+layout:     post
+title:      第十九记·Flume详解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u014414323/article/details/81286884				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>XY个人记</p>
+
+<p>    Apache Flume 用于移动大规模批量流数据到 HDFS 系统。从Web服务器收集当前日志文件数据到HDFS聚集用于分析，一个常见的用例是Flume。</p>
+
+<p>    Flume最早是Cloudera提供的日志收集系统，目前是Apache下的一个孵化项目，Flume支持在日志系统中定制各类数据发送方，用于收集数据。Flume是一种分布式，可靠且可用的服务，用于有效地收集，聚合和移动大量日志数据。它具有基于流数据流的简单灵活的架构。它具有可靠的可靠性机制和许多故障转移和恢复机制，具有强大的容错能力。它使用简单的可扩展数据模型，允许在线分析应用程序。Flume可以将应用产生的数据存储到任何集中存储器中，比如HDFS,HBase。</p>
+
+<p style="text-align:center;"><img alt="" class="has" height="208" src="https://img-blog.csdn.net/2018073016183142?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="475"></p>
+
+<p>Flume 支持多种来源，如：</p>
+
+<ul><li>
+	<p>“tail”(从本地文件，该文件的管道数据和通过Flume写入 HDFS，类似于Unix命令“tail”)</p>
+	</li>
+	<li>
+	<p>系统日志</p>
+	</li>
+	<li>
+	<p>Apache log4j (允许Java应用程序通过Flume事件写入到HDFS文件)。</p>
+	</li>
+</ul><p> </p>
+
+<h3><strong>Flume的工作方式有两种Flume-og（</strong>Cloudera<strong>）和Flume-ng（</strong>Apache<strong>）。</strong></h3>
+
+<p><strong>    Flume-og</strong>采用了多Master的方式。为了保证配置数据的一致性，Flume引入了ZooKeeper，用于保存配置数据，ZooKeeper本身可保证配置数据的一致性和高可用，另外，在配置数据发生变化时，ZooKeeper可以通知Flume Master节点。Flume Master间使用gossip协议同步数据。<br>
+    <strong>Flume-ng</strong>最明显的改动就是取消了集中管理配置的 Master 和 Zookeeper，变为一个纯粹的传输工具。Flume-ng另一个主要的不同点是读入数据和写出数据现在由不同的工作线程处理（称为 Runner）。 在 Flume-og 中，读入线程同样做写出工作（除了故障重试）。如果写出慢的话（不是完全失败），它将阻塞 Flume 接收数据的能力。这种异步的设计使读入线程可以顺畅的工作而无需关注下游的任何问题。而我们现在用的就是Flume-ng。</p>
+
+<h3>Flume-ng</h3>
+
+<p><strong>（官网：<a href="http://flume.apache.org/" rel="nofollow">http://flume.apache.org/</a>）</strong></p>
+
+<p>Flume-ng只有一个角色的节点：<span style="color:#f33b45;"><strong>agent</strong></span>的角色，agent由source、channel、sink组成。</p>
+
+<p><strong><span style="color:#f33b45;">    Source</span></strong>：Source用于采集数据，Source是产生数据流的地方，同时Source会将产生的数据流传输到Channel</p>
+
+<p><strong><span style="color:#f33b45;">    Channel</span></strong>：连接 sources 和 sinks ，这个有点像一个队列。</p>
+
+<p><strong><span style="color:#f33b45;">    Sink</span></strong>：从Channel收集数据，将数据写到目标源，可以是下一个Source也可以是HDFS或者HBase。</p>
+
+<p><img alt="" class="has" height="405" src="https://img-blog.csdn.net/20180730163014241?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="852"></p>
+
+<p>    <span style="color:#f33b45;"><strong>Event是Flume数据传输的基本单元</strong></span></p>
+
+<p>    source监控某个文件，将数据拿到，封装在一个event当中，并put/commit到channel当中，channel是一个队列，队列的优点是先进先出，放好后尾部一个个event出来，sink主动去从channel当中去拉数据，sink再把数据写到某个地方，比如HDFS上面去。</p>
+
+<h3 style="margin-left:-20px;"><span style="color:#e579b6;">设置多代理流程</span></h3>
+
+<p style="text-align:center;"><img alt="" class="has" height="128" src="https://img-blog.csdn.net/20180730163137371?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="623"></p>
+
+<p>为了跨多个代理或跳数据流，先前代理的接收器和当前跳的源需要是avro类型，接收器指向源的主机名（或IP地址）和端口。</p>
+
+<h3 style="margin-left:-20px;"><span style="color:#e579b6;">合并</span></h3>
+
+<p>    日志收集中非常常见的情况是大量日志生成客户端将数据发送到连接到存储子系统的少数消费者代理。例如，从数百个Web服务器收集的日志发送给写入HDFS集群的十几个代理。</p>
+
+<p style="text-align:center;"><img alt="" class="has" height="443" src="https://img-blog.csdn.net/20180730163238651?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="640"></p>
+
+<p>    这可以通过使用avro接收器配置多个第一层代理在Flume中实现，所有这些都指向单个代理的avro源（同样，您可以在这种情况下使用简单的方式 sources/sinks/clients）。第二层代理上的此源将接收的事件合并到单个信道中，该信道由接收器消耗到其最终目的地。</p>
+
+<h3 style="margin-left:-20px;"><span style="color:#e579b6;">多路复用流程</span></h3>
+
+<p>Flume支持将事件流多路复用到一个或多个目的地。这是通过定义可以复制或选择性地将事件路由到一个或多个通道的流复用器来实现的。</p>
+
+<p style="text-align:center;"><img alt="" class="has" height="379" src="https://img-blog.csdn.net/20180730163330984?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="652"></p>
+
+<p>    上面的例子显示了来自代理“foo”的源代码将流程扇出到三个不同的通道。这个扇出可以复制或多路复用。在复制流的情况下，每个事件被发送到所有三个通道。对于多路复用情况，当事件的属性与预配置的值匹配时，事件将传递到可用通道的子集。例如，如果一个名为“txnType”的事件属性设置为“customer”，那么它应该转到channel1和channel3，如果它是“vendor”，那么它应该转到channel2，否则转到channel3。可以在代理的配置文件中设置映射。</p>
+
+<h3>安装配置Flume</h3>
+
+<p>解压、并修改配置文件flume-env.sh</p>
+
+<pre class="has">
+<code>$ tar -zxf ../../software/apache-flume-1.7.0-bin.tar.gz -C ./
+$ mv apache-flume-1.7.0-bin flume-1.7.0
+$ cp flume-env.sh.template flume-env.sh
+
+配置flume-env.sh中的
+JAVA_HOME=/opt/modules/jdk1.7.0_67
+</code></pre>
+
+<p><span style="color:#f33b45;"><strong>运行之前先添加一些flume依赖的hdfs的jar包，添加到flume的lib目录</strong></span></p>
+
+<p><img alt="" class="has" height="152" src="https://img-blog.csdn.net/20180730170307446?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="275"></p>
+
+<p>完成后配置是否成功</p>
+
+<pre class="has">
+<code>bin/flume-ng version</code></pre>
+
+<p><img alt="" class="has" height="123" src="https://img-blog.csdn.net/20180730164120450?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="633"></p>
+
+<p>bin/flume-ng.sh 查看flume的flume-ng命令相关命令</p>
+
+<pre class="has">
+<code>Usage: bin/flume-ng &lt;command&gt; [options]...
+
+commands:
+  agent                     run a Flume agent
+  avro-client               run an avro Flume client
+
+global options:
+  --conf,-c &lt;conf&gt;          use configs in &lt;conf&gt; directory
+
+agent options:
+  --name,-n &lt;name&gt;          the name of this agent (required)
+  --conf-file,-f &lt;file&gt;     specify a config file (required if -z missing)
+
+avro-client options:
+  --rpcProps,-P &lt;file&gt;   RPC client properties file with server connection params
+  --host,-H &lt;host&gt;       hostname to which events will be sent
+  --port,-p &lt;port&gt;       port of the avro source
+  --dirname &lt;dir&gt;        directory to stream to avro source
+  --filename,-F &lt;file&gt;   text file to stream to avro source (default: std input)
+  --headerFile,-R &lt;file&gt; File containing event headers as key/value pairs on each new line</code></pre>
+
+<p> </p>
+
+<h3>根据官网上的配置运行官网上的一个配置案例：</h3>
+
+<p><img alt="" class="has" height="599" src="https://img-blog.csdn.net/20180730164320921?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1112"></p>
+
+<p>图片中的红框中相当于一个<strong><span style="color:#f33b45;">Agent</span></strong><br>
+下面这个flume-test.properties相当于一个Agent<br>
+首先vi一个flume-test.properties<br>
+复制官网上的案例进行更改</p>
+
+<p># Name the components on this agent<strong> 三个组件的别名</strong> a1.sources = r1 a1.sinks = k1 a1.channels = c1</p>
+
+<p>下面是三个组件的属性<br>
+# Describe/configure the source a1.sources.r1.type = netcat     #类型<br>
+a1.sources.r1.bind = localhost     #主机名<br>
+a1.sources.r1.port = 44444    #端口号</p>
+
+<p> </p>
+
+<p>#capacity 肯定要比 transactionCapacity 参数大<br>
+# Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000 memory最多能存储多少个events事件<br>
+a1.channels.c1.transactionCapacity = 100 一次能提交多少个events数量</p>
+
+<p>一个source，可以绑定多个channel<br>
+一个sink，只能绑定一个channel<br>
+# Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1 #绑定到c1<br>
+a1.sinks.k1.channel = c1 #</p>
+
+<p><img alt="" class="has" height="396" src="https://img-blog.csdn.net/20180730164806373?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="898"></p>
+
+<p>更改log4j的日志级别，flume.root.logger=INFO,LOGFILE 更改为flume.root.logger=INFO,console（在控制台输出）</p>
+
+<p><img alt="" class="has" height="117" src="https://img-blog.csdn.net/20180730164842925?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="417"></p>
+
+<p><br>
+查看系统有没有安装telnet，没有的就安装</p>
+
+<pre class="has">
+<code>rpm -qa | grep telnet
+安装
+sudo yum -y install telnet
+或
+yum -y install nc</code></pre>
+
+<p><strong>运行flume-test.properties</strong></p>
+
+<pre class="has">
+<code>$ bin/flume-ng agent --conf conf --name a1 --conf-file conf/flume-test.properties </code></pre>
+
+<p><strong>执行流程：先创建channel ---&gt; 再创建sink ---&gt; 再创建source</strong></p>
+
+<p><img alt="" class="has" height="278" src="https://img-blog.csdn.net/20180730165149766?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="889"></p>
+
+<p><strong>完成之后使用telnet链接或者使用netcat链接，连接成功后输入信息</strong></p>
+
+<pre class="has">
+<code>telnet 192.168.142.167 44444 或 nc hadoop01.com 44444</code></pre>
+
+<p><img alt="" class="has" height="121" src="https://img-blog.csdn.net/20180730165323150?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="527"></p>
+
+<p><strong>之后可以在44444端口看到监控的到的信息</strong></p>
+
+<p><img alt="" class="has" height="144" src="https://img-blog.csdn.net/20180730165414660?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="889"></p>
+
+<p><strong>退出telnet：输入ctrl + ] 然后输入quit</strong></p>
+
+<p> </p>
+
+<h3>运行自定义案例</h3>
+
+<p>需求：监控apache服务器的日志,利用flume监控某一个文件<br>
+监控：/var/log/httpd/access_log日志文件</p>
+
+<p><strong>首先</strong></p>
+
+<p>安装httpd服务<br>
+安装完成之后，会有个目录生成<span style="color:#e579b6;"> /var/www/html</span><br>
+启动服务<br>
+浏览网页：输入主机名[hostname] 端口号默认是80。没有主页默认进到下面页面，在 /var/www/html中<br>
+创建一个index.html文件<br>
+会默认进入到index.html中</p>
+
+<pre class="has">
+<code>$ sudo yum -y install httpd    #安装httpd服务
+$ sudo service httpd start    #启动服务
+$ sudo vi index.html    #穿件index.html文件</code></pre>
+
+<p><img alt="" class="has" height="462" src="https://img-blog.csdn.net/20180730165917257?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1200"></p>
+
+<p><strong>访问主页的时候日志产生的路径：/var/log/httpd/access_log</strong></p>
+
+<p><strong>然后</strong></p>
+
+<p>创建一个文件flume-apache-sink-hdfs.properties</p>
+
+<pre class="has">
+<code>$ cp flume-test.properties flume-apache-sink-hdfs.properties    #copy后更改</code></pre>
+
+<p>官网案例如图</p>
+
+<p><img alt="" class="has" height="750" src="https://img-blog.csdn.net/20180730170110719?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1200"></p>
+
+<p>配置如下：</p>
+
+<p>a1.sources.r1.type = exec<br>
+a1.sources.r1.command = tail -f /var/log/httpd/access_log<br>
+a1.sinks.k1.type = hdfs<br>
+a1.sinks.k1.hdfs.path = hdfs://hadoop01.com/flume/webdata</p>
+
+<p><img alt="" class="has" height="141" src="https://img-blog.csdn.net/20180730170145792?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="626"></p>
+
+<p>运行：</p>
+
+<pre class="has">
+<code>$ bin/flume-ng agent --conf conf --name a1 --conf-file conf/flume-apache-sink-hdfs.properties</code></pre>
+
+<p>日志会实时记录，每次刷新都会自动加载数据并上传到HDFS</p>
+
+<p><img alt="" class="has" height="277" src="https://img-blog.csdn.net/20180730170421398?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="882"></p>
+
+<p><img alt="" class="has" height="577" src="https://img-blog.csdn.net/20180730170434241?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="968"></p>
+
+<p> </p>
+
+<h3>优化 sink hdfs 类型</h3>
+
+<p>在HDFS中我们看到产生的日志文件很多但是非常小，这样就违背了HDFS的原则（数据文件要大，数量要小）</p>
+
+<p><strong>关于临时文件生成目标文件的条件</strong></p>
+
+<p><strong><span style="color:#3399ea;">rollInterval</span></strong><br>
+默认值：30<br>
+hdfs sink间隔多长将临时文件滚动成最终目标文件，单位：秒；<br>
+如果设置成0，则表示不根据时间来滚动文件；<br>
+注：滚动（roll）指的是，hdfs sink将临时文件重命名成最终目标文件，并新打开一个临时文件来写入数据；</p>
+
+<p><strong><span style="color:#3399ea;">rollSize</span></strong><br>
+默认值：1024<br>
+当临时文件达到该大小（单位：bytes）时，滚动成目标文件；<br>
+如果设置成0，则表示不根据临时文件大小来滚动文件；</p>
+
+<p><strong><span style="color:#3399ea;">rollCount</span></strong><br>
+默认值：10<br>
+当events数据达到该数量时候，将临时文件滚动成目标文件；<br>
+如果设置成0，则表示不根据events数据来滚动文件；</p>
+
+<p><strong><span style="color:#3399ea;">idleTimeout</span></strong><br>
+默认值：0<br>
+当目前被打开的临时文件在该参数指定的时间（秒）内，没有任何数据写入，则将该临时文件关闭并重命名成目标文件；</p>
+
+<p><span style="color:#f33b45;"><strong>解决：文件数量多，文件大小太小</strong></span><br>
+hdfs.rollInterval = 600 (这个地方最好还是设置一个时间)<br>
+hdfs.rollSize = 1048576 （1M，134217728-》128M）<br>
+hdfs.rollCount = 0<br>
+hdfs.minBlockReplicas = 1 (这个不设置的话，上面的参数有可能不会生效)</p>
+
+<p><img alt="" class="has" height="160" src="https://img-blog.csdn.net/20180730170744361?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="654"></p>
+
+<p><strong>多次刷新查看</strong></p>
+
+<p><img alt="" class="has" height="116" src="https://img-blog.csdn.net/20180730170834192?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="879"></p>
+
+<p>只创建了一个文件不会创建多个，等待达到相应条件以后再生成目标文件，说明我们的设置有效</p>
+
+<p><img alt="" class="has" height="210" src="https://img-blog.csdn.net/20180730170933789?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1195"></p>
+
+<p> </p>
+
+<h3>在hdfs文件上设置时间格式分层 年月日/时 每小时生成一个文件</h3>
+
+<p><strong>解决：</strong></p>
+
+<p>hdfs.useLocalTimeStamp = true #开启<br>
+hdfs.round = true<br>
+hdfs.roundValue = 1<br>
+hdfs.roundUnit = hour #根据小时进行分层</p>
+
+<p><img alt="" class="has" height="230" src="https://img-blog.csdn.net/20180730171032201?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="838"></p>
+
+<p><img alt="" class="has" height="73" src="https://img-blog.csdn.net/20180730171051745?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="893"></p>
+
+<p><img alt="" class="has" height="220" src="https://img-blog.csdn.net/20180730171138184?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1184"></p>
+
+<p>因为我们设置的是按照小时分层，等到16点再次操作查看又会生成一个新的文件层</p>
+
+<p><img alt="" class="has" height="129" src="https://img-blog.csdn.net/20180730171242190?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1183"></p>
+
+<p> </p>
+
+<h3>利用flume监控某一个文件目录（/home/beifeng/logs）</h3>
+
+<p><strong>需求：将目录下滚动好的文件实时抽取到HDFS上</strong></p>
+
+<p>拷贝一个文件flume-spooldir-sink-hdfs.properties，并拷贝hadoop的的logs用来进行测试</p>
+
+<pre class="has">
+<code>$ cp flume-apache-sink-hdfs.properties flume-spooldir-sink-hdfs.properties
+$ cp logs/ -r /opt/datas/</code></pre>
+
+<p>按照文档进行如下配置</p>
+
+<p><img alt="" class="has" height="119" src="https://img-blog.csdn.net/20180730171534498?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="878"></p>
+
+<p>类型选择<br>
+source：spooldir<br>
+channel：file<br>
+sink：hdfs</p>
+
+<ul><li>source：spooldir（已经生成好的最终的数据文件）</li>
+	<li>recursiveDirectorySearch 是否监视子目录以查找要读取的新文件</li>
+	<li>includePattern 正则表达式，指定要包含的文件 （只.csv数据文件，是正则匹配）</li>
+	<li>ignorePattern 正则表达式，指定要忽略的文件 （不抽取.csv数据文件，是正则匹配）</li>
+	<li>缺点：不能对目录文件进行修改，如果有追加内容的文本文件，是不允许的（有可能不会被抽取，有可能会有错误）</li>
+</ul><p> </p>
+
+<p><strong>flume监控目录，支持文件修改，并记录文件状态</strong></p>
+
+<ul><li>source：taildir （类似exec + spooldir的组合）</li>
+	<li>filegroups :设置source组 可设置多个 filegroups = f1</li>
+	<li>filegroups.&lt;filegroupName&gt;：设置组员的监控目录和监控文件类型,使用正则表示,只能监控文件</li>
+	<li>positionFile：设置定位文件的位置，以JSON格式写入给定位置文件上每个文件的最后读取位置</li>
+</ul><p><img alt="" class="has" height="265" src="https://img-blog.csdn.net/20180730171754280?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="708"></p>
+
+<p><img alt="" class="has" height="157" src="https://img-blog.csdn.net/20180730171808140?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="791"></p>
+
+<p><img alt="" class="has" height="287" src="https://img-blog.csdn.net/20180730171818622?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="736"></p>
+
+<p><strong>配置如图</strong></p>
+
+<p><img alt="" class="has" height="702" src="https://img-blog.csdn.net/20180730171842530?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="829"></p>
+
+<pre class="has">
+<code># example.conf: A single-node Flume configuration
+
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = spooldir
+a1.sources.r1.spoolDir = /opt/datas/logs
+
+# Describe the sink
+a1.sinks.k1.type = hdfs
+a1.sinks.k1.hdfs.path = hdfs://hadoop01.com/flume/webdata/spooldir/%y%m%d/%H
+a1.sinks.k1.hdfs.rollInterval = 600
+a1.sinks.k1.hdfs.rollSize = 1048576
+a1.sinks.k1.hdfs.rollCount = 0
+a1.sinks.k1.hdfs.minBlockReplicas = 1
+a1.sinks.k1.hdfs.useLocalTimeStamp = true
+a1.sinks.k1.hdfs.round = true
+a1.sinks.k1.hdfs.roundValue	= 1
+a1.sinks.k1.hdfs.roundUnit = hour
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = file
+a1.channels.c1.checkpointDir = /opt/modules/apache/flume-1.7.0/checkpointDir
+a1.channels.c1.dataDirs = /opt/modules/apache/flume-1.7.0/dataDirs
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1</code></pre>
+
+<p>运行：flume-spooldir-sink-hdfs.properties</p>
+
+<pre class="has">
+<code>$ bin/flume-ng agent --conf conf --name a1 --conf-file conf/flume-spooldir-sink-hdfs.properties</code></pre>
+
+<p>抽取完的文件都被重命名（<span style="color:#f33b45;">Spooling Directory Source会把新文件的内容读取并推送到Channel中，并且把已读取的文件重命名成指定格式或者把文件删除</span>）</p>
+
+<p><img alt="" class="has" height="218" src="https://img-blog.csdn.net/20180730172430746?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="491"></p>
+
+<p>查看HDFS文件大小都是1G的（a1.sinks.k1.hdfs.rollSize = 1048576），大小会有一点的偏差，所以不能设置成128M（会造成分块区的浪费）</p>
+
+<p><img alt="" class="has" height="311" src="https://img-blog.csdn.net/20180730172606852?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1166"></p>
+
+<p><img alt="" class="has" height="89" src="https://img-blog.csdn.net/20180730172711454?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="464"></p>
+
+<pre class="has">
+<code>a1.sources.r1.recursiveDirectorySearch = true  监听子级目录 默认为false
+
+hdfs上数据默认是二进制的文件类型：bin/hdfs dfs -text /
+可以修改hdfs.fileType = DataStream(数据流)
+    hdfs.writeFormat = Text 改为文本格式
+当使用DataStream时候，文件不会被压缩，不需要设置hdfs.codeC;
+当使用CompressedStream时候，必须设置一个正确的hdfs.codeC值;
+hdfs.codeC压缩编码解码器 --》snappy压缩
+batchSize默认值：100 每个批次刷新到HDFS上的events数量;  </code></pre>
+
+<p> </p>
+
+<p><img alt="" class="has" height="289" src="https://img-blog.csdn.net/20180730172907268?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="609"></p>
+
+<p> </p>
+
+<h3>sink-hive</h3>
+
+<p>在flume1.6以上包括1.6支持sink hive</p>
+
+<p>首先，将hive的一些jar拷贝过来 flume的lib目录下，将mysql的驱动jar拷贝过来，除了有几个在lib目录下还有几个在hcatalog下</p>
+
+<p> <img alt="" class="has" height="84" src="https://img-blog.csdn.net/20180731130651441?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="643"></p>
+
+<p><img alt="" class="has" height="335" src="https://img-blog.csdn.net/20180730173050284?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="262"></p>
+
+<p>配置 flume agent<br>
+    source：netcat<br>
+    channel：Memory<br>
+    sink：hive</p>
+
+<p>做一个基于netcat的配置</p>
+
+<p><img alt="" class="has" height="90" src="https://img-blog.csdn.net/20180731130744790?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="362"></p>
+
+<p>在官网上可以查看Hive Sink的配置</p>
+
+<p><img alt="" class="has" height="389" src="https://img-blog.csdn.net/20180731130804829?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1200"></p>
+
+<p><img alt="" class="has" height="60" src="https://img-blog.csdn.net/20180731130817162?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1168"></p>
+
+<p><img alt="" class="has" height="189" src="https://img-blog.csdn.net/20180731130833310?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="958"></p>
+
+<p><span style="color:#f33b45;"><strong>serializer:</strong></span> 负责解析事件中的字段并将它们映射到hive表中的列</p>
+
+<p><strong>DELIMITED </strong></p>
+
+<p>DELIMITED：普通文本json文件 （不需要配置，JSON中的对象名称直接映射到Hive表中具有相同名称的列，内部使用org.apache.hive.hcatalog.data.JsonSerDe）</p>
+
+<p><strong><span style="color:#f33b45;">serializer.delimiter：</span></strong>传入数据中的字段分隔符，用双引号括起来，例如"\t",默认用‘，’隔开</p>
+
+<p><strong><span style="color:#f33b45;">serializer.fieldnames：</span></strong>从输入字段到hive表中的列的映射，指定为hive表列名称的逗号分隔列表</p>
+
+<p><strong><span style="color:#f33b45;">serializer.serdeSeparator：</span></strong>输出字段分隔符,单引号括起来，例如'\t'</p>
+
+<p><img alt="" class="has" height="217" src="https://img-blog.csdn.net/20180731131123369?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="655"></p>
+
+<p>a1.sinks.k1.type = hive<br>
+a1.sinks.k1.hive.metastore = thrift://hadoop01.com:9083 #需要在hive中配置metastore<br>
+a1.sinks.k1.hive.database = flume_test<br>
+a1.sinks.k1.hive.table = flume_user<br>
+a1.sinks.k1.serializer = DELIMITED<br>
+# hive.partition = 分区<br>
+a1.sinks.k1.serializer.delimiter = "\t" #输入<br>
+a1.sinks.k1.serializer.fieldnames = user_id,user_name,user_age 字段<br>
+a1.sinks.k1.serializer.serdeSeparator = '\t' #输出</p>
+
+<p>hive-site.xml中hive参数设置：</p>
+
+<pre class="has">
+<code>&lt;property&gt;
+    &lt;name&gt;hive.metastore.uris&lt;/name&gt;
+    &lt;value&gt;thrift://hadoop01.com:9083&lt;/value&gt;
+&lt;/property&gt;</code></pre>
+
+<p> </p>
+
+<p>配置完成后启动hive的元数据服务,开启hive</p>
+
+<pre class="has">
+<code>$ bin/hive --service metastore &amp;
+$ bin/hive</code></pre>
+
+<p>建库建表</p>
+
+<pre class="has">
+<code>创建库和表 (表必须是CLUSTERED BY ,INTO BUCKETS ---&gt;分桶的表)
+create database flume_test;
+
+create database flume_test;
+use flume_test;
+create table flume_user(
+user_id int,
+user_name string,
+user_age int
+)CLUSTERED BY (user_id) INTO 2 BUCKETS
+row format delimited fields terminated by '\t'
+stored as orc;</code></pre>
+
+<p>运行</p>
+
+<pre class="has">
+<code>$ bin/flume-ng agent --conf conf --name a1 --conf-file conf/flume-sink-hive.properties</code></pre>
+
+<p>使用nc链接并输入 1 jeffrey 18</p>
+
+<pre class="has">
+<code>$ nc hadoop01.com 44444</code></pre>
+
+<p>键入完成后发现报错</p>
+
+<pre class="has">
+<code>Caused by: org.apache.thrift.TApplicationException: Internal error processing open_txns
+        at org.apache.thrift.TApplicationException.read(TApplicationException.java:111)
+        at org.apache.thrift.TServiceClient.receiveBase(TServiceClient.java:71)
+        at org.apache.hadoop.hive.metastore.api.ThriftHiveMetastore$Client.recv_open_txns(ThriftHiveMetastore.java:3834)
+        at org.apache.hadoop.hive.metastore.api.ThriftHiveMetastore$Client.open_txns(ThriftHiveMetastore.java:3821)</code></pre>
+
+<p>解决办法：配置hive-site.xml</p>
+
+<p> </p>
+
+<ul><li>       hive.txn.manager=org.apache.hadoop.hive.ql.lockmgr.DbTxnManager; -》打开一部分事务支持</li>
+</ul><p>协同配置</p>
+
+<ul><li>       hive.compactor.initiator.on=true; -》运行启动程序和清除线程,用于打开所需参数的完整列表事务</li>
+	<li>       hive.compactor.worker.threads=1; -》增加工作线程的数量将减少花费的时间</li>
+	<li>       hive.support.concurrency=true;  -》是否支持并发，默认是false</li>
+	<li>       hive.enforce.bucketing=true;   -》是否启用bucketing，写入table数据</li>
+</ul><pre class="has">
+<code class="language-html">&lt;property&gt;
+	&lt;name&gt;hive.txn.manager&lt;/name&gt;
+	&lt;value&gt;org.apache.hadoop.hive.ql.lockmgr.DbTxnManager&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+	&lt;name&gt;hive.compactor.initiator.on&lt;/name&gt;
+	&lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+	&lt;name&gt;hive.compactor.worker.threads&lt;/name&gt;
+	&lt;value&gt;1&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+	&lt;name&gt;hive.support.concurrency&lt;/name&gt;
+	&lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+	&lt;name&gt;hive.enforce.bucketing&lt;/name&gt;
+	&lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;</code></pre>
+
+<p>启动metastore时报错：</p>
+
+<pre class="has">
+<code>Table 'metastore.COMPACTION_QUEUE' doesn't exist</code></pre>
+
+<p>配置以下属性再启动，又报错,然后在去掉此属性</p>
+
+<pre class="has">
+<code>Error rolling back: Can't call rollback when autocommit=true</code></pre>
+
+<pre class="has">
+<code class="language-html">&lt;property&gt;
+    &lt;name&gt;hive.in.test&lt;/name&gt;
+    &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+
+这个是用来创建COMPACTION_QUEUE这张表的，所以开始启动时因为没有此表报错，加上此表后生成此表删除即可</code></pre>
+
+<p>在开启metastore正常，然后运行，使用nc链接并输入 ：1 jeffrey 18</p>
+
+<pre class="has">
+<code>$ bin/flume-ng agent --conf conf --name a1 --conf-file conf/flume-sink-hive.properties 
+$ nc hadoop01.com 44444</code></pre>
+
+<p><img alt="" class="has" height="272" src="https://img-blog.csdn.net/2018073113242448?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="895"></p>
+
+<h3> </h3>
+
+<h3>接下来做一个基于exec的配置</h3>
+
+<p>首先copy一个文件，并运行</p>
+
+<pre class="has">
+<code>$ cp conf/flume-sink-hive.properties conf/flume-sink-hive2.properties 
+$ bin/flume-ng agent --conf conf  --name a1 --conf-file conf/flume-sink-hive2.properties </code></pre>
+
+<p><img alt="" class="has" height="641" src="https://img-blog.csdn.net/20180731132523703?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="844"></p>
+
+<p><img alt="" class="has" height="401" src="https://img-blog.csdn.net/20180731132620996?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="822"></p>
+
+<p><strong>在HDFS中也可以查看到我们分桶的数据 </strong></p>
+
+<p><img alt="" class="has" height="385" src="https://img-blog.csdn.net/20180731132759659?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1195"></p>
+
+<p> </p>
+
+<h3>扇入、扇出的案例</h3>
+
+<p><span style="color:#f33b45;"><strong>    扇入：多个对一个</strong></span><br>
+    开启三个flume agent：</p>
+
+<p><strong>第一个：监控httpd日志</strong><br>
+  source：exec<br>
+  channel：memory<br>
+  sink：avro<br><strong>第二个：监控hive的日志</strong><br>
+  source：exec<br>
+  channel：memory<br>
+  sink：avro<br><strong>第三个：agent：把前两个的数据进行汇合--》hdfs</strong><br>
+  source：avro<br>
+  channel：memory<br>
+  sink：hdfs</p>
+
+<p>拷贝复制三个文件</p>
+
+<pre class="has">
+<code>$ cp conf/flume-apache-sink-hdfs.properties conf/flume-avro-sink.properties
+$ cp conf/flume-apache-sink-hdfs.properties conf/flume-avro-sink2.properties
+$ cp conf/flume-apache-sink-hdfs.properties conf/flume-avro-source.properties</code></pre>
+
+<p><img alt="" class="has" height="275" src="https://img-blog.csdn.net/20180731133046445?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="817"></p>
+
+<p><strong>检查端口号是否被占用：$ sodu netstat -anp | grep 8888，如果没有被占用可以使用8888端口</strong></p>
+
+<p><img alt="" class="has" height="469" src="https://img-blog.csdn.net/20180731133725809?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="585"></p>
+
+<p><img alt="" class="has" height="488" src="https://img-blog.csdn.net/20180731133807227?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="735"></p>
+
+<p><img alt="" class="has" height="658" src="https://img-blog.csdn.net/20180731133855869?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="660"></p>
+
+<p>配置完成后运行<br>
+首先运行第三个，“&amp;“ 后台运行此任务，关闭需要找到任务进程pid ，然后kill</p>
+
+<pre class="has">
+<code>$ bin/flume-ng agent --conf conf  --name a3 --conf-file conf/flume-avro-source.properties &amp;
+$ bin/flume-ng agent --conf conf  --name a1 --conf-file conf/flume-avro-sink.properties &amp; 
+$ bin/flume-ng agent --conf conf  --name a2 --conf-file conf/flume-avro-sink2.properties &amp;</code></pre>
+
+<p><img alt="" class="has" height="152" src="https://img-blog.csdn.net/20180731134049830?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1189"></p>
+
+<p><strong><span style="color:#f33b45;">    扇出：一个对多个</span></strong><br>
+    监控hive的日志：</p>
+
+<p>    创建一个文件 flume-channels-sinks.properties</p>
+
+<p><img alt="" class="has" height="520" src="https://img-blog.csdn.net/20180731134329986?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="776"></p>
+
+<p><span style="color:#f33b45;">hdfs.path = /hive_log/flume1: 需要这样写<br>
+前提：把hadoop的core-site.xml和hdfs-site.xml文件拷贝到flume的conf目录下</span></p>
+
+<pre class="has">
+<code>$ cp ../hadoop-2.7.3/etc/hadoop/core-site.xml conf/
+$ cp ../hadoop-2.7.3/etc/hadoop/hdfs-site.xml conf/
+运行：
+$ bin/flume-ng agent --conf conf  --name agent1 --conf-file conf/flume-channels-sinks.properties </code></pre>
+
+<p><span style="color:#f33b45;">一个channels对应一个sinks，channels里的数据是一样的</span></p>
+
+<p><img alt="" class="has" height="198" src="https://img-blog.csdn.net/20180731134514604?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTQ0MTQzMjM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1196"></p>
+
+<p> </p>            </div>
+                </div>

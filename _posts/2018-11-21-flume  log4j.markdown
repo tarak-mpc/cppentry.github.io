@@ -1,0 +1,106 @@
+---
+layout:     post
+title:      flume  log4j
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>最近有业务需求，将log4j 收集的日志发送到 flume ，整合期间遇到很多问题，在这里统一说明下，方便大家快速整合</p>
+<p>关于flume 介绍 大家可以参考 http://my.oschina.net/leejun2005/blog/288136 这篇文章很详细</p>
+<p>我用的 flume 版本是 1.5.2,</p>
+<p><img src="" alt=""><br></p>
+<p>目录结构</p>
+<p>其中 bin 是启动命令所在</p>
+<p>conf 是资源文件，资源文件最开始都是.teltemple 可能拼错了，模板文件。把这个后缀去了</p>
+<p>第一步修改 flume-env.sh，文件在conf里面，也是模板文件copy  》》去后缀</p>
+<p>1.增加 jdk 路径，修改启动内存大小<br>
+2.增加环境变量<br><img src="" alt=""><br></p>
+<p><br></p>
+<p># Licensed to the Apache Software Foundation (ASF) under one<br>
+# or more contributor license agreements.  See the NOTICE file<br>
+# distributed with this work for additional information<br>
+# regarding copyright ownership.  The ASF licenses this file<br>
+# to you under the Apache License, Version 2.0 (the<br>
+# "License"); you may not use this file except in compliance<br>
+# with the License.  You may obtain a copy of the License at<br>
+#<br>
+#     http://www.apache.org/licenses/LICENSE-2.0<br>
+#<br>
+# Unless required by applicable law or agreed to in writing, software<br>
+# distributed under the License is distributed on an "AS IS" BASIS,<br>
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.<br>
+# See the License for the specific language governing permissions and<br>
+# limitations under the License.<br><br><br>
+# If this file is placed at FLUME_CONF_DIR/flume-env.sh, it will be sourced<br>
+# during Flume startup.<br><br><br>
+# Enviroment variables can be set here.<br><br><br>
+#JAVA_HOME=/usr/lib/jvm/java-<br>
+#Java<br>
+export  JAVA_HOME=/usr/local/jdk<br>
+export  CLASSPATH=.:$JAVA_HOME/jre/lib/rt.jar:$JAVA_HOME/lib/dt.jar:$JAVA_HOME/lib/tools.jar<br>
+export  PATH=$PATH:$JAVA_HOME/bin<br>
+# Give Flume more memory and pre-allocate, enable remote monitoring via JMX<br>
+JAVA_OPTS="-Xms100m -Xmx500m -Dcom.sun.management.jmxremote"<br><br><br>
+# Note that the Flume conf directory is always included in the classpath.<br>
+#FLUME_CLASSPATH=""<br>
+#flume<br>
+export  FLUME_HOME=/data/flume/<br>
+export  FLUME_CONF_DIR=$FLUME_HOME/conf<br>
+export  PATH=$PATH:$FLUME_HOME/bin<br></p>
+<p><br></p>
+<p><br></p>
+<p>修改下 java_home 和 flume_home</p>
+<p>第二部  创建启动配置文件 arvo.conf 名字随便了<br><img src="" alt=""></p>
+<p># example.conf: A single-node Flume configuration<br>
+# Name the components on this agent<br>
+a1.sources = r1<br>
+a1.sinks = k1<br>
+a1.channels = c1<br><br><br>
+# Describe/configure the source<br>
+a1.sources.r1.type = avro<br>
+a1.sources.r1.bind = 192.168.50.28<br>
+a1.sources.r1.port = 44444<br><br><br>
+# Describe the sink<br>
+a1.sinks.k1.type =com.wangku.wjf.dubbo.filter.method.flume.sink.DubboMethodInfoSink<br><br><br>
+# Use a channel which buffers events in memory<br>
+a1.channels.c1.type = memory<br>
+a1.channels.c1.capacity = 1000<br>
+a1.channels.c1.transactionCapacity = 100<br><br><br>
+# Bind the source and sink to the channel<br>
+a1.sources.r1.channels = c1<br>
+a1.sinks.k1.channel = c1</p>
+<p><br></p>
+<p><br>
+sinks 的type 是我自定义的，这个稍后再说,你用默认的 flume自带的 logger</p>
+<p><br></p>
+<p>接下来就是启动 flume  我是在flume根目录下启动的</p>
+<p>bin/flume-ng agent -c conf -f conf/avro.conf -n a1 -Dflume.root.logger=INFO,dubboMethodFlume,console&amp;</p>
+<p><br></p>
+<p>flume-ng 启动脚本</p>
+<p>agent 命令</p>
+<p>-c 资源文件</p>
+<p>-c conf 是告诉flume 资源文件路径</p>
+<p>-f 配置文件</p>
+<p>-f conf/avro.conf 是告诉flume 用这个文件启动</p>
+<p>-n 名称</p>
+<p>-Dflume.root.logger=INFO,dubboMethodFlume,console  这是告诉flume 启动日志，用哪几个记录器，中间那个是我自定义的。你们可以不写 </p>
+<p>&amp; 后台运行</p>
+<p><br></p>
+<p>接下来讲解程序中 log4j 的配置，</p>
+<p> .properties</p>
+<p><img src="" alt=""><br></p>
+<p>最底下 是配置一个 名为 dubboMethod的控制器</p>
+<p>org.apache.flume 这个类在 flume 安装包 lib 下有这个 jar 需要项目引入</p>
+<p>第一行代码中要加入 flume 这样程序才能正确加载 flume 记录器，否则发不出信息。</p>
+<p><img src="" alt=""><br></p>
+<p><br></p>
+<p>关于自定义 sinks ，代码网上好多，我主要讲 怎么加到 flume ，将你写好的 项目打包上传到 flume lib 下 </p>
+<p>在 arvo.conf 中 sinks.type 写上你的类全路径名称</p>
+<p><br></p>
+<p>还有一个注意点，先启动 flume 再启动 项目 </p>
+<p><br></p>
+<p>欢迎矫正，和讨论，回复评论我将能收到邮件</p>
+<p><br></p>
+            </div>
+                </div>

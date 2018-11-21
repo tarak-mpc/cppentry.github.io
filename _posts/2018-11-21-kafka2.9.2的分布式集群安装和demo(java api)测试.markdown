@@ -1,0 +1,1372 @@
+---
+layout:     post
+title:      kafka2.9.2的分布式集群安装和demo(java api)测试
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div><strong>目录：</strong></div>
+<div><strong>　　一、什么是kafka?</strong></div>
+<div><strong>　　二、kafka的官方网站在哪里？</strong></div>
+<div><strong>　　三、在哪里下载？需要哪些组件的支持？</strong></div>
+<div><strong>　　四、如何安装？</strong></div>
+<div><strong>　　五、FAQ</strong></div>
+<div><strong>　　六、扩展阅读</strong></div>
+<div><strong><br></strong></div>
+<div><strong>　　一、什么是kafka?</strong></div>
+<div>　　kafka是LinkedIn开发并开源的一个分布式MQ系统，现在是Apache的一个孵化项目。在它的主页描述kafka为一个高吞吐量的分布式（能将消息分散到不同的节点上）MQ。Kafka仅仅由7000行Scala编写，据了解，Kafka每秒可以生产约25万消息（50 MB），每秒处理55万消息（110 MB）。</div>
+<div>　　kafka目前支持多种客户端语言：java，python，c++，php等等。</div>
+<div>　　kafka集群的简要图解如下，producer写入消息，consumer读取消息：</div>
+<div><a href="http://idoall.org/data/attachment/album/201408/05/145455f6bg6fggektmo4ko.png" rel="nofollow"><img src="http://idoall.org/data/attachment/album/201408/05/145455f6bg6fggektmo4ko.png" alt=""></a></div>
+<div><br></div>
+<div>
+<div>　　kafka设计目标</div>
+<div>
+<ul><li><ul><li><span style="line-height:1.8em;">高吞吐量是其核心设计之一。</span></li><li><span style="line-height:1.8em;">数据磁盘持久化：消息不在内存中cache，直接写入到磁盘，充分利用磁盘的顺序读写性能。</span></li><li><span style="line-height:1.8em;">zero-copy：减少IO操作步骤。</span></li><li><span style="line-height:1.8em;">支持数据批量发送和拉取。</span></li><li><span style="line-height:1.8em;">支持数据压缩。</span></li><li><span style="line-height:1.8em;">Topic划分为多个partition，提高并行处理能力。</span></li></ul></li></ul></div>
+<div><br></div>
+<div><strong>　　kafka名词解释和工作方式：</strong></div>
+<div>
+<ul><li><ul><li><span style="line-height:1.8em;">Producer ：消息生产者，就是向kafka broker发消息的客户端。</span></li><li><span style="line-height:1.8em;">Consumer ：消息消费者，向kafka broker取消息的客户端</span></li><li><span style="line-height:1.8em;">Topic ：可以理解为一个队列。</span></li><li><span style="line-height:1.8em;">Consumer Group （CG）：这是kafka用来实现一个topic消息的广播（发给所有的consumer）和单播（发给任意一个consumer）的手段。一个topic可以有多个CG。topic的消息会复制（不是真的复制，是概念上的）到所有的CG，但每个CG只会把消息发给该CG中的一个consumer。如果需要实现广播，只要每个consumer有一个独立的CG就可以了。要实现单播只要所有的consumer在同一个CG。用CG还可以将consumer进行自由的分组而不需要多次发送消息到不同的topic。</span></li><li><span style="line-height:1.8em;">Broker ：一台kafka服务器就是一个broker。一个集群由多个broker组成。一个broker可以容纳多个topic。</span></li><li><span style="line-height:1.8em;">Partition：为了实现扩展性，一个非常大的topic可以分布到多个broker（即服务器）上，一个topic可以分为多个partition，每个partition是一个有序的队列。partition中的每条消息都会被分配一个有序的id（offset）。kafka只保证按一个partition中的顺序将消息发给consumer，不保证一个topic的整体（多个partition间）的顺序。</span></li><li><span style="line-height:1.8em;"> Offset：kafka的存储文件都是按照offset.kafka来命名，用offset做名字的好处是方便查找。例如你想找位于2049的位置，只要找到2048.kafka的文件即可。当然the first offset就是00000000000.kafka</span></li></ul></li></ul></div>
+<div><br></div>
+<div><strong>　　kafak系统扩展性：</strong></div>
+<div>
+<ul><li><ul><li><span style="line-height:1.8em;">kafka使用zookeeper来实现动态的集群扩展，不需要更改客户端（producer和consumer）的配置。broker会在zookeeper注册并保持相关的元数据（topic，partition信息等）更新。</span></li><li><span style="line-height:1.8em;">而客户端会在zookeeper上注册相关的watcher。一旦zookeeper发生变化，客户端能及时感知并作出相应调整。这样就保证了添加或去除broker时，各broker间仍能自动实现负载均衡。</span></li></ul></li></ul></div>
+<div><br></div>
+<div><strong>　　kafak和zookeeper的关系：</strong></div>
+<div>
+<ul><li><ul><li><span style="line-height:1.8em;">Producer端使用zookeeper用来"发现"broker列表,以及和Topic下每个partition leader建立socket连接并发送消息.</span></li><li><span style="line-height:1.8em;">Broker端使用zookeeper用来注册broker信息,已经监测partition leader存活性.</span></li><li><span style="line-height:1.8em;">Consumer端使用zookeeper用来注册consumer信息,其中包括consumer消费的partition列表等,同时也用来发现broker列表,并和partition leader建立socket连接,并获取消息.</span></li></ul></li></ul></div>
+</div>
+<div><br></div>
+<div>
+<div><strong>　　二、kafka的官方网站在哪里？</strong></div>
+<div>　　<a href="http://kafka.apache.org/" rel="nofollow">http://kafka.apache.org/</a></div>
+<div><br></div>
+<div><strong>　　三、在哪里下载？需要哪些组件的支持？</strong></div>
+<div>　　kafka2.9.2在下面的地址可以下载：</div>
+<div>　　<a href="https://www.apache.org/dyn/closer.cgi?path=/kafka/0.8.1.1/kafka_2.9.2-0.8.1.1.tgz" rel="nofollow">https://www.apache.org/dyn/closer.cgi?path=/kafka/0.8.1.1/kafka_2.9.2-0.8.1.1.tgz</a></div>
+<div><br></div>
+<div>　　需要zookeeper的支持，相关安装及下载，可以参考这篇文章《<a href="http://idoall.org/home.php?mod=space&amp;uid=1&amp;do=blog&amp;id=542" rel="nofollow">ubuntu12.04+hadoop2.2.0+zookeeper3.4.5+hbase0.96.2+hive0.13.1分布式环境部署</a>》</div>
+<div><br></div>
+<div><strong>　　四、如何安装？</strong></div>
+<div>　　1、解压kafka_2.9.2-0.8.1.1.tgz，本文中解压到/home/hadoop目录下</div>
+<div>  <code class="bash plain"><a href="mailto:root@m1:/home/hadoop/kafka_2.9.2-0.8.1.1" rel="nofollow">root@m1:</a></code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash comments"># pwd
+</code>
+<div>
+<div class="line number2 index1 alt1"><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code></div>
+</div>
+</div>
+</div>
+<div>
+<div>
+<div>
+<div id="highlighter_551742" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span>        </span>2、修改server.properties配置文件。这里使用zookeeper的部分，请参考可以参考这篇文章《<a href="http://idoall.org/home.php?mod=space&amp;uid=1&amp;do=blog&amp;id=542" rel="nofollow">ubuntu12.04+hadoop2.2.0+zookeeper3.4.5+hbase0.96.2+hive0.13.1分布式环境部署</a>》中的配置，见下方第123行：</div>
+</div>
+</div>
+</div>
+</div>
+<div>
+<div>
+<div>
+<div id="highlighter_828728" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash comments"># cat config/server.properties
+</code></div>
+<div class="line number2 index1 alt1"><code class="bash comments"># Licensed to the Apache Software Foundation (ASF) under one or more
+</code></div>
+<div class="line number3 index2 alt2"><code class="bash comments"># contributor license agreements.  See the NOTICE file distributed with
+</code></div>
+<div class="line number4 index3 alt1"><code class="bash comments"># this work for additional information regarding copyright ownership.
+</code></div>
+<div class="line number5 index4 alt2"><code class="bash comments"># The ASF licenses this file to You under the Apache License, Version 2.0
+</code></div>
+<div class="line number6 index5 alt1"><code class="bash comments"># (the "License"); you may not use this file except in compliance with
+</code></div>
+<div class="line number7 index6 alt2"><code class="bash comments"># the License.  You may obtain a copy of the License at
+</code></div>
+<div class="line number8 index7 alt1"><code class="bash comments">#  </code></div>
+<div class="line number9 index8 alt2"><code class="bash comments">#    http://www.apache.org/licenses/LICENSE-2.0
+</code></div>
+<div class="line number10 index9 alt1"><code class="bash comments">#  </code></div>
+<div class="line number11 index10 alt2"><code class="bash comments"># Unless required by applicable law or agreed to in writing, software
+</code></div>
+<div class="line number12 index11 alt1"><code class="bash comments"># distributed under the License is distributed on an "AS IS" BASIS,
+</code></div>
+<div class="line number13 index12 alt2"><code class="bash comments"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+</code></div>
+<div class="line number14 index13 alt1"><code class="bash comments"># See the License for the specific language governing permissions and
+</code></div>
+<div class="line number15 index14 alt2"><code class="bash comments"># limitations under the License.
+</code></div>
+<div class="line number16 index15 alt1"><code class="bash comments"># see kafka.server.KafkaConfig for additional details and defaults
+</code></div>
+<div class="line number17 index16 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number18 index17 alt1"><code class="bash comments">############################# Server Basics #############################
+</code></div>
+<div class="line number19 index18 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number20 index19 alt1"><code class="bash comments"># The id of the broker. This must be set to a unique integer for each broker.
+</code></div>
+<div class="line number21 index20 alt2"><code class="bash comments">#整数，建议根据ip区分,这里我是使用zookeeper中的id来设置
+</code></div>
+<div class="line number22 index21 alt1"><code class="bash plain">broker.</code><code class="bash functions">id</code><code class="bash plain">=1
+</code></div>
+<div class="line number23 index22 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number24 index23 alt1"><code class="bash comments">############################# Socket Server Settings #############################
+</code></div>
+<div class="line number25 index24 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number26 index25 alt1"><code class="bash comments"># The port the socket server listens on
+</code></div>
+<div class="line number27 index26 alt2"><code class="bash comments">#broker用于接收producer消息的端口
+</code></div>
+<div class="line number28 index27 alt1"><code class="bash plain">port=9092 </code>
+</div>
+<div class="line number29 index28 alt2"><code class="bash comments">#port=44444 </code>
+</div>
+<div class="line number30 index29 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number31 index30 alt2"><code class="bash comments"># Hostname the broker will bind to. If not set, the server will bind to all interfaces
+</code></div>
+<div class="line number32 index31 alt1"><code class="bash comments">#broker的hostname
+</code></div>
+<div class="line number33 index32 alt2"><code class="bash plain">host.name=m1 </code>
+</div>
+<div class="line number34 index33 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number35 index34 alt2"><code class="bash comments"># Hostname the broker will advertise to producers and consumers. If not set, it uses the
+</code></div>
+<div class="line number36 index35 alt1"><code class="bash comments"># value for "host.name" if configured.  Otherwise, it will use the value returned from
+</code></div>
+<div class="line number37 index36 alt2"><code class="bash comments"># java.net.InetAddress.getCanonicalHostName().
+</code></div>
+<div class="line number38 index37 alt1"><code class="bash comments">#这个是配置PRODUCER/CONSUMER连上来的时候使用的地址
+</code></div>
+<div class="line number39 index38 alt2"><code class="bash plain">advertised.host.name=m1
+</code></div>
+<div class="line number40 index39 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number41 index40 alt2"><code class="bash comments"># The port to publish to ZooKeeper for clients to use. If this is not set,
+</code></div>
+<div class="line number42 index41 alt1"><code class="bash comments"># it will publish the same port that the broker binds to.
+</code></div>
+<div class="line number43 index42 alt2"><code class="bash comments">#advertised.port=&lt;port accessible by clients&gt;
+</code></div>
+<div class="line number44 index43 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number45 index44 alt2"><code class="bash comments"># The number of threads handling network requests
+</code></div>
+<div class="line number46 index45 alt1"><code class="bash plain">num.network.threads=2
+</code></div>
+<div class="line number47 index46 alt2"><code class="bash spaces">  </code> </div>
+<div class="line number48 index47 alt1"><code class="bash comments"># The number of threads doing disk I/O
+</code></div>
+<div class="line number49 index48 alt2"><code class="bash plain">num.io.threads=8
+</code></div>
+<div class="line number50 index49 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number51 index50 alt2"><code class="bash comments"># The send buffer (SO_SNDBUF) used by the socket server
+</code></div>
+<div class="line number52 index51 alt1"><code class="bash plain">socket.send.buffer.bytes=1048576
+</code></div>
+<div class="line number53 index52 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number54 index53 alt1"><code class="bash comments"># The receive buffer (SO_RCVBUF) used by the socket server
+</code></div>
+<div class="line number55 index54 alt2"><code class="bash plain">socket.receive.buffer.bytes=1048576
+</code></div>
+<div class="line number56 index55 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number57 index56 alt2"><code class="bash comments"># The maximum size of a request that the socket server will accept (protection against OOM)
+</code></div>
+<div class="line number58 index57 alt1"><code class="bash plain">socket.request.max.bytes=104857600
+</code></div>
+<div class="line number59 index58 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number60 index59 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number61 index60 alt2"><code class="bash comments">############################# Log Basics #############################
+</code></div>
+<div class="line number62 index61 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number63 index62 alt2"><code class="bash comments"># A comma seperated list of directories under which to store log files
+</code></div>
+<div class="line number64 index63 alt1"><code class="bash comments">#kafka存放消息文件的路径
+</code></div>
+<div class="line number65 index64 alt2"><code class="bash plain">log.</code><code class="bash functions">dirs</code><code class="bash plain">=</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/kafka-logs</code></div>
+<div class="line number66 index65 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number67 index66 alt2"><code class="bash comments"># The default number of log partitions per topic. More partitions allow greater
+</code></div>
+<div class="line number68 index67 alt1"><code class="bash comments"># parallelism for consumption, but this will also result in more files across
+</code></div>
+<div class="line number69 index68 alt2"><code class="bash comments"># the brokers.
+</code></div>
+<div class="line number70 index69 alt1"><code class="bash comments">#topic的默认分区数 </code>
+</div>
+<div class="line number71 index70 alt2"><code class="bash plain">num.partitions=2
+</code></div>
+<div class="line number72 index71 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number73 index72 alt2"><code class="bash comments">############################# Log Flush Policy #############################
+</code></div>
+<div class="line number74 index73 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number75 index74 alt2"><code class="bash comments"># Messages are immediately written to the filesystem but by default we only fsync() to sync
+</code></div>
+<div class="line number76 index75 alt1"><code class="bash comments"># the OS cache lazily. The following configurations control the flush of data to disk. 
+</code></div>
+<div class="line number77 index76 alt2"><code class="bash comments"># There are a few important trade-offs here:
+</code></div>
+<div class="line number78 index77 alt1"><code class="bash comments">#    1. Durability: Unflushed data may be lost if you are not using replication.
+</code></div>
+<div class="line number79 index78 alt2"><code class="bash comments">#    2. Latency: Very large flush intervals may lead to latency spikes when the flush does occur as there will be a lot of data to flush.
+</code></div>
+<div class="line number80 index79 alt1"><code class="bash comments">#    3. Throughput: The flush is generally the most expensive operation, and a small flush interval may lead to exceessive seeks. 
+</code></div>
+<div class="line number81 index80 alt2"><code class="bash comments"># The settings below allow one to configure the flush policy to flush data after a period of time or
+</code></div>
+<div class="line number82 index81 alt1"><code class="bash comments"># every N messages (or both). This can be done globally and overridden on a per-topic basis.
+</code></div>
+<div class="line number83 index82 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number84 index83 alt1"><code class="bash comments"># The number of messages to accept before forcing a flush of data to disk
+</code></div>
+<div class="line number85 index84 alt2"><code class="bash comments">#log.flush.interval.messages=10000
+</code></div>
+<div class="line number86 index85 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number87 index86 alt2"><code class="bash comments"># The maximum amount of time a message can sit in a log before we force a flush
+</code></div>
+<div class="line number88 index87 alt1"><code class="bash comments">#log.flush.interval.ms=1000
+</code></div>
+<div class="line number89 index88 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number90 index89 alt1"><code class="bash comments">############################# Log Retention Policy #############################
+</code></div>
+<div class="line number91 index90 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number92 index91 alt1"><code class="bash comments"># The following configurations control the disposal of log segments. The policy can
+</code></div>
+<div class="line number93 index92 alt2"><code class="bash comments"># be set to delete segments after a period of time, or after a given size has accumulated.
+</code></div>
+<div class="line number94 index93 alt1"><code class="bash comments"># A segment will be deleted whenever *either* of these criteria are met. Deletion always happens
+</code></div>
+<div class="line number95 index94 alt2"><code class="bash comments"># from the end of the log.
+</code></div>
+<div class="line number96 index95 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number97 index96 alt2"><code class="bash comments"># The minimum age of a log file to be eligible for deletion
+</code></div>
+<div class="line number98 index97 alt1"><code class="bash comments">#kafka接收日志的存储目录(目前我们保存7天数据log.retention.hours=168)
+</code></div>
+<div class="line number99 index98 alt2"><code class="bash plain">log.retention.hours=168
+</code></div>
+<div class="line number100 index99 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number101 index100 alt2"><code class="bash comments"># A size-based retention policy for logs. Segments are pruned from the log as long as the remaining
+</code></div>
+<div class="line number102 index101 alt1"><code class="bash comments"># segments don't drop below log.retention.bytes.
+</code></div>
+<div class="line number103 index102 alt2"><code class="bash comments">#log.retention.bytes=1073741824
+</code></div>
+<div class="line number104 index103 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number105 index104 alt2"><code class="bash comments"># The maximum size of a log segment file. When this size is reached a new log segment will be created.
+</code></div>
+<div class="line number106 index105 alt1"><code class="bash plain">log.segment.bytes=536870912
+</code></div>
+<div class="line number107 index106 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number108 index107 alt1"><code class="bash comments"># The interval at which log segments are checked to see if they can be deleted according 
+</code></div>
+<div class="line number109 index108 alt2"><code class="bash comments"># to the retention policies
+</code></div>
+<div class="line number110 index109 alt1"><code class="bash plain">log.retention.check.interval.ms=60000
+</code></div>
+<div class="line number111 index110 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number112 index111 alt1"><code class="bash comments"># By default the log cleaner is disabled and the log retention policy will default to just delete segments after their retention expires.
+</code></div>
+<div class="line number113 index112 alt2"><code class="bash comments"># If log.cleaner.enable=true is set the cleaner will be enabled and individual logs can then be marked for log compaction.
+</code></div>
+<div class="line number114 index113 alt1"><code class="bash plain">log.cleaner.</code><code class="bash functions">enable</code><code class="bash plain">=</code><code class="bash functions">false</code></div>
+<div class="line number115 index114 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number116 index115 alt1"><code class="bash comments">############################# Zookeeper #############################
+</code></div>
+<div class="line number117 index116 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number118 index117 alt1"><code class="bash comments"># Zookeeper connection string (see zookeeper docs for details).
+</code></div>
+<div class="line number119 index118 alt2"><code class="bash comments"># This is a comma separated host:port pairs, each corresponding to a zk
+</code></div>
+<div class="line number120 index119 alt1"><code class="bash comments"># server. e.g. "127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002".
+</code></div>
+<div class="line number121 index120 alt2"><code class="bash comments"># You can also append an optional chroot string to the urls to specify the
+</code></div>
+<div class="line number122 index121 alt1"><code class="bash comments"># root directory for all kafka znodes.
+</code></div>
+<div class="line number123 index122 alt2 highlighted"><code class="bash plain">zookeeper.connect=m1:2181,m2:2181,s1:2181,s2:2181
+</code></div>
+<div class="line number124 index123 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number125 index124 alt2"><code class="bash comments"># Timeout in ms for connecting to zookeeper
+</code></div>
+<div class="line number126 index125 alt1"><code class="bash plain">zookeeper.connection.timeout.ms=1000000</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>
+<div>　　3、启动zookeeper和kafka</div>
+<div>　　　　1)zookeeper的启动，请参考这篇文章《<a href="http://idoall.org/home.php?mod=space&amp;uid=1&amp;do=blog&amp;id=542" rel="nofollow">ubuntu12.04+hadoop2.2.0+zookeeper3.4.5+hbase0.96.2+hive0.13.1分布式环境部署</a>》</div>
+<div>　　　　启动后可以用以下命令在每台机器上查看状态：</div>
+<div> </div>
+</div>
+<div>
+<div>
+<div>
+<div id="highlighter_118487" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/zookeeper-3.4.5/bin/zkServer.sh status
+</code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">JMX enabled by default
+</code></div>
+<div class="line number3 index2 alt2"><code class="bash plain">Using config: </code>
+<code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/conf/zoo</code><code class="bash plain">.cfg
+</code></div>
+<div class="line number4 index3 alt1"><code class="bash plain">Mode: leader</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　2)在m1,m2,s1,s2的机器上启动kafka，在这之前请先将m1上的kafka复制到另外三台机器上，复制后，记得更改server.properties配置文件中的host名称为当前所在机器。以下代码是在m1上执行后的效果：</div>
+<div> </div>
+<div>
+<div>
+<div>
+<div id="highlighter_243888" class="syntaxhighlighter bash ie">
+<div class="toolbar">
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-server-start.sh /home/hadoop/kafka_2.9.2-0.8.1.1/config/server.properties
+ &amp; </code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">[1] 31823 </code></div>
+<div class="line number3 index2 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># [2014-08-05 10:03:11,210] INFO Verifying properties (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number4 index3 alt1"><code class="bash plain">[2014-08-05 10:03:11,261] INFO Property advertised.host.name is overridden to m1 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number5 index4 alt2"><code class="bash plain">[2014-08-05 10:03:11,261] INFO Property broker.</code><code class="bash functions">id</code>
+<code class="bash plain">is overridden to 1 (kafka.utils.VerifiableProperties) </code>
+</div>
+<div class="line number6 index5 alt1"><code class="bash plain">[2014-08-05 10:03:11,264] INFO Property host.name is overridden to m1 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number7 index6 alt2"><code class="bash plain">[2014-08-05 10:03:11,264] INFO Property log.cleaner.</code><code class="bash functions">enable</code>
+<code class="bash plain">is overridden to </code><code class="bash functions">false</code>
+<code class="bash plain">(kafka.utils.VerifiableProperties) </code></div>
+<div class="line number8 index7 alt1"><code class="bash plain">[2014-08-05 10:03:11,264] INFO Property log.</code><code class="bash functions">dirs</code>
+<code class="bash plain">is overridden to </code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/kafka-logs</code>
+<code class="bash plain">(kafka.utils.VerifiableProperties) </code></div>
+<div class="line number9 index8 alt2"><code class="bash plain">[2014-08-05 10:03:11,265] INFO Property log.retention.check.interval.ms is overridden to 60000 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number10 index9 alt1"><code class="bash plain">[2014-08-05 10:03:11,265] INFO Property log.retention.hours is overridden to 168 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number11 index10 alt2"><code class="bash plain">[2014-08-05 10:03:11,265] INFO Property log.segment.bytes is overridden to 536870912 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number12 index11 alt1"><code class="bash plain">[2014-08-05 10:03:11,265] INFO Property num.io.threads is overridden to 8 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number13 index12 alt2"><code class="bash plain">[2014-08-05 10:03:11,266] INFO Property num.network.threads is overridden to 2 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number14 index13 alt1"><code class="bash plain">[2014-08-05 10:03:11,266] INFO Property num.partitions is overridden to 2 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number15 index14 alt2"><code class="bash plain">[2014-08-05 10:03:11,267] INFO Property port is overridden to 9092 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number16 index15 alt1"><code class="bash plain">[2014-08-05 10:03:11,267] INFO Property socket.receive.buffer.bytes is overridden to 1048576 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number17 index16 alt2"><code class="bash plain">[2014-08-05 10:03:11,268] INFO Property socket.request.max.bytes is overridden to 104857600 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number18 index17 alt1"><code class="bash plain">[2014-08-05 10:03:11,268] INFO Property socket.send.buffer.bytes is overridden to 1048576 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number19 index18 alt2"><code class="bash plain">[2014-08-05 10:03:11,268] INFO Property zookeeper.connect is overridden to m1:2181,m2:2181,s1:2181,s2:2181 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number20 index19 alt1"><code class="bash plain">[2014-08-05 10:03:11,269] INFO Property zookeeper.connection.timeout.ms is overridden to 1000000 (kafka.utils.VerifiableProperties)
+</code></div>
+<div class="line number21 index20 alt2"><code class="bash plain">[2014-08-05 10:03:11,302] INFO [Kafka Server 1], starting (kafka.server.KafkaServer)
+</code></div>
+<div class="line number22 index21 alt1"><code class="bash plain">[2014-08-05 10:03:11,303] INFO [Kafka Server 1], Connecting to zookeeper on m1:2181,m2:2181,s1:2181,s2:2181 (kafka.server.KafkaServer)
+</code></div>
+<div class="line number23 index22 alt2"><code class="bash plain">[2014-08-05 10:03:11,335] INFO Starting ZkClient event thread. (org.I0Itec.zkclient.ZkEventThread)
+</code></div>
+<div class="line number24 index23 alt1"><code class="bash plain">[2014-08-05 10:03:11,348] INFO Client environment:zookeeper.version=3.3.3-1203054, built on 11</code><code class="bash plain">/17/2011</code>
+<code class="bash plain">05:47 GMT (org.apache.zookeeper.ZooKeeper) </code></div>
+<div class="line number25 index24 alt2"><code class="bash plain">[2014-08-05 10:03:11,348] INFO Client environment:host.name=m1 (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number26 index25 alt1"><code class="bash plain">[2014-08-05 10:03:11,349] INFO Client environment:java.version=1.7.0_65 (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number27 index26 alt2"><code class="bash plain">[2014-08-05 10:03:11,349] INFO Client environment:java.vendor=Oracle Corporation (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number28 index27 alt1"><code class="bash plain">[2014-08-05 10:03:11,349] INFO Client environment:java.home=</code><code class="bash plain">/usr/lib/jvm/java-7-oracle/jre</code>
+<code class="bash plain">(org.apache.zookeeper.ZooKeeper) </code></div>
+<div class="line number29 index28 alt2"><code class="bash plain">[2014-08-05 10:03:11,349] INFO Client environment:java.class.path=.:</code><code class="bash plain">/usr/lib/jvm/java-7-oracle/lib/tools</code><code class="bash plain">.jar:</code><code class="bash plain">/usr/lib/jvm/java-7-oracle/lib/dt</code><code class="bash plain">.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/core/build/dependant-libs-2</code><code class="bash plain">.8.0/*.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/perf/build/libs//kafka-perf_2</code><code class="bash plain">.8.0*.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/clients/build/libs//kafka-clients</code><code class="bash plain">*.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/examples/build/libs//kafka-examples</code><code class="bash plain">*.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/contrib/hadoop-consumer/build/libs//kafka-hadoop-consumer</code><code class="bash plain">*.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/contrib/hadoop-producer/build/libs//kafka-hadoop-producer</code><code class="bash plain">*.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/jopt-simple-3</code><code class="bash plain">.2.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/kafka_2</code><code class="bash plain">.9.2-0.8.1.1.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/kafka_2</code><code class="bash plain">.9.2-0.8.1.1-javadoc.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/kafka_2</code><code class="bash plain">.9.2-0.8.1.1-scaladoc.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/kafka_2</code><code class="bash plain">.9.2-0.8.1.1-sources.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/log4j-1</code><code class="bash plain">.2.15.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/metrics-core-2</code><code class="bash plain">.2.0.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/scala-library-2</code><code class="bash plain">.9.2.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/slf4j-api-1</code><code class="bash plain">.7.2.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/snappy-java-1</code><code class="bash plain">.0.5.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/zkclient-0</code><code class="bash plain">.3.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/libs/zookeeper-3</code><code class="bash plain">.3.4.jar:</code><code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/core/build/libs/kafka_2</code><code class="bash plain">.8.0*.jar
+ (org.apache.zookeeper.ZooKeeper) </code></div>
+<div class="line number30 index29 alt1"><code class="bash plain">[2014-08-05 10:03:11,350] INFO Client environment:java.library.path=:</code><code class="bash plain">/usr/local/lib</code><code class="bash plain">:</code><code class="bash plain">/usr/java/packages/lib/amd64</code><code class="bash plain">:</code><code class="bash plain">/usr/lib64</code><code class="bash plain">:</code><code class="bash plain">/lib64</code><code class="bash plain">:</code><code class="bash plain">/lib</code><code class="bash plain">:</code><code class="bash plain">/usr/lib</code>
+<code class="bash plain">(org.apache.zookeeper.ZooKeeper) </code></div>
+<div class="line number31 index30 alt2"><code class="bash plain">[2014-08-05 10:03:11,350] INFO Client environment:java.io.tmpdir=</code><code class="bash plain">/tmp</code>
+<code class="bash plain">(org.apache.zookeeper.ZooKeeper) </code></div>
+<div class="line number32 index31 alt1"><code class="bash plain">[2014-08-05 10:03:11,350] INFO Client environment:java.compiler=&lt;NA&gt; (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number33 index32 alt2"><code class="bash plain">[2014-08-05 10:03:11,350] INFO Client environment:os.name=Linux (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number34 index33 alt1"><code class="bash plain">[2014-08-05 10:03:11,350] INFO Client environment:os.arch=amd64 (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number35 index34 alt2"><code class="bash plain">[2014-08-05 10:03:11,351] INFO Client environment:os.version=3.11.0-15-generic (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number36 index35 alt1"><code class="bash plain">[2014-08-05 10:03:11,351] INFO Client environment:user.name=root (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number37 index36 alt2"><code class="bash plain">[2014-08-05 10:03:11,351] INFO Client environment:user.home=</code><code class="bash plain">/root</code>
+<code class="bash plain">(org.apache.zookeeper.ZooKeeper) </code></div>
+<div class="line number38 index37 alt1"><code class="bash plain">[2014-08-05 10:03:11,351] INFO Client environment:user.</code><code class="bash functions">dir</code><code class="bash plain">=</code><code class="bash plain">/home/hadoop</code>
+<code class="bash plain">(org.apache.zookeeper.ZooKeeper) </code></div>
+<div class="line number39 index38 alt2"><code class="bash plain">[2014-08-05 10:03:11,352] INFO Initiating client connection, connectString=m1:2181,m2:2181,s1:2181,s2:2181 sessionTimeout=6000 watcher=org.I0Itec.zkclient.ZkClient@51f782b8 (org.apache.zookeeper.ZooKeeper)
+</code></div>
+<div class="line number40 index39 alt1"><code class="bash plain">[2014-08-05 10:03:11,380] INFO Opening socket connection to server m2</code><code class="bash plain">/192</code><code class="bash plain">.168.1.51:2181 (org.apache.zookeeper.ClientCnxn)
+</code></div>
+<div class="line number41 index40 alt2"><code class="bash plain">[2014-08-05 10:03:11,386] INFO Socket connection established to m2</code><code class="bash plain">/192</code><code class="bash plain">.168.1.51:2181, initiating session (org.apache.zookeeper.ClientCnxn)
+</code></div>
+<div class="line number42 index41 alt1"><code class="bash plain">[2014-08-05 10:03:11,398] INFO Session establishment complete on server m2</code><code class="bash plain">/192</code><code class="bash plain">.168.1.51:2181, sessionid = 0x247a3e09b460000, negotiated
+ timeout = 6000 (org.apache.zookeeper.ClientCnxn) </code></div>
+<div class="line number43 index42 alt2"><code class="bash plain">[2014-08-05 10:03:11,400] INFO zookeeper state changed (SyncConnected) (org.I0Itec.zkclient.ZkClient)
+</code></div>
+<div class="line number44 index43 alt1"><code class="bash plain">[2014-08-05 10:03:11,652] INFO Loading log
+</code><code class="bash string">'test-1'</code> <code class="bash plain">(kafka.log.LogManager)
+</code></div>
+<div class="line number45 index44 alt2"><code class="bash plain">[2014-08-05 10:03:11,681] INFO Recovering unflushed segment 0
+</code><code class="bash keyword">in</code> <code class="bash plain">log </code><code class="bash functions">test</code><code class="bash plain">-1. (kafka.log.Log)
+</code></div>
+<div class="line number46 index45 alt1"><code class="bash plain">[2014-08-05 10:03:11,711] INFO Completed load of log
+</code><code class="bash functions">test</code><code class="bash plain">-1 with log end offset 137 (kafka.log.Log)
+</code></div>
+<div class="line number47 index46 alt2"><code class="bash plain">SLF4J: Failed to load class
+</code><code class="bash string">"org.slf4j.impl.StaticLoggerBinder"</code><code class="bash plain">.
+</code></div>
+<div class="line number48 index47 alt1"><code class="bash plain">SLF4J: Defaulting to no-operation (NOP) logger implementation
+</code></div>
+<div class="line number49 index48 alt2"><code class="bash plain">SLF4J: See http:</code><code class="bash plain">//www</code><code class="bash plain">.slf4j.org</code><code class="bash plain">/codes</code><code class="bash plain">.html</code><code class="bash comments">#StaticLoggerBinder
+ for further details. </code></div>
+<div class="line number50 index49 alt1"><code class="bash plain">[2014-08-05 10:03:11,747] INFO Loading log
+</code><code class="bash string">'idoall.org-0'</code> <code class="bash plain">(kafka.log.LogManager)
+</code></div>
+<div class="line number51 index50 alt2"><code class="bash plain">[2014-08-05 10:03:11,748] INFO Recovering unflushed segment 0
+</code><code class="bash keyword">in</code> <code class="bash plain">log idoall.org-0. (kafka.log.Log)
+</code></div>
+<div class="line number52 index51 alt1"><code class="bash plain">[2014-08-05 10:03:11,754] INFO Completed load of log idoall.org-0 with log end offset 5 (kafka.log.Log)
+</code></div>
+<div class="line number53 index52 alt2"><code class="bash plain">[2014-08-05 10:03:11,760] INFO Loading log
+</code><code class="bash string">'test-0'</code> <code class="bash plain">(kafka.log.LogManager)
+</code></div>
+<div class="line number54 index53 alt1"><code class="bash plain">[2014-08-05 10:03:11,765] INFO Recovering unflushed segment 0
+</code><code class="bash keyword">in</code> <code class="bash plain">log </code><code class="bash functions">test</code><code class="bash plain">-0. (kafka.log.Log)
+</code></div>
+<div class="line number55 index54 alt2"><code class="bash plain">[2014-08-05 10:03:11,777] INFO Completed load of log
+</code><code class="bash functions">test</code><code class="bash plain">-0 with log end offset 151 (kafka.log.Log)
+</code></div>
+<div class="line number56 index55 alt1"><code class="bash plain">[2014-08-05 10:03:11,779] INFO Starting log cleanup with a period of 60000 ms. (kafka.log.LogManager)
+</code></div>
+<div class="line number57 index56 alt2"><code class="bash plain">[2014-08-05 10:03:11,782] INFO Starting log flusher with a default period of 9223372036854775807 ms. (kafka.log.LogManager)
+</code></div>
+<div class="line number58 index57 alt1"><code class="bash plain">[2014-08-05 10:03:11,800] INFO Awaiting socket connections on m1:9092. (kafka.network.Acceptor)
+</code></div>
+<div class="line number59 index58 alt2"><code class="bash plain">[2014-08-05 10:03:11,802] INFO [Socket Server on Broker 1], Started (kafka.network.SocketServer)
+</code></div>
+<div class="line number60 index59 alt1"><code class="bash plain">[2014-08-05 10:03:11,890] INFO Will not load MX4J, mx4j-tools.jar is not
+</code><code class="bash keyword">in</code> <code class="bash plain">the classpath (kafka.utils.Mx4jLoader$)
+</code></div>
+<div class="line number61 index60 alt2"><code class="bash plain">[2014-08-05 10:03:11,919] INFO 1 successfully elected as leader (kafka.server.ZookeeperLeaderElector)
+</code></div>
+<div class="line number62 index61 alt1"><code class="bash plain">[2014-08-05 10:03:12,359] INFO New leader is 1 (kafka.server.ZookeeperLeaderElector$LeaderChangeListener)
+</code></div>
+<div class="line number63 index62 alt2"><code class="bash plain">[2014-08-05 10:03:12,387] INFO Registered broker 1 at path
+</code><code class="bash plain">/brokers/ids/1</code> <code class="bash plain">with address m1:9092. (kafka.utils.ZkUtils$)
+</code></div>
+<div class="line number64 index63 alt1"><code class="bash plain">[2014-08-05 10:03:12,392] INFO [Kafka Server 1], started (kafka.server.KafkaServer)
+</code></div>
+<div class="line number65 index64 alt2"><code class="bash plain">[2014-08-05 10:03:12,671] INFO [ReplicaFetcherManager on broker 1] Removed fetcher
+</code><code class="bash keyword">for</code> <code class="bash plain">partitions [idoall.org,0],[</code><code class="bash functions">test</code><code class="bash plain">,0],[</code><code class="bash functions">test</code><code class="bash plain">,1] (kafka.server.ReplicaFetcherManager)
+</code></div>
+<div class="line number66 index65 alt1"><code class="bash plain">[2014-08-05 10:03:12,741] INFO [ReplicaFetcherManager on broker 1] Removed fetcher
+</code><code class="bash keyword">for</code> <code class="bash plain">partitions [idoall.org,0],[</code><code class="bash functions">test</code><code class="bash plain">,0],[</code><code class="bash functions">test</code><code class="bash plain">,1] (kafka.server.ReplicaFetcherManager)
+</code></div>
+<div class="line number67 index66 alt2"><code class="bash plain">[2014-08-05 10:03:25,327] INFO Partition [</code><code class="bash functions">test</code><code class="bash plain">,0] on broker 1: Expanding ISR
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [</code><code class="bash functions">test</code><code class="bash plain">,0] from 1 to 1,2 (kafka.cluster.Partition)
+</code></div>
+<div class="line number68 index67 alt1"><code class="bash plain">[2014-08-05 10:03:25,334] INFO Partition [</code><code class="bash functions">test</code><code class="bash plain">,1] on broker 1: Expanding ISR
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [</code><code class="bash functions">test</code><code class="bash plain">,1] from 1 to 1,2 (kafka.cluster.Partition)
+</code></div>
+<div class="line number69 index68 alt2"><code class="bash plain">[2014-08-05 10:03:26,905] INFO Partition [</code><code class="bash functions">test</code><code class="bash plain">,1] on broker 1: Expanding ISR
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [</code><code class="bash functions">test</code><code class="bash plain">,1] from 1,2 to 1,2,3 (kafka.cluster.Partition)</code></div>
+</div>
+<br></div>
+</div>
+</div>
+</div>
+</div>
+<div>
+<div>　　4、测试kafka的状态</div>
+<div>　　　　1)在m1上创建一个idoall_testTopic主题</div>
+<div> </div>
+</div>
+<div>
+<div>
+<div>
+<div id="highlighter_939070" class="syntaxhighlighter bash ie">
+<div class="toolbar">
+<div class="line number1 index0 alt2"><code class="bash comments">#KAFKA有几个，replication-factor就填几个
+</code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-topics.sh --create --topic idoall_testTopic --replication-factor
+ 4 --partitions 2 --zookeeper m1:2181 </code></div>
+<div class="line number3 index2 alt2"><code class="bash plain">Created topic </code>
+<code class="bash string">"idoall_testTopic"</code><code class="bash plain">. </code>
+</div>
+<div class="line number4 index3 alt1"><code class="bash plain">[2014-08-05 10:08:29,315] INFO [ReplicaFetcherManager on broker 1] Removed fetcher
+</code><code class="bash keyword">for</code> <code class="bash plain">partitions [idoall_testTopic,0] (kafka.server.ReplicaFetcherManager)
+</code></div>
+<div class="line number5 index4 alt2"><code class="bash plain">[2014-08-05 10:08:29,334] INFO Completed load of log idoall_testTopic-0 with log end offset 0 (kafka.log.Log)
+</code></div>
+<div class="line number6 index5 alt1"><code class="bash plain">[2014-08-05 10:08:29,373] INFO Created log
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [idoall_testTopic,0]
+</code><code class="bash keyword">in</code> <code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/kafka-logs</code>
+<code class="bash plain">with properties {segment.index.bytes -&gt; 10485760, </code>
+<code class="bash functions">file</code><code class="bash plain">.delete.delay.ms -&gt; 60000, segment.bytes -&gt; 536870912, flush.ms -&gt; 9223372036854775807, delete.retention.ms -&gt; 86400000, index.interval.bytes -&gt; 4096, retention.bytes -&gt; -1, cleanup.policy -&gt;
+ delete, segment.ms -&gt; 604800000, max.message.bytes -&gt; 1000012, flush.messages -&gt; 9223372036854775807, min.cleanable.dirty.ratio -&gt; 0.5, retention.ms -&gt; 604800000}. (kafka.log.LogManager)
+</code></div>
+<div class="line number7 index6 alt2"><code class="bash plain">[2014-08-05 10:08:29,384] WARN Partition [idoall_testTopic,0] on broker 1: No checkpointed highwatermark is found
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [idoall_testTopic,0] (kafka.cluster.Partition)
+</code></div>
+<div class="line number8 index7 alt1"><code class="bash plain">[2014-08-05 10:08:29,415] INFO Completed load of log idoall_testTopic-1 with log end offset 0 (kafka.log.Log)
+</code></div>
+<div class="line number9 index8 alt2"><code class="bash plain">[2014-08-05 10:08:29,416] INFO Created log
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [idoall_testTopic,1]
+</code><code class="bash keyword">in</code> <code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/kafka-logs</code>
+<code class="bash plain">with properties {segment.index.bytes -&gt; 10485760, </code>
+<code class="bash functions">file</code><code class="bash plain">.delete.delay.ms -&gt; 60000, segment.bytes -&gt; 536870912, flush.ms -&gt; 9223372036854775807, delete.retention.ms -&gt; 86400000, index.interval.bytes -&gt; 4096, retention.bytes -&gt; -1, cleanup.policy -&gt;
+ delete, segment.ms -&gt; 604800000, max.message.bytes -&gt; 1000012, flush.messages -&gt; 9223372036854775807, min.cleanable.dirty.ratio -&gt; 0.5, retention.ms -&gt; 604800000}. (kafka.log.LogManager)
+</code></div>
+<div class="line number10 index9 alt1"><code class="bash plain">[2014-08-05 10:08:29,422] WARN Partition [idoall_testTopic,1] on broker 1: No checkpointed highwatermark is found
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [idoall_testTopic,1] (kafka.cluster.Partition)
+</code></div>
+<div class="line number11 index10 alt2"><code class="bash plain">[2014-08-05 10:08:29,430] INFO [ReplicaFetcherManager on broker 1] Removed fetcher
+</code><code class="bash keyword">for</code> <code class="bash plain">partitions [idoall_testTopic,1] (kafka.server.ReplicaFetcherManager)
+</code></div>
+<div class="line number12 index11 alt1"><code class="bash plain">[2014-08-05 10:08:29,438] INFO Truncating log idoall_testTopic-1 to offset 0. (kafka.log.Log)
+</code></div>
+<div class="line number13 index12 alt2"><code class="bash plain">[2014-08-05 10:08:29,473] INFO [ReplicaFetcherManager on broker 1] Added fetcher
+</code><code class="bash keyword">for</code> <code class="bash plain">partitions ArrayBuffer([[idoall_testTopic,1], initOffset 0 to broker
+</code><code class="bash functions">id</code><code class="bash plain">:2,host:m2,port:9092] ) (kafka.server.ReplicaFetcherManager)
+</code></div>
+<br></div>
+</div>
+</div>
+</div>
+</div>
+<div>　　　　2)在m1上查看刚才创建的idoall_testTopic主题</div>
+<div>
+<div>
+<div>
+<div id="highlighter_268610" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-topics.sh --list --zookeeper m1:2181   
+</code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">idoall_testTopic</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　3)在m2上发送消息至kafka（m2模拟producer），发送消息“hello idoall.org”</div>
+<div> </div>
+<div>
+<div>
+<div>
+<div id="highlighter_400451" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">root@m2:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-console-producer.sh --broker-list m1:9092 --sync --topic idoall_testTopic
+</code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">SLF4J: Failed to load class
+</code><code class="bash string">"org.slf4j.impl.StaticLoggerBinder"</code><code class="bash plain">.
+</code></div>
+<div class="line number3 index2 alt2"><code class="bash plain">SLF4J: Defaulting to no-operation (NOP) logger implementation
+</code></div>
+<div class="line number4 index3 alt1"><code class="bash plain">SLF4J: See http:</code><code class="bash plain">//www</code><code class="bash plain">.slf4j.org</code><code class="bash plain">/codes</code><code class="bash plain">.html</code><code class="bash comments">#StaticLoggerBinder
+ for further details. </code></div>
+<div class="line number5 index4 alt2"><code class="bash plain">hello idoall.org</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　4)在s1上开启一个消费者（s1模拟consumer），可以看到刚才发送的消息</div>
+<div>
+<div>
+<div>
+<div id="highlighter_131745" class="syntaxhighlighter bash ie">
+<div class="toolbar">
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">root@s1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-console-consumer.sh --zookeeper m1:2181 --topic idoall_testTopic
+ --from-beginning </code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">SLF4J: Failed to load class
+</code><code class="bash string">"org.slf4j.impl.StaticLoggerBinder"</code><code class="bash plain">.
+</code></div>
+<div class="line number3 index2 alt2"><code class="bash plain">SLF4J: Defaulting to no-operation (NOP) logger implementation
+</code></div>
+<div class="line number4 index3 alt1"><code class="bash plain">SLF4J: See http:</code><code class="bash plain">//www</code><code class="bash plain">.slf4j.org</code><code class="bash plain">/codes</code><code class="bash plain">.html</code><code class="bash comments">#StaticLoggerBinder
+ for further details. </code></div>
+<div class="line number5 index4 alt2"><code class="bash plain">hello idoall.org</code></div>
+</div>
+<br></div>
+</div>
+</div>
+</div>
+</div>
+<div>　　　　5)删除掉一个Topic，这里我们测试创建一个idoall的主题，再删除掉</div>
+<div> </div>
+<div>
+<div>
+<div>
+<div id="highlighter_260172" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-topics.sh --create --topic idoall --replication-factor 4 --partitions
+ 2 --zookeeper m1:2181           </code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">Created topic </code>
+<code class="bash string">"idoall"</code><code class="bash plain">. </code></div>
+<div class="line number3 index2 alt2"><code class="bash plain">[2014-08-05 10:38:30,862] INFO Completed load of log idoall-1 with log end offset 0 (kafka.log.Log)
+</code></div>
+<div class="line number4 index3 alt1"><code class="bash plain">[2014-08-05 10:38:30,864] INFO Created log
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [idoall,1]
+</code><code class="bash keyword">in</code> <code class="bash plain">/home/hadoop/kafka_2</code><code class="bash plain">.9.2-0.8.1.1</code><code class="bash plain">/kafka-logs</code>
+<code class="bash plain">with properties {segment.index.bytes -&gt; 10485760, </code>
+<code class="bash functions">file</code><code class="bash plain">.delete.delay.ms -&gt; 60000, segment.bytes -&gt; 536870912, flush.ms -&gt; 9223372036854775807, delete.retention.ms -&gt; 86400000, index.interval.bytes -&gt; 4096, retention.bytes -&gt; -1, cleanup.policy -&gt;
+ delete, segment.ms -&gt; 604800000, max.message.bytes -&gt; 1000012, flush.messages -&gt; 9223372036854775807, min.cleanable.dirty.ratio -&gt; 0.5, retention.ms -&gt; 604800000}. (kafka.log.LogManager)
+</code></div>
+<div class="line number5 index4 alt2"><code class="bash plain">[2014-08-05 10:38:30,870] WARN Partition [idoall,1] on broker 1: No checkpointed highwatermark is found
+</code><code class="bash keyword">for</code> <code class="bash plain">partition [idoall,1] (kafka.cluster.Partition)
+</code></div>
+<div class="line number6 index5 alt1"><code class="bash plain">[2014-08-05 10:38:30,878] INFO [ReplicaFetcherManager on broker 1] Removed fetcher
+</code><code class="bash keyword">for</code> <code class="bash plain">partitions [idoall,1] (kafka.server.ReplicaFetcherManager)
+</code></div>
+<div class="line number7 index6 alt2"><code class="bash plain">[2014-08-05 10:38:30,880] INFO Truncating log idoall-1 to offset 0. (kafka.log.Log)
+</code></div>
+<div class="line number8 index7 alt1"><code class="bash plain">[2014-08-05 10:38:30,885] INFO [ReplicaFetcherManager on broker 1] Added fetcher
+</code><code class="bash keyword">for</code> <code class="bash plain">partitions ArrayBuffer([[idoall,1], initOffset 0 to broker
+</code><code class="bash functions">id</code><code class="bash plain">:3,host:s1,port:9092] ) (kafka.server.ReplicaFetcherManager)
+</code></div>
+<div class="line number9 index8 alt2"><code class="bash plain">[2014-08-05 10:38:30,887] INFO [ReplicaFetcherThread-0-3], Starting  (kafka.server.ReplicaFetcherThread)
+</code></div>
+<div class="line number10 index9 alt1"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-topics.sh --list --zookeeper m1:2181
+</code></div>
+<div class="line number11 index10 alt2"><code class="bash plain">idoall </code></div>
+<div class="line number12 index11 alt1"><code class="bash plain">idoall_testTopic
+</code></div>
+<div class="line number13 index12 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-run-class.sh kafka.admin.DeleteTopicCommand --topic idoall --zookeeper
+ m2:2181     </code></div>
+<div class="line number14 index13 alt1"><code class="bash plain">deletion succeeded!
+</code></div>
+<div class="line number15 index14 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/kafka_2.9.2-0.8.1.1/bin/kafka-topics.sh --list --zookeeper m1:2181                  idoall_testTopic
+</code></div>
+<div class="line number16 index15 alt1"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments">#</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　同样也可以进入到zookeeper中查看主题是否已经删除掉。</div>
+<div> </div>
+<div>
+<div>
+<div>
+<div id="highlighter_156025" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">root@m1:</code><code class="bash plain">/home/hadoop</code><code class="bash comments"># /home/hadoop/zookeeper-3.4.5/bin/zkCli.sh
+</code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">Connecting to localhost:2181
+</code></div>
+<div class="line number3 index2 alt2"><code class="bash plain">2014-08-05 10:15:21,863 [myid:] - INFO  [main:Environment@100] - Client environment:zookeeper.version=3.4.5-1392090, built on 09</code><code class="bash plain">/30/2012</code>
+<code class="bash plain">17:52 GMT </code></div>
+<div class="line number4 index3 alt1"><code class="bash plain">2014-08-05 10:15:21,871 [myid:] - INFO  [main:Environment@100] - Client environment:host.name=m1
+</code></div>
+<div class="line number5 index4 alt2"><code class="bash plain">2014-08-05 10:15:21,871 [myid:] - INFO  [main:Environment@100] - Client environment:java.version=1.7.0_65
+</code></div>
+<div class="line number6 index5 alt1"><code class="bash plain">2014-08-05 10:15:21,872 [myid:] - INFO  [main:Environment@100] - Client environment:java.vendor=Oracle Corporation
+</code></div>
+<div class="line number7 index6 alt2"><code class="bash plain">2014-08-05 10:15:21,872 [myid:] - INFO  [main:Environment@100] - Client environment:java.home=</code><code class="bash plain">/usr/lib/jvm/java-7-oracle/jre</code></div>
+<div class="line number8 index7 alt1"><code class="bash plain">2014-08-05 10:15:21,873 [myid:] - INFO  [main:Environment@100] - Client environment:java.class.path=</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/build/classes</code><code class="bash plain">:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/build/lib/</code><code class="bash plain">*.jar:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/lib/slf4j-log4j12-1</code><code class="bash plain">.6.1.jar:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/lib/slf4j-api-1</code><code class="bash plain">.6.1.jar:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/lib/netty-3</code><code class="bash plain">.2.2.Final.jar:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/lib/log4j-1</code><code class="bash plain">.2.15.jar:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/lib/jline-0</code><code class="bash plain">.9.94.jar:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/zookeeper-3</code><code class="bash plain">.4.5.jar:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/src/java/lib/</code><code class="bash plain">*.jar:</code><code class="bash plain">/home/hadoop/zookeeper-3</code><code class="bash plain">.4.5</code><code class="bash plain">/bin/</code><code class="bash plain">..</code><code class="bash plain">/conf</code><code class="bash plain">:.:</code><code class="bash plain">/usr/lib/jvm/java-7-oracle/lib/tools</code><code class="bash plain">.jar:</code><code class="bash plain">/usr/lib/jvm/java-7-oracle/lib/dt</code><code class="bash plain">.jar
+</code></div>
+<div class="line number9 index8 alt2"><code class="bash plain">2014-08-05 10:15:21,874 [myid:] - INFO  [main:Environment@100] - Client environment:java.library.path=:</code><code class="bash plain">/usr/local/lib</code><code class="bash plain">:</code><code class="bash plain">/usr/java/packages/lib/amd64</code><code class="bash plain">:</code><code class="bash plain">/usr/lib64</code><code class="bash plain">:</code><code class="bash plain">/lib64</code><code class="bash plain">:</code><code class="bash plain">/lib</code><code class="bash plain">:</code><code class="bash plain">/usr/lib</code></div>
+<div class="line number10 index9 alt1"><code class="bash plain">2014-08-05 10:15:21,874 [myid:] - INFO  [main:Environment@100] - Client environment:java.io.tmpdir=</code><code class="bash plain">/tmp</code></div>
+<div class="line number11 index10 alt2"><code class="bash plain">2014-08-05 10:15:21,874 [myid:] - INFO  [main:Environment@100] - Client environment:java.compiler=&lt;NA&gt;
+</code></div>
+<div class="line number12 index11 alt1"><code class="bash plain">2014-08-05 10:15:21,875 [myid:] - INFO  [main:Environment@100] - Client environment:os.name=Linux
+</code></div>
+<div class="line number13 index12 alt2"><code class="bash plain">2014-08-05 10:15:21,875 [myid:] - INFO  [main:Environment@100] - Client environment:os.arch=amd64
+</code></div>
+<div class="line number14 index13 alt1"><code class="bash plain">2014-08-05 10:15:21,876 [myid:] - INFO  [main:Environment@100] - Client environment:os.version=3.11.0-15-generic
+</code></div>
+<div class="line number15 index14 alt2"><code class="bash plain">2014-08-05 10:15:21,876 [myid:] - INFO  [main:Environment@100] - Client environment:user.name=root
+</code></div>
+<div class="line number16 index15 alt1"><code class="bash plain">2014-08-05 10:15:21,877 [myid:] - INFO  [main:Environment@100] - Client environment:user.home=</code><code class="bash plain">/root</code></div>
+<div class="line number17 index16 alt2"><code class="bash plain">2014-08-05 10:15:21,878 [myid:] - INFO  [main:Environment@100] - Client environment:user.</code><code class="bash functions">dir</code><code class="bash plain">=</code><code class="bash plain">/home/hadoop</code></div>
+<div class="line number18 index17 alt1"><code class="bash plain">2014-08-05 10:15:21,879 [myid:] - INFO  [main:ZooKeeper@438] - Initiating client connection, connectString=localhost:2181 sessionTimeout=30000 watcher=org.apache.zookeeper.ZooKeeperMain$MyWatcher@666c211a
+</code></div>
+<div class="line number19 index18 alt2"><code class="bash plain">Welcome to ZooKeeper!
+</code></div>
+<div class="line number20 index19 alt1"><code class="bash plain">2014-08-05 10:15:21,920 [myid:] - INFO  [main-SendThread(localhost:2181):ClientCnxn$SendThread@966] - Opening socket connection to server localhost</code><code class="bash plain">/127</code><code class="bash plain">.0.0.1:2181.
+ Will not attempt to authenticate using SASL (unknown error) </code></div>
+<div class="line number21 index20 alt2"><code class="bash plain">2014-08-05 10:15:21,934 [myid:] - INFO  [main-SendThread(localhost:2181):ClientCnxn$SendThread@849] - Socket connection established to localhost</code><code class="bash plain">/127</code><code class="bash plain">.0.0.1:2181,
+ initiating session </code></div>
+<div class="line number22 index21 alt1"><code class="bash plain">JLine support is enabled
+</code></div>
+<div class="line number23 index22 alt2"><code class="bash plain">2014-08-05 10:15:21,966 [myid:] - INFO  [main-SendThread(localhost:2181):ClientCnxn$SendThread@1207] - Session establishment complete on server localhost</code><code class="bash plain">/127</code><code class="bash plain">.0.0.1:2181,
+ sessionid = 0x147a3e1246b0007, negotiated timeout = 30000 </code></div>
+<div class="line number24 index23 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number25 index24 alt2"><code class="bash plain">WATCHER:: </code>
+</div>
+<div class="line number26 index25 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number27 index26 alt2"><code class="bash plain">WatchedEvent state:SyncConnected
+</code><code class="bash functions">type</code><code class="bash plain">:None path:null
+</code></div>
+<div class="line number28 index27 alt1"><code class="bash plain">[zk: localhost:2181(CONNECTED) 0]
+</code><code class="bash functions">ls</code> <code class="bash plain">/ </code></div>
+<div class="line number29 index28 alt2"><code class="bash plain">[hbase, hadoop-ha, admin, zookeeper, consumers, config, controller, storm, brokers, controller_epoch]
+</code></div>
+<div class="line number30 index29 alt1"><code class="bash plain">[zk: localhost:2181(CONNECTED) 1]
+</code><code class="bash functions">ls</code> <code class="bash plain">/brokers</code></div>
+<div class="line number31 index30 alt2"><code class="bash plain">[topics, ids] </code>
+</div>
+<div class="line number32 index31 alt1"><code class="bash plain">[zk: localhost:2181(CONNECTED) 2]
+</code><code class="bash functions">ls</code> <code class="bash plain">/brokers/topics</code></div>
+<div class="line number33 index32 alt2"><code class="bash plain">[idoall_testTopic]</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>
+<div>　　5、使用Eclipse来调用kafka的JAVA API来测试kafka的集群状态</div>
+<div>　　　　1)消息生产端：Producertest.java</div>
+</div>
+<div>
+<div>
+<div>
+<div id="highlighter_437929" class="syntaxhighlighter java ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="java keyword">package</code> <code class="java plain">
+idoall.testkafka; </code></div>
+<div class="line number2 index1 alt1"><code class="java spaces"> </code> </div>
+<div class="line number3 index2 alt2"><code class="java keyword">import</code> <code class="java plain">
+java.util.Date; </code></div>
+<div class="line number4 index3 alt1"><code class="java keyword">import</code> <code class="java plain">
+java.util.Properties; </code></div>
+<div class="line number5 index4 alt2"><code class="java keyword">import</code> <code class="java plain">
+java.text.SimpleDateFormat;    </code></div>
+<div class="line number6 index5 alt1"><code class="java spaces"> </code> </div>
+<div class="line number7 index6 alt2"><code class="java keyword">import</code> <code class="java plain">
+kafka.javaapi.producer.Producer; </code></div>
+<div class="line number8 index7 alt1"><code class="java keyword">import</code> <code class="java plain">
+kafka.producer.KeyedMessage; </code></div>
+<div class="line number9 index8 alt2"><code class="java keyword">import</code> <code class="java plain">
+kafka.producer.ProducerConfig; </code></div>
+<div class="line number10 index9 alt1"><code class="java spaces"> </code> </div>
+<div class="line number11 index10 alt2"><code class="java spaces"> </code> </div>
+<div class="line number12 index11 alt1"><code class="java preprocessor">/** </code>
+</div>
+<div class="line number13 index12 alt2"><code class="java preprocessor">* 消息生产端 </code>
+</div>
+<div class="line number14 index13 alt1"><code class="java preprocessor">* @author 迦壹
+</code></div>
+<div class="line number15 index14 alt2"><code class="java preprocessor">* @Time 2014-08-05
+</code></div>
+<div class="line number16 index15 alt1"><code class="java preprocessor">*/</code></div>
+<div class="line number17 index16 alt2"><code class="java keyword">public</code> <code class="java keyword">
+class</code> <code class="java plain">Producertest { </code></div>
+<div class="line number18 index17 alt1"><code class="java spaces">     </code> </div>
+<div class="line number19 index18 alt2"><code class="java spaces">     </code><code class="java keyword">public</code>
+<code class="java keyword">static</code> <code class="java keyword">void</code> <code class="java plain">
+main(String[] args) { </code></div>
+<div class="line number20 index19 alt1"><code class="java spaces">         </code><code class="java plain">Properties props =
+</code><code class="java keyword">new</code> <code class="java plain">Properties();
+</code></div>
+<div class="line number21 index20 alt2"><code class="java spaces">         </code><code class="java plain">props.put(</code><code class="java string">"zk.connect"</code><code class="java plain">,
+</code><code class="java string">"m1:2181,m2:2181,s1:2181,s2:2181"</code><code class="java plain">);
+</code></div>
+<div class="line number22 index21 alt1"><code class="java spaces">         </code><code class="java comments">// serializer.class为消息的序列化类
+</code></div>
+<div class="line number23 index22 alt2"><code class="java spaces">         </code><code class="java plain">props.put(</code><code class="java string">"serializer.class"</code><code class="java plain">,
+</code><code class="java string">"kafka.serializer.StringEncoder"</code><code class="java plain">);
+</code></div>
+<div class="line number24 index23 alt1"><code class="java spaces">         </code><code class="java comments">// 配置metadata.broker.list, 为了高可用, 最好配两个broker实例
+</code></div>
+<div class="line number25 index24 alt2"><code class="java spaces">         </code><code class="java plain">props.put(</code><code class="java string">"metadata.broker.list"</code><code class="java plain">,
+</code><code class="java string">"m1:9092,m2:9092,s1:9092,s2:9092"</code><code class="java plain">);
+</code></div>
+<div class="line number26 index25 alt1"><code class="java spaces">         </code><code class="java comments">// 设置Partition类, 对队列进行合理的划分
+</code></div>
+<div class="line number27 index26 alt2"><code class="java spaces">         </code><code class="java comments">//props.put("partitioner.class", "idoall.testkafka.Partitionertest");
+</code></div>
+<div class="line number28 index27 alt1"><code class="java spaces">         </code><code class="java comments">// ACK机制, 消息发送需要kafka服务端确认
+</code></div>
+<div class="line number29 index28 alt2"><code class="java spaces">         </code><code class="java plain">props.put(</code><code class="java string">"request.required.acks"</code><code class="java plain">,
+</code><code class="java string">"1"</code><code class="java plain">); </code></div>
+<div class="line number30 index29 alt1"><code class="java spaces"> </code> </div>
+<div class="line number31 index30 alt2"><code class="java spaces">          </code><code class="java plain">props.put(</code><code class="java string">"num.partitions"</code><code class="java plain">,
+</code><code class="java string">"4"</code><code class="java plain">); </code></div>
+<div class="line number32 index31 alt1"><code class="java spaces">         </code><code class="java plain">ProducerConfig config =
+</code><code class="java keyword">new</code> <code class="java plain">ProducerConfig(props);
+</code></div>
+<div class="line number33 index32 alt2"><code class="java spaces">         </code><code class="java plain">Producer&lt;String, String&gt; producer =
+</code><code class="java keyword">new</code> <code class="java plain">Producer&lt;String, String&gt;(config);
+</code></div>
+<div class="line number34 index33 alt1"><code class="java spaces">         </code><code class="java keyword">for</code>
+<code class="java plain">(</code><code class="java keyword">int</code> <code class="java plain">
+i = </code><code class="java value">0</code><code class="java plain">; i &lt; </code>
+<code class="java value">10</code><code class="java plain">; i++) </code></div>
+<div class="line number35 index34 alt2"><code class="java spaces">         </code><code class="java plain">{
+</code></div>
+<div class="line number36 index35 alt1"><code class="java spaces">           </code><code class="java comments">// KeyedMessage&lt;K, V&gt;
+</code></div>
+<div class="line number37 index36 alt2"><code class="java spaces">           </code><code class="java comments">// 　　K对应Partition Key的类型
+</code></div>
+<div class="line number38 index37 alt1"><code class="java spaces">           </code><code class="java comments">// 　　V对应消息本身的类型
+</code></div>
+<div class="line number39 index38 alt2"><code class="java comments">//　　 topic: "test", key: "key", message: "message"
+</code></div>
+<div class="line number40 index39 alt1"><code class="java spaces">           </code><code class="java plain">SimpleDateFormat formatter =
+</code><code class="java keyword">new</code> <code class="java plain">SimpleDateFormat   (</code><code class="java string">"yyyy年MM月dd日 HH:mm:ss SSS"</code><code class="java plain">);       
+</code></div>
+<div class="line number41 index40 alt2"><code class="java spaces">           </code><code class="java plain">Date curDate =
+</code><code class="java keyword">new</code> <code class="java plain">Date(System.currentTimeMillis());</code><code class="java comments">//获取当前时间       
+</code></div>
+<div class="line number42 index41 alt1"><code class="java spaces">           </code><code class="java plain">String str = formatter.format(curDate);   
+</code></div>
+<div class="line number43 index42 alt2"><code class="java spaces">            </code> </div>
+<div class="line number44 index43 alt1"><code class="java spaces">           </code><code class="java plain">String msg =
+</code><code class="java string">"idoall.org"</code> <code class="java plain">+ i+</code><code class="java string">"="</code><code class="java plain">+str;
+</code></div>
+<div class="line number45 index44 alt2"><code class="java spaces">           </code><code class="java plain">String key = i+</code><code class="java string">""</code><code class="java plain">;
+</code></div>
+<div class="line number46 index45 alt1"><code class="java spaces">           </code><code class="java plain">producer.send(</code><code class="java keyword">new</code>
+<code class="java plain">KeyedMessage&lt;String, String&gt;(</code><code class="java string">"idoall_testTopic"</code><code class="java plain">,key, msg));
+</code></div>
+<div class="line number47 index46 alt2"><code class="java spaces">         </code><code class="java plain">}
+</code></div>
+<div class="line number48 index47 alt1"><code class="java spaces">       </code><code class="java plain">}
+</code></div>
+<div class="line number49 index48 alt2"><code class="java plain">}</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　2)消息消费端：Consumertest.java</div>
+<div>
+<div>
+<div>
+<div id="highlighter_798890" class="syntaxhighlighter java ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="java keyword">package</code> <code class="java plain">
+idoall.testkafka; </code></div>
+<div class="line number2 index1 alt1"><code class="java spaces"> </code> </div>
+<div class="line number3 index2 alt2"><code class="java keyword">import</code> <code class="java plain">
+java.util.HashMap;  </code></div>
+<div class="line number4 index3 alt1"><code class="java keyword">import</code> <code class="java plain">
+java.util.List;   </code></div>
+<div class="line number5 index4 alt2"><code class="java keyword">import</code> <code class="java plain">
+java.util.Map;   </code></div>
+<div class="line number6 index5 alt1"><code class="java keyword">import</code> <code class="java plain">
+java.util.Properties;   </code></div>
+<div class="line number7 index6 alt2"><code class="java spaces">   </code> </div>
+<div class="line number8 index7 alt1"><code class="java keyword">import</code> <code class="java plain">
+kafka.consumer.ConsumerConfig;   </code></div>
+<div class="line number9 index8 alt2"><code class="java keyword">import</code> <code class="java plain">
+kafka.consumer.ConsumerIterator;   </code></div>
+<div class="line number10 index9 alt1"><code class="java keyword">import</code> <code class="java plain">
+kafka.consumer.KafkaStream;   </code></div>
+<div class="line number11 index10 alt2"><code class="java keyword">import</code> <code class="java plain">
+kafka.javaapi.consumer.ConsumerConnector; </code></div>
+<div class="line number12 index11 alt1"><code class="java spaces"> </code> </div>
+<div class="line number13 index12 alt2"><code class="java spaces"> </code> </div>
+<div class="line number14 index13 alt1"><code class="java preprocessor">/** </code>
+</div>
+<div class="line number15 index14 alt2"><code class="java preprocessor">* 消息消费端 </code>
+</div>
+<div class="line number16 index15 alt1"><code class="java preprocessor">* @author 迦壹
+</code></div>
+<div class="line number17 index16 alt2"><code class="java preprocessor">* @Time 2014-08-05
+</code></div>
+<div class="line number18 index17 alt1"><code class="java preprocessor">*/</code></div>
+<div class="line number19 index18 alt2"><code class="java keyword">public</code> <code class="java keyword">
+class</code> <code class="java plain">Consumertest </code><code class="java keyword">extends</code>
+<code class="java plain">Thread{ </code></div>
+<div class="line number20 index19 alt1"><code class="java spaces">      </code> </div>
+<div class="line number21 index20 alt2"><code class="java spaces">     </code><code class="java keyword">private</code>
+<code class="java keyword">final</code> <code class="java plain">ConsumerConnector consumer;  
+</code></div>
+<div class="line number22 index21 alt1"><code class="java spaces">    </code><code class="java keyword">private</code>
+<code class="java keyword">final</code> <code class="java plain">String topic;   </code>
+</div>
+<div class="line number23 index22 alt2"><code class="java spaces"> </code> </div>
+<div class="line number24 index23 alt1"><code class="java spaces">    </code><code class="java keyword">public</code>
+<code class="java keyword">static</code> <code class="java keyword">void</code> <code class="java plain">
+main(String[] args) {   </code></div>
+<div class="line number25 index24 alt2"><code class="java spaces">      </code><code class="java plain">Consumertest consumerThread =
+</code><code class="java keyword">new</code> <code class="java plain">Consumertest(</code><code class="java string">"idoall_testTopic"</code><code class="java plain">);  
+</code></div>
+<div class="line number26 index25 alt1"><code class="java spaces">        </code><code class="java plain">consumerThread.start();  
+</code></div>
+<div class="line number27 index26 alt2"><code class="java spaces">    </code><code class="java plain">}  
+</code></div>
+<div class="line number28 index27 alt1"><code class="java spaces">    </code><code class="java keyword">public</code>
+<code class="java plain">Consumertest(String topic) {   </code></div>
+<div class="line number29 index28 alt2"><code class="java spaces">        </code><code class="java plain">consumer =kafka.consumer.Consumer.createJavaConsumerConnector(createConsumerConfig());  
+</code></div>
+<div class="line number30 index29 alt1"><code class="java spaces">        </code><code class="java keyword">this</code><code class="java plain">.topic =topic;  
+</code></div>
+<div class="line number31 index30 alt2"><code class="java spaces">    </code><code class="java plain">}  
+</code></div>
+<div class="line number32 index31 alt1"><code class="java spaces"> </code> </div>
+<div class="line number33 index32 alt2"><code class="java keyword">private</code>
+<code class="java keyword">static</code> <code class="java plain">ConsumerConfig createConsumerConfig() {  
+</code></div>
+<div class="line number34 index33 alt1"><code class="java spaces">    </code><code class="java plain">Properties props =
+</code><code class="java keyword">new</code> <code class="java plain">Properties();  
+</code></div>
+<div class="line number35 index34 alt2"><code class="java spaces">    </code><code class="java comments">// 设置zookeeper的链接地址
+</code></div>
+<div class="line number36 index35 alt1"><code class="java spaces">    </code><code class="java plain">props.put(</code><code class="java string">"zookeeper.connect"</code><code class="java plain">,</code><code class="java string">"m1:2181,m2:2181,s1:2181,s2:2181"</code><code class="java plain">);  
+</code></div>
+<div class="line number37 index36 alt2"><code class="java spaces">    </code><code class="java comments">// 设置group id
+</code></div>
+<div class="line number38 index37 alt1"><code class="java spaces">    </code><code class="java plain">props.put(</code><code class="java string">"group.id"</code><code class="java plain">,
+</code><code class="java string">"1"</code><code class="java plain">);   </code></div>
+<div class="line number39 index38 alt2"><code class="java spaces">    </code><code class="java comments">// kafka的group 消费记录是保存在zookeeper上的, 但这个信息在zookeeper上不是实时更新的, 需要有个间隔时间更新
+</code></div>
+<div class="line number40 index39 alt1"><code class="java spaces">    </code><code class="java plain">props.put(</code><code class="java string">"auto.commit.interval.ms"</code><code class="java plain">,
+</code><code class="java string">"1000"</code><code class="java plain">); </code>
+</div>
+<div class="line number41 index40 alt2"><code class="java spaces">    </code><code class="java plain">props.put(</code><code class="java string">"zookeeper.session.timeout.ms"</code><code class="java plain">,</code><code class="java string">"10000"</code><code class="java plain">);  
+</code></div>
+<div class="line number42 index41 alt1"><code class="java spaces">    </code><code class="java keyword">return</code>
+<code class="java keyword">new</code> <code class="java plain">ConsumerConfig(props);  
+</code></div>
+<div class="line number43 index42 alt2"><code class="java plain">}   </code></div>
+<div class="line number44 index43 alt1"><code class="java spaces"> </code> </div>
+<div class="line number45 index44 alt2"><code class="java keyword">public</code> <code class="java keyword">
+void</code> <code class="java plain">run(){   </code></div>
+<div class="line number46 index45 alt1"><code class="java spaces">     </code><code class="java comments">//设置Topic=&gt;Thread Num映射关系, 构建具体的流
+</code></div>
+<div class="line number47 index46 alt2"><code class="java spaces">    </code><code class="java plain">Map&lt;String,Integer&gt; topickMap =
+</code><code class="java keyword">new</code> <code class="java plain">HashMap&lt;String, Integer&gt;();  
+</code></div>
+<div class="line number48 index47 alt1"><code class="java spaces">    </code><code class="java plain">topickMap.put(topic,
+</code><code class="java value">1</code><code class="java plain">);   </code></div>
+<div class="line number49 index48 alt2"><code class="java spaces">    </code><code class="java plain">Map&lt;String, List&lt;KafkaStream&lt;</code><code class="java keyword">byte</code><code class="java plain">[],</code><code class="java keyword">byte</code><code class="java plain">[]&gt;&gt;&gt; 
+ streamMap=consumer.createMessageStreams(topickMap);   </code></div>
+<div class="line number50 index49 alt1"><code class="java spaces">    </code><code class="java plain">KafkaStream&lt;</code><code class="java keyword">byte</code><code class="java plain">[],</code><code class="java keyword">byte</code><code class="java plain">[]&gt;stream
+ = streamMap.get(topic).get(</code><code class="java value">0</code><code class="java plain">);  
+</code></div>
+<div class="line number51 index50 alt2"><code class="java spaces">    </code><code class="java plain">ConsumerIterator&lt;</code><code class="java keyword">byte</code><code class="java plain">[],</code><code class="java keyword">byte</code><code class="java plain">[]&gt;
+ it =stream.iterator();   </code></div>
+<div class="line number52 index51 alt1"><code class="java spaces">    </code><code class="java plain">System.out.println(</code><code class="java string">"*********Results********"</code><code class="java plain">);  
+</code></div>
+<div class="line number53 index52 alt2"><code class="java spaces">    </code><code class="java keyword">while</code><code class="java plain">(it.hasNext()){  
+</code></div>
+<div class="line number54 index53 alt1"><code class="java spaces">        </code><code class="java plain">System.err.println(</code><code class="java string">"get data:"</code>
+<code class="java plain">+</code><code class="java keyword">new</code> <code class="java plain">
+String(it.next().message()));   </code></div>
+<div class="line number55 index54 alt2"><code class="java spaces">        </code><code class="java keyword">try</code>
+<code class="java plain">{   </code></div>
+<div class="line number56 index55 alt1"><code class="java spaces">            </code><code class="java plain">Thread.sleep(</code><code class="java value">1000</code><code class="java plain">);  
+</code></div>
+<div class="line number57 index56 alt2"><code class="java spaces">        </code><code class="java plain">}
+</code><code class="java keyword">catch</code> <code class="java plain">(InterruptedException e) {  
+</code></div>
+<div class="line number58 index57 alt1"><code class="java spaces">            </code><code class="java plain">e.printStackTrace();  
+</code></div>
+<div class="line number59 index58 alt2"><code class="java spaces">        </code><code class="java plain">}  
+</code></div>
+<div class="line number60 index59 alt1"><code class="java spaces">    </code><code class="java plain">}  
+</code></div>
+<div class="line number61 index60 alt2"><code class="java plain">}   </code></div>
+<div class="line number62 index61 alt1"><code class="java plain">}</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　3)在Eclipse查看java代码效果，在这之前先在其中一台机器(我使用的s1)，开启消费者，同时观察eclipse和s1上的消费者是否都收到了消息。最后结果如下图：</div>
+<div><a href="http://idoall.org/data/attachment/album/201408/05/135956o2v3eoxhyyffv3xf.png" rel="nofollow"><img src="http://idoall.org/data/attachment/album/201408/05/135956o2v3eoxhyyffv3xf.png" width="896" height="213" alt=""></a></div>
+<div>----------两张图片之间的分隔线<span style="line-height:1.8em;">----------</span></div>
+<div><span style="line-height:1.8em;"><a href="http://idoall.org/data/attachment/album/201408/05/140010cxxkwckyz8xyjmoj.png" rel="nofollow"><img src="http://idoall.org/data/attachment/album/201408/05/140010cxxkwckyz8xyjmoj.png" width="894" height="305" alt=""></a></span></div>
+<div><br></div>
+<div>
+<div>　　　　<span style="color:#f00000;">可以看到，刚好10条信息，没有丢失。不过消息因为均衡的原因，并非是有序的，在Kafka只提供了分区内部的有序性，不能跨partition. 每个分区的有序性，结合按Key分partition的能力对大多应用都够用了。（如何按key进行分partition，在文章末尾提供的Eclpise代码中有个Partitionertest.java提供了一个Demo）</span></div>
+<div><br></div>
+<div>　　6、在命令行下打包java文件，测试kafka</div>
+<div>　　　　1)修改工程目录中的pom.xml文件</div>
+<div> </div>
+</div>
+<div>
+<div>
+<div>
+<div id="highlighter_114216" class="syntaxhighlighter xml ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="xml plain">&lt;</code><code class="xml keyword">project</code>
+<code class="xml color1">xmlns</code><code class="xml plain">=</code><code class="xml string">"http://maven.apache.org/POM/4.0.0"</code>
+<code class="xml color1">xmlns:xsi</code><code class="xml plain">=</code><code class="xml string">"http://www.w3.org/2001/XMLSchema-instance"</code></div>
+<div class="line number2 index1 alt1"><code class="xml spaces">  </code><code class="xml color1">xsi:schemaLocation</code><code class="xml plain">=</code><code class="xml string">"http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number3 index2 alt2"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">modelVersion</code><code class="xml plain">&gt;4.0.0&lt;/</code><code class="xml keyword">modelVersion</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number4 index3 alt1"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;idoall.testkafka&lt;/</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number5 index4 alt2"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;idoall.testkafka&lt;/</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number6 index5 alt1"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">version</code><code class="xml plain">&gt;0.0.1-SNAPSHOT&lt;/</code><code class="xml keyword">version</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number7 index6 alt2"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">packaging</code><code class="xml plain">&gt;jar&lt;/</code><code class="xml keyword">packaging</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number8 index7 alt1"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">name</code><code class="xml plain">&gt;idoall.testkafka&lt;/</code><code class="xml keyword">name</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number9 index8 alt2"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">url</code><code class="xml plain">&gt;http://maven.apache.org&lt;/</code><code class="xml keyword">url</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number10 index9 alt1"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">properties</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number11 index10 alt2"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">project.build.sourceEncoding</code><code class="xml plain">&gt;UTF-8&lt;/</code><code class="xml keyword">project.build.sourceEncoding</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number12 index11 alt1"><code class="xml spaces">  </code><code class="xml plain">&lt;/</code><code class="xml keyword">properties</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number13 index12 alt2"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">dependencies</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number14 index13 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">dependency</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number15 index14 alt2"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;junit&lt;/</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number16 index15 alt1"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;junit&lt;/</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number17 index16 alt2"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">version</code><code class="xml plain">&gt;3.8.1&lt;/</code><code class="xml keyword">version</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number18 index17 alt1"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">scope</code><code class="xml plain">&gt;test&lt;/</code><code class="xml keyword">scope</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number19 index18 alt2"><code class="xml spaces">    </code><code class="xml plain">&lt;/</code><code class="xml keyword">dependency</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number20 index19 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">dependency</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number21 index20 alt2"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;log4j&lt;/</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number22 index21 alt1"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;log4j&lt;/</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number23 index22 alt2"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">version</code><code class="xml plain">&gt;1.2.14&lt;/</code><code class="xml keyword">version</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number24 index23 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;/</code><code class="xml keyword">dependency</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number25 index24 alt2"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">dependency</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number26 index25 alt1"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;com.sksamuel.kafka&lt;/</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number27 index26 alt2"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;kafka_2.10&lt;/</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number28 index27 alt1"><code class="xml spaces">      </code><code class="xml plain">&lt;</code><code class="xml keyword">version</code><code class="xml plain">&gt;0.8.0-beta1&lt;/</code><code class="xml keyword">version</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number29 index28 alt2"><code class="xml spaces">    </code><code class="xml plain">&lt;/</code><code class="xml keyword">dependency</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number30 index29 alt1"><code class="xml spaces">  </code><code class="xml plain">&lt;/</code><code class="xml keyword">dependencies</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number31 index30 alt2"><code class="xml spaces">  </code><code class="xml plain">&lt;</code><code class="xml keyword">build</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number32 index31 alt1"><code class="xml spaces">        </code><code class="xml plain">&lt;</code><code class="xml keyword">finalName</code><code class="xml plain">&gt;idoall.testkafka&lt;/</code><code class="xml keyword">finalName</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number33 index32 alt2"><code class="xml spaces">        </code><code class="xml plain">&lt;</code><code class="xml keyword">plugins</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number34 index33 alt1"><code class="xml spaces">            </code><code class="xml plain">&lt;</code><code class="xml keyword">plugin</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number35 index34 alt2"><code class="xml spaces">                </code><code class="xml plain">&lt;</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;org.apache.maven.plugins&lt;/</code><code class="xml keyword">groupId</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number36 index35 alt1"><code class="xml spaces">                </code><code class="xml plain">&lt;</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;maven-compiler-plugin&lt;/</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number37 index36 alt2"><code class="xml spaces">                </code><code class="xml plain">&lt;</code><code class="xml keyword">version</code><code class="xml plain">&gt;2.0.2&lt;/</code><code class="xml keyword">version</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number38 index37 alt1"><code class="xml spaces">                </code><code class="xml plain">&lt;</code><code class="xml keyword">configuration</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number39 index38 alt2"><code class="xml spaces">                    </code><code class="xml plain">&lt;</code><code class="xml keyword">source</code><code class="xml plain">&gt;1.5&lt;/</code><code class="xml keyword">source</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number40 index39 alt1"><code class="xml spaces">                    </code><code class="xml plain">&lt;</code><code class="xml keyword">target</code><code class="xml plain">&gt;1.5&lt;/</code><code class="xml keyword">target</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number41 index40 alt2"><code class="xml spaces">                    </code><code class="xml plain">&lt;</code><code class="xml keyword">encoding</code><code class="xml plain">&gt;UTF-8&lt;/</code><code class="xml keyword">encoding</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number42 index41 alt1"><code class="xml spaces">                </code><code class="xml plain">&lt;/</code><code class="xml keyword">configuration</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number43 index42 alt2"><code class="xml spaces">            </code><code class="xml plain">&lt;/</code><code class="xml keyword">plugin</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number44 index43 alt1"><code class="xml spaces">            </code><code class="xml plain">&lt;</code><code class="xml keyword">plugin</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number45 index44 alt2"><code class="xml spaces">                </code><code class="xml plain">&lt;</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;maven-assembly-plugin&lt;/</code><code class="xml keyword">artifactId</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number46 index45 alt1"><code class="xml spaces">                </code><code class="xml plain">&lt;</code><code class="xml keyword">version</code><code class="xml plain">&gt;2.4&lt;/</code><code class="xml keyword">version</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number47 index46 alt2"><code class="xml spaces">                </code><code class="xml plain">&lt;</code><code class="xml keyword">configuration</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number48 index47 alt1"><code class="xml spaces">                    </code><code class="xml plain">&lt;</code><code class="xml keyword">descriptors</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number49 index48 alt2"><code class="xml spaces">                        </code><code class="xml plain">&lt;</code><code class="xml keyword">descriptor</code><code class="xml plain">&gt;src/main/src.xml&lt;/</code><code class="xml keyword">descriptor</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number50 index49 alt1"><code class="xml spaces">                    </code><code class="xml plain">&lt;/</code><code class="xml keyword">descriptors</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number51 index50 alt2"><code class="xml spaces">                    </code><code class="xml plain">&lt;</code><code class="xml keyword">descriptorRefs</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number52 index51 alt1"><code class="xml spaces">                        </code><code class="xml plain">&lt;</code><code class="xml keyword">descriptorRef</code><code class="xml plain">&gt;jar-with-dependencies&lt;/</code><code class="xml keyword">descriptorRef</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number53 index52 alt2"><code class="xml spaces">                    </code><code class="xml plain">&lt;/</code><code class="xml keyword">descriptorRefs</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number54 index53 alt1"><code class="xml spaces">                </code><code class="xml plain">&lt;/</code><code class="xml keyword">configuration</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number55 index54 alt2"><code class="xml spaces">                </code><code class="xml plain">&lt;</code><code class="xml keyword">executions</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number56 index55 alt1"><code class="xml spaces">                    </code><code class="xml plain">&lt;</code><code class="xml keyword">execution</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number57 index56 alt2"><code class="xml spaces">                        </code><code class="xml plain">&lt;</code><code class="xml keyword">id</code><code class="xml plain">&gt;make-assembly&lt;/</code><code class="xml keyword">id</code><code class="xml plain">&gt;
+</code><code class="xml comments">&lt;!-- this is used for inheritance merges --&gt;</code>  </div>
+<div class="line number58 index57 alt1"><code class="xml spaces">                        </code><code class="xml plain">&lt;</code><code class="xml keyword">phase</code><code class="xml plain">&gt;package&lt;/</code><code class="xml keyword">phase</code><code class="xml plain">&gt;
+</code><code class="xml comments">&lt;!-- bind to the packaging phase --&gt;</code>  </div>
+<div class="line number59 index58 alt2"><code class="xml spaces">                        </code><code class="xml plain">&lt;</code><code class="xml keyword">goals</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number60 index59 alt1"><code class="xml spaces">                            </code><code class="xml plain">&lt;</code><code class="xml keyword">goal</code><code class="xml plain">&gt;single&lt;/</code><code class="xml keyword">goal</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number61 index60 alt2"><code class="xml spaces">                        </code><code class="xml plain">&lt;/</code><code class="xml keyword">goals</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number62 index61 alt1"><code class="xml spaces">                    </code><code class="xml plain">&lt;/</code><code class="xml keyword">execution</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number63 index62 alt2"><code class="xml spaces">                </code><code class="xml plain">&lt;/</code><code class="xml keyword">executions</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number64 index63 alt1"><code class="xml spaces">            </code><code class="xml plain">&lt;/</code><code class="xml keyword">plugin</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number65 index64 alt2"><code class="xml spaces">        </code><code class="xml plain">&lt;/</code><code class="xml keyword">plugins</code><code class="xml plain">&gt;  
+</code></div>
+<div class="line number66 index65 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;/</code><code class="xml keyword">build</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number67 index66 alt2"><code class="xml plain">&lt;/</code><code class="xml keyword">project</code><code class="xml plain">&gt;</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　2)修改工程目录中的src/main/src.xml文件</div>
+<div> </div>
+<div>
+<div>
+<div>
+<div id="highlighter_514661" class="syntaxhighlighter xml ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="xml plain">&lt;?</code><code class="xml keyword">xml</code>
+<code class="xml color1">version</code><code class="xml plain">=</code><code class="xml string">"1.0"</code>
+<code class="xml color1">encoding</code><code class="xml plain">=</code><code class="xml string">"UTF-8"</code><code class="xml plain">?&gt;
+</code></div>
+<div class="line number2 index1 alt1"><code class="xml plain">&lt;</code><code class="xml keyword">assembly</code>
+<code class="xml color1">xmlns</code><code class="xml plain">=</code><code class="xml string">"http://maven.apache.org/plugins/maven-assembly-plugin/assembly/1.1.0"</code></div>
+<div class="line number3 index2 alt2"><code class="xml spaces">          </code><code class="xml color1">xmlns:xsi</code><code class="xml plain">=</code><code class="xml string">"http://www.w3.org/2001/XMLSchema-instance"</code></div>
+<div class="line number4 index3 alt1"><code class="xml spaces">          </code><code class="xml color1">xsi:schemaLocation</code><code class="xml plain">=</code><code class="xml string">"http://maven.apache.org/plugins/maven-assembly-plugin/assembly/1.1.0
+ http://maven.apache.org/xsd/assembly-1.1.0.xsd "</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number5 index4 alt2"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">id</code><code class="xml plain">&gt;jar-with-dependencies&lt;/</code><code class="xml keyword">id</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number6 index5 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">formats</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number7 index6 alt2"><code class="xml spaces">        </code><code class="xml plain">&lt;</code><code class="xml keyword">format</code><code class="xml plain">&gt;jar&lt;/</code><code class="xml keyword">format</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number8 index7 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;/</code><code class="xml keyword">formats</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number9 index8 alt2"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">includeBaseDirectory</code><code class="xml plain">&gt;false&lt;/</code><code class="xml keyword">includeBaseDirectory</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number10 index9 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">dependencySets</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number11 index10 alt2"><code class="xml spaces">        </code><code class="xml plain">&lt;</code><code class="xml keyword">dependencySet</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number12 index11 alt1"><code class="xml spaces">            </code><code class="xml plain">&lt;</code><code class="xml keyword">unpack</code><code class="xml plain">&gt;false&lt;/</code><code class="xml keyword">unpack</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number13 index12 alt2"><code class="xml spaces">            </code><code class="xml plain">&lt;</code><code class="xml keyword">scope</code><code class="xml plain">&gt;runtime&lt;/</code><code class="xml keyword">scope</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number14 index13 alt1"><code class="xml spaces">        </code><code class="xml plain">&lt;/</code><code class="xml keyword">dependencySet</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number15 index14 alt2"><code class="xml spaces">    </code><code class="xml plain">&lt;/</code><code class="xml keyword">dependencySets</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number16 index15 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;</code><code class="xml keyword">fileSets</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number17 index16 alt2"><code class="xml spaces">        </code><code class="xml plain">&lt;</code><code class="xml keyword">fileSet</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number18 index17 alt1"><code class="xml spaces">            </code><code class="xml plain">&lt;</code><code class="xml keyword">directory</code><code class="xml plain">&gt;/lib&lt;/</code><code class="xml keyword">directory</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number19 index18 alt2"><code class="xml spaces">        </code><code class="xml plain">&lt;/</code><code class="xml keyword">fileSet</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number20 index19 alt1"><code class="xml spaces">    </code><code class="xml plain">&lt;/</code><code class="xml keyword">fileSets</code><code class="xml plain">&gt;
+</code></div>
+<div class="line number21 index20 alt2"><code class="xml plain">&lt;/</code><code class="xml keyword">assembly</code><code class="xml plain">&gt;</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　3)制作依赖包，在工程目录执行mvn package，得到idoall.testkafka-jar-with-dependencies.jar，下面是部分执行后的结果：</div>
+<div>
+<div>
+<div>
+<div id="highlighter_932277" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">Running idoall.testkafka.idoall.testkafka.AppTest
+</code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 sec
+</code></div>
+<div class="line number3 index2 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number4 index3 alt1"><code class="bash plain">Results : </code></div>
+<div class="line number5 index4 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number6 index5 alt1"><code class="bash plain">Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+</code></div>
+<div class="line number7 index6 alt2"><code class="bash spaces"> </code> </div>
+<div class="line number8 index7 alt1"><code class="bash plain">[INFO]  </code></div>
+<div class="line number9 index8 alt2"><code class="bash plain">[INFO] --- maven-jar-plugin:2.4:jar (default-jar) @ idoall.testkafka ---
+</code></div>
+<div class="line number10 index9 alt1"><code class="bash plain">[INFO] Building jar:
+</code><code class="bash plain">/Users/lion/Documents/_my_project/java/idoall</code><code class="bash plain">.testkafka</code><code class="bash plain">/target/idoall</code><code class="bash plain">.testkafka.jar
+</code></div>
+<div class="line number11 index10 alt2"><code class="bash plain">[INFO]  </code></div>
+<div class="line number12 index11 alt1"><code class="bash plain">[INFO] --- maven-assembly-plugin:2.4:single (</code><code class="bash functions">make</code><code class="bash plain">-assembly) @ idoall.testkafka ---
+</code></div>
+<div class="line number13 index12 alt2"><code class="bash plain">[INFO] Reading assembly descriptor: src</code><code class="bash plain">/main/src</code><code class="bash plain">.xml
+</code></div>
+<div class="line number14 index13 alt1"><code class="bash plain">[WARNING] The assembly
+</code><code class="bash functions">id</code> <code class="bash plain">jar-with-dependencies is used
+</code><code class="bash functions">more</code> <code class="bash plain">than once.
+</code></div>
+<div class="line number15 index14 alt2"><code class="bash plain">[INFO] Building jar:
+</code><code class="bash plain">/Users/lion/Documents/_my_project/java/idoall</code><code class="bash plain">.testkafka</code><code class="bash plain">/target/idoall</code><code class="bash plain">.testkafka-jar-with-dependencies.jar
+</code></div>
+<div class="line number16 index15 alt1"><code class="bash plain">[INFO] Building jar:
+</code><code class="bash plain">/Users/lion/Documents/_my_project/java/idoall</code><code class="bash plain">.testkafka</code><code class="bash plain">/target/idoall</code><code class="bash plain">.testkafka-jar-with-dependencies.jar
+</code></div>
+<div class="line number17 index16 alt2"><code class="bash plain">[INFO] ------------------------------------------------------------------------
+</code></div>
+<div class="line number18 index17 alt1"><code class="bash plain">[INFO] BUILD SUCCESS
+</code></div>
+<div class="line number19 index18 alt2"><code class="bash plain">[INFO] ------------------------------------------------------------------------
+</code></div>
+<div class="line number20 index19 alt1"><code class="bash plain">[INFO] Total </code>
+<code class="bash functions">time</code><code class="bash plain">: 9.074 s </code>
+</div>
+<div class="line number21 index20 alt2"><code class="bash plain">[INFO] Finished at: 2014-08-05T12:22:47+08:00
+</code></div>
+<div class="line number22 index21 alt1"><code class="bash plain">[INFO] Final Memory: 63M</code><code class="bash plain">/836M</code></div>
+<div class="line number23 index22 alt2"><code class="bash plain">[INFO] ------------------------------------------------------------------------</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　　　4)编译文件，进入到工程目录，执行命令</div>
+<div>
+<div>
+<div>
+<div id="highlighter_874691" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span></div>
+</div>
+</div>
+</div>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">liondeMacBook-Pro:idoall.testkafka lion$
+</code><code class="bash functions">pwd</code></div>
+<div class="line number2 index1 alt1"><code class="bash plain">/Users/lion/Documents/_my_project/java/idoall</code><code class="bash plain">.testkafka
+</code></div>
+<div class="line number3 index2 alt2"><code class="bash plain">liondeMacBook-Pro:idoall.testkafka lion$ javac -classpath target</code><code class="bash plain">/idoall</code><code class="bash plain">.testkafka-jar-with-dependencies.jar -d . src</code><code class="bash plain">/main/java/idoall/testkafka/</code><code class="bash plain">*.java</code></div>
+</div>
+<br></div>
+<div>　　　　5执行编译后的文件。分别打开两个窗口，一个用来消费，一个用来生产。可以看到消费窗口可以正常显示消息。</div>
+<div> </div>
+<div>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">java -classpath .:target</code><code class="bash plain">/idoall</code><code class="bash plain">.testkafka-jar-with-dependencies.jar idoall.testkafka.Producertest
+</code></div>
+<div class="line number2 index1 alt1"><code class="bash spaces"> </code> </div>
+<div class="line number3 index2 alt2"><code class="bash plain">java -classpath .:target</code><code class="bash plain">/idoall</code><code class="bash plain">.testkafka-jar-with-dependencies.jar idoall.testkafka.Consumertest</code></div>
+</div>
+</div>
+<div>
+<div>
+<div>
+<div id="highlighter_441383" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span></div>
+</div>
+</div>
+</div>
+<a href="http://idoall.org/data/attachment/album/201408/05/141337y2g44vbtbzz66yz4.png" rel="nofollow"><img src="http://idoall.org/data/attachment/album/201408/05/141337y2g44vbtbzz66yz4.png" width="825" height="227" alt=""></a></div>
+<div>----------两张图片之间的分隔线<span style="line-height:1.8em;">----------</span></div>
+<div><span style="line-height:1.8em;"><a href="http://idoall.org/data/attachment/album/201408/05/141343gvl9o7f98tojlj2f.png" rel="nofollow"><img src="http://idoall.org/data/attachment/album/201408/05/141343gvl9o7f98tojlj2f.png" width="828" height="360" alt=""></a></span></div>
+<div><br></div>
+<div>
+<div><strong>　　五、FAQ</strong></div>
+<div>　　1、如果在创建主题时出现下面的错误 ，那就是启动的brokers的个数达不到你所指定的--replication-factor值：</div>
+<div> </div>
+</div>
+<div>
+<div>
+<div>
+<div id="highlighter_321645" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">Error </code><code class="bash keyword">while</code>
+<code class="bash plain">executing topic </code><code class="bash functions">command</code>
+<code class="bash plain">replication factor: 3 larger than available brokers: 1 </code>
+</div>
+<div class="line number2 index1 alt1"><code class="bash plain">kafka.admin.AdminOperationException: replication factor: 3 larger than available brokers: 1
+</code></div>
+<div class="line number3 index2 alt2"><code class="bash spaces">        </code><code class="bash plain">at kafka.admin.AdminUtils$.assignReplicasToBrokers(AdminUtils.scala:70)
+</code></div>
+<div class="line number4 index3 alt1"><code class="bash spaces">        </code><code class="bash plain">at kafka.admin.AdminUtils$.createTopic(AdminUtils.scala:155)
+</code></div>
+<div class="line number5 index4 alt2"><code class="bash spaces">        </code><code class="bash plain">at kafka.admin.TopicCommand$.createTopic(TopicCommand.scala:86)
+</code></div>
+<div class="line number6 index5 alt1"><code class="bash spaces">        </code><code class="bash plain">at kafka.admin.TopicCommand$.main(TopicCommand.scala:50)
+</code></div>
+<div class="line number7 index6 alt2"><code class="bash spaces">        </code><code class="bash plain">at kafka.admin.TopicCommand.main(TopicCommand.scala)</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>　　2、如果出现下面的错误，可以先启动kafka，再启动hadoop中的zkfc(DFSZKFailoverController)：</div>
+<div> </div>
+<div>
+<div>
+<div>
+<div id="highlighter_694234" class="syntaxhighlighter bash ie">
+<div class="toolbar"><span></span>
+<div>
+<div class="line number1 index0 alt2"><code class="bash plain">Java HotSpot(TM) 64-Bit Server VM warning: INFO: os::commit_memory(0x00000000c0130000, 986513408, 0) failed; error=</code><code class="bash string">'Cannot allocate memory'</code>
+<code class="bash plain">(errno=12) </code></div>
+<div class="line number2 index1 alt1"><code class="bash comments"># </code></div>
+<div class="line number3 index2 alt2"><code class="bash comments"># There is insufficient memory for the Java Runtime Environment to continue.
+</code></div>
+<div class="line number4 index3 alt1"><code class="bash comments"># Native memory allocation (malloc) failed to allocate 986513408 bytes for committing reserved memory.
+</code></div>
+<div class="line number5 index4 alt2"><code class="bash comments"># An error report file with more information is saved as:
+</code></div>
+<div class="line number6 index5 alt1"><code class="bash comments"># /home/hadoop/hs_err_pid13558.log</code></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<br></div>
+<div>
+<div><strong>　　六、扩展阅读</strong></div>
+<div>　　<a href="http://my.oschina.net/MaTech/blog/292090" rel="nofollow">Kafka集群安装与扩容</a></div>
+</div>
+<div><br></div>
+<div>　　文章中Eclipse工程文件的下载地址：<a href="http://pan.baidu.com/s/1i3kQEFz" rel="nofollow">http://pan.baidu.com/s/1i3kQEFz</a></div>
+<div> </div>
+<div>       该文章转自：<a href="http://idoall.org/home.php?mod=space&amp;uid=1&amp;do=blog&amp;id=547" rel="nofollow">http://idoall.org/home.php?mod=space&amp;uid=1&amp;do=blog&amp;id=547</a></div>
+            </div>
+                </div>

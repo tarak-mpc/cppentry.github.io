@@ -1,0 +1,374 @@
+---
+layout:     post
+title:      如何使用JMX监控Kafka
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主朱小厮允许不得转载。					https://blog.csdn.net/u013256816/article/details/53524884				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>使用kafka做消息队列中间件时，为了实时监控其性能时，免不了要使用jmx调取kafka broker的内部数据，不管是自己重新做一个kafka集群的监控系统，还是使用一些开源的产品，比如yahoo的kafka manager, 其都需要使用jmx来监控一些敏感的数据。在kafka官网中 <a href="http://kafka.apache.org/082/documentation.html#monitoring" rel="nofollow">http://kafka.apache.org/082/documentation.html#monitoring</a> 这样说：</p>
+
+<blockquote>
+  <p>Kafka uses Yammer Metrics for metrics reporting in both the server and the client. This can be configured to report stats using pluggable stats reporters to hook up to your monitoring system. <br>
+  The easiest way to see the available metrics to fire up jconsole and point it at a running kafka client or server; this will all browsing all metrics with JMX.</p>
+</blockquote>
+
+<p>可见kafka官方也是提倡使用jmx并且提供了jmx的调用给用户以监控kafka.</p>
+
+<p>本博文通过使用jmx调用kafka的几个监测项属性来讲述下如何使用jmx来监控kafka. <br>
+有关Jmx的使用可以参考：</p>
+
+<ul>
+<li><a href="http://blog.csdn.net/u013256816/article/details/52800742" rel="nofollow">从零开始玩转JMX(一)——简介和Standard MBean</a></li>
+<li><a href="http://blog.csdn.net/u013256816/article/details/52808328" rel="nofollow">从零开始玩转JMX(二)——Condition</a></li>
+<li><a href="http://blog.csdn.net/u013256816/article/details/52817247" rel="nofollow">从零开始玩转JMX(三)——Model MBean</a></li>
+<li><a href="http://blog.csdn.net/u013256816/article/details/52840067" rel="nofollow">从零开始玩转JMX(四)——Apache Commons Modeler &amp; Dynamic MBean</a></li>
+</ul>
+
+<p>在使用jmx之前需要确保kafka开启了jmx监控，kafka启动时要添加JMX_PORT=9999这一项，也就是：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs axapta">JMX_PORT=<span class="hljs-number">9999</span> bin/kafka-<span class="hljs-keyword">server</span>-start.sh config/<span class="hljs-keyword">server</span>.properties &amp;</code></pre>
+
+<p>博主自行搭建了一个kafka集群，只有两个节点。集群中有一个topic（name=default_channel_kafka_zzh_demo）,分为5个partition(0 1 2 3 4).</p>
+
+<p>这里讨论的kafka版本是0.8.1.x和0.8.2.x，这两者在使用jmx监控时会有差异，差异体现在ObjectName之中。熟悉kafka的同学知道，kafka有topic和partition这两个概念，topic中根据一定的策略来分为若干个partitions, 这里就以此举例来看,  <br>
+在0.8.1.x中有关此项的属性的ObjectName(String值)为：  <br>
+“kafka.log”:type=”Log”,name=”default_channel_kafka_zzh_demo-*-LogEndOffset”</p>
+
+<p>而在0.8.2.x中有关的属性的ObjectName为： <br>
+kafka.log:type=Log,name=LogEndOffset,topic=default_channel_kafka_zzh_demo,partition=0</p>
+
+<p>所以在程序中要区别对待。</p>
+
+<p>这里采用三个监测项来演示如果使用jmx进行监控：</p>
+
+<ol>
+<li>上面所说的offset (集群中的一个topic下的所有partition的LogEndOffset值，即logSize)</li>
+<li>sendCount(集群中的一个topic下的发送总量，这个值是集群中每个broker中此topic的发送量之和)</li>
+<li>sendTps(集群中的一个topic下的TPS, 这个值也是集群中每个broker中此topic的发送量之和)</li>
+</ol>
+
+<p>首先是针对单个kafka broker的。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">package</span> kafka.jmx;
+
+<span class="hljs-keyword">import</span> org.slf4j.Logger;
+<span class="hljs-keyword">import</span> org.slf4j.LoggerFactory;
+
+<span class="hljs-keyword">import</span> javax.management.*;
+<span class="hljs-keyword">import</span> javax.management.remote.JMXConnector;
+<span class="hljs-keyword">import</span> javax.management.remote.JMXConnectorFactory;
+<span class="hljs-keyword">import</span> javax.management.remote.JMXServiceURL;
+<span class="hljs-keyword">import</span> java.io.IOException;
+<span class="hljs-keyword">import</span> java.net.MalformedURLException;
+<span class="hljs-keyword">import</span> java.util.HashMap;
+<span class="hljs-keyword">import</span> java.util.Map;
+<span class="hljs-keyword">import</span> java.util.Set;
+
+<span class="hljs-javadoc">/**
+ * Created by hidden on 2016/12/8.
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">JmxConnection</span> {</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> Logger log = LoggerFactory.getLogger(JmxConnection.class);
+
+    <span class="hljs-keyword">private</span> MBeanServerConnection conn;
+    <span class="hljs-keyword">private</span> String jmxURL;
+    <span class="hljs-keyword">private</span> String ipAndPort = <span class="hljs-string">"localhost:9999"</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">int</span> port = <span class="hljs-number">9999</span>;
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">boolean</span> newKafkaVersion = <span class="hljs-keyword">false</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-title">JmxConnection</span>(Boolean newKafkaVersion, String ipAndPort){
+        <span class="hljs-keyword">this</span>.newKafkaVersion = newKafkaVersion;
+        <span class="hljs-keyword">this</span>.ipAndPort = ipAndPort;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">init</span>(){
+        jmxURL = <span class="hljs-string">"service:jmx:rmi:///jndi/rmi://"</span> +ipAndPort+ <span class="hljs-string">"/jmxrmi"</span>;
+        log.info(<span class="hljs-string">"init jmx, jmxUrl: {}, and begin to connect it"</span>,jmxURL);
+        <span class="hljs-keyword">try</span> {
+            JMXServiceURL serviceURL = <span class="hljs-keyword">new</span> JMXServiceURL(jmxURL);
+            JMXConnector connector = JMXConnectorFactory.connect(serviceURL,<span class="hljs-keyword">null</span>);
+            conn = connector.getMBeanServerConnection();
+            <span class="hljs-keyword">if</span>(conn == <span class="hljs-keyword">null</span>){
+               log.error(<span class="hljs-string">"get connection return null!"</span>);
+                <span class="hljs-keyword">return</span>  <span class="hljs-keyword">false</span>;
+            }
+        } <span class="hljs-keyword">catch</span> (MalformedURLException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+        } <span class="hljs-keyword">catch</span> (IOException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+        }
+        <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+    }
+
+    <span class="hljs-keyword">public</span> String <span class="hljs-title">getTopicName</span>(String topicName){
+        String s;
+        <span class="hljs-keyword">if</span> (newKafkaVersion) {
+            s = <span class="hljs-string">"kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec,topic="</span> + topicName;
+        } <span class="hljs-keyword">else</span> {
+            s = <span class="hljs-string">"\"kafka.server\":type=\"BrokerTopicMetrics\",name=\""</span> + topicName + <span class="hljs-string">"-MessagesInPerSec\""</span>;
+        }
+        <span class="hljs-keyword">return</span> s;
+    }
+
+    <span class="hljs-javadoc">/**
+     *<span class="hljs-javadoctag"> @param</span> topicName: topic name, default_channel_kafka_zzh_demo
+     *<span class="hljs-javadoctag"> @return</span> 获取发送量(单个broker的，要计算某个topic的总的发送量就要计算集群中每一个broker之和)
+     */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-keyword">long</span> <span class="hljs-title">getMsgInCountPerSec</span>(String topicName){
+    String objectName = getTopicName(topicName);
+    Object val = getAttribute(objectName,<span class="hljs-string">"Count"</span>);
+    String debugInfo = <span class="hljs-string">"jmxUrl:"</span>+jmxURL+<span class="hljs-string">",objectName="</span>+objectName;
+    <span class="hljs-keyword">if</span>(val !=<span class="hljs-keyword">null</span>){
+        log.info(<span class="hljs-string">"{}, Count:{}"</span>,debugInfo,(<span class="hljs-keyword">long</span>)val);
+        <span class="hljs-keyword">return</span> (<span class="hljs-keyword">long</span>)val;
+    }
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+
+    <span class="hljs-javadoc">/**
+     *<span class="hljs-javadoctag"> @param</span> topicName: topic name, default_channel_kafka_zzh_demo
+     *<span class="hljs-javadoctag"> @return</span> 获取发送的tps，和发送量一样如果要计算某个topic的发送量就需要计算集群中每一个broker中此topic的tps之和。
+     */</span>
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">double</span> <span class="hljs-title">getMsgInTpsPerSec</span>(String topicName){
+        String objectName = getTopicName(topicName);
+        Object val = getAttribute(objectName,<span class="hljs-string">"OneMinuteRate"</span>);
+        <span class="hljs-keyword">if</span>(val !=<span class="hljs-keyword">null</span>){
+            <span class="hljs-keyword">double</span> dVal = ((Double)val).doubleValue();
+            <span class="hljs-keyword">return</span> dVal;
+        }
+        <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+    }
+
+    <span class="hljs-keyword">private</span> Object <span class="hljs-title">getAttribute</span>(String objName, String objAttr)
+    {
+        ObjectName objectName =<span class="hljs-keyword">null</span>;
+        <span class="hljs-keyword">try</span> {
+            objectName = <span class="hljs-keyword">new</span> ObjectName(objName);
+        } <span class="hljs-keyword">catch</span> (MalformedObjectNameException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        }
+        <span class="hljs-keyword">return</span> getAttribute(objectName,objAttr);
+    }
+
+    <span class="hljs-keyword">private</span> Object <span class="hljs-title">getAttribute</span>(ObjectName objName, String objAttr){
+        <span class="hljs-keyword">if</span>(conn== <span class="hljs-keyword">null</span>)
+        {
+            log.error(<span class="hljs-string">"jmx connection is null"</span>);
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        }
+
+        <span class="hljs-keyword">try</span> {
+            <span class="hljs-keyword">return</span> conn.getAttribute(objName,objAttr);
+        } <span class="hljs-keyword">catch</span> (MBeanException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        } <span class="hljs-keyword">catch</span> (AttributeNotFoundException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        } <span class="hljs-keyword">catch</span> (InstanceNotFoundException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        } <span class="hljs-keyword">catch</span> (ReflectionException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        } <span class="hljs-keyword">catch</span> (IOException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        }
+    }
+
+    <span class="hljs-javadoc">/**
+     *<span class="hljs-javadoctag"> @param</span> topicName
+     *<span class="hljs-javadoctag"> @return</span> 获取topicName中每个partition所对应的logSize(即offset)
+     */</span>
+    <span class="hljs-keyword">public</span> Map&lt;Integer,Long&gt; <span class="hljs-title">getTopicEndOffset</span>(String topicName){
+        Set&lt;ObjectName&gt; objs = getEndOffsetObjects(topicName);
+        <span class="hljs-keyword">if</span>(objs == <span class="hljs-keyword">null</span>){
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        }
+        Map&lt;Integer, Long&gt; map = <span class="hljs-keyword">new</span> HashMap&lt;&gt;();
+        <span class="hljs-keyword">for</span>(ObjectName objName:objs){
+            <span class="hljs-keyword">int</span> partId = getParId(objName);
+            Object val = getAttribute(objName,<span class="hljs-string">"Value"</span>);
+            <span class="hljs-keyword">if</span>(val !=<span class="hljs-keyword">null</span>){
+                map.put(partId,(Long)val);
+            }
+        }
+        <span class="hljs-keyword">return</span> map;
+    }
+
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">int</span> <span class="hljs-title">getParId</span>(ObjectName objName){
+        <span class="hljs-keyword">if</span>(newKafkaVersion){
+            String s = objName.getKeyProperty(<span class="hljs-string">"partition"</span>);
+            <span class="hljs-keyword">return</span> Integer.parseInt(s);
+        }<span class="hljs-keyword">else</span> {
+            String s = objName.getKeyProperty(<span class="hljs-string">"name"</span>);
+
+            <span class="hljs-keyword">int</span> to = s.lastIndexOf(<span class="hljs-string">"-LogEndOffset"</span>);
+            String s1 = s.substring(<span class="hljs-number">0</span>, to);
+            <span class="hljs-keyword">int</span> from = s1.lastIndexOf(<span class="hljs-string">"-"</span>) + <span class="hljs-number">1</span>;
+
+            String ss = s.substring(from, to);
+            <span class="hljs-keyword">return</span> Integer.parseInt(ss);
+        }
+    }
+
+    <span class="hljs-keyword">private</span> Set&lt;ObjectName&gt; <span class="hljs-title">getEndOffsetObjects</span>(String topicName){
+        String objectName;
+        <span class="hljs-keyword">if</span> (newKafkaVersion) {
+            objectName = <span class="hljs-string">"kafka.log:type=Log,name=LogEndOffset,topic="</span>+topicName+<span class="hljs-string">",partition=*"</span>;
+        }<span class="hljs-keyword">else</span>{
+            objectName = <span class="hljs-string">"\"kafka.log\":type=\"Log\",name=\""</span> + topicName + <span class="hljs-string">"-*-LogEndOffset\""</span>;
+        }
+        ObjectName objName = <span class="hljs-keyword">null</span>;
+        Set&lt;ObjectName&gt; objectNames = <span class="hljs-keyword">null</span>;
+        <span class="hljs-keyword">try</span> {
+            objName = <span class="hljs-keyword">new</span> ObjectName(objectName);
+            objectNames = conn.queryNames(objName,<span class="hljs-keyword">null</span>);
+        } <span class="hljs-keyword">catch</span> (MalformedObjectNameException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span>  <span class="hljs-keyword">null</span>;
+        } <span class="hljs-keyword">catch</span> (IOException e) {
+            e.printStackTrace();
+            <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+        }
+
+        <span class="hljs-keyword">return</span> objectNames;
+    }
+}</code></pre>
+
+<p>注意代码中对于两种不同kafka版本的区别处理。对应前面所说的三个检测项的方法为：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbnet"><span class="hljs-keyword">public</span> Map&lt;<span class="hljs-built_in">Integer</span>,<span class="hljs-built_in">Long</span>&gt; getTopicEndOffset(<span class="hljs-built_in">String</span> topicName)
+<span class="hljs-keyword">public</span> <span class="hljs-built_in">long</span> getMsgInCountPerSec(<span class="hljs-built_in">String</span> topicName)
+<span class="hljs-keyword">public</span> <span class="hljs-built_in">double</span> getMsgInTpsPerSec(<span class="hljs-built_in">String</span> topicName)</code></pre>
+
+<p>对于整个集群的处理需要另外一个类来保证，总体上是对集群中的每一个broker相应的值进行累加，且看代码：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">package</span> kafka.jmx;
+
+<span class="hljs-keyword">import</span> org.slf4j.Logger;
+<span class="hljs-keyword">import</span> org.slf4j.LoggerFactory;
+
+<span class="hljs-keyword">import</span> java.util.ArrayList;
+<span class="hljs-keyword">import</span> java.util.HashMap;
+<span class="hljs-keyword">import</span> java.util.List;
+<span class="hljs-keyword">import</span> java.util.Map;
+
+<span class="hljs-javadoc">/**
+ * Created by hidden on 2016/12/8.
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">JmxMgr</span> {</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> Logger log = LoggerFactory.getLogger(JmxMgr.class);
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> List&lt;JmxConnection&gt; conns = <span class="hljs-keyword">new</span> ArrayList&lt;&gt;();
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">init</span>(List&lt;String&gt; ipPortList, <span class="hljs-keyword">boolean</span> newKafkaVersion){
+        <span class="hljs-keyword">for</span>(String ipPort:ipPortList){
+            log.info(<span class="hljs-string">"init jmxConnection [{}]"</span>,ipPort);
+            JmxConnection conn = <span class="hljs-keyword">new</span> JmxConnection(newKafkaVersion, ipPort);
+            <span class="hljs-keyword">boolean</span> bRet = conn.init();
+            <span class="hljs-keyword">if</span>(!bRet){
+                log.error(<span class="hljs-string">"init jmxConnection error"</span>);
+                <span class="hljs-keyword">return</span> <span class="hljs-keyword">false</span>;
+            }
+            conns.add(conn);
+        }
+        <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">long</span> <span class="hljs-title">getMsgInCountPerSec</span>(String topicName){
+        <span class="hljs-keyword">long</span> val = <span class="hljs-number">0</span>;
+        <span class="hljs-keyword">for</span>(JmxConnection conn:conns){
+            <span class="hljs-keyword">long</span> temp = conn.getMsgInCountPerSec(topicName);
+            val += temp;
+        }
+        <span class="hljs-keyword">return</span> val;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">double</span> <span class="hljs-title">getMsgInTpsPerSec</span>(String topicName){
+        <span class="hljs-keyword">double</span> val = <span class="hljs-number">0</span>;
+        <span class="hljs-keyword">for</span>(JmxConnection conn:conns){
+            <span class="hljs-keyword">double</span> temp = conn.getMsgInTpsPerSec(topicName);
+            val += temp;
+        }
+        <span class="hljs-keyword">return</span> val;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> Map&lt;Integer, Long&gt; <span class="hljs-title">getEndOffset</span>(String topicName){
+        Map&lt;Integer,Long&gt; map = <span class="hljs-keyword">new</span> HashMap&lt;&gt;();
+        <span class="hljs-keyword">for</span>(JmxConnection conn:conns){
+            Map&lt;Integer,Long&gt; tmp = conn.getTopicEndOffset(topicName);
+            <span class="hljs-keyword">if</span>(tmp == <span class="hljs-keyword">null</span>){
+                log.warn(<span class="hljs-string">"get topic endoffset return null, topic {}"</span>, topicName);
+                <span class="hljs-keyword">continue</span>;
+            }
+            <span class="hljs-keyword">for</span>(Integer parId:tmp.keySet()){<span class="hljs-comment">//change if bigger</span>
+                <span class="hljs-keyword">if</span>(!map.containsKey(parId) || (map.containsKey(parId) &amp;&amp; (tmp.get(parId)&gt;map.get(parId))) ){
+                    map.put(parId, tmp.get(parId));
+                }
+            }
+        }
+        <span class="hljs-keyword">return</span> map;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) {
+        List&lt;String&gt; ipPortList = <span class="hljs-keyword">new</span> ArrayList&lt;&gt;();
+        ipPortList.add(<span class="hljs-string">"xx.101.130.1:9999"</span>);
+        ipPortList.add(<span class="hljs-string">"xx.101.130.2:9999"</span>);
+        JmxMgr.init(ipPortList,<span class="hljs-keyword">true</span>);
+
+        String topicName = <span class="hljs-string">"default_channel_kafka_zzh_demo"</span>;
+        System.out.println(getMsgInCountPerSec(topicName));
+        System.out.println(getMsgInTpsPerSec(topicName));
+        System.out.println(getEndOffset(topicName));
+    }
+}</code></pre>
+
+<p>运行结果：</p>
+
+<pre class="prettyprint"><code class=" hljs css">2016<span class="hljs-tag">-12-08</span> 19<span class="hljs-pseudo">:25</span><span class="hljs-pseudo">:32</span> <span class="hljs-tag">-</span><span class="hljs-attr_selector">[INFO]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[init jmxConnection [xx.101.130.1:9999]</span>] <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[kafka.jmx.JmxMgr:20]</span>
+2016<span class="hljs-tag">-12-08</span> 19<span class="hljs-pseudo">:25</span><span class="hljs-pseudo">:32</span> <span class="hljs-tag">-</span><span class="hljs-attr_selector">[INFO]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[init jmx, jmxUrl: service:jmx:rmi:///jndi/rmi://xx.101.130.1:9999/jmxrmi, and begin to connect it]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[kafka.jmx.JmxConnection:35]</span>
+2016<span class="hljs-tag">-12-08</span> 19<span class="hljs-pseudo">:25</span><span class="hljs-pseudo">:33</span> <span class="hljs-tag">-</span><span class="hljs-attr_selector">[INFO]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[init jmxConnection [xx.101.130.2:9999]</span>] <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[kafka.jmx.JmxMgr:20]</span>
+2016<span class="hljs-tag">-12-08</span> 19<span class="hljs-pseudo">:25</span><span class="hljs-pseudo">:33</span> <span class="hljs-tag">-</span><span class="hljs-attr_selector">[INFO]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[init jmx, jmxUrl: service:jmx:rmi:///jndi/rmi://xx.101.130.2:9999/jmxrmi, and begin to connect it]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[kafka.jmx.JmxConnection:35]</span>
+2016<span class="hljs-tag">-12-08</span> 20<span class="hljs-pseudo">:45</span><span class="hljs-pseudo">:15</span> <span class="hljs-tag">-</span><span class="hljs-attr_selector">[INFO]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[jmxUrl:service:jmx:rmi:///jndi/rmi://xx.101.130.1:9999/jmxrmi,objectName=kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec,topic=default_channel_kafka_zzh_demo, Count:6000]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[kafka.jmx.JmxConnection:73]</span>
+2016<span class="hljs-tag">-12-08</span> 20<span class="hljs-pseudo">:45</span><span class="hljs-pseudo">:15</span> <span class="hljs-tag">-</span><span class="hljs-attr_selector">[INFO]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[jmxUrl:service:jmx:rmi:///jndi/rmi://xx.101.130.2:9999/jmxrmi,objectName=kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec,topic=default_channel_kafka_zzh_demo, Count:4384]</span> <span class="hljs-tag">-</span> <span class="hljs-attr_selector">[kafka.jmx.JmxConnection:73]</span>
+10384
+3<span class="hljs-class">.915592283987704E-65</span>
+<span class="hljs-rules">{<span class="hljs-rule">0=2072, 1=2084, 2=2073, 3=2083, 4=2072}</span></span></code></pre>
+
+<p>观察运行结果可以发现 6000+4384 = 10384 = 2072+2084+2073+2083+2072，小伙伴们可以揣摩下原因。 <br>
+可以通过jconsole连接service:jmx:rmi:///jndi/rmi://xx.101.130.1:9999/jmxrmi或者service:jmx:rmi:///jndi/rmi://xx.101.130.2:9999/jmxrmi来查看相应的数据值。如下图： <br>
+<img src="https://img-blog.csdn.net/20161208211424593?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzI1NjgxNg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>也可以通过命令行的形式来查看某项数据，不过这里要借助一个jar包：cmdline-jmxclient-0.xx.3.jar，这个请自行下载，网上很多。 <br>
+将这个jar放入某一目录，博主这里放在了linux系统下的/root/util目录中，以offset举例： <br>
+0.8.1.x版-读取topic=default_channel_kafka_zzh_demo,partition=0的Value值：</p>
+
+<pre class="prettyprint"><code class=" hljs fsharp">java -jar cmdline-jmxclient-<span class="hljs-number">0.10</span><span class="hljs-number">.3</span>.jar - xx<span class="hljs-number">.101</span><span class="hljs-number">.130</span><span class="hljs-number">.1</span>:<span class="hljs-number">9999</span> '<span class="hljs-string">"kafka.log"</span>:<span class="hljs-class"><span class="hljs-keyword">type</span>=</span><span class="hljs-string">"Log"</span>,name=<span class="hljs-string">"default_channel_kafka_zzh_demo-0-LogEndOffset"</span>' Value</code></pre>
+
+<p>0.8.2.x版-读取topic=default_channel_kafka_zzh_demo,partition=0的Value值：</p>
+
+<pre class="prettyprint"><code class=" hljs lasso">java <span class="hljs-attribute">-jar</span> cmdline<span class="hljs-attribute">-jmxclient</span><span class="hljs-subst">-</span><span class="hljs-number">0.10</span><span class="hljs-number">.3</span><span class="hljs-built_in">.</span>jar <span class="hljs-subst">-</span> xx<span class="hljs-number">.101</span><span class="hljs-number">.130</span><span class="hljs-number">.1</span>:<span class="hljs-number">9999</span> kafka<span class="hljs-built_in">.</span><span class="hljs-keyword">log</span>:<span class="hljs-keyword">type</span><span class="hljs-subst">=</span><span class="hljs-keyword">Log</span>,name<span class="hljs-subst">=</span>LogEndOffset,topic<span class="hljs-subst">=</span>default_channel_kafka_zzh_demo,partition<span class="hljs-subst">=</span><span class="hljs-number">0</span></code></pre>
+
+<p>看出规律了嘛？如果还是没有，博主再提示一个小技巧，你可以用Jconsole打开相应的属性，然后将鼠标浮于其上，Jconsole会跳出tooltips来提示怎么拼这些属性的ObjectName.</p>
+
+<hr>
+
+<p>欢迎支持《RabbitMQ实战指南》以及关注微信公众号：朱小厮的博客。 <br>
+<img src="https://img-blog.csdn.net/20180116193232073?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMzI1NjgxNg==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

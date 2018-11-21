@@ -1,0 +1,101 @@
+---
+layout:     post
+title:      Flume前述（二）--功能配置
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/zhf257/article/details/48476475				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h3 id="三功能配置示例">三、功能配置示例</h3>
+
+
+
+<h4 id="单节点flume设置">单节点Flume设置</h4>
+
+<blockquote>
+  <p># example.conf: A single-node Flume configuration</p>
+  
+  <p># Name the components on this agent <br>
+      a1.sources = r1 <br>
+      a1.sinks = k1 <br>
+      a1.channels = c1  </p>
+  
+  <p># Describe/configure the source <br>
+      a1.sources.r1.type = exec <br>
+      a1.sources.r1.command = ping localhost  </p>
+  
+  <p># Describe the sink <br>
+      a1.sinks.k1.type = logger  </p>
+  
+  <p># Use a channel which buffers events in memory <br>
+      a1.channels.c1.type = memory <br>
+      a1.channels.c1.capacity = 1000 <br>
+      a1.channels.c1.transactionCapacity = 100  </p>
+  
+  <p># Bind the source and sink to the channel <br>
+      a1.sources.r1.channels = c1 <br>
+      a1.sinks.k1.channel = c1  </p>
+</blockquote>
+
+<p>将上述配置存为：example.conf，然后我们就可以启动 Flume 了：  </p>
+
+<blockquote>
+  <p>flume-ng agent -n a1 -f example.conf -Dflume.root.logger=INFO,console   </p>
+</blockquote>
+
+<p>-Dflume.root.logger=INFO,console 仅为 debug 使用，请勿生产环境生搬硬套，否则大量的日志会返回到终端。 <br>
+* -c/–conf 后跟配置目录; <br>
+* -f/–conf-file 后跟具体的配置文件; <br>
+* -n/–name 指定agent的名称； <br>
+然后我们再开一个 shell 终端窗口，执行  ping localhost，就可以发消息看到效果了； <br>
+Flume 终端窗口此时会打印出如下信息，就表示成功了：  </p>
+
+<blockquote>
+  <p>INFO ({SinkRunner-PollingRunner-DefaultSinkProcessor}  LoggerSink.java[process]:70) [2015-09-15 09:25:08,457] - Event: { headers:{} body: 36 34 20 62 79 74 65 73 20 66 72 6F 6D 20 6C 6F 64 bytes from lo } <br>
+      INFO ({SinkRunner-PollingRunner-DefaultSinkProcessor} LoggerSink.java[process]:70) [2015-09-15 09:25:08,457] - Event: { headers:{} body: 36 34 20 62 79 74 65 73 20 66 72 6F 6D 20 6C 6F 64 bytes from lo }   </p>
+</blockquote>
+
+<p>至此，咱们的第一个 Flume Agent 算是部署成功了！</p>
+
+
+
+<h4 id="单节点-flume-直接写入-hdfs">单节点 Flume 直接写入 HDFS</h4>
+
+<blockquote>
+  <p># Define a memory channel called ch1 on agent1 <br>
+    agent1.channels.ch1.type = memory <br>
+      agent1.channels.ch1.capacity = 100000 <br>
+      agent1.channels.ch1.transactionCapacity = 100000 <br>
+      agent1.channels.ch1.keep-alive = 30  </p>
+  
+  <p>#define source monitor a file <br>
+      agent1.sources.avro-source1.type = exec <br>
+      agent1.sources.avro-source1.shell = /bin/bash -c <br>
+      agent1.sources.avro-source1.command = tail -n +0 -F /home/lkm/tmp/id.txt <br>
+      agent1.sources.avro-source1.channels = ch1 <br>
+      agent1.sources.avro-source1.threads = 5  </p>
+  
+  <p># Define a logger sink that simply logs all events it receives <br>
+      # and connect it to the other end of the same channel. <br>
+      agent1.sinks.log-sink1.channel = ch1 <br>
+      agent1.sinks.log-sink1.type = hdfs <br>
+      agent1.sinks.log-sink1.hdfs.path = hdfs://nameservice1/flume <br>
+      agent1.sinks.log-sink1.hdfs.writeFormat = Text <br>
+      agent1.sinks.log-sink1.hdfs.fileType = DataStream <br>
+      agent1.sinks.log-sink1.hdfs.rollInterval = 0 <br>
+      agent1.sinks.log-sink1.hdfs.rollSize = 1000000 <br>
+      agent1.sinks.log-sink1.hdfs.rollCount = 0 <br>
+      agent1.sinks.log-sink1.hdfs.batchSize = 1000 <br>
+      agent1.sinks.log-sink1.hdfs.txnEventMax = 1000 <br>
+      agent1.sinks.log-sink1.hdfs.callTimeout = 60000 <br>
+      agent1.sinks.log-sink1.hdfs.appendTimeout = 60000    </p>
+</blockquote>
+
+<p>启动如下命令，就可以在 hdfs 上看到效果了。 <br>
+    flume-ng agent -n agent1 -f agent1.conf -Dflume.root.logger=INFO,console <br>
+PS：实际环境中有这样的需求，通过在多个agent端tail日志，发送给channel，channel再把数据收集，统一发送给HDFS存储起来，当HDFS文件大小超过一定的大小或者超过在规定的时间间隔会生成一个文件。 <br>
+Flume 实现了两个Trigger，分别为SizeTriger（在调用HDFS输出流写的同时，count该流已经写入的大小总和，若超过一定大小，则创建新的文件和输出流，写入操作指向新的输出流，同时close以前的输出流）和TimeTriger（开启定时器，当到达该点时，自动创建新的文件和输出流，新的写入重定向到该流中，同时close以前的输出流）。  </p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,157 @@
+---
+layout:     post
+title:      EFK日志搜集demo
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/a_842297171/article/details/79675107				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>以前的一些东西整理下。</p>
+
+<p>E：Elasticsearch <br>
+F：Flume <br>
+K：Kafka <br>
+    Flume是一个分布式的日志聚合收集工具，可以从多个且不同类型的日志源头收集日志。Flume的模型如下： <br>
+Source代表数据的源头，channel暂存数据，sink为数据的流向。如下： <br>
+<img src="https://img-blog.csdn.net/20180324093911226?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+    多个flume代理的情况下，数据可以汇聚到同一个地方，如下： <br>
+<img src="https://img-blog.csdn.net/20180324094002582?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+    数据量多的时候，可能终端的数据处理压力比较大，为了平衡数据生产的速度和处理速度，最好在数据生产和数据处理之间增加一个缓冲，为此使用Kafka。 <br>
+    Apache Kafka是一种分布式发布-订阅消息系统。 <br>
+    Kafka的设计初衷是希望作为一个统一的信息收集平台,能够实时的收集反馈信息,并需要能够支撑较大的数据量,且具备良好的容错能力。 <br>
+    Kafka是一个典型的生产者消费者模型，生产者消费者模型的主要功能就是提供缓冲，平衡数据生产和使用的速率。 <br>
+Kafka的模型如下： <br>
+<img src="https://img-blog.csdn.net/20180324094119281?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+    所以Flume负责收集数据，Kafka作为缓冲，消费者从kafka中取数据。就像是多个水管同时向池子中注水，水管从哪取水可以自己决定；同时也有多个水管从池子里取水，水要流向哪里也可以自己决定。 <br>
+<img src="https://img-blog.csdn.net/20180324094227331?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+    Elasticsearch是一个基于Lucene的搜索服务器，提供了分布式的全文搜索引擎，传统的数据库如果数据在PB（1024TB）级别的，搜索会非常慢，而Elasticsearch支持PB级别的搜索。 <br>
+<strong>Elasticsearch的几个概念：</strong> <br>
+Cluster：集群，一个集群下有多个节点。 <br>
+Node：相同的集群名的节点是一个集群。 <br>
+Index：Elasticsearch用来存储数据的逻辑区域。 <br>
+Document：文档，数据实体。 <br>
+Document Type：文档的类型。 <br>
+    所以可以为了搜索的方便，可以把kafka的数据存入Elasticsearch。 <br>
+模型如下： <br>
+<img src="https://img-blog.csdn.net/20180324094328978?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+现在建立一个简单的日志收集搜索的demo： <br>
+jdk要求版本：1.7 <br>
+①先简单的捕获异常并记录，规范异常的记录格式如下：记录异常的各种信息。因为elasticsearch的文档都采用json的格式，所以异常规范了扔到Elasticsearch里。</p>
+
+<pre class="prettyprint"><code class=" hljs json">{
+          "<span class="hljs-attribute">localizedMessage</span>": <span class="hljs-value"><span class="hljs-string">"分页查询Activity对象"</span></span>,
+          "<span class="hljs-attribute">cause</span>": <span class="hljs-value"><span class="hljs-string">"java.lang.NullPointerException"</span></span>,
+          "<span class="hljs-attribute">mac</span>": <span class="hljs-value"><span class="hljs-string">""</span></span>,
+          "<span class="hljs-attribute">type</span>": <span class="hljs-value"><span class="hljs-string">"java.lang.RuntimeException"</span></span>,
+          "<span class="hljs-attribute">extendedStackTrace</span>": <span class="hljs-value">[
+            {
+              "<span class="hljs-attribute">author</span>": <span class="hljs-value"><span class="hljs-string">"风中追风"</span></span>,
+              "<span class="hljs-attribute">file</span>": <span class="hljs-value"><span class="hljs-string">"ActivityManagerAction.java"</span></span>,
+              "<span class="hljs-attribute">traceSeat</span>": <span class="hljs-value"><span class="hljs-number">1</span></span>,
+              "<span class="hljs-attribute">line</span>": <span class="hljs-value"><span class="hljs-number">202</span></span>,
+              "<span class="hljs-attribute">class</span>": <span class="hljs-value"><span class="hljs-string">"com.cairh.xpe.coupons.backend.action.ActivityManagerAction"</span></span>,
+              "<span class="hljs-attribute">method</span>": <span class="hljs-value"><span class="hljs-string">"getActivityList"</span>
+            </span>}
+          ]</span>,
+          "<span class="hljs-attribute">ip</span>": <span class="hljs-value"><span class="hljs-string">"127.0.0.1"</span></span>,
+          "<span class="hljs-attribute">message</span>": <span class="hljs-value"><span class="hljs-string">"分页查询Activity对象"</span></span>,
+          "<span class="hljs-attribute">time</span>": <span class="hljs-value"><span class="hljs-string">"2017-10-19 09:25:07"</span></span>,
+          "<span class="hljs-attribute">questParams</span>": <span class="hljs-value">{
+            "<span class="hljs-attribute">page</span>": <span class="hljs-value">[
+              <span class="hljs-string">"1"</span>
+            ]</span>,
+            "<span class="hljs-attribute">rtQryPage</span>": <span class="hljs-value">[
+              <span class="hljs-string">"1"</span>
+            ]</span>,
+            "<span class="hljs-attribute">activity_type</span>": <span class="hljs-value">[
+              <span class="hljs-string">"2"</span>
+            ]
+          </span>}</span>,
+          "<span class="hljs-attribute">serverPort</span>": <span class="hljs-value"><span class="hljs-number">80</span></span>,
+          "<span class="hljs-attribute">thread</span>": <span class="hljs-value"><span class="hljs-string">"http-apr-8080-exec-10"</span></span>,
+          "<span class="hljs-attribute">remotePort</span>": <span class="hljs-value"><span class="hljs-number">55192</span></span>,
+          "<span class="hljs-attribute">URL</span>": <span class="hljs-value"><span class="hljs-string">"http://hcsisap.xpe.com/xpe-products-coupons-backend/coupons/getActivityList.json"</span></span>,
+          "<span class="hljs-attribute">timemillis</span>": <span class="hljs-value"><span class="hljs-number">1508376307761</span></span>,
+          "<span class="hljs-attribute">URI</span>": <span class="hljs-value"><span class="hljs-string">"/xpe-products-coupons-backend/coupons/getActivityList.json"</span>
+</span>}</code></pre>
+
+<p>②导入sapling-component-logstandard项目，且在要使用异常记录的项目的pom文件添加依赖： <br>
+<img src="https://img-blog.csdn.net/20180324094453826?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">dependency</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">groupId</span>&gt;</span>com.btp<span class="hljs-tag">&lt;/<span class="hljs-title">groupId</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">artifactId</span>&gt;</span>sapling-component-logstandard<span class="hljs-tag">&lt;/<span class="hljs-title">artifactId</span>&gt;</span>
+            <span class="hljs-tag">&lt;<span class="hljs-title">version</span>&gt;</span>0.0.1-SNAPSHOT<span class="hljs-tag">&lt;/<span class="hljs-title">version</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">dependency</span>&gt;</span></code></pre>
+
+<p>③启动Flume实例： <br>
+<img src="https://img-blog.csdn.net/20180324094533456?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+在bin目录下执行cmd：flume-ng.cmd  agent  -conf  ../conf  -conf-file  ../conf/flumeToKafka.conf  -name  a1 <br>
+flumeToKafka.conf为启动一个flume代理的配置文件，可以配置flume的source、channel和sink，a1为代理名称。比如 <br>
+<img src="https://img-blog.csdn.net/20180324094605739?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+配置source：代表从44444端口获取数据。 <br>
+<img src="https://img-blog.csdn.net/20180324094630649?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+配置sink，传数据到kafka的名为test的topic下。 <br>
+<img src="https://img-blog.csdn.net/20180324094658125?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+配置channel：本地的flume数据缓存。 <br>
+启动代理之后： <br>
+<img src="https://img-blog.csdn.net/20180324094720929?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+检查一下上面配置的44444端口是否打开：telnet localhost 44444,如果不是报未打开，则说明flume代理成功启动。 <br>
+④启动zookeeper，因为kafka依赖zookeeper，所以先启动zookeeper： <br>
+执行zookeeper-3.4.9\bin\zkServer.cmd <br>
+<img src="https://img-blog.csdn.net/20180324094755464?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+⑤启动kafka： <br>
+Kafka目录下启动：.\bin\windows\kafka-server-start.bat .\config\server.properties <br>
+<img src="https://img-blog.csdn.net/20180324094824723?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+上面的flume的sink的9092端口配置在producer.properties。 <br>
+启动一个消费者： <br>
+消费者（Kafka目录下启动）：.\bin\windows\kafka-console-consumer.bat –zookeeper localhost:2181 –topic test <br>
+消费topic为test的数据： <br>
+<img src="https://img-blog.csdn.net/20180324094851728?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+然后记录日志： <br>
+<img src="https://img-blog.csdn.net/20180324094923993?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+查看kafka消费端窗口：已经有异常消息了。 <br>
+<img src="https://img-blog.csdn.net/20180324094952751?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+⑥准备将消息送到elasticsearch中： <br>
+在backend的web.xml增加</p>
+
+<p><code>` <br>
+&lt;servlet-name&gt;action&lt;/servlet-name&gt; <br>
+        &lt;servlet-class&gt;com.btp.logstandard.autoTask.KafkaComsumer&lt;/servlet-class&gt; <br>
+        &lt;load-on-startup&gt;2&lt;/load-on-startup&gt; <br>
+&lt;/servlet&gt; <br>
+</code> <br>
+启动elasticsearch：elasticsearch-2.1.0\bin\elasticsearch.bat <br>
+elasticsearch-2.1.0\config\elasticsearch.yml可以配置集群名称和节点名称。 <br>
+打开网页：输入：<a href="http://localhost:9200/?pretty" rel="nofollow">http://localhost:9200/?pretty</a>` <br>
+<img src="https://img-blog.csdn.net/20180324095100109?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+说明启动成功。</p>
+
+<p>启动kibana：kibana-4.3.0-windows\bin\kibana.bat <br>
+打开网页输入：<a href="http://localhost:5601/app/sense" rel="nofollow">http://localhost:5601/app/sense</a> <br>
+<img src="https://img-blog.csdn.net/2018032409513113?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+表示启动kinaba成功。 <br>
+⑦启动web.xml改变的项目： <br>
+<img src="https://img-blog.csdn.net/20180324095212669?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+如果如下说明启动成功，现在可以往elasticsearch中放数据了。 <br>
+再次调用 <br>
+<img src="https://img-blog.csdn.net/2018032409523732?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+Kafka消费窗口可看到： <br>
+<img src="https://img-blog.csdn.net/20180324095319186?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+Console下（默认存到myexceptions索引下，类型定义为exception）： <br>
+<img src="https://img-blog.csdn.net/20180324095344519?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+说明数据存到elasticsearch中成功。 <br>
+现在是要kinaba进行查询：GET /myexceptions/exception/_search <br>
+<img src="https://img-blog.csdn.net/20180324095412721?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+<img src="https://img-blog.csdn.net/2018032409543151?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+说明数据存储成功。 <br>
+也可以从elasticsearch中将数据查出来： <br>
+<img src="https://img-blog.csdn.net/20180324095505485?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+注：桌面上建立一个文件夹如下：用来存放flume的数据和kafka的日志，配置文件可配： <br>
+<img src="https://img-blog.csdn.net/20180324095532914?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2FfODQyMjk3MTcx/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

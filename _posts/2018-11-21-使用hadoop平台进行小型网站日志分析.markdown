@@ -1,0 +1,38 @@
+---
+layout:     post
+title:      使用hadoop平台进行小型网站日志分析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq1010885678/article/details/44688325				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<br>
+0.上传日志文件到linux中，通过flume将文件收集到hdfs中。<br>
+执行命令/home/cloud/flume/bin/flume-ng agent -n a4 -c conf -f /home/cloud/flume/conf/a4.conf -Dflume.root.logger=DEBUG,console<br><br><br>
+1.建立hive表<br>
+create external table bbslog (ip string,logtime string,url string) partitioned by (logdate string) row format delimited fields terminated by '\t' location '/cleaned';<br><br><br>
+2.创建shell脚本<br>
+touch daily.sh<br>
+添加执行权限<br>
+chmod +x daily.sh<br>
+daily.sh:<br>
+CURRENT=`date +%Y%m%d`<br>
+#对数据进行清理，保存到cleaned文件夹，按照当前日期进行保存<br>
+/home/cloud/hadoop/bin/hadoop jar /home/cloud/cleaner.jar /flume/$CURRENT /cleaned/$CURRENT<br>
+#修改hive表，添加当前日期的分区<br>
+/home/cloud/hive/bin/hive -e "alter table bbslog add partition (logdate=$CURRENT) location 'cleaned/$CURRENT'"<br>
+#使用hive进行分析，根据业务需求而定<br>
+#统计pv并计入每日的pv表<br>
+/home/cloud/hive/bin/hive -e "create table pv_$CURRENT row format delimited fields terminated by '\t' as select count(*) from bbslog where logdate=$CURRENT;"<br>
+#统计点击次数过20的潜在用户<br>
+/home/cloud/hive/bin/hive -e "create table vip _$CURRENT row format delimited fields terminated by '\t' as select $CURRENT,ip,count(*) as hits from bbslog where logdate=$CURRENT group by ip having hits &gt; 20 order by hits desc"<br>
+#查询uv<br>
+/home/cloud/hive/bin/hive -e "create table uv_$CURRENT row format delimited fields terminated by '\t' as select count(distinct ip) from bbslog where logdate=$CURRENT"<br>
+#查询每天的注册人数<br>
+/home/cloud/hive/bin/hive -e "create table reg_$CURRENT row format delimited fields terminated by '\t' as select count(*) from bbslog where logdate=$CURRENT AND instr(url,'member.php?mod=register')&gt;0"<br>
+#将hive表中的数据导入mysql<br>
+/home/cloud/sqoop/bin/sqoop export --connect jdbc:mysql://cloud3:3306/jchubby --username root --password JChubby123 --export-dir "/user/hive/warehouse/vip_$CURRENT" --table vip --fields-terminated-by '\t' 
+            </div>
+                </div>

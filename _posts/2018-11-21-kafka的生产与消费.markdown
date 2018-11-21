@@ -1,0 +1,366 @@
+---
+layout:     post
+title:      kafka的生产与消费
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>因为项目的业务于kafka有关，自己也对kafka有了一定的了解，这里全当总结，有解释的错误的地方，还请指认！   </p>
+
+<p>kafka的介绍不是本文的重点，若有对kafka还不是很了解的同学可以先去了解一下。</p>
+
+<p>可以参考下：<a href="http://www.orchome.com/kafka/index" rel="nofollow">http://www.orchome.com/kafka/index</a></p>
+
+<p>下面回到正题。</p>
+
+<p>kafka是依赖于zookeeper使用的，zookeeper上会存kafka的broker信息、topic信息、conusergroup信息(对应的消费量)等等，其实还有其他的很多信息，如配置信息、Controller_epoch等这里不做说明。</p>
+
+<p>kafka的生产信息会同步到zookeeper的，但是消费信息不一定。kafka的消费分为高级消费与低级消费，将消费信息同步到zookeeper的为高级消费，仅仅将消费信息存在kafka上的为低级消费(这里的分类可能不太严谨，比较直白，这个是公司大牛总结出来的)。</p>
+
+<hr><p>这里我做了两套以javaapi的方式去实现的kafka的生产与消费，一套高级生产与消费，一套低级生产与消费。</p>
+
+<p><strong>高级生产与消费:</strong></p>
+
+<p><strong>生产消息：</strong></p>
+
+<pre class="has">
+<code class="language-java">package kafkaModel;
+
+import java.util.Properties;
+
+import kafka.javaapi.producer.Producer;
+import kafka.producer.KeyedMessage;
+import kafka.producer.ProducerConfig;
+
+/**
+*  @ClassName kafkaProducerTest3
+*  @author chenb
+*  @date 创建时间：2018年9月6日 下午4:15:32
+**/
+public class kafkaProducerTest3 {
+	private final Producer&lt;String, String&gt; producer;
+    public final static String TOPIC = "chenbTest0906";
+ 
+    private kafkaProducerTest3(){
+    	
+        Properties props = new Properties();
+        
+        // 此处配置的是kafka的broker地址:端口列表
+        props.put("metadata.broker.list", "192.168.5.56:9092,192.168.5.56:9093");
+ 
+        //配置value的序列化类
+        props.put("serializer.class", "kafka.serializer.StringEncoder");
+        
+        //配置key的序列化类
+        props.put("key.serializer.class", "kafka.serializer.StringEncoder");
+ 
+        //request.required.acks
+        //0, which means that the producer never waits for an acknowledgement from the broker (the same behavior as 0.7). This option provides the lowest latency but the weakest durability guarantees (some data will be lost when a server fails).
+        //1, which means that the producer gets an acknowledgement after the leader replica has received the data. This option provides better durability as the client waits until the server acknowledges the request as successful (only messages that were written to the now-dead leader but not yet replicated will be lost).
+        //-1, which means that the producer gets an acknowledgement after all in-sync replicas have received the data. This option provides the best durability, we guarantee that no messages will be lost as long as at least one in sync replica remains.
+        props.put("request.required.acks","-1");
+ 
+        producer = new Producer&lt;String, String&gt;(new ProducerConfig(props));
+    }
+ 
+    void produce() {
+        int messageNo = 1;
+        final int COUNT = 10;
+ 
+        int messageCount = 0;
+        while (messageNo &lt;= COUNT) {
+            String key = String.valueOf(messageNo);
+            String data = "Hello kafka message :" + key;
+            producer.send(new KeyedMessage&lt;String, String&gt;(TOPIC, key ,data));
+            System.out.println(data);
+            messageNo ++;
+            messageCount++;
+        }
+        
+        System.out.println("Producer端一共产生了" + messageCount + "条消息！");
+    }
+ 
+    public static void main( String[] args )
+    {
+        new kafkaProducerTest3().produce();
+    }
+
+}
+</code></pre>
+
+<p><img alt="" class="has" height="200" src="https://img-blog.csdn.net/20180906160022136?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="675"></p>
+
+<p>上面是生产消息的代码，生产10条消息成功。</p>
+
+<p><img alt="" class="has" height="285" src="https://img-blog.csdn.net/20180906160341727?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="847"></p>
+
+<p>使用KafkaOffsetMonitor监控，可以看到topicList里已经新加了一个名为chenbTest0906的topic。</p>
+
+<p>不了解KafkaOffsetMonitor工具的可以看<a href="https://blog.csdn.net/catshitone/article/details/50462462" rel="nofollow">https://blog.csdn.net/catshitone/article/details/50462462</a></p>
+
+<p><strong>消费消息：</strong></p>
+
+<pre class="has">
+<code class="language-java">package kafkaModel;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+
+import org.apache.kafka.clients.producer.KafkaProducer;
+
+import kafka.consumer.ConsumerConfig;
+import kafka.consumer.ConsumerIterator;
+import kafka.consumer.KafkaStream;
+import kafka.javaapi.consumer.ConsumerConnector;
+import kafka.serializer.StringDecoder;
+import kafka.utils.VerifiableProperties;
+
+/**
+*  @ClassName KafkaConsumerTest3
+*  @author chenb
+*  @date 创建时间：2018年9月6日 下午4:15:51
+**/
+public class KafkaConsumerTest3 {
+	private final ConsumerConnector consumer;
+	 
+    private KafkaConsumerTest3() {
+        Properties props = new Properties();
+        
+        // zookeeper 配置
+        props.put("zookeeper.connect", "192.168.5.56:2181");
+ 
+        // 消费者所在组
+        //props.put("group.id", "group0830");
+        props.put("group.id", "test-group0906");
+ 
+        // zk连接超时
+        props.put("zookeeper.session.timeout.ms", "4000");
+        props.put("zookeeper.sync.time.ms", "200");
+        props.put("auto.commit.interval.ms", "1000");
+        props.put("auto.offset.reset", "smallest");
+        
+        // 序列化类
+        props.put("serializer.class", "kafka.serializer.StringEncoder");
+ 
+        ConsumerConfig config = new ConsumerConfig(props);
+ 
+        consumer = kafka.consumer.Consumer.createJavaConsumerConnector(config);
+    }
+ 
+    void consume() {
+        Map&lt;String, Integer&gt; topicCountMap = new HashMap&lt;String, Integer&gt;();
+        topicCountMap.put("chenbTest0906", new Integer(1));
+ 
+        StringDecoder keyDecoder = new StringDecoder(new VerifiableProperties());
+        StringDecoder valueDecoder = new StringDecoder(new VerifiableProperties());
+ 
+        Map&lt;String, List&lt;KafkaStream&lt;String, String&gt;&gt;&gt; consumerMap = 
+                consumer.createMessageStreams(topicCountMap,keyDecoder,valueDecoder);
+        KafkaStream&lt;String, String&gt; stream = consumerMap.get("chenbTest0906").get(0);
+        ConsumerIterator&lt;String, String&gt; it = stream.iterator();
+        
+        int messageCount = 0;
+        while (it.hasNext()){
+        	System.out.println(it.next().message());
+        	messageCount++;
+        }
+        System.out.println("Consumer端一共消费了" + messageCount + "条消息！");
+    }
+ 
+    public static void main(String[] args) {
+        new KafkaConsumerTest3().consume();
+    }
+
+}
+</code></pre>
+
+<p><img alt="" class="has" height="200" src="https://img-blog.csdn.net/20180906161738418?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="618"></p>
+
+<p>消费消息成功。</p>
+
+<p><img alt="" class="has" height="330" src="https://img-blog.csdn.net/20180906161948395?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="916"></p>
+
+<p>在高级消费中，需要注明zookeeper的信息，将消费情况同步到zk中，而KafkaOffsetMonitor工具用于监控zk中的变化，所以这里可以看到消费。</p>
+
+<hr><p><strong>低级生产与消费:</strong></p>
+
+<pre class="has">
+<code class="language-java">package kafkaModel;
+
+import java.util.Properties;
+
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringSerializer;
+
+/**
+*  @ClassName KafkaProducerTest
+*  @author chenb
+*  @date 创建时间：2018年9月06日 下午3:33:01
+**/
+public class KafkaProducerTest implements Runnable {
+	
+    public static void main(String args[]) {
+        KafkaProducerTest test = new KafkaProducerTest("chenbTest0906");
+        Thread thread = new Thread(test);
+        thread.start();
+    }
+	
+	private final KafkaProducer&lt;String, String&gt; producer;
+	private final String topic;
+	
+    public KafkaProducerTest(String topicName) {
+        Properties props = new Properties();
+        props.put("bootstrap.servers", "192.168.5.56:9092,192.168.5.56:9093");
+        props.put("acks", "all");
+        props.put("retries", 0);
+        props.put("batch.size", 16384);
+        props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        this.producer = new KafkaProducer&lt;String, String&gt;(props);
+        this.topic = topicName;
+    }
+    
+	public void run() {
+	   int messageNo = 1;
+        try {
+        	for (int i = 0; i &lt; 5; i++) {
+                String messageStr="你好，这是第"+messageNo+"条数据";
+                producer.send(new ProducerRecord&lt;String, String&gt;(topic, "Message", messageStr));
+                System.out.println("发送的信息:" + messageStr);
+                messageNo++;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            producer.close();
+        }
+	}
+	
+}
+</code></pre>
+
+<p><strong>生产消息：</strong></p>
+
+<p><img alt="" class="has" height="200" src="https://img-blog.csdn.net/20180906162414812?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="870"></p>
+
+<p>消息成功生产5条。</p>
+
+<p><img alt="" class="has" height="304" src="https://img-blog.csdn.net/20180906162633879?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="829"></p>
+
+<p>在KafkaOffsetMonitor中也可以看出多了5条消息。</p>
+
+<p><strong>消费消息：</strong></p>
+
+<pre class="has">
+<code class="language-java">package kafkaModel;
+
+import java.util.Arrays;
+import java.util.Properties;
+
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
+
+/**
+*  @ClassName KafkaConsumerTest
+*  @author chenb
+*  @date 创建时间：2018年9月06日 下午3:41:41
+**/
+public class KafkaConsumerTest implements Runnable {
+    public static void main(String args[]) {
+        KafkaConsumerTest test1 = new KafkaConsumerTest("chenbTest0906");
+        Thread thread1 = new Thread(test1);
+        thread1.start();
+    }
+	   
+	private final KafkaConsumer&lt;String, String&gt; consumer;
+    private ConsumerRecords&lt;String, String&gt; msgList;
+    private final String topic;
+    private static final String GROUPID = "test-group0906";
+
+    public KafkaConsumerTest(String topicName) {
+        Properties props = new Properties();
+        props.put("bootstrap.servers", "192.168.5.56:9092,192.168.5.56:9093");
+        props.put("group.id", GROUPID);
+        //props.put("group.id", "test-group1");
+        //props.put("enable.auto.commit", "true");
+        props.put("auto.commit.interval.ms", "1000");
+        props.put("session.timeout.ms", "30000");
+        props.put("auto.offset.reset", "earliest");
+        //props.put("key.deserializer", StringDeserializer.class.getName());
+        //props.put("value.deserializer", StringDeserializer.class.getName());
+        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        this.consumer = new KafkaConsumer&lt;String, String&gt;(props);
+        this.topic = topicName;
+        this.consumer.subscribe(Arrays.asList(topic));
+    }
+
+    @Override
+    public void run() {
+        int messageNo = 1;
+        System.out.println("---------开始消费---------");
+        try {
+        	System.out.println(123123);
+        	for (int i = 0; i &lt; 5; i++) {
+                    msgList = consumer.poll(100);
+                    System.out.println("msgList.count():"+msgList.count());
+                    if(null!=msgList&amp;&amp;msgList.count()&gt;0){
+                    for (ConsumerRecord&lt;String, String&gt; record : msgList) {
+                        System.out.println(messageNo+"=======receive: key = " + record.key() + ", value = " + record.value()+" offset==="+record.offset());
+                        messageNo++;
+                    }
+                }else{  
+                    Thread.sleep(1000);
+                }
+            }       
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            consumer.close();
+        }
+    }  
+}
+</code></pre>
+
+<p><img alt="" class="has" height="350" src="https://img-blog.csdn.net/20180906163133810?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1047"></p>
+
+<p>可以看出低级消费这里不是消费的5条，而是消费的15条数据，为什么会这样呢？因为低级消费的offset存在kafka中，而高级消费的offset存在zk中，kafka中offset为0，所以从头开始消费。</p>
+
+<p>下面我再生产5条信息，这里再消费。</p>
+
+<p><img alt="" class="has" height="200" src="https://img-blog.csdn.net/20180906163515218?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="806"></p>
+
+<p><img alt="" class="has" height="200" src="https://img-blog.csdn.net/20180906163545558?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="720"></p>
+
+<p>可以看到这次消费就是接着上次的15开始消费了。</p>
+
+<p>但是看下图</p>
+
+<p><img alt="" class="has" height="300" src="https://img-blog.csdn.net/20180906163709119?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM1MTU1MTE0/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="866"></p>
+
+<p>图中生产的消息logsize可以同步过来，消费的消息offset，低级消费的并没有同步过来，这是因为kafka低级消费不往zk里存数据。只有高级消费才会存入数据到zk的缘故。</p>
+
+<p><span style="color:#f33b45;">下面补充一下导入的jar包</span></p>
+
+<pre class="has">
+<code>    &lt;!-- https://mvnrepository.com/artifact/org.apache.kafka/kafka --&gt;
+	&lt;dependency&gt;
+	    &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;
+	    &lt;artifactId&gt;kafka_2.12&lt;/artifactId&gt;
+	    &lt;version&gt;1.1.0&lt;/version&gt;
+	&lt;/dependency&gt;	
+	&lt;!-- https://mvnrepository.com/artifact/org.apache.kafka/kafka-clients --&gt;
+	&lt;dependency&gt;
+	    &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;
+	    &lt;artifactId&gt;kafka-clients&lt;/artifactId&gt;
+	    &lt;version&gt;1.1.0&lt;/version&gt;
+	&lt;/dependency&gt;</code></pre>
+
+<p><span style="color:#f33b45;">注意：低级消费者的api只支持1.8以上的jdk。</span></p>            </div>
+                </div>

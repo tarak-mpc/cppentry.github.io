@@ -1,0 +1,244 @@
+---
+layout:     post
+title:      基于Flume的美团日志收集系统（二）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="iteye-blog-content-contain" style="font-size:14px;">
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">【转：http://blog.csdn.net/qq405371160/article/details/41696269】</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;"> </p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">在《基于Flume的美团日志收集系统(一)架构和设计》中，我们详述了基于Flume的美团日志收集系统的架构设计，以及为什么做这样的设计。在本节中，我们将会讲述在实际部署和使用过程中遇到的问题，对Flume的功能改进和对系统做的优化。</p>
+<h2 id="1-flume-" style="color:#333333;font-size:24px;border-bottom:1px solid #eeeeee;border-top-color:#eeeeee;border-right-color:#eeeeee;border-left-color:#eeeeee;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t26"></a>1 Flume的问题总结</h2>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">在Flume的使用过程中，遇到的主要问题如下：</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">a. Channel“水土不服”：使用固定大小的MemoryChannel在日志高峰时常报队列大小不够的异常；使用FileChannel又导致IO繁忙的问题；</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">b. HdfsSink的性能问题：使用HdfsSink向Hdfs写日志，在高峰时间速度较慢；</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">c. 系统的管理问题：配置升级，模块重启等；</p>
+<h2 id="2-flume-" style="color:#333333;font-size:24px;border-bottom:1px solid #eeeeee;border-top-color:#eeeeee;border-right-color:#eeeeee;border-left-color:#eeeeee;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t27"></a>2 Flume的功能改进和优化点</h2>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">从上面的问题中可以看到，有一些需求是原生Flume无法满足的，因此，基于开源的Flume我们增加了许多功能，修改了一些Bug，并且进行一些调优。下面将对一些主要的方面做一些说明。</p>
+<h3 id="2-1-zabbix-monitor-" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t28"></a>2.1 增加Zabbix monitor服务</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">一方面，Flume本身提供了http, ganglia的监控服务，而我们目前主要使用zabbix做监控。因此，我们为Flume添加了zabbix监控模块，和sa的监控服务无缝融合。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">另一方面，净化Flume的metrics。只将我们需要的metrics发送给zabbix，避免 zabbix server造成压力。目前我们最为关心的是Flume能否及时把应用端发送过来的日志写到Hdfs上， 对应关注的metrics为：</p>
+<ul style="color:#333333;margin-left:15px;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;"><li>Source : 接收的event数和处理的event数</li>
+<li>Channel : Channel中拥堵的event数</li>
+<li>Sink : 已经处理的event数</li>
+</ul><h3 id="2-2-hdfssink-index-" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t29"></a>2.2 为HdfsSink增加自动创建index功能</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">首先，我们的HdfsSink写到hadoop的文件采用lzo压缩存储。 HdfsSink可以读取hadoop配置文件中提供的编码类列表，然后通过配置的方式获取使用何种压缩编码，我们目前使用lzo压缩数据。采用lzo压缩而非bz2压缩，是基于以下测试数据：</p>
+<table style="color:#333333;border-collapse:collapse;border-spacing:0px;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;"><tbody><tr><th style="border:1px solid #cccccc;">event大小(Byte)</th>
+<th style="border:1px solid #cccccc;">sink.batch-size</th>
+<th style="border:1px solid #cccccc;">hdfs.batchSize</th>
+<th style="border:1px solid #cccccc;">压缩格式</th>
+<th style="border:1px solid #cccccc;">总数据大小(G)</th>
+<th style="border:1px solid #cccccc;">耗时(s)</th>
+<th style="border:1px solid #cccccc;">平均events/s</th>
+<th style="border:1px solid #cccccc;">压缩后大小(G)</th>
+</tr><tr style="background-color:#f8f8f8;"><td style="border:1px solid #cccccc;">544</td>
+<td style="border:1px solid #cccccc;">300</td>
+<td style="border:1px solid #cccccc;">10000</td>
+<td style="border:1px solid #cccccc;">bz2</td>
+<td style="border:1px solid #cccccc;">9.1</td>
+<td style="border:1px solid #cccccc;">2448</td>
+<td style="border:1px solid #cccccc;">6833</td>
+<td style="border:1px solid #cccccc;">1.36</td>
+</tr><tr><td style="border:1px solid #cccccc;">544</td>
+<td style="border:1px solid #cccccc;">300</td>
+<td style="border:1px solid #cccccc;">10000</td>
+<td style="border:1px solid #cccccc;">lzo</td>
+<td style="border:1px solid #cccccc;">9.1</td>
+<td style="border:1px solid #cccccc;">612</td>
+<td style="border:1px solid #cccccc;">27333</td>
+<td style="border:1px solid #cccccc;">3.49</td>
+</tr></tbody></table><p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">其次，我们的HdfsSink增加了创建lzo文件后自动创建index功能。Hadoop提供了对lzo创建索引，使得压缩文件是可切分的，这样Hadoop Job可以并行处理数据文件。HdfsSink本身lzo压缩，但写完lzo文件并不会建索引，我们在close文件之后添加了建索引功能。</p>
+<pre><code style="font-family:Courier, monospace;border:none;background:#f8f8ff;">  /**
+   * Rename bucketPath file from .tmp to permanent location.
+   */
+  private void renameBucket() throws IOException, InterruptedException {
+      if(bucketPath.equals(targetPath)) {
+              return;
+        }
+
+        final Path srcPath = new Path(bucketPath);
+        final Path dstPath = new Path(targetPath);
+
+        callWithTimeout(new CallRunner&lt;Object&gt;() {
+              @Override
+              public Object call() throws Exception {
+                if(fileSystem.exists(srcPath)) { // could block
+                      LOG.info("Renaming " + srcPath + " to " + dstPath);
+                     fileSystem.rename(srcPath, dstPath); // could block
+
+                      //index the dstPath lzo file
+                      if (codeC != null &amp;&amp; ".lzo".equals(codeC.getDefaultExtension()) ) {
+                              LzoIndexer lzoIndexer = new LzoIndexer(new Configuration());
+                              lzoIndexer.index(dstPath);
+                      }
+                }
+                return null;
+              }
+    });
+}</code></pre>
+<h3 id="2-3-hdfssink-" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t30"></a>2.3 增加HdfsSink的开关</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">我们在HdfsSink和DualChannel中增加开关，当开关打开的情况下，HdfsSink不再往Hdfs上写数据，并且数据只写向DualChannel中的FileChannel。以此策略来防止Hdfs的正常停机维护。</p>
+<h3 id="2-4-dualchannel" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t31"></a>2.4 增加DualChannel</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">Flume本身提供了MemoryChannel和FileChannel。MemoryChannel处理速度快，但缓存大小有限，且没有持久化；FileChannel则刚好相反。我们希望利用两者的优势，在Sink处理速度够快，Channel没有缓存过多日志的时候，就使用MemoryChannel，当Sink处理速度跟不上，又需要Channel能够缓存下应用端发送过来的日志时，就使用FileChannel，由此我们开发了DualChannel，能够智能的在两个Channel之间切换。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">其具体的逻辑如下：</p>
+<pre><code style="font-family:Courier, monospace;border:none;background:#f8f8ff;">/***
+ * putToMemChannel indicate put event to memChannel or fileChannel
+ * takeFromMemChannel indicate take event from memChannel or fileChannel
+ * */
+private AtomicBoolean putToMemChannel = new AtomicBoolean(true);
+private AtomicBoolean takeFromMemChannel = new AtomicBoolean(true);
+
+void doPut(Event event) {
+        if (switchon &amp;&amp; putToMemChannel.get()) {
+              //往memChannel中写数据
+              memTransaction.put(event);
+
+              if ( memChannel.isFull() || fileChannel.getQueueSize() &gt; 100) {
+                putToMemChannel.set(false);
+              }
+        } else {
+              //往fileChannel中写数据
+              fileTransaction.put(event);
+        }
+  }
+
+Event doTake() {
+    Event event = null;
+    if ( takeFromMemChannel.get() ) {
+        //从memChannel中取数据
+        event = memTransaction.take();
+        if (event == null) {
+            takeFromMemChannel.set(false);
+        } 
+    } else {
+        //从fileChannel中取数据
+        event = fileTransaction.take();
+        if (event == null) {
+            takeFromMemChannel.set(true);
+
+            putToMemChannel.set(true);
+        } 
+    }
+    return event;
+}</code></pre>
+<h3 id="2-5-nullchannel" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t32"></a>2.5 增加NullChannel</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">Flume提供了NullSink，可以把不需要的日志通过NullSink直接丢弃，不进行存储。然而，Source需要先将events存放到Channel中，NullSink再将events取出扔掉。为了提升性能，我们把这一步移到了Channel里面做，所以开发了NullChannel。</p>
+<h3 id="2-6-kafkasink" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t33"></a>2.6 增加KafkaSink</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">为支持向Storm提供实时数据流，我们增加了KafkaSink用来向Kafka写实时数据流。其基本的逻辑如下：</p>
+<pre><code style="font-family:Courier, monospace;border:none;background:#f8f8ff;">public class KafkaSink extends AbstractSink implements Configurable {
+        private String zkConnect;
+        private Integer zkTimeout;
+        private Integer batchSize;
+        private Integer queueSize;
+        private String serializerClass;
+        private String producerType;
+        private String topicPrefix;
+
+        private Producer&lt;String, String&gt; producer;
+
+        public void configure(Context context) {
+            //读取配置，并检查配置
+        }
+
+        @Override
+        public synchronized void start() {
+            //初始化producer
+        }
+
+        @Override
+        public synchronized void stop() {
+            //关闭producer
+        }
+
+        @Override
+        public Status process() throws EventDeliveryException {
+
+            Status status = Status.READY;
+
+            Channel channel = getChannel();
+            Transaction tx = channel.getTransaction();
+            try {
+                    tx.begin();
+
+                    //将日志按category分队列存放
+                    Map&lt;String, List&lt;String&gt;&gt; topic2EventList = new HashMap&lt;String, List&lt;String&gt;&gt;();
+
+                    //从channel中取batchSize大小的日志，从header中获取category，生成topic，并存放于上述的Map中；
+
+                    //将Map中的数据通过producer发送给kafka 
+
+                   tx.commit();
+            } catch (Exception e) {
+                    tx.rollback();
+                    throw new EventDeliveryException(e);
+            } finally {
+                tx.close();
+            }
+            return status;
+        }
+}</code></pre>
+<h3 id="2-7-scribe-" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t34"></a>2.7 修复和scribe的兼容问题</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">Scribed在通过ScribeSource发送数据包给Flume时，大于4096字节的包，会先发送一个Dummy包检查服务器的反应，而Flume的ScribeSource对于logentry.size()=0的包返回TRY_LATER，此时Scribed就认为出错，断开连接。这样循环反复尝试，无法真正发送数据。现在在ScribeSource的Thrift接口中，对size为0的情况返回OK，保证后续正常发送数据。</p>
+<h2 id="3-flume-" style="color:#333333;font-size:24px;border-bottom:1px solid #eeeeee;border-top-color:#eeeeee;border-right-color:#eeeeee;border-left-color:#eeeeee;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t35"></a>3. Flume系统调优经验总结</h2>
+<h3 id="3-1-" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t36"></a>3.1 基础参数调优经验</h3>
+<ul style="color:#333333;margin-left:15px;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;"><li>HdfsSink中默认的serializer会每写一行在行尾添加一个换行符，我们日志本身带有换行符，这样会导致每条日志后面多一个空行，修改配置不要自动添加换行符；</li>
+</ul><pre><code style="font-family:Courier, monospace;border:none;background:#f8f8ff;">lc.sinks.sink_hdfs.serializer.appendNewline = false</code></pre>
+<ul style="color:#333333;margin-left:15px;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;"><li>
+<p>调大MemoryChannel的capacity，尽量利用MemoryChannel快速的处理能力；</p>
+</li>
+<li>
+<p>调大HdfsSink的batchSize，增加吞吐量，减少hdfs的flush次数；</p>
+</li>
+<li>
+<p>适当调大HdfsSink的callTimeout，避免不必要的超时错误；</p>
+</li>
+</ul><h3 id="3-2-hdfssink-filename-" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t37"></a>3.2 HdfsSink获取Filename的优化</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">HdfsSink的path参数指明了日志被写到Hdfs的位置，该参数中可以引用格式化的参数，将日志写到一个动态的目录中。这方便了日志的管理。例如我们可以将日志写到category分类的目录，并且按天和按小时存放：</p>
+<pre><code style="font-family:Courier, monospace;border:none;background:#f8f8ff;">lc.sinks.sink_hdfs.hdfs.path = /user/hive/work/orglog.db/%{category}/dt=%Y%m%d/hour=%H</code></pre>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">HdfsS ink中处理每条event时，都要根据配置获取此event应该写入的Hdfs path和filename，默认的获取方法是通过正则表达式替换配置中的变量，获取真实的path和filename。因为此过程是每条event都要做的操作，耗时很长。通过我们的测试，20万条日志，这个操作要耗时6-8s左右。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">由于我们目前的path和filename有固定的模式，可以通过字符串拼接获得。而后者比正则匹配快几十倍。拼接定符串的方式，20万条日志的操作只需要几百毫秒。</p>
+<h3 id="3-3-hdfssink-b-m-s-" style="color:#333333;font-size:18px;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t38"></a>3.3 HdfsSink的b/m/s优化</h3>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">在我们初始的设计中，所有的日志都通过一个Channel和一个HdfsSink写到Hdfs上。我们来看一看这样做有什么问题。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">首先，我们来看一下HdfsSink在发送数据的逻辑：</p>
+<pre><code style="font-family:Courier, monospace;border:none;background:#f8f8ff;">//从Channel中取batchSize大小的events
+for (txnEventCount = 0; txnEventCount &lt; batchSize; txnEventCount++) {
+    //对每条日志根据category append到相应的bucketWriter上；
+    bucketWriter.append(event);
+｝
+
+for (BucketWriter bucketWriter : writers) {
+    //然后对每一个bucketWriter调用相应的flush方法将数据flush到Hdfs上
+    bucketWriter.flush();
+｝</code></pre>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">假设我们的系统中有100个category，batchSize大小设置为20万。则每20万条数据，就需要对100个文件进行append或者flush操作。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">其次，对于我们的日志来说，基本符合80/20原则。即20%的category产生了系统80%的日志量。这样对大部分日志来说，每20万条可能只包含几条日志，也需要往Hdfs上flush一次。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">上述的情况会导致HdfsSink写Hdfs的效率极差。下图是单Channel的情况下每小时的发送量和写hdfs的时间趋势图。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;"><img src="http://tech.meituan.com/img/mt-log-system/single_hdfssink.png" alt="美团日志收集系统架构"></p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">鉴于这种实际应用场景，我们把日志进行了大小归类，分为big, middle和small三类，这样可以有效的避免小日志跟着大日志一起频繁的flush，提升效果明显。下图是分队列后big队列的每小时的发送量和写hdfs的时间趋势图。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;"><img src="http://tech.meituan.com/img/mt-log-system/multi_hdfssink.png" alt="美团日志收集系统架构"></p>
+<h2 id="4-" style="color:#333333;font-size:24px;border-bottom:1px solid #eeeeee;border-top-color:#eeeeee;border-right-color:#eeeeee;border-left-color:#eeeeee;font-family:'Lucida Grande', helvetica, arial, sans-serif;">
+<a style="color:#336699;" name="t39"></a>4 未来发展</h2>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">目前，Flume日志收集系统提供了一个高可用，高可靠，可扩展的分布式服务，已经有效地支持了美团的日志数据收集工作。</p>
+<p style="color:#333333;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;">后续，我们将在如下方面继续研究：</p>
+<ul style="color:#333333;margin-left:15px;font-family:'Lucida Grande', helvetica, arial, sans-serif;line-height:21px;"><li>
+<p>日志管理系统：图形化的展示和控制日志收集系统；</p>
+</li>
+<li>
+<p>跟进社区发展：跟进Flume 1.5的进展，同时回馈社区；</p>
+</li>
+</ul></div>            </div>
+                </div>

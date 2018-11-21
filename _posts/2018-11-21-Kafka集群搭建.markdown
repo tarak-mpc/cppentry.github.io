@@ -1,0 +1,522 @@
+---
+layout:     post
+title:      Kafka集群搭建
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2>Kafka初识</h2>
+<p><strong><span style="font-size:18px;color:#0000ff;">1、Kafka使用背景</span></strong></p>
+<p></p>
+<div>在我们大量使用分布式数据库、分布式计算集群的时候，是否会遇到这样的一些问题：</div>
+<ol><li>我们想分析下用户行为（pageviews），以便我们设计出更好的广告位</li><li>我想对用户的搜索关键词进行统计，分析出当前的流行趋势</li><li>有些数据，存储数据库浪费，直接存储硬盘效率又低 </li></ol><div><span style="color:#ff0000;">这些场景都有一个共同点</span>：</div>
+<div><span style="color:#ff0000;">数据是由上游模块产生，上游模块，使用上游模块的数据计算、统计、分析，这个时候就可以使用消息系统，尤其是分布式消息系统！</span></div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">2、Kafka的定义</span></strong></span></div>
+<div><span style="color:#ff0000;">What is Kafka</span>：它是一个分布式消息系统，由linkedin使用scala编写，用作LinkedIn的活动流（Activity Stream）和运营数据处理管道（Pipeline）的基础。具有高水平扩展和高吞吐量。</div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">3、Kafka和其他主流分布式消息系统的对比</span></strong></span> </div>
+<div><img alt="" src="http://images2015.cnblogs.com/blog/831021/201602/831021-20160222115519338-1279419718.png"></div>
+<div>定义解释：</div>
+<div>1、Java 和 scala都是运行在JVM上的语言。</div>
+<div>
+<div>2、erlang和最近比较火的和go语言一样是从代码级别就支持高并发的一种语言，所以RabbitMQ天生就有很高的并发性能，但是 有RabbitMQ严格按照AMQP进行实现，受到了很多限制。kafka的设计目标是高吞吐量，所以kafka自己设计了一套高性能但是不通用的协议，他也是仿照AMQP（ Advanced Message Queuing Protocol   高级消息队列协议）设计的。 </div>
+<div>3、事物的概念：在数据库中，多个操作一起提交，要么操作全部成功，要么全部失败。举个例子， 在转账的时候付款和收款，就是一个事物的例子，你给一个人转账，你转成功，并且对方正常行收到款项后，这个操作才算成功，有一方失败，那么这个操作就是失败的。 </div>
+<div>
+<div>对应消在息队列中，就是多条消息一起发送，要么全部成功，要么全部失败。3个中只有ActiveMQ支持，这个是因为，RabbitMQ和Kafka为了更高的性能，而放弃了对事物的支持 。</div>
+<div>4、集群：多台服务器组成的整体叫做集群，这个整体对生产者和消费者来说，是透明的。其实对消费系统组成的集群添加一台服务器减少一台服务器对生产者和消费者都是无感之的。
+<div>5、负载均衡，对消息系统来说负载均衡是大量的生产者和消费者向消息系统发出请求消息，系统必须均衡这些请求使得每一台服务器的请求达到平衡，而不是大量的请求，落到某一台或几台，使得这几台服务器高负荷或超负荷工作，严重情况下会停止服务或宕机。</div>
+<div>6、动态扩容是很多公司要求的技术之一，不支持动态扩容就意味着停止服务，这对很多公司来说是不可以接受的。 </div>
+<div>注：</div>
+<div>
+<div><span style="color:#0000ff;">阿里巴巴的Metal,RocketMQ都有Kafka的影子，他们要么改造了Kafka或者借鉴了Kafka，最后Kafka的动态扩容是通过Zookeeper来实现的。 </span></div>
+<div></div>
+<div> </div>
+<div><span style="color:#0000ff;">Zookeeper是一种在分布式系统中被广泛用来作为：分布式状态管理、分布式协调管理、分布式配置管理、和分布式锁服务的集群。<span style="color:#ff0000;">kafka增加和减少服务器都会在Zookeeper节点上触发相应的事件kafka系统会捕获这些事件，进行新一轮的负载均衡</span>，客户端也会捕获这些事件来进行新一轮的处理。</span></div>
+</div>
+</div>
+<h2>Kafka相关概念</h2>
+<p><span style="font-size:18px;"><strong><span style="color:#0000ff;">1、 AMQP协议</span></strong></span></p>
+</div>
+</div>
+<div><span style="color:#ff0000;">Advanced Message Queuing Protocol （高级消息队列协议）</span></div>
+<div>
+<div><span style="color:#ff0000;"><strong>The Advanced Message Queuing Protocol (AMQP)：</strong></span><span lang="zh-cn" xml:lang="zh-cn">是一个标准开放的应用层的消息中间件（Message Oriented Middleware<span lang="zh-cn" xml:lang="zh-cn">）协议。AMQP<span lang="zh-cn" xml:lang="zh-cn">定义了通过网络发送的字节流的数据格式。因此兼容性非常好，任何实现AMQP<span lang="zh-cn" xml:lang="zh-cn">协议的程序都可以和与AMQP<span lang="zh-cn" xml:lang="zh-cn">协议兼容的其他程序交互，可以很容易做到跨语言，跨平台。</span></span></span></span></span></div>
+<div> </div>
+<div>上面说的3种比较流行的消息队列协议，要么支持AMQP协议，要么借鉴了AMQP协议的思想进行了开发、实现、设计。</div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">2、 一些基本的概念</span></strong></span></div>
+</div>
+<div>
+<div>1、消费者：（Consumer）：从消息队列中请求消息的客户端应用程序</div>
+<div>2、生产者：（Producer）  ：向broker发布消息的应用程序</div>
+<div>3、AMQP服务端（broker）：用来接收生产者发送的消息并将这些消息路由给服务器中的队列，便于fafka将生产者发送的消息，动态的添加到磁盘并给每一条消息一个偏移量，所以对于kafka一个broker就是一个应用程序的实例</div>
+<div><span style="color:#0000ff;">kafka支持的客户端语言</span>：Kafka客户端支持当前大部分主流语言，包括：C、C++、Erlang、Java、.net、perl、PHP、Python、Ruby、Go、Javascript
+<div>可以使用以上任何一种语言和kafka服务器进行通信（即辨析自己的consumer从kafka集群订阅消息也可以自己写producer程序） </div>
+</div>
+</div>
+<div></div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">3、Kafka架构</span></strong></span></div>
+<div>生产者生产消息、kafka集群、消费者获取消息这样一种架构，如下图：</div>
+<div><img alt="" src="http://images2015.cnblogs.com/blog/831021/201602/831021-20160222125238526-112967735.png"></div>
+<div>kafka集群中的消息，是通过Topic（主题）来进行组织的，如下图：</div>
+<div><img alt="" src="http://images2015.cnblogs.com/blog/831021/201602/831021-20160222125343135-190706359.png"></div>
+<div><span style="color:#0000ff;">一些基本的概念：</span></div>
+<div>
+<div>1、主题（Topic）：一个主题类似新闻中的体育、娱乐、教育等分类概念，在实际工程中通常一个业务一个主题。</div>
+<div>2、分区（Partition）：一个Topic中的消息数据按照多个分区组织，分区是kafka消息队列组织的最小单位，一个分区可以看作是一个FIFO（ First Input First Output的缩写，先入先出队列）的队列。</div>
+<div>kafka分区是提高kafka性能的关键所在，当你发现你的集群性能不高时，常用手段就是增加Topic的分区，分区里面的消息是按照从新到老的顺序进行组织，消费者从队列头订阅消息，生产者从队列尾添加消息。</div>
+<div> </div>
+<div>工作图：</div>
+<div><img alt="" src="http://images2015.cnblogs.com/blog/831021/201602/831021-20160222125912869-944637205.png"></div>
+</div>
+<div> </div>
+<div> 
+<div>备份（Replication）：为了保证分布式可靠性，kafka0.8开始对每个分区的数据进行备份（不同的Broker上），防止其中一个Broker宕机造成分区上的数据不可用。</div>
+<div>kafka0.7是一个很大的改变：1、增加了备份2、增加了控制借点概念，增加了集群领导者选举 。</div>
+</div>
+<h2>Zookeeper集群搭建</h2>
+<div><span style="color:#ff0000;">Kafka集群是把状态保存在Zookeeper中的，首先要搭建Zookeeper集群。</span></div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">1、软件环境</span></strong></span></div>
+<div>（3台服务器-我的测试）</div>
+<div>192.168.7.100 server1</div>
+<div>192.168.7.101 server2</div>
+<div>192.168.7.107 server3</div>
+<div>
+<div>1、Linux服务器一台、三台、五台、（<span style="color:#ff0000;">2*n+1</span>），Zookeeper集群的工作是超过半数才能对外提供服务，3台中超过两台超过半数，允许1台挂掉 ，是否可以用偶数，其实没必要。</div>
+<div><span style="color:#ff0000;">如果有四台那么挂掉一台还剩下三台服务器，如果在挂掉一个就不行了，这里记住是超过半数。</span></div>
+<div>2、Java jdk1.7 zookeeper是用java写的所以他的需要JAVA环境，java是运行在java虚拟机上的</div>
+<div>3、Zookeeper的稳定版本Zookeeper 3.4.6版本 </div>
+</div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">2、配置&amp;安装Zookeeper</span></strong></span></div>
+<div><span style="color:#ff0000;">下面的操作是：3台服务器统一操作</span></div>
+<div>1、安装Java</div>
+<div>
+<div class="cnblogs_code">
+<pre>yum list java*<span style="color:#000000;">
+yum </span>-y install java-1.7.0-openjdk*</pre>
+</div>
+<p>2、下载Zookeeper</p>
+<p>首先要注意在生产环境中目录结构要定义好，防止在项目过多的时候找不到所需的项目</p>
+<div class="cnblogs_code">
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">我的目录统一放在/opt下面</span><span style="color:#008000;">
+#</span><span style="color:#008000;">首先创建Zookeeper项目目录</span>
+mkdir zookeeper <span style="color:#008000;">#</span><span style="color:#008000;">项目目录</span>
+mkdir zkdata <span style="color:#008000;">#</span><span style="color:#008000;">存放快照日志</span>
+mkdir zkdatalog<span style="color:#008000;">#</span><span style="color:#008000;">存放事物日志</span></pre>
+</div>
+<p>下载Zookeeper</p>
+</div>
+<div>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">下载软件</span>
+cd /opt/zookeeper/<span style="color:#000000;">
+
+wget http:</span>//mirrors.cnnic.cn/apache/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6<span style="color:#000000;">.tar.gz
+
+</span><span style="color:#008000;">#</span><span style="color:#008000;">解压软件</span>
+tar -zxvf zookeeper-3.4.6.tar.gz</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p><span style="font-size:18px;"><strong><span style="color:#0000ff;">3、修改配置文件</span></strong></span></p>
+</div>
+<div>进入到解压好的目录里面的conf目录中，查看</div>
+<div>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">进入conf目录</span>
+/opt/zookeeper/zookeeper-3.4.6/<span style="color:#000000;">conf
+</span><span style="color:#008000;">#</span><span style="color:#008000;">查看</span>
+[root@192.168.7.107<span style="color:#000000;">]$ ll
+</span>-rw-rw-r--. 1 1000 1000  535 Feb 20  2014<span style="color:#000000;"> configuration.xsl
+</span>-rw-rw-r--. 1 1000 1000 2161 Feb 20  2014<span style="color:#000000;"> log4j.properties
+</span>-rw-rw-r--. 1 1000 1000  922 Feb 20  2014 zoo_sample.cfg</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p><span style="color:#0000ff;">#zoo_sample.cfg  这个文件是官方给我们的zookeeper的样板文件，给他复制一份命名为zoo.cfg，<span style="color:#ff0000;">zoo.cfg是官方指定的文件命名规则</span>。</span></p>
+<p><strong><span style="color:#ff0000;">3台服务器的配置文件</span></strong></p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre>tickTime=2000
+initLimit=10
+syncLimit=5
+dataDir=/opt/zookeeper/<span style="color:#000000;">zkdata
+dataLogDir</span>=/opt/zookeeper/<span style="color:#000000;">zkdatalog</span>
+clientPort=12181
+server.1=192.168.7.100:12888:13888<span style="color:#000000;">
+server.</span>2=192.168.7.101:12888:13888<span style="color:#000000;">
+server.</span>3=192.168.7.107:12888:13888
+<span style="color:#008000;">#</span><span style="color:#008000;">server.1 这个1是服务器的标识也可以是其他的数字， 表示这个是第几号服务器，用来标识服务器，这个标识要写到快照目录下面myid文件里</span><span style="color:#008000;">
+#</span><span style="color:#008000;">192.168.7.107为集群里的IP地址，第一个端口是master和slave之间的通信端口，默认是2888，第二个端口是leader选举的端口，集群刚启动的时候选举或者leader挂掉之后进行新的选举的端口默认是3888</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p><strong><span style="color:#ff0000;">配置文件解释：</span></strong></p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">tickTime：</span>
+<span style="color:#000000;">这个时间是作为 Zookeeper 服务器之间或客户端与服务器之间维持心跳的时间间隔，也就是每个 tickTime 时间就会发送一个心跳。
+</span><span style="color:#008000;">#</span><span style="color:#008000;">initLimit：</span>
+这个配置项是用来配置 Zookeeper 接受客户端（这里所说的客户端不是用户连接 Zookeeper 服务器的客户端，而是 Zookeeper 服务器集群中连接到 Leader 的 Follower 服务器）初始化连接时最长能忍受多少个心跳时间间隔数。当已经超过 5个心跳的时间（也就是 tickTime）长度后 Zookeeper 服务器还没有收到客户端的返回信息，那么表明这个客户端连接失败。总的时间长度就是 5*2000=10<span style="color:#000000;"> 秒
+</span><span style="color:#008000;">#</span><span style="color:#008000;">syncLimit：</span>
+这个配置项标识 Leader 与Follower 之间发送消息，请求和应答时间长度，最长不能超过多少个 tickTime 的时间长度，总的时间长度就是5*2000=<span style="color:#000000;">10秒
+</span><span style="color:#008000;">#</span><span style="color:#008000;">dataDir：</span>
+<span style="color:#000000;">快照日志的存储路径
+</span><span style="color:#008000;">#</span><span style="color:#008000;">dataLogDir：</span>
+<span style="color:#000000;">事物日志的存储路径，如果不配置这个那么事物日志会默认存储到dataDir制定的目录，这样会严重影响zk的性能，当zk吞吐量较大的时候，产生的事物日志、快照日志太多
+</span><span style="color:#008000;">#</span><span style="color:#008000;">clientPort：</span>
+这个端口就是客户端连接 Zookeeper 服务器的端口，Zookeeper 会监听这个端口，接受客户端的访问请求。修改他的端口改大点</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p><span style="color:#ff0000;">创建myid文件</span></p>
+<div class="cnblogs_code">
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">server1</span>
+echo <span style="color:#800000;">"</span><span style="color:#800000;">1</span><span style="color:#800000;">"</span> &gt; /opt/zookeeper/zkdata/<span style="color:#000000;">myid
+</span><span style="color:#008000;">#</span><span style="color:#008000;">server2</span>
+echo <span style="color:#800000;">"</span><span style="color:#800000;">2</span><span style="color:#800000;">"</span> &gt; /opt/zookeeper/zkdata/<span style="color:#000000;">myid
+</span><span style="color:#008000;">#</span><span style="color:#008000;">server3</span>
+echo <span style="color:#800000;">"</span><span style="color:#800000;">3</span><span style="color:#800000;">"</span> &gt; /opt/zookeeper/zkdata/myid</pre>
+</div>
+<p><span style="font-size:18px;"><strong><span style="color:#0000ff;"> 4、重要配置说明</span></strong></span></p>
+<p>1、myid文件和server.myid  在快照目录下存放的标识本台服务器的文件，他是整个zk集群用来发现彼此的一个重要标识。</p>
+<p>2、zoo.cfg 文件是zookeeper配置文件 在conf目录里。</p>
+<p>3、log4j.properties文件是zk的日志输出文件 在conf目录里用java写的程序基本上有个共同点日志都用log4j，来进行管理。</p>
+<div class="cnblogs_code"><img class="code_img_closed" id="code_img_closed_71829a91-3075-4485-a695-4df41ea09130" alt="" src="http://images.cnblogs.com/OutliningIndicators/ContractedBlock.gif"><img class="code_img_opened" id="code_img_opened_71829a91-3075-4485-a695-4df41ea09130" alt="" src="http://images.cnblogs.com/OutliningIndicators/ExpandedBlockStart.gif"><div class="cnblogs_code_hide" id="cnblogs_code_open_71829a91-3075-4485-a695-4df41ea09130" style="display:block;">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;"> Define some default values that can be overridden by system properties</span>
+zookeeper.root.logger=INFO, CONSOLE  <span style="color:#008000;">#</span><span style="color:#008000;">日志级别</span>
+zookeeper.console.threshold=INFO  <span style="color:#008000;">#</span><span style="color:#008000;">使用下面的console来打印日志</span>
+zookeeper.log.dir=.    <span style="color:#008000;">#</span><span style="color:#008000;">日志打印到那里，是咱们启动zookeeper的目录 （建议设置统一的日志目录路径）</span>
+zookeeper.log.file=<span style="color:#000000;">zookeeper.log
+zookeeper.log.threshold</span>=<span style="color:#000000;">DEBUG
+zookeeper.tracelog.dir</span>=<span style="color:#000000;">.
+zookeeper.tracelog.file</span>=<span style="color:#000000;">zookeeper_trace.log
+
+</span><span style="color:#008000;">#
+#</span><span style="color:#008000;"> ZooKeeper Logging Configuration</span><span style="color:#008000;">
+#
+</span>
+<span style="color:#008000;">#</span><span style="color:#008000;"> Format is "&lt;default threshold&gt; (, &lt;appender&gt;)+</span>
+
+<span style="color:#008000;">#</span><span style="color:#008000;"> DEFAULT: console appender only</span>
+log4j.rootLogger=<span style="color:#000000;">${zookeeper.root.logger}
+
+</span><span style="color:#008000;">#</span><span style="color:#008000;"> Example with rolling log file</span><span style="color:#008000;">
+#</span><span style="color:#008000;">log4j.rootLogger=DEBUG, CONSOLE, ROLLINGFILE</span>
+
+<span style="color:#008000;">#</span><span style="color:#008000;"> Example with rolling log file and tracing</span><span style="color:#008000;">
+#</span><span style="color:#008000;">log4j.rootLogger=TRACE, CONSOLE, ROLLINGFILE, TRACEFILE</span>
+
+<span style="color:#008000;">#
+#</span><span style="color:#008000;"> Log INFO level and above messages to the console</span><span style="color:#008000;">
+#
+</span>log4j.appender.CONSOLE=<span style="color:#000000;">org.apache.log4j.ConsoleAppender
+log4j.appender.CONSOLE.Threshold</span>=<span style="color:#000000;">${zookeeper.console.threshold}
+log4j.appender.CONSOLE.layout</span>=<span style="color:#000000;">org.apache.log4j.PatternLayout
+log4j.appender.CONSOLE.layout.ConversionPattern</span>=%d{ISO8601} [myid:%X{myid}] - %-5p [%t:%C{1}@%L] - %m%<span style="color:#000000;">n
+
+
+</span><span style="color:#008000;">#</span><span style="color:#008000;"> Add ROLLINGFILE to rootLogger to get log file output</span><span style="color:#008000;">
+#</span><span style="color:#008000;">    Log DEBUG level and above messages to a log file</span>
+log4j.appender.ROLLINGFILE=<span style="color:#000000;">org.apache.log4j.RollingFileAppender
+log4j.appender.ROLLINGFILE.Threshold</span>=<span style="color:#000000;">${zookeeper.log.threshold}
+log4j.appender.ROLLINGFILE.File</span>=${zookeeper.log.dir}/<span style="color:#000000;">${zookeeper.log.file}
+
+</span><span style="color:#008000;">#</span><span style="color:#008000;"> Max log file size of 10MB</span>
+log4j.appender.ROLLINGFILE.MaxFileSize=<span style="color:#000000;">10MB
+</span><span style="color:#008000;">#</span><span style="color:#008000;"> uncomment the next line to limit number of backup files</span><span style="color:#008000;">
+#</span><span style="color:#008000;">log4j.appender.ROLLINGFILE.MaxBackupIndex=10</span>
+<span style="color:#000000;">
+log4j.appender.ROLLINGFILE.layout</span>=<span style="color:#000000;">org.apache.log4j.PatternLayout
+log4j.appender.ROLLINGFILE.layout.ConversionPattern</span>=%d{ISO8601} [myid:%X{myid}] - %-5p [%t:%C{1}@%L] - %m%<span style="color:#000000;">n
+
+
+</span><span style="color:#008000;">#
+#</span><span style="color:#008000;"> Add TRACEFILE to rootLogger to get log file output</span><span style="color:#008000;">
+#</span><span style="color:#008000;">    Log DEBUG level and above messages to a log file</span>
+log4j.appender.TRACEFILE=<span style="color:#000000;">org.apache.log4j.FileAppender
+log4j.appender.TRACEFILE.Threshold</span>=<span style="color:#000000;">TRACE
+log4j.appender.TRACEFILE.File</span>=${zookeeper.tracelog.dir}/<span style="color:#000000;">${zookeeper.tracelog.file}
+
+log4j.appender.TRACEFILE.layout</span>=<span style="color:#000000;">org.apache.log4j.PatternLayout
+</span><span style="color:#008000;">#</span><span style="color:#008000;">## Notice we are including log4j's NDC here (%x)</span>
+log4j.appender.TRACEFILE.layout.ConversionPattern=%d{ISO8601} [myid:%X{myid}] - %-5p [%t:%C{1}@%L][%x] - %m%n</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<span class="cnblogs_code_collapse">configuration for log4j</span></div>
+<p>4、zkEnv.sh和zkServer.sh文件</p>
+<div>zkServer.sh 主的管理程序文件</div>
+<div>zkEnv.sh 是主要配置，zookeeper集群启动时配置环境变量的文件</div>
+<div><span style="color:#ff0000;">5、还有一个需要注意</span></div>
+<div>ZooKeeper server <strong>will not remove old snapshots and log files</strong> when using the default configuration (see autopurge below), this is the responsibility of the operator</div>
+<div>zookeeper不会主动的清除旧的快照和日志文件，这个是操作者的责任。</div>
+<p><span style="color:#0000ff;">但是可以通过命令去定期的清理。</span></p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">!/bin/bash </span>
+ 
+<span style="color:#008000;">#</span><span style="color:#008000;">snapshot file dir </span>
+dataDir=/opt/zookeeper/zkdata/version-2
+<span style="color:#008000;">#</span><span style="color:#008000;">tran log dir </span>
+dataLogDir=/opt/zookeeper/zkdatalog/version-2
+
+<span style="color:#008000;">#</span><span style="color:#008000;">Leave 66 files </span>
+count=66<span style="color:#000000;"> 
+count</span>=$[$count+1<span style="color:#000000;">] 
+ls </span>-t $dataLogDir/log.* | tail -n +$count | xargs rm -<span style="color:#000000;">f 
+ls </span>-t $dataDir/snapshot.* | tail -n +$count | xargs rm -<span style="color:#000000;">f 
+
+</span><span style="color:#008000;">#</span><span style="color:#008000;">以上这个脚本定义了删除对应两个目录中的文件，保留最新的66个文件，可以将他写到crontab中，设置为每天凌晨2点执行一次就可以了。</span>
+
+
+<span style="color:#008000;">#</span><span style="color:#008000;">zk log dir   del the zookeeper log</span><span style="color:#008000;">
+#</span><span style="color:#008000;">logDir=</span><span style="color:#008000;">
+#</span><span style="color:#008000;">ls -t $logDir/zookeeper.log.* | tail -n +$count | xargs rm -f</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p>其他方法：</p>
+<p>第二种：使用ZK的工具类PurgeTxnLog，它的实现了一种简单的历史文件清理策略，可以在这里看一下他的使用方法 http://zookeeper.apache.org/doc/r3.4.6/zookeeperAdmin.html </p>
+<p>第三种：对于上面这个执行，ZK自己已经写好了脚本，在bin/zkCleanup.sh中，所以直接使用这个脚本也是可以执行清理工作的。</p>
+<p>第四种：从3.4.0开始，zookeeper提供了自动清理snapshot和事务日志的功能，通过配置 autopurge.snapRetainCount 和 autopurge.purgeInterval 这两个参数能够实现定时清理了。这两个参数都是在zoo.cfg中配置的：</p>
+<div>
+<div><strong>autopurge.purgeInterval</strong>  这个参数指定了清理频率，单位是小时，需要填写一个1或更大的整数，默认是0，表示不开启自己清理功能。</div>
+</div>
+<div>
+<div><strong>autopurge.snapRetainCount</strong> 这个参数和上面的参数搭配使用，这个参数指定了需要保留的文件数目。默认是保留3个。</div>
+<div> </div>
+<div><span style="color:#0000ff;">推荐使用第一种方法</span>，对于运维人员来说，将日志清理工作独立出来，便于统一管理也更可控。毕竟zk自带的一些工具并不怎么给力。</div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">5、启动服务并查看</span></strong></span></div>
+<div>1、启动服务</div>
+<div>
+<div class="cnblogs_code">
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">进入到Zookeeper的bin目录下</span>
+cd /opt/zookeeper/zookeeper-3.4.6/<span style="color:#000000;">bin
+</span><span style="color:#008000;">#</span><span style="color:#008000;">启动服务（3台都需要操作）</span>
+./zkServer.sh start</pre>
+</div>
+<p>2、检查服务状态</p>
+<div class="cnblogs_code">
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">检查服务器状态</span>
+./zkServer.sh status</pre>
+</div>
+<p>通过status就能看到状态：</p>
+<div class="cnblogs_code">
+<pre>./<span style="color:#000000;">zkServer.sh status
+JMX enabled by default
+Using config: </span>/opt/zookeeper/zookeeper-3.4.6/bin/../conf/zoo.cfg  <span style="color:#008000;">#</span><span style="color:#008000;">配置文件</span>
+Mode: follower  <span style="color:#008000;">#</span><span style="color:#008000;">他是否为领导</span></pre>
+</div>
+<p><span style="color:#ff0000;">zk集群一般只有一个leader，多个follower，主一般是相应客户端的读写请求，而从主同步数据，当主挂掉之后就会从follower里投票选举一个leader出来。</span></p>
+<p><span style="color:#0000ff;">可以用“jps”查看zk的进程，这个是zk的整个工程的main</span></p>
+<div class="cnblogs_code">
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">执行命令jps</span>
+20348<span style="color:#000000;"> Jps
+</span>4233 QuorumPeerMain </pre>
+</div>
+<h2>Kafka集群搭建</h2>
+</div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">1、软件环境</span></strong></span></div>
+<div>
+<div>1、linux一台或多台，大于等于2</div>
+<div>2、已经搭建好的zookeeper集群</div>
+<div>3、软件版本kafka_2.11-0.9.0.1.tgz<a href="http://apache.opencas.org/kafka/0.9.0.1/kafka_2.11-0.9.0.1.tgz" rel="nofollow"><br></a></div>
+</div>
+<div><span style="font-size:18px;"><strong><span style="color:#0000ff;">2、创建目录并下载安装软件</span></strong></span></div>
+<div>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">创建目录</span>
+cd /opt/<span style="color:#000000;">
+mkdir kafka </span><span style="color:#008000;">#</span><span style="color:#008000;">创建项目目录</span>
+<span style="color:#000000;">cd kafka
+mkdir kafkalogs </span><span style="color:#008000;">#</span><span style="color:#008000;">创建kafka消息目录，主要存放kafka消息</span>
+
+<span style="color:#008000;">#</span><span style="color:#008000;">下载软件</span>
+wget  http://apache.opencas.org/kafka/0.9.0.1/kafka_2.11-0.9.0.1<span style="color:#000000;">.tgz
+
+</span><span style="color:#008000;">#</span><span style="color:#008000;">解压软件</span>
+tar -zxvf kafka_2.11-0.9.0.1.tgz</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p><span style="font-size:18px;"><strong><span style="color:#0000ff;">3、修改配置文件</span></strong></span></p>
+</div>
+<div>进入到config目录</div>
+<div>
+<div class="cnblogs_code">
+<pre>cd /opt/kafka/kafka_2.11-0.9.0.1/config/</pre>
+</div>
+<p>主要关注：<span style="color:#ff0000;">server.properties</span> 这个文件即可，我们可以发现在目录下：</p>
+<p><span style="font-family:Arial;">有很多文件，这里可以发现有Zookeeper文件，我们可以根据Kafka内带的zk集群来启动，但是建议使用独立的zk集群</span></p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre>-rw-r--r--. 1 root root 5699 Feb 22 09:41 192.168.7.101
+-rw-r--r--. 1 root root  906 Feb 12 08:37 connect-console-<span style="color:#000000;">sink.properties
+</span>-rw-r--r--. 1 root root  909 Feb 12 08:37 connect-console-<span style="color:#000000;">source.properties
+</span>-rw-r--r--. 1 root root 2110 Feb 12 08:37 connect-<span style="color:#000000;">distributed.properties
+</span>-rw-r--r--. 1 root root  922 Feb 12 08:38 connect-file-<span style="color:#000000;">sink.properties
+</span>-rw-r--r--. 1 root root  920 Feb 12 08:38 connect-file-<span style="color:#000000;">source.properties
+</span>-rw-r--r--. 1 root root 1074 Feb 12 08:37 connect-<span style="color:#000000;">log4j.properties
+</span>-rw-r--r--. 1 root root 2055 Feb 12 08:37 connect-<span style="color:#000000;">standalone.properties
+</span>-rw-r--r--. 1 root root 1199 Feb 12 08:37<span style="color:#000000;"> consumer.properties
+</span>-rw-r--r--. 1 root root 4369 Feb 12 08:37<span style="color:#000000;"> log4j.properties
+</span>-rw-r--r--. 1 root root 2228 Feb 12 08:38<span style="color:#000000;"> producer.properties
+</span>-rw-r--r--. 1 root root 5699 Feb 15 18:10<span style="color:#000000;"> server.properties
+</span>-rw-r--r--. 1 root root 3325 Feb 12 08:37 test-<span style="color:#000000;">log4j.properties
+</span>-rw-r--r--. 1 root root 1032 Feb 12 08:37 tools-<span style="color:#000000;">log4j.properties
+</span>-rw-r--r--. 1 root root 1023 Feb 12 08:37 zookeeper.properties</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p>修改配置文件：</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre>broker.id=0  <span style="color:#008000;">#</span><span style="color:#008000;">当前机器在集群中的唯一标识，和zookeeper的myid性质一样</span>
+port=19092 <span style="color:#008000;">#</span><span style="color:#008000;">当前kafka对外提供服务的端口默认是9092</span>
+host.name=192.168.7.100 <span style="color:#008000;">#</span><span style="color:#008000;">这个参数默认是关闭的，在0.8.1有个bug，DNS解析问题，失败率的问题。</span>
+num.network.threads=3 <span style="color:#008000;">#</span><span style="color:#008000;">这个是borker进行网络处理的线程数</span>
+num.io.threads=8 <span style="color:#008000;">#</span><span style="color:#008000;">这个是borker进行I/O处理的线程数</span>
+log.dirs=/opt/kafka/kafkalogs/ <span style="color:#008000;">#</span><span style="color:#008000;">消息存放的目录，这个目录可以配置为“，”逗号分割的表达式，上面的num.io.threads要大于这个目录的个数</span><span style="color:#000000;"><span style="color:#339966;">这个目录，如果配置多个目录，新创建的topic他把消息持久化的地方是，当前以逗号分割的目录中，那个分区数最少就放那一个</span>
+socket.send.buffer.bytes</span>=102400 <span style="color:#008000;">#</span><span style="color:#008000;">发送缓冲区buffer大小，数据不是一下子就发送的，先回存储到缓冲区了到达一定的大小后在发送，能提高性能</span>
+socket.receive.buffer.bytes=102400 <span style="color:#008000;">#</span><span style="color:#008000;">kafka接收缓冲区大小，当数据到达一定大小后在序列化到磁盘</span>
+socket.request.max.bytes=104857600 <span style="color:#008000;">#</span><span style="color:#008000;">这个参数是向kafka请求消息或者向kafka发送消息的请请求的最大数，这个值不能超过java的堆栈大小</span>
+num.partitions=1 <span style="color:#008000;">#</span><span style="color:#008000;">默认的分区数，一个topic默认1个分区数</span>
+log.retention.hours=168 <span style="color:#008000;">#</span><span style="color:#008000;">默认消息的最大持久化时间，168小时，7天</span>
+message.max.byte=5242880  <span style="color:#008000;">#</span><span style="color:#008000;">消息保存的最大值5M</span>
+default.replication.factor=2  <span style="color:#008000;">#</span><span style="color:#008000;">kafka保存消息的副本数，如果一个副本失效了，另一个还可以继续提供服务</span>
+replica.fetch.max.bytes=5242880  <span style="color:#008000;">#</span><span style="color:#008000;">取消息的最大直接数</span>
+log.segment.bytes=1073741824 <span style="color:#008000;">#</span><span style="color:#008000;">这个参数是：因为kafka的消息是以追加的形式落地到文件，当超过这个值的时候，kafka会新起一个文件</span>
+log.retention.check.interval.ms=300000 <span style="color:#008000;">#</span><span style="color:#008000;">每隔300000毫秒去检查上面配置的log失效时间（log.retention.hours=168 ），到目录查看是否有过期的消息如果有，删除</span>
+log.cleaner.enable=false <span style="color:#008000;">#</span><span style="color:#008000;">是否启用log压缩，一般不用启用，启用的话可以提高性能</span>
+zookeeper.connect=192.168.7.100:12181,192.168.7.101:12181,192.168.7.107:1218 <span style="color:#008000;">#</span><span style="color:#008000;">设置zookeeper的连接端口</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p>上面是参数的解释，实际的修改项为：</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">broker.id=0  每台服务器的broker.id都不能相同</span>
+
+
+<span style="color:#008000;">#</span><span style="color:#008000;">hostname</span>
+host.name=192.168.7.100
+
+<span style="color:#008000;">#</span><span style="color:#008000;">在log.retention.hours=168 下面新增下面三项</span>
+message.max.byte=5242880<span style="color:#000000;">
+default.replication.factor</span>=2<span style="color:#000000;">
+replica.fetch.max.bytes</span>=5242880
+
+<span style="color:#008000;">#</span><span style="color:#008000;">设置zookeeper的连接端口</span>
+zookeeper.connect=192.168.7.100:12181,192.168.7.101:12181,192.168.7.107:12181</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p><span style="font-size:18px;"><strong><span style="color:#0000ff;">4、启动Kafka集群并测试</span></strong></span></p>
+<p>1、启动服务</p>
+<div class="cnblogs_code">
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">从后台启动Kafka集群（3台都需要启动）</span>
+cd</pre>
+<pre>/opt/kafka/kafka_2.11-0.9.0.1//bin <span style="color:#008000;">#</span><span style="color:#008000;">进入到kafka的bin目录</span> 
+./kafka-server-start.sh -daemon ../config/server.properties</pre>
+</div>
+<p>2、检查服务是否启动</p>
+<div class="cnblogs_code">
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">执行命令jps</span>
+20348<span style="color:#000000;"> Jps
+</span>4233<span style="color:#000000;"> QuorumPeerMain
+</span>18991 Kafka</pre>
+</div>
+<p>3、创建Topic来验证是否创建成功</p>
+<p>更多请看官方文档：http://kafka.apache.org/documentation.html</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">创建Topic</span>
+./kafka-topics.sh --create --zookeeper 192.168.7.100:12181 --replication-factor 2 --partitions 1 --<span style="color:#000000;">topic shuaige
+</span><span style="color:#008000;">#</span><span style="color:#008000;">解释</span>
+--replication-factor 2   <span style="color:#008000;">#</span><span style="color:#008000;">复制两份</span>
+--partitions 1 <span style="color:#008000;">#</span><span style="color:#008000;">创建1个分区</span>
+--topic <span style="color:#008000;">#</span><span style="color:#008000;">主题为shuaige</span>
+
+<span style="color:#800000;">'''</span><span style="color:#800000;">在一台服务器上创建一个发布者</span><span style="color:#800000;">'''</span>
+<span style="color:#008000;">#</span><span style="color:#008000;">创建一个broker，发布者</span>
+./kafka-console-producer.sh --broker-list 192.168.7.100:19092 --<span style="color:#000000;">topic shuaige
+
+</span><span style="color:#800000;">'''</span><span style="color:#800000;">在一台服务器上创建一个订阅者</span><span style="color:#800000;">'''</span><span style="color:#000000;">
+.</span>/kafka-console-consumer.sh --zookeeper localhost:12181 --topic shuaige --<span style="color:#0000ff;">from</span>-beginning</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p>测试（在发布者那里发布消息看看订阅者那里是否能正常收到~）：</p>
+<p>4、其他命令</p>
+<p>大部分命令可以去官方文档查看</p>
+<p>4.1、查看topic</p>
+<div class="cnblogs_code">
+<pre>./kafka-topics.sh --list --zookeeper localhost:12181
+<span style="color:#008000;">#</span><span style="color:#008000;">就会显示我们创建的所有topic</span></pre>
+</div>
+<p>4.2、查看topic状态</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre>/kafka-topics.sh --describe --zookeeper localhost:12181 --<span style="color:#000000;">topic shuaige
+</span><span style="color:#008000;">#</span><span style="color:#008000;">下面是显示信息</span>
+Topic:ssports    PartitionCount:1    ReplicationFactor:2<span style="color:#000000;">    Configs:
+    Topic: shuaige    Partition: 0    Leader: </span>1    Replicas: 0,1    Isr: 1
+<span style="color:#008000;">#</span><span style="color:#008000;">分区为为1  复制因子为2   他的  shuaige的分区为0 </span><span style="color:#008000;">
+#</span><span style="color:#008000;">Replicas: 0,1   复制的为0，1</span><span style="color:#008000;">
+#</span> </pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+</div>
+<p> OKkafka集群搭建完毕</p>
+<p>5、其他说明标注</p>
+<p>5.1、日志说明</p>
+<p>默认kafka的日志是保存在/opt/kafka/kafka_2.10-0.9.0.0/logs目录下的，这里说几个需要注意的日志</p>
+<div class="cnblogs_code">
+<pre>server.log <span style="color:#008000;">#</span><span style="color:#008000;">kafka的运行日志</span>
+state-change.log  <span style="color:#008000;">#</span><span style="color:#008000;">kafka他是用zookeeper来保存状态，所以他可能会进行切换，切换的日志就保存在这里</span>
+<span style="color:#000000;">
+controller.log </span><span style="color:#008000;">#</span><span style="color:#008000;">kafka选择一个节点作为“controller”,当发现有节点down掉的时候它负责在游泳分区的所有节点中选择新的leader,这使得Kafka可以批量的高效的管理所有分区节点的主从关系。如果controller down掉了，活着的节点中的一个会备切换为新的controller.</span></pre>
+</div>
+<p>5.2、上面的大家你完成之后可以登录zk来查看zk的目录情况</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img alt="复制代码" src="http://common.cnblogs.com/images/copycode.gif"></a></span></div>
+<pre><span style="color:#008000;">#</span><span style="color:#008000;">使用客户端进入zk</span>
+./zkCli.sh -server 127.0.0.1:12181  <span style="color:#008000;">#</span><span style="color:#008000;">默认是不用加’-server‘参数的因为我们修改了他的端口</span>
+
+<span style="color:#008000;">#</span><span style="color:#008000;">查看目录情况 执行“ls /”</span>
+[zk: 127.0.0.1:12181(CONNECTED) 0] ls /
+
+<span style="color:#008000;">#</span><span style="color:#008000;">显示结果：[consumers, config, controller, isr_change_notification, admin, brokers, zookeeper, controller_epoch]</span>
+<span style="color:#800000;">'''</span><span style="color:#800000;">
+上面的显示结果中：只有zookeeper是，zookeeper原生的，其他都是Kafka创建的
+</span><span style="color:#800000;">'''</span>
+
+<span style="color:#008000;">#</span><span style="color:#008000;">标注一个重要的</span>
+[zk: 127.0.0.1:12181(CONNECTED) 1] get /brokers/ids/<span style="color:#000000;">0
+{</span><span style="color:#800000;">"</span><span style="color:#800000;">jmx_port</span><span style="color:#800000;">"</span>:-1,<span style="color:#800000;">"</span><span style="color:#800000;">timestamp</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1456125963355</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">endpoints</span><span style="color:#800000;">"</span>:[<span style="color:#800000;">"</span><span style="color:#800000;">PLAINTEXT://192.168.7.100:19092</span><span style="color:#800000;">"</span>],<span style="color:#800000;">"</span><span style="color:#800000;">host</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">192.168.7.100</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">version</span><span style="color:#800000;">"</span>:2,<span style="color:#800000;">"</span><span style="color:#800000;">port</span><span style="color:#800000;">"</span>:19092<span style="color:#000000;">}
+cZxid </span>= 0x1000001c1<span style="color:#000000;">
+ctime </span>= Mon Feb 22 15:26:03 CST 2016<span style="color:#000000;">
+mZxid </span>= 0x1000001c1<span style="color:#000000;">
+mtime </span>= Mon Feb 22 15:26:03 CST 2016<span style="color:#000000;">
+pZxid </span>= 0x1000001c1<span style="color:#000000;">
+cversion </span>=<span style="color:#000000;"> 0
+dataVersion </span>=<span style="color:#000000;"> 0
+aclVersion </span>=<span style="color:#000000;"> 0
+ephemeralOwner </span>= 0x152e40aead20016<span style="color:#000000;">
+dataLength </span>= 139<span style="color:#000000;">
+numChildren </span>=<span style="color:#000000;"> 0
+[zk: </span>127.0.0.1:12181(CONNECTED) 2<span style="color:#000000;">] 
+
+</span><span style="color:#008000;">#</span><span style="color:#008000;">还有一个是查看partion</span>
+[zk: 127.0.0.1:12181(CONNECTED) 7] get /brokers/topics/shuaige/partitions/<span style="color:#000000;">0
+null
+cZxid </span>= 0x100000029<span style="color:#000000;">
+ctime </span>= Mon Feb 22 10:05:11 CST 2016<span style="color:#000000;">
+mZxid </span>= 0x100000029<span style="color:#000000;">
+mtime </span>= Mon Feb 22 10:05:11 CST 2016<span style="color:#000000;">
+pZxid </span>= 0x10000002a<span style="color:#000000;">
+cversion </span>= 1<span style="color:#000000;">
+dataVersion </span>=<span style="color:#000000;"> 0
+aclVersion </span>=<span style="color:#000000;"> 0
+ephemeralOwner </span>= 0x0<span style="color:#000000;">
+dataLength </span>=<span style="color:#000000;"> 0
+numChildren </span>= 1<span style="color:#000000;">
+[zk: </span>127.0.0.1:12181(CONNECTED) 8] </pre>
+</div>
+</div>
+</div>
+</div>
+            </div>
+                </div>

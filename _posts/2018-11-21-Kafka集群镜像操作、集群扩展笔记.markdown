@@ -1,0 +1,184 @@
+---
+layout:     post
+title:      Kafka集群镜像操作、集群扩展笔记
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/xmuyo/article/details/50544039				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>之前阅读了Kafka的基本概念和关于Replica的文档，现在已是晕晕乎乎。在这大好的清晨微风徐徐中，继续阅读关于Kafka集群镜像的内容。 <br>
+（Kafka版本：0.8.2.1）</p>
+
+
+
+<h3 id="kafka集群镜像">Kafka集群镜像</h3>
+
+<p>Kafka的集群镜像与Replica不同。Replica作用在单个集群中不同的节点之间；而建立集群镜像在不同的Kafka集群之间发生作用。在集群镜像的过程中，源数据来自于一个或多个不同的Kafka集群，然后数据流向一个目标集群： <br>
+<img src="http://7vzs9m.com1.z0.glb.clouddn.com/kafka-mirror-maker.png" alt="from Apache Kafka" title=""> <br>
+Kafka提供了专用的工具实现创建集群镜像。</p>
+
+<p>这个操作的一个用途之一是创建数据中心的备份。但在严格意义上讲，它不完全是“备份”。因为创建后的镜像与源集群在partition数量、offset方面都会有所不同。但由于其使用的message key仍然不变并且也是通过Consumer的方式读取数据的，所以其顺序仍然相同。</p>
+
+
+
+<h3 id="扩展kafka集群">扩展Kafka集群</h3>
+
+<p>添加新broker：为新的broker分配一个唯一id，然后在新的服务器上启动Kafka即可。 <br>
+做到这一步完成新broker的添加，但它只有在创建新的topic时才会参与工作。除非将已有的partition迁移到新的服务器上面。</p>
+
+<p>迁移数据到新broker：迁移数据只能手动执行，但整个过程是自动完成的。Kafka先将新的Server设置为要迁移的partition的follower，让它进行replica。等它将目标partition的数据完全复制，且这个新的server已经进入in sync的列表后，已有的一个replica就会删除自己的partition数据。 <br>
+Kafka提供kafka-reassign-partitions.sh工具做添加新broker后的数据迁移。</p>
+
+
+
+<h4 id="kafka-reassign-partitionssh-使用方法">kafka-reassign-partitions.sh 使用方法</h4>
+
+<p>本文记录下笔者的尝试过程，详细的文档说明可以在这里找到：<a href="http://kafka.apache.org/documentation.html#basic_ops_cluster_expansion" rel="nofollow">kafka-reassign-partitions.sh</a> <br>
+依据官方的文档，kafka-reassign-partitions.sh是用来重新分配partition和replica到broker上的工具。简单实现重新分配需要三步： <br>
+- 生成分配计划（generate） <br>
+- 执行分配（execute） <br>
+- 检查分配的状态（verify）</p>
+
+<p>在我原有的集群中，只有一个broker，broker.id = 0；现在我添加了一个broker到集群中，broker.id = 1。下面记录如何对原有的partition进行重新分配。 <br>
+添加broker很简单，只需要在新的机器上拷贝一份新的server.properties，然后改一个新的broker.id，启动即可。</p>
+
+<ol>
+<li>生成分配计划</li>
+</ol>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-built_in">.</span>/bin/kafka<span class="hljs-attribute">-reassign</span><span class="hljs-attribute">-partitions</span><span class="hljs-built_in">.</span>sh <span class="hljs-subst">--</span>zookeeper <span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span>:<span class="hljs-number">2181</span> <span class="hljs-subst">--</span>topics<span class="hljs-attribute">-to</span><span class="hljs-attribute">-move</span><span class="hljs-attribute">-json</span><span class="hljs-attribute">-file</span> topics<span class="hljs-attribute">-to</span><span class="hljs-attribute">-move</span><span class="hljs-built_in">.</span>json <span class="hljs-subst">--</span>broker<span class="hljs-attribute">-list</span> <span class="hljs-string">"1"</span> <span class="hljs-subst">--</span>generate</code></pre>
+
+<p>其中，topic-to-move.json 是事先自己写好的一个json文件，里面包含要进行迁移的topic。例如我用来实验的是这样：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs json">{"<span class="hljs-attribute">topics</span>":
+        <span class="hljs-value">[{"<span class="hljs-attribute">topic</span>":<span class="hljs-value"><span class="hljs-string">"test"</span></span>}]</span>,
+            "<span class="hljs-attribute">version</span>": <span class="hljs-value"><span class="hljs-number">1</span>
+</span>}</code></pre>
+
+<p>用 kafka-topics.sh 工具查看topic信息是：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs css"><span class="hljs-tag">Topic</span><span class="hljs-pseudo">:test</span>  <span class="hljs-tag">PartitionCount</span><span class="hljs-pseudo">:2</span>    <span class="hljs-tag">ReplicationFactor</span><span class="hljs-pseudo">:1</span> <span class="hljs-tag">Configs</span>:
+    <span class="hljs-tag">Topic</span>: <span class="hljs-tag">test</span> <span class="hljs-tag">Partition</span>: 0    <span class="hljs-tag">Leader</span>: 0   <span class="hljs-tag">Replicas</span>: 0 <span class="hljs-tag">Isr</span>: 0
+    <span class="hljs-tag">Topic</span>: <span class="hljs-tag">test</span> <span class="hljs-tag">Partition</span>: 1    <span class="hljs-tag">Leader</span>: 0   <span class="hljs-tag">Replicas</span>: 0 <span class="hljs-tag">Isr</span>: 0
+</code></pre>
+
+<p>因为原有集群只有一个broker，所以两个partition都在broker 0上，而broker 0本身也是leader，在“in sync”的replica也都是0。 <br>
+执行生成计划的命令以后，会出现类似文档里那样的信息，有两个json格式信息：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs mel">Current <span class="hljs-keyword">partition</span> replica assignment
+
+{<span class="hljs-string">"version"</span>:<span class="hljs-number">1</span>,<span class="hljs-string">"partitions"</span>:[{<span class="hljs-string">"topic"</span>:<span class="hljs-string">"test"</span>,<span class="hljs-string">"partition"</span>:<span class="hljs-number">1</span>,<span class="hljs-string">"replicas"</span>:[<span class="hljs-number">0</span>]},{<span class="hljs-string">"topic"</span>:<span class="hljs-string">"test"</span>,<span class="hljs-string">"partition"</span>:<span class="hljs-number">0</span>,<span class="hljs-string">"replicas"</span>:[<span class="hljs-number">0</span>]}]}
+Proposed <span class="hljs-keyword">partition</span> reassignment configuration
+
+{<span class="hljs-string">"version"</span>:<span class="hljs-number">1</span>,<span class="hljs-string">"partitions"</span>:[{<span class="hljs-string">"topic"</span>:<span class="hljs-string">"test"</span>,<span class="hljs-string">"partition"</span>:<span class="hljs-number">1</span>,<span class="hljs-string">"replicas"</span>:[<span class="hljs-number">1</span>]},{<span class="hljs-string">"topic"</span>:<span class="hljs-string">"test"</span>,<span class="hljs-string">"partition"</span>:<span class="hljs-number">0</span>,<span class="hljs-string">"replicas"</span>:[<span class="hljs-number">1</span>]}]}</code></pre>
+
+<ol>
+<li>执行分配 <br>
+在生成计划后，可以按照计划来执行重新分配，执行命令：</li>
+</ol>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-built_in">.</span>/bin/kafka<span class="hljs-attribute">-reassign</span><span class="hljs-attribute">-partitions</span><span class="hljs-built_in">.</span>sh <span class="hljs-subst">--</span>zookeeper <span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span>:<span class="hljs-number">2181</span> <span class="hljs-subst">--</span>reassignment<span class="hljs-attribute">-json</span><span class="hljs-attribute">-file</span> expand<span class="hljs-attribute">-cluster</span><span class="hljs-attribute">-reassignment</span><span class="hljs-built_in">.</span>json <span class="hljs-subst">--</span>execute</code></pre>
+
+<p>在官方文档中，提供的例子只有这一行命令与其输入样式。然而，所需的 expand-cluster-reassignment.json 文件里面是什么确没有直接说明。（让我花了好多时间研究=。=）这个文件的内容就是：刚才执行–generate后，第！二！个！json！是的，将它直接粘贴到这个文件里保存就可以了。执行命令后的会出现如下的信息：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">Current partition replica assignment
+
+{<span class="hljs-string">"version"</span>:<span class="hljs-number">1</span>,<span class="hljs-string">"partitions"</span>:[{<span class="hljs-string">"topic"</span>:<span class="hljs-string">"test"</span>,<span class="hljs-string">"partition"</span>:<span class="hljs-number">1</span>,<span class="hljs-string">"replicas"</span>:[<span class="hljs-number">0</span>]},{<span class="hljs-string">"topic"</span>:<span class="hljs-string">"test"</span>,<span class="hljs-string">"partition"</span>:<span class="hljs-number">0</span>,<span class="hljs-string">"replicas"</span>:[<span class="hljs-number">0</span>]}]}
+
+Save this <span class="hljs-built_in">to</span> use <span class="hljs-keyword">as</span> <span class="hljs-operator">the</span> <span class="hljs-comment">--reassignment-json-file option during rollback</span>
+Successfully started reassignment <span class="hljs-operator">of</span> partitions {<span class="hljs-string">"version"</span>:<span class="hljs-number">1</span>,<span class="hljs-string">"partitions"</span>:[{<span class="hljs-string">"topic"</span>:<span class="hljs-string">"test"</span>,<span class="hljs-string">"partition"</span>:<span class="hljs-number">1</span>,<span class="hljs-string">"replicas"</span>:[<span class="hljs-number">1</span>]},{<span class="hljs-string">"topic"</span>:<span class="hljs-string">"test"</span>,<span class="hljs-string">"partition"</span>:<span class="hljs-number">0</span>,<span class="hljs-string">"replicas"</span>:[<span class="hljs-number">1</span>]}]}</code></pre>
+
+<p>此时，Kafka就已经开始进行重新分配、数据迁移了。 <br>
+3. 检查分配的状态 <br>
+这一步很好操作。只需要执行命令就可以：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-built_in">.</span>/bin/kafka<span class="hljs-attribute">-reassign</span><span class="hljs-attribute">-partitions</span><span class="hljs-built_in">.</span>sh <span class="hljs-subst">--</span>zookeeper <span class="hljs-number">127.0</span><span class="hljs-number">.0</span><span class="hljs-number">.1</span>:<span class="hljs-number">2181</span> <span class="hljs-subst">--</span>reassignment<span class="hljs-attribute">-json</span><span class="hljs-attribute">-file</span> expand<span class="hljs-attribute">-cluster</span><span class="hljs-attribute">-reassignment</span><span class="hljs-built_in">.</span>json <span class="hljs-subst">--</span>verify</code></pre>
+
+<p>json文件依然是–execute时的那个。然后会出现如下信息：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs erlang"><span class="hljs-variable">Status</span> <span class="hljs-keyword">of</span> partition reassignment:
+<span class="hljs-variable">Reassignment</span> <span class="hljs-keyword">of</span> partition [test,<span class="hljs-number">1</span>] completed successfully
+<span class="hljs-variable">Reassignment</span> <span class="hljs-keyword">of</span> partition [test,<span class="hljs-number">0</span>] completed successfully</code></pre>
+
+<p>这样就完成了。用kafka-topics.sh工具查看一下当前topic信息就变成了这样：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs css"><span class="hljs-tag">Topic</span><span class="hljs-pseudo">:test</span>  <span class="hljs-tag">PartitionCount</span><span class="hljs-pseudo">:2</span>    <span class="hljs-tag">ReplicationFactor</span><span class="hljs-pseudo">:1</span> <span class="hljs-tag">Configs</span>:
+    <span class="hljs-tag">Topic</span>: <span class="hljs-tag">test</span> <span class="hljs-tag">Partition</span>: 0    <span class="hljs-tag">Leader</span>: 1   <span class="hljs-tag">Replicas</span>: 1 <span class="hljs-tag">Isr</span>: 1
+    <span class="hljs-tag">Topic</span>: <span class="hljs-tag">test</span> <span class="hljs-tag">Partition</span>: 1    <span class="hljs-tag">Leader</span>: 1   <span class="hljs-tag">Replicas</span>: 1 <span class="hljs-tag">Isr</span>: 1</code></pre>
+
+<p>在这个例子中，我将原来在broker 0上的两个partition都重新分配到了broker 1上。其实可以将两个partition都分在这两个broker上。只需要在生成计划的那一步，指定–broker-list就可以了，将它指定为：–broker-list “0,1”。这个参数就是目标broker的id列表。例如我这样指定后topic的信息就变成了这样：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs css"><span class="hljs-tag">Topic</span><span class="hljs-pseudo">:test</span>  <span class="hljs-tag">PartitionCount</span><span class="hljs-pseudo">:2</span>    <span class="hljs-tag">ReplicationFactor</span><span class="hljs-pseudo">:1</span> <span class="hljs-tag">Configs</span>:
+    <span class="hljs-tag">Topic</span>: <span class="hljs-tag">test</span> <span class="hljs-tag">Partition</span>: 0    <span class="hljs-tag">Leader</span>: 0   <span class="hljs-tag">Replicas</span>: 0 <span class="hljs-tag">Isr</span>: 0
+    <span class="hljs-tag">Topic</span>: <span class="hljs-tag">test</span> <span class="hljs-tag">Partition</span>: 1    <span class="hljs-tag">Leader</span>: 1   <span class="hljs-tag">Replicas</span>: 1 <span class="hljs-tag">Isr</span>: 1</code></pre>
+
+
+
+<h4 id="kafka-topicssh-add-partition-添加partition">kafka-topics.sh add partition 添加partition</h4>
+
+<p>到此我们可以为broker重新分配partition和replica。但是要增加partition怎么办？ <br>
+我问了好久google，google也没有给我合适的答案，倒是告诉了我一个不幸的消息：kafka-add-partition.sh这样的工具只在0.8.0版本中才有。后续的版本都没了，都没了，没了，没…… Orz 那肿么办？！Kafka这样的神器不会傻到不支持增加partition吧？ <br>
+于是就在0.8.2.1提供的工具中查找，发现kafka-topics.sh工具–partitions选项的说明是这样的：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs mizar">--partitions &lt;Integer: # <span class="hljs-keyword">of</span> partitions&gt; The number <span class="hljs-keyword">of</span> partitions <span class="hljs-keyword">for</span> the topic 
+                                          <span class="hljs-keyword">being</span> created <span class="hljs-keyword">or</span> altered (WARNING:   
+                                          If partitions are increased <span class="hljs-keyword">for</span> a    
+                                          topic <span class="hljs-keyword">that</span> has a key, the partition  
+                                          logic <span class="hljs-keyword">or</span> ordering <span class="hljs-keyword">of</span> the messages    
+                                          will <span class="hljs-keyword">be</span> affected                     </code></pre>
+
+<p>看到了吗？“the number of partitions for the topic being created or altered”，然后这个工具有一个选项就是 –alter 啊！试了一下，果然可以！</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-string">.</span><span class="hljs-comment">/bin/kafka</span><span class="hljs-literal">-</span><span class="hljs-comment">topics</span><span class="hljs-string">.</span><span class="hljs-comment">sh</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">zookeeper</span> <span class="hljs-comment">127</span><span class="hljs-string">.</span><span class="hljs-comment">0</span><span class="hljs-string">.</span><span class="hljs-comment">0</span><span class="hljs-string">.</span><span class="hljs-comment">1:2181</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">alter</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">topic</span> <span class="hljs-comment">test</span> <span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">partitions</span> <span class="hljs-comment">4</span></code></pre>
+
+<p>执行后出现如下信息：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs asciidoc"><span class="hljs-label">WARNING: </span>If partitions are increased for a topic that has a key, the partition logic or ordering of the messages will be affected
+Adding partitions succeeded!</code></pre>
+
+<p>再查看topic信息就变成了这样：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs mathematica">Topic:test  PartitionCount:<span class="hljs-number">4</span>    ReplicationFactor:<span class="hljs-number">1</span> Configs:
+    Topic: test <span class="hljs-keyword">Partition</span>: <span class="hljs-number">0</span>    Leader: <span class="hljs-number">0</span>   Replicas: <span class="hljs-number">0</span> Isr: <span class="hljs-number">0</span>
+    Topic: test <span class="hljs-keyword">Partition</span>: <span class="hljs-number">1</span>    Leader: <span class="hljs-number">1</span>   Replicas: <span class="hljs-number">1</span> Isr: <span class="hljs-number">1</span>
+    Topic: test <span class="hljs-keyword">Partition</span>: <span class="hljs-number">2</span>    Leader: <span class="hljs-number">1</span>   Replicas: <span class="hljs-number">1</span> Isr: <span class="hljs-number">1</span>
+    Topic: test <span class="hljs-keyword">Partition</span>: <span class="hljs-number">3</span>    Leader: <span class="hljs-number">0</span>   Replicas: <span class="hljs-number">0</span> Isr: <span class="hljs-number">0</span></code></pre>
+
+<p>但是注意，就如官方提示所言，在改变partition的数量后，如果消息数据进入partition是以key分配的，那么消息按key分配和消息的顺序都会受影响。 <br>
+这样就添加了partition。</p>
+
+<p>添加partition的这种方法再配合重新分配的方法，就可以当做一种水平扩展的方案。主要就是依赖这两个工具： <br>
+- kafka-topics.sh：添加partition <br>
+- kafka-reassign-partitions.sh：重新分配partition、迁移数据</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

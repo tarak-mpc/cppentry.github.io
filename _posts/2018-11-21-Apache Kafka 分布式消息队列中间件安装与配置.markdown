@@ -1,0 +1,507 @@
+---
+layout:     post
+title:      Apache Kafka 分布式消息队列中间件安装与配置
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/system1190/article/details/49623423				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+本文演示从1个zookeeper+1个kafka broker到3个zookeeper+2个kafka broker集群的配置过程。</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+kafka依赖于zookeeper, 首先下载zookeeper和kafka</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ wget http://mirrors.hust.edu.cn/apache/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ gzip -d zookeeper-3.4.6.tar.gz  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ tar -xvf zookeeper-3.4.6.tar  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">//$ wget http://apache.fayea.com/apache-mirror/kafka/0.8.1.1/kafka_2.8.0-0.8.1.1.tgz  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ wget https://www.apache.org/dyn/closer.cgi?path=/kafka/0.8.1.1/kafka_2.8.0-0.8.1.1.tgz<br></span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ gtar xvzf kafka_2.8.0-0.8.1.1.tgz  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+对于CentOS来说在，在本地试验可能会遇到莫名其妙的问题，这一般是由于主机名不能正确识别导致。为了避免可能遇到的问题，首先查询本机主机名,</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ hostname  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">HOME  </span></li></ol></div>
+<span style="font-family:Arial;font-size:14px;line-height:26px;">然后加入一条本地解析到/etc/hosts文件中</span>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">127.0.0.1      HOME       </span></li></ol></div>
+<br style="font-family:Arial;font-size:14px;line-height:26px;"><br style="font-family:Arial;font-size:14px;line-height:26px;"><br style="font-family:Arial;font-size:14px;line-height:26px;"><br style="font-family:Arial;font-size:14px;line-height:26px;"><h2 style="font-family:Arial;line-height:26px;"><a name="t0" style="color:rgb(202,0,0);"></a>一个zookeeper  + 一个kafka broker的配置</h2>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+将zookeeper/conf/下的zoo_sample.cfg改名成zoo.cfg。 zookeeper默认会读取此配置文件。配置文件暂时不用改，默认即可</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$mv zookeeper-3.4.6/conf/zoo_sample.cfg zookeeper-3.4.6/conf/zoo.cfg   </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+启动Zookeeper服务, Zookeeper启动成功后在2181端口监听</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ zookeeper-3.4.6/bin/zkServer.sh start  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /home/wj/event/zookeeper-3.4.6/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Starting zookeeper ... STARTED  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+启动Kafka服务，启动成功后在9092端口监听<br></p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-server-start.sh kafka_2.8.0-0.8.1.1/config/server.properties  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+开始测试</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># 连接zookeeper, 创建一个名为test的topic, replication-factor 和 partitions 后面会解释，先设置为1  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 1 --topic test  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Created topic "test".  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># 查看已经创建的topic列表  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ bin/kafka-topics.sh --list --zookeeper localhost:2181  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">test  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># 查看此topic的属性  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ bin/kafka-topics.sh --describe --zookeeper localhost:2181 --topic test  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Topic:test  PartitionCount:1    ReplicationFactor:1 Configs:  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">    Topic: test Partition: 0    Leader: 0   Replicas: 0 Isr: 0  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># 生产者连接Kafka Broker发布一个消息  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ bin/kafka-console-producer.sh --broker-list localhost:9092 --topic test   </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Hello World  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+消费者连接Zookeeper获取消息</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic test --from-beginning  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Hello World  </span></li></ol></div>
+<h2 style="font-family:Arial;line-height:26px;"><a name="t1" style="color:rgb(202,0,0);"></a>一个zookeeper  + 两个kafka broker的配置</h2>
+<hr style="font-family:Arial;font-size:14px;line-height:26px;"><span style="font-family:Arial;font-size:14px;line-height:26px;">为避免Kafka Broker的Singal-Point-Failure(单点失败), 需要建立多个Kafka Broker。先将kakfa目录中的/config/server.properties复制为/config/server-2.properties然后编辑它的内容， 具体见注释</span>
+<div class="dp-highlighter bg_html" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" class="dp-xml" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The id of the broker. This must be set to a unique integer for each broker.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"><span class="attribute" style="border:none;color:#FF0000;background-color:inherit;">broker.id</span><span style="border:none;background-color:inherit;">=</span><span class="attribute-value" style="border:none;color:#0000FF;background-color:inherit;">1</span><span style="border:none;background-color:inherit;">  #每个Kafka Broker应该配置一个唯一的ID  </span></span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">############################# Socket Server Settings #############################  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The port the socket server listens on  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"><span class="attribute" style="border:none;color:#FF0000;background-color:inherit;">port</span><span style="border:none;background-color:inherit;">=</span><span class="attribute-value" style="border:none;color:#0000FF;background-color:inherit;">19092</span><span style="border:none;background-color:inherit;">   #因为是在同一台机器上开多个Broker，所以使用不同的端口号区分  </span></span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Hostname the broker will bind to. If not set, the server will bind to all interfaces  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#<span class="attribute" style="border:none;color:#FF0000;background-color:inherit;">host.name</span><span style="border:none;background-color:inherit;">=</span><span class="attribute-value" style="border:none;color:#0000FF;background-color:inherit;">localhost</span><span style="border:none;background-color:inherit;">   #如果有多个网卡地址，也可以将不同的Broker绑定到不同的网卡  </span></span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">############################# Log Basics #############################  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># A comma seperated list of directories under which to store log files  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"><span class="attribute" style="border:none;color:#FF0000;background-color:inherit;">log.dirs</span><span style="border:none;background-color:inherit;">=/tmp/kafka-logs-2  #因为是在同一台机器上开多个Broker,需要确保使用不同的日志目录来避免冲突  </span></span></li></ol></div>
+<br style="font-family:Arial;font-size:14px;line-height:26px;"><span style="font-family:Arial;font-size:14px;line-height:26px;">现在就可以用新建的配置文件启动这个一个Broker了</span>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-server-start.sh kafka_2.8.0-0.8.1.1/config/server-2.properties  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+现在新创建一个topic, replication-factor表示该topic需要在不同的broker中保存几份，这里replication-factor设置为2, 表示在两个broker中保存。 </p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 2 --partitions 1 --topic test2  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+然后查看此topic的属性。</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-topics.sh --describe --zookeeper localhost:2181 --topic test2  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Topic:test2 PartitionCount:1    ReplicationFactor:2 Configs:  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">    Topic: test2    Partition: 0    Leader: 0   Replicas: 0,1   Isr: 0,1  </span></li></ol></div>
+<ul style="font-family:Arial;font-size:14px;line-height:26px;"><li>Leader: 如果有多个brokerBroker保存同一个topic，那么同时只能有一个Broker负责该topic的读写，其它的Broker作为实时备份。负责读写的Broker称为Leader.</li><li>Replicas : 表示该topic的0分区在0号和1号broker中保存</li><li>Isr : 表示当前有效的broker, Isr是Replicas的子集</li></ul><p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+在test2这个topic下发布新的消息验证工作正常</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-console-producer.sh --broker-list localhost:9092 --topic test2  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">HHH  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-console-consumer.sh --zookeeper lochost:2181 --from-beginning --topic test2  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">HHH  </span></li></ol></div>
+<br style="font-family:Arial;font-size:14px;line-height:26px;"><span style="font-family:Arial;font-size:14px;line-height:26px;">现在杀掉第一个Broker，模拟此点的崩溃</span><br style="font-family:Arial;font-size:14px;line-height:26px;"><div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ ps aux | grep server.properties  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">user        2620  1.5  5.6 2082704 192424 pts/1  Sl+  08:57   0:25 java   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kill 2620  </span></li></ol></div>
+<br style="font-family:Arial;font-size:14px;line-height:26px;"><span style="font-family:Arial;font-size:14px;line-height:26px;">重新查询此topic的属性，会发现Leader已经进行了切换，而0号Broker也从Isr中消失了。</span><br style="font-family:Arial;font-size:14px;line-height:26px;"><div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-topics.sh --describe --zookeeper localhost:2181 --topic test2  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Topic:test2 PartitionCount:1    ReplicationFactor:2 Configs:  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">    Topic: test2    Partition: 0    Leader: 1   Replicas: 0,1   Isr: 1  </span></li></ol></div>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-console-producer.sh --broker-list localhost:19092 --topic test2  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># 使用1号broker再发布一个消息到test2下  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Another message  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># 消费者查询，仍然工作正常  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-consolconsumer.sh --zookeeper localhost:2181 --from-beginning92 --topic test2  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">HHH  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Another message  </span></li></ol></div>
+<br style="font-family:Arial;font-size:14px;line-height:26px;"><br style="font-family:Arial;font-size:14px;line-height:26px;"><h2 style="font-family:Arial;line-height:26px;"><a name="t2" style="color:rgb(202,0,0);"></a>三个zookeeper + 两个kafka broker的配置</h2>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+</p>
+<hr style="font-family:Arial;font-size:14px;line-height:26px;"><p style="font-family:Arial;font-size:14px;line-height:26px;">
+同样，zookeeper也需要搭建cluster, 避免出现Single-Point-Failure. 由于zookeeper采用投票的方式来重新选举某节点失败后的leader, 所以至少需要三个zookeeper才能组成群集。且最好使用奇数个（而非偶数）。</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+下面是演示单机搭建最简单的zookeeper cluster, 具体的可以参考http://myjeeva.com/zookeeper-cluster-setup.html</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#!/bin/sh  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#下载  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">wget http://mirror.bit.edu.cn/apache/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">gzip -d zookeeper-3.4.6.tar.gz  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">tar xvf zookeeper-3.4.6.tar  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#重命名 zoo_sample.cfg 为 zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mv zookeeper-3.4.6/conf/zoo_sample.cfg zookeeper-3.4.6/conf/zoo.cfg  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#新建一个目录  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">sudo mkdir /usr/zookeeper-cluster  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">sudo chown -R jerry:jerry /usr/zookeeper-cluster  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#3个子目录分别对应三个zookeeper服务  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/server1  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/server2  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/server3  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#建立三个目录存放各自的数据文件  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/data  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/data/server1  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/data/server2  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/data/server3  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#建立三个目录存放各自的日志文件  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/log  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/log/server1  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/log/server2  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">mkdir /usr/zookeeper-cluster/log/server3  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#在每一个数据文件目录中，新建一个myid文件，文件必须是唯一的服务标识，在后面的配置中会用到  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">echo '1' &gt; /usr/zookeeper-cluster/data/server1/myid  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">echo '2' &gt; /usr/zookeeper-cluster/data/server2/myid  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">echo '3' &gt; /usr/zookeeper-cluster/data/server3/myid  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#将zookeeper复制三份  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">cp -rf zookeeper-3.4.6/* /usr/zookeeper-cluster/server1  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">cp -rf zookeeper-3.4.6/* /usr/zookeeper-cluster/server2  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">cp -rf zookeeper-3.4.6/* /usr/zookeeper-cluster/server3  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+然后编辑每个zookeeper的zoo.cfg配置文件。<br>
+将dataDir和dataLogDir设置为各自独立的目录；然后保证clientPort不会和其它zookeeper冲突（因为这里演示是3个实例安装于一台服务器上)</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+最后加入下面几行</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.1=0.0.0.0:2888:3888  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.2=0.0.0.0:12888:13888  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.3=0.0.0.0:22888:23888  </span></li></ol></div>
+<span style="font-family:Arial;font-size:14px;line-height:26px;">server.</span><span style="font-family:Arial;font-size:14px;line-height:26px;">X</span><span style="font-family:Arial;font-size:14px;line-height:26px;">=</span><span style="font-family:Arial;font-size:14px;line-height:26px;">IP</span><span style="font-family:Arial;font-size:14px;line-height:26px;">:</span><span style="font-family:Arial;font-size:14px;line-height:26px;">port1</span><span style="font-family:Arial;font-size:14px;line-height:26px;">:</span><span style="font-family:Arial;font-size:14px;line-height:26px;">port2</span>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+X是在该zookeeper数据文件目录中myid指定的服务ID.</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<strong>IP</strong>是当前zookeeper绑定的IP地址,因为是演示，所以全都是localhost</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<strong>port1 </strong>是Quorum Port</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<strong>port2 </strong>是Leader Election Port</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+由于3个zookeeper在同一台机器上，需要使用不同的端口号避免冲突。</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+修改后的结果如下</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<strong>/usr/zookeeper-cluster/server1/conf/zoo.cfg</strong></p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of milliseconds of each tick  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">tickTime=2000  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of ticks that the initial   </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># synchronization phase can take  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">initLimit=10  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of ticks that can pass between   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># sending a request and getting an acknowledgement  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">syncLimit=5  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the directory where the snapshot is stored.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># do not use /tmp for storage, /tmp here is just   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># example sakes.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">dataDir=/usr/zookeeper-cluster/data/server1  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">dataLogDir=/usr/zookeeper-cluster/log/server1  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the port at which the clients will connect  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">clientPort=2181  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the maximum number of client connections.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># increase this if you need to handle more clients  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#maxClientCnxns=60  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Be sure to read the maintenance section of the   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># administrator guide before turning on autopurge.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># http://zookeeper.apache.org/doc/current/zookeeperAdmin.html#sc_maintenance  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of snapshots to retain in dataDir  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#autopurge.snapRetainCount=3  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Purge task interval in hours  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Set to "0" to disable auto purge feature  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#autopurge.purgeInterval=1  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.1=0.0.0.0:2888:3888  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.2=0.0.0.0:12888:13888  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.3=0.0.0.0:22888:23888  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<strong> /usr/zookeeper-cluster/server2/conf/zoo.cfg</strong></p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of milliseconds of each tick  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">tickTime=2000  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of ticks that the initial   </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># synchronization phase can take  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">initLimit=10  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of ticks that can pass between   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># sending a request and getting an acknowledgement  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">syncLimit=5  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the directory where the snapshot is stored.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># do not use /tmp for storage, /tmp here is just   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># example sakes.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">dataDir=/usr/zookeeper-cluster/data/server2  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">dataLogDir=/usr/zookeeper-cluster/log/server2  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the port at which the clients will connect  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">clientPort=12181  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the maximum number of client connections.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># increase this if you need to handle more clients  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#maxClientCnxns=60  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Be sure to read the maintenance section of the   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># administrator guide before turning on autopurge.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># http://zookeeper.apache.org/doc/current/zookeeperAdmin.html#sc_maintenance  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of snapshots to retain in dataDir  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#autopurge.snapRetainCount=3  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Purge task interval in hours  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Set to "0" to disable auto purge feature  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#autopurge.purgeInterval=1  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.1=0.0.0.0:2888:3888  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.2=0.0.0.0:12888:13888  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.3=0.0.0.0:22888:23888  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<strong>  /usr/zookeeper-cluster/server3/conf/zoo.cfg</strong></p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of milliseconds of each tick  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">tickTime=2000  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of ticks that the initial   </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># synchronization phase can take  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">initLimit=10  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of ticks that can pass between   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># sending a request and getting an acknowledgement  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">syncLimit=5  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the directory where the snapshot is stored.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># do not use /tmp for storage, /tmp here is just   </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># example sakes.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">dataDir=/usr/zookeeper-cluster/data/server3  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">dataLogDir=/usr/zookeeper-cluster/log/server3  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the port at which the clients will connect  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">clientPort=22181  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># the maximum number of client connections.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># increase this if you need to handle more clients  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#maxClientCnxns=60  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Be sure to read the maintenance section of the   </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># administrator guide before turning on autopurge.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># http://zookeeper.apache.org/doc/current/zookeeperAdmin.html#sc_maintenance  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># The number of snapshots to retain in dataDir  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#autopurge.snapRetainCount=3  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Purge task interval in hours  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;"># Set to "0" to disable auto purge feature  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">#autopurge.purgeInterval=1  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.1=0.0.0.0:2888:3888  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.2=0.0.0.0:12888:13888  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">server.3=0.0.0.0:22888:23888  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+然后分别启动3个zookeeper服务</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server1/bin/zkServer.sh start  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server1/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Starting zookeeper ... STARTED  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server2/bin/zkServer.sh start  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server2/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Starting zookeeper ... STARTED  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server3/bin/zkServer.sh start  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server3/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Starting zookeeper ... STARTED  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+启动完成后查看每个服务的状态，下面可以看到server2被选为了leader. 而其它2个服务为follower.</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server1/bin/zkServer.sh status  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server1/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Mode: follower  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server2/bin/zkServer.sh status  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server2/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Mode: leader  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server3/bin/zkServer.sh status  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server3/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Mode: follower  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+<br></p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+接下来修改kafka的server.properties配置文件</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+kafka_2.8.0-0.8.1.1/config/server.properties和kafka_2.8.0-0.8.1.1/config/server-2.properties</p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+将3个zookeeper的地址加入到zookeeper.connect中，如下:</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">zookeeper.connect=localhost:2181,localhost:12181,localhost:22181  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+启动2个Kafka broker</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-server-start.sh kafka_2.8.0-0.8.1.1/config/server.properties  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-server-start.sh kafka_2.8.0-0.8.1.1/config/server-2.properties  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+接下来验证一下</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic test3 --from-beginning  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fhsjdfhdsa  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fjdsljfdsadsfdas  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-console-consumer.sh --zookeepecalhost:12181 --topic test3 --from-beginning  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fhsjdfhdsa  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fjdsljfdsadsfdas  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-console-consumer.sh --zookeepecalhost:22181 --topic test3 --from-beginning  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fhsjdfhdsa  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fjdsljfdsadsfdas  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+现在模拟leader挂掉的情况，直接将server2 的zookeeper杀掉</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ ps aux | grep server2  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">user     2493  1.0  1.8 1661116 53792 pts/0   Sl   14:46   0:02 java  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kill 2493  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+重新查询一次各zookeeper的状态，会发现leader发生了改变</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server3/bin/zkServer.sh status  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server3/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Mode: leader  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server1/bin/zkServer.sh status  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server1/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Mode: follower  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ /usr/zookeeper-cluster/server2/bin/zkServer.sh status  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">JMX enabled by default  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Using config: /usr/zookeeper-cluster/server2/bin/../conf/zoo.cfg  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Error contacting service. It is probably not running.  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+再次验证，kafka集群仍然工作正常。</p>
+<div class="dp-highlighter bg_plain" style="font-family:Consolas, 'Courier New', Courier, mono, serif;border:1px dashed rgb(153,153,153);overflow:auto;line-height:26px;background-color:rgb(245,245,245);">
+<ol start="1" style="border:none;color:rgb(92,92,92);"><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic test3 --from-beginning  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fhsjdfhdsa  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fjdsljfdsadsfdas  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/kafka-console-consumer.sh --zookeepecalhost:22181 --topic test3 --from-beginning  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: Defaulting to no-operation (NOP) logger implementation  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fhsjdfhdsa  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">fjdsljfdsadsfdas  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/katopics.sh --create --zookeeper localhost:2181 --replication-factor 2 --partitions 2 --topic test5  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Created topic "test5".  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">  </span></li><li style="border:none;list-style:outside;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">$ kafka_2.8.0-0.8.1.1/bin/katopics.sh --create --zookeeper localhost:22181 --replication-factor 2 --partitions 2 --topic test6  </span></li><li class="alt" style="border:none;list-style:outside;color:inherit;line-height:14.6667px;">
+<span style="border:none;color:#000000;background-color:inherit;">Created topic "test6".  </span></li></ol></div>
+<p style="font-family:Arial;font-size:14px;line-height:26px;">
+ </p>
+<br>            </div>
+                </div>

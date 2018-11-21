@@ -1,0 +1,94 @@
+---
+layout:     post
+title:      Kafka是如何实现高吞吐率的
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<span style="font-size:12px;">转载至：</span><span style="font-size:12px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;line-height:1.5em;">http://www.tuicool.com/articles/NvyMj2I</span>
+<p style="font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;font-weight:normal;line-height:1.5em;color:rgb(51,51,51);font-size:24px;">
+<br></p>
+<p style="font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;font-weight:normal;line-height:1.5em;color:rgb(51,51,51);">
+</p>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">Kafka是分布式消息系统，需要处理海量的消息，Kafka的设计是把所有的消息都写入速度低容量大的硬盘，以此来换取更强的存储能力，但实际上，使用硬盘并没有带来过多的性能损失</span></p>
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">kafka主要使用了以下几个方式实现了超高的吞吐率</span></p>
+</div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span><span style="font-size:12px;">顺序读写</span></span></div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">kafka的消息是不断追加到文件中的，这个特性使kafka可以充分利用磁盘的顺序读写性能</span></p>
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">顺序读写不需要硬盘磁头的寻道时间，只需很少的扇区旋转时间，所以速度远快于随机读写</span></p>
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">Kafka官方给出了测试数据( Raid-5，7200rpm )：</span></p>
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">顺序 I/O: 600MB/s</span></p>
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">随机 I/O: 100KB/s</span></p>
+</div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span><span style="font-size:12px;">零拷贝</span></span></div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">先简单了解下文件系统的操作流程，例如一个程序要把文件内容发送到网络</span></p>
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">这个程序是工作在用户空间，文件和网络socket属于硬件资源，两者之间有一个内核空间</span></p>
+<p style="line-height:1.7em;text-indent:1em;">
+<span style="font-size:12px;">在操作系统内部，整个过程为：</span></p>
+</div>
+                      <img src="https://img-blog.csdn.net/20170514155547264?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvRGF4MW4=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><p></p>
+<p style="font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;font-weight:normal;line-height:1.5em;color:rgb(51,51,51);">
+</p>
+<p style="line-height:27.2px;text-indent:1em;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span style="font-size:12px;">在Linux kernel2.2 之后出现了一种叫做"零拷贝(zero-copy)"系统调用机制，就是跳过“用户缓冲区”的拷贝，建立一个磁盘空间和内存的直接映射，数据不再复制到“用户态缓冲区”</span></p>
+<p style="line-height:27.2px;text-indent:1em;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span style="font-size:12px;">系统上下文切换减少为2次，可以提升一倍的性能</span></p>
+<p style="line-height:27.2px;text-indent:1em;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span style="font-size:12px;"><img src="https://img-blog.csdn.net/20170514155554160?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvRGF4MW4=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p style="line-height:27.2px;text-indent:1em;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span style="font-size:12px;"><br></span></p>
+<p style="line-height:27.2px;text-indent:1em;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span style="font-size:12px;"></span></p>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span>文件分段</span></div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<p style="line-height:1.7em;text-indent:1em;">
+kafka的队列topic被分为了多个区partition，每个partition又分为多个段segment，所以一个队列中的消息实际上是保存在N多个片段文件中</p>
+</div>
+<img src="https://img-blog.csdn.net/20170514155604645?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvRGF4MW4=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><p></p>
+<p style="line-height:27.2px;text-indent:1em;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span style="font-size:12px;"></span></p>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<p style="line-height:1.7em;text-indent:1em;">
+通过分段的方式，每次文件操作都是对一个小文件的操作，非常轻便，同时也增加了并行处理能力</p>
+</div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span>批量发送</span></div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<p style="line-height:1.7em;text-indent:1em;">
+Kafka允许进行批量发送消息，先将消息缓存在内存中，然后一次请求批量发送出去</p>
+<p style="line-height:1.7em;text-indent:1em;">
+比如可以指定缓存的消息达到某个量的时候就发出去，或者缓存了固定的时间后就发送出去</p>
+<p style="line-height:1.7em;text-indent:1em;">
+如100条消息就发送，或者每5秒发送一次</p>
+<p style="line-height:1.7em;text-indent:1em;">
+这种策略将大大减少服务端的I/O次数</p>
+</div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<span>数据压缩</span></div>
+<div style="line-height:27.2px;color:rgb(51,51,51);font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, STXihei, 'Microsoft YaHei', '微软雅黑', sans-serif;background-color:rgb(254,254,254);">
+<p style="line-height:1.7em;text-indent:1em;">
+Kafka还支持对消息集合进行压缩，Producer可以通过GZIP或Snappy格式对消息集合进行压缩</p>
+<p style="line-height:1.7em;text-indent:1em;">
+压缩的好处就是减少传输的数据量，减轻对网络传输的压力</p>
+<p style="line-height:1.7em;text-indent:1em;">
+Producer压缩之后，在Consumer需进行解压，虽然增加了CPU的工作，但在对大数据处理上，瓶颈在网络上而不是CPU，所以这个成本很值得</p>
+</div>
+<br><p></p>
+<br>            </div>
+                </div>

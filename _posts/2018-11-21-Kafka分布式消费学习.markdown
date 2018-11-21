@@ -1,0 +1,330 @@
+---
+layout:     post
+title:      Kafka分布式消费学习
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：希望本文能对您有所帮助！欢迎指导、勘误、讨论及转载，转载请注明出处。					https://blog.csdn.net/Remoa_Dengqinyi/article/details/77968174				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p align="center"><span style="font-family:'Times New Roman';font-size:14px;"><strong>Kafka分布式消费学习</strong></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>目录：</strong></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>1、Logstash input Kafka配置参数解析：<br></strong></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>2、Kafka的Topic命令查看：<br></strong></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>3、单机多进程实现Kafka的at least once分布式消费：<br></strong></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>4、多机多进程实现Kafka分布式消费：</strong><br></span></p>
+<p><strong><span style="font-family:'Times New Roman';font-size:14px;"><br></span></strong></p>
+<p><strong><span style="font-family:'Times New Roman';font-size:14px;">1、Logstash input Kafka配置参数解析：</span></strong></p>
+<p></p><pre><code class="language-plain"><span style="font-family:'Times New Roman';font-size:14px;">kafka{
+		bootstrap_servers =&gt; "hdp1.example.com:9092"
+		security_protocol =&gt; "SASL_PLAINTEXT"
+		sasl_kerberos_service_name =&gt; "kafka"
+		jaas_path =&gt; "/tmp/kafka_jaas.conf.demouser"
+		kerberos_config =&gt; "/etc/krb5.conf"
+		topics =&gt; ["remoa3"]
+		consumer_threads =&gt; 6
+		decorate_events =&gt; true
+		group_id =&gt; "remoa3"
+}</span></code></pre>
+<p><span style="font-family:'Times New Roman';font-size:14px;">l topics：</span></p>
+<blockquote style="border:none;">
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>官网描述：</strong>Value type is array</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Default value is ["logstash"]</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">A list of topics to subscribe to, defaults to ["logstash"].</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>翻译：</strong>值类型是数组，默认值为[“logstash”]。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">要订阅的主题列表，默认为[“logstash”]。</span></p>
+</blockquote>
+<p><span style="font-family:'Times New Roman';font-size:14px;">l consumer_threads：</span></p>
+<blockquote style="border:none;">
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>官网描述：</strong>Value type is number</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Default value is 1</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Ideally you should have as many threads as the number of partitions for a perfect balance — more threads than partitions means that some threads will be idle</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>翻译：</strong>消费者线程：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">值类型是数字。默认值为1。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">理想情况下，你应该拥有与完美平衡的分区数一样多的线程数，比分区更多的线程意味着有些线程将空闲。</span></p>
+</blockquote>
+<p><span style="font-family:'Times New Roman';font-size:14px;">l decorate_events</span></p>
+<blockquote style="border:none;">
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>官网描述：</strong>Value type is boolean</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Default value is false</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Option to add Kafka metadata like topic, message size to the event. This will add a field named kafka to the logstash event containing the following attributes: topic: The topic this message is associated
+ with consumer_group: The consumer group used to read in this event partition: The partition this message is associated with offset: The offset from the partition this message is associated with key: A ByteBuffer containing the message key</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>翻译：</strong>装饰事件：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">值类型是布尔型，默认值为false。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">可以将Kafka元数据（如主题，消息大小）添加到事件中。这将添加一个名为kafka的字段到包含以下属性的logstash事件：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">主题</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">该消息与consumer_group相关联的主题</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">用于读取这个事件分区的消费者组</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">此消息与偏移量相关联的分区</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">此消息与密钥相关联的分区偏移量</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">包含消息密钥的BtyeBuffer</span></p>
+</blockquote>
+<blockquote style="border:none;">
+<p><strong><span style="font-family:'Times New Roman';font-size:14px;">即设置为True时在输出消息时会输出自身的信息，如Topic来源，消费消息的大小，消费者的group信息等等。</span></strong></p>
+</blockquote>
+<p><span style="font-family:'Times New Roman';font-size:14px;">l group_id：</span></p>
+<blockquote style="border:none;">
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>官网描述：</strong>Value type is string</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Default value is "logstash"</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">The identifier of the group this consumer belongs to. Consumer group is a single logical subscriber that happens to be made up of multiple processors. Messages in a topic will be distributed to all
+ Logstash instances with the same group_id</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><strong>翻译：</strong>group_id：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">值类型是字符串。默认值为”logstash”</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">该消费者所属的组的标识符。消费者组是单个逻辑用户，是由多个处理器组成。主题中的消息将分发给具有相同group_id的所有的Logstash实例。</span></p>
+<p><strong><span style="font-family:'Times New Roman';font-size:14px;">即不同的组之间消费是互补影响的，相互隔离的。</span></strong></p>
+</blockquote>
+<p><span style="font-family:'Times New Roman';font-size:14px;"> </span></p>
+<p><strong><span style="font-family:'Times New Roman';font-size:14px;">2、Kafka的Topic命令查看：</span></strong></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（1）创建Topic：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"> 执行：bash kafka-topics.sh --zookeeper hdp1.example.com:2181/kafka_010 --create --topic remoa2 --partitions 3 --replication-factor 1</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">创建名为remoa2的Topic，使用3个分区分别存放数据，复制因子为1，数据备份共1份。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165402390?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;">图2.1 截图1</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（2）显示名为remoa2的Topic的详细信息：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">执行：bash /opt/package/kafka_2.10-0.10.1.0/bin/kafka-topics.sh --zookeeper hdp1.example.com:2181/kafka_010 --topic remoa2 --describe</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165410928?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图2.2 截图2</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">第一行列出了该Topic的总体情况，包括Topic名称为remoa2，分区数量为3，副本数量为1。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Partition：分区</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Leader：负责读写指定分区的节点</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Replicas：复制该分区日志的节点列表</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">Isr：”in-sync replicas”，当前活跃的副本列表</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（3）显示所有的Topic的详细信息：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">执行：bash /opt/package/kafka_2.10-0.10.1.0/bin/kafka-topics.sh --zookeeper hdp1.example.com:2181/kafka_010 --describe</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165422410?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图2.3 截图3</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（4）删除Topic：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">执行：bash /opt/package/kafka_2.10-0.10.1.0/bin/kafka-topics.sh --zookeeper hdp1.example.com:2181/kafka_010 --delete --topic topic1,topic2,topic3,topic4</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">删除名为topic1、topic2、topic3、topic4的Topic。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165431574?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图2.4 截图4</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（5）查看已存在Topic列表：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">pwd所在目录为：/opt/package/kafka_2.10-0.10.1.0/bin</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">执行：bash kafka-topics.sh --zookeeper hdp1.example.com:2181/kafka_010 --list</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165440162?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图2.5 截图5</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（6）修改Topic分区数量：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">执行：bash kafka-topics.sh --alter --zookeeper hdp1.example.com:2181/kafka_010 --topic remoaindex --partitions 4</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">将名称为remoaindex的Topic的分区修改为4。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165451443?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图2.6 截图6</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">执行--describe参数可以查看到remoaindex的Topic分区数量修改为了4。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165458462?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图2.7 截图7</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"> </span></p>
+<p><strong><span style="font-family:'Times New Roman';font-size:14px;">3、单机多进程实现Kafka的at least once分布式消费：</span></strong></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（1）注意：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">A）使用多个Logstash端协同消费同一个Topic的话，需要把两个或是多个Logstash消费端配置成相同的group_id和topic_id，同时需要把相应的Topic分成多个分区，多个消费者消费是无法保证消息的消费顺序性的。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">B）Kafka的消息模型是对Topic分区以达到分布式效果。每个Topic下的不同的partitions只能有一个Owner去消费。所以只有多个分区后才能启动多个消费者，对应不同的区去消费。其中协调消费部分是由Server端协调而成。消息的消费是无序的。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">C）若要保证消息的顺序，则使用一个partition。Kafka的每个partition只能同时被同一个group中的consumer消费。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（2）试验原理说明：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">A）Kafka保证同一个consumer group中只有一个consumer会消费某条消息。Kafka保证在稳定状态下每一个consumer实例只会消费某一个或多个特定partition的数据，而某个partition的数据只会被某一个特定的consumer实例所消费。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">B）三种情况：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">①如果某个consumer group中consumer数量少于partition数量，则至少有一个consumer会消费多个partition的数据。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">②如果某个consumer group中consumer数量等于partition数量，则正好一个consumer消费一个partition的数据。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">③如果某个consumer group中consumer数量多于partition数量，会有部分的consumer无法消费该Topic下任何一条消息。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">C）at least once：消息绝不会丢，但可能会重复传输</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">D）at most once：消息可能会丢，但绝不会重复传输</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">E）Exactly once：每条消息肯定会被传输一次且仅传输一次。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">试验测试第一种情况，consumer数量为2，partition数量为3。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（3）producer.conf脚本及consumer.conf脚本内容如下：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">A）producer.conf脚本内容：</span></p>
+<p></p><pre><code class="language-plain"><span style="font-family:'Times New Roman';font-size:14px;">input {
+        beats{
+                port =&gt; 5044
+        }
+}
+ 
+filter{
+        if "beats_input_codec_plain_applied" in [tags]{
+                mutate{
+                        remove_tag =&gt; ["beats_input_codec_plain_applied"]
+                }
+        }
+        grok{
+                patterns_dir =&gt; "/opt/package/logstash-5.2.2/config/patterns/filter1pattern"
+                match =&gt; {
+                        "message" =&gt; "&lt;%{INT:systemType}&gt;%{MYTIME:logTime}\s*%{MYCOMMAND:command}\[%{INT:pid}\]:%{MYOPERATE:operate}"
+                }
+        }
+}
+ 
+output {
+        stdout{
+                codec =&gt; rubydebug
+        }
+        kafka{
+                topic_id =&gt; "remoa2"
+                bootstrap_servers =&gt; "hdp1.example.com:9092"
+                security_protocol =&gt; "SASL_PLAINTEXT"
+                sasl_kerberos_service_name =&gt; "kafka"
+                jaas_path =&gt; "/tmp/kafka_jaas.conf.demouser"
+                kerberos_config =&gt; "/etc/krb5.conf"
+                compression_type =&gt; "none"
+                acks =&gt; "1"
+        }
+}</span></code></pre>
+<p><span style="font-family:'Times New Roman';font-size:14px;">B）consumer1.conf及consumer2.conf脚本内容：</span></p>
+<p></p><pre><code class="language-plain"><span style="font-family:'Times New Roman';font-size:14px;">input{
+        kafka{
+                bootstrap_servers =&gt; "hdp1.example.com:9092"
+                security_protocol =&gt; "SASL_PLAINTEXT"
+                sasl_kerberos_service_name =&gt; "kafka"
+                jaas_path =&gt; "/tmp/kafka_jaas.conf.demouser"
+                kerberos_config =&gt; "/etc/krb5.conf"
+                topics =&gt; ["remoa2"]
+                consumer_threads =&gt; 3
+                decorate_events =&gt; true
+                group_id =&gt; "remoa2"
+        }
+}
+ 
+filter{
+        if "beats_input_codec_plain_applied" in [tags]{
+                mutate{
+                        remove_tag =&gt; ["beats_input_codec_plain_applied"]
+                }
+        }
+        grok{
+                patterns_dir =&gt; "/opt/package/logstash-5.2.2/config/patterns/filter1pattern"
+                match =&gt; {
+                        "message" =&gt; "&lt;%{INT:systemType}&gt;%{MYTIME:logTime}\s*%{MYCOMMAND:command}\[%{INT:pid}\]:%{MYOPERATE:operate}"
+                }
+        }
+}
+ 
+output{
+        stdout{
+                codec =&gt; rubydebug
+        }
+        elasticsearch{
+                hosts =&gt; ["kdc1.example.com:9200","kdc2.example.com:9200"]
+                user =&gt; logstash
+                password =&gt; logstash
+                action =&gt; "index"
+                index =&gt; "logstash-kafka1-%{+YYYY.MM.dd}"
+                truststore =&gt; "/opt/package/logstash-5.2.2/config/keys/truststore.jks"
+                truststore_password =&gt; whoami
+                ssl =&gt; true
+                ssl_certificate_verification =&gt; true
+                codec =&gt; "json"
+        }
+}</span></code></pre>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（4）在单机中启动Filebeat，然后执行两个相同的Logstash消费者脚本，其Logstash消费端配置成相同的group_id和topic_id。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">执行：service filebeat start</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">bash ../../bin/logstash -f producer.conf</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">bash ../../bin/logstash -f consumer2.conf</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">bash ../../bin/logstash -f consumer1.conf</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（5）查看到producer.conf的Logstash output Kafka中的标准输出：</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165545297?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图3.1 截图8</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（6）查看到consumer1.conf的标准输出：</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165559875?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图3.2 截图9</span><br></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165609543?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图3.3 截图10</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">通过上下滑动查看标准输出，查看到consumer1其消费了两个分区的数据，为分区1和分区2，标准输出结果里分区1及分区2的输出结果随机交替出现。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（7）查看到consumer2.conf的标准输出：</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165618817?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图3.4 截图11</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">查看到consumer2消费的分区为分区0。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（8）查看名为remoa2的Topic的具体信息：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">bash /opt/package/kafka_2.10-0.10.1.0/bin/kafka-topics.sh --zookeeper hdp1.example.com:2181/kafka_010 --topic remoa2 --describe</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165630443?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图3.5 截图12</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（9）在Kibana中查看到Elasticsearch中对应index名为logstash-kafka1-2017.09.13的具体内容：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">GET logstash-kafka1-2017.09.13/_search</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><img src="https://img-blog.csdn.net/20170913165656051?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图3.6 截图13</span><br></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165641001?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图3.7 截图14</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"><br></span></p>
+<p><strong><span style="font-family:'Times New Roman';font-size:14px;">4、多机多进程实现Kafka分布式消费：</span></strong></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（1）创建名为remoa3的Topic，使用6个分区，数据备份一份。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">bash kafka-topics.sh --zookeeper hdp1.example.com:2181/kafka_010 --create --topic remoa3 --partitions 6 --replication-factor 1</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（2）在两台机子分别启动三个消费者进程，两台机的logstash版本分别为5.2.2及5.2.1，实测版本兼容不影响测试。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">conf脚本文件如下：</span></p>
+<p></p><pre><code class="language-plain"><span style="font-family:'Times New Roman';font-size:14px;">input{
+        kafka{
+                bootstrap_servers =&gt; "hdp1.example.com:9092"
+                security_protocol =&gt; "SASL_PLAINTEXT"
+                sasl_kerberos_service_name =&gt; "kafka"
+                jaas_path =&gt; "/tmp/kafka_jaas.conf.demouser"
+                kerberos_config =&gt; "/etc/krb5.conf"
+                topics =&gt; ["remoa3"]
+                consumer_threads =&gt; 6
+                decorate_events =&gt; true
+                group_id =&gt; "remoa3"
+        }
+}
+ 
+filter{
+        if "beats_input_codec_plain_applied" in [tags]{
+                mutate{
+                        remove_tag =&gt; ["beats_input_codec_plain_applied"]
+                }
+        }
+        grok{
+                patterns_dir =&gt; "/opt/package/logstash-5.2.2/config/patterns/filter1pattern"
+                match =&gt; {
+                        "message" =&gt; "&lt;%{INT:systemType}&gt;%{MYTIME:logTime}\s*%{MYCOMMAND:command}\[%{INT:pid}\]:%{MYOPERATE:operate}"
+                }
+        }
+}
+ 
+output{
+        stdout{
+                codec =&gt; rubydebug
+        }
+        elasticsearch{
+                hosts =&gt; ["kdc1.example.com:9200","kdc2.example.com:9200"]
+                user =&gt; logstash
+                password =&gt; logstash
+                action =&gt; "index"
+                index =&gt; "logstash-kafka3-%{+YYYY.MM.dd}"
+                truststore =&gt; "/opt/package/logstash-5.2.2/config/keys/truststore.jks"
+                truststore_password =&gt; whoami
+                ssl =&gt; true
+                ssl_certificate_verification =&gt; true
+                codec =&gt; "json"
+        }
+}</span></code></pre>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（3）当启动filebeat进行日志采集后，可以查看到两台主机中的三个logstash进程都进行了消费。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165734696?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.1 截图15</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">A）查看hdp1机中的三个logstash进程消费情况：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">第一个进程消费了partition1中的数据，共消费数据15条。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165746523?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.2 截图16</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">第二个进程消费了partition3中的数据，共消费数据16条。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165756271?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.3 截图17</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">第三个进程消费了partition4中的数据，共消费数据15条。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165804735?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.4 截图18</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">B）查看hdp2机中的三个logstash进程消费情况：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">第一个进程消费了partition5中的数据，共消费数据15条。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165813630?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.5 截图19</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">第二个进程消费了partition0中的数据，共消费数据16条。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165823111?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.6 截图20</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">第三个进程消费了partition2中的数据，共消费数据16条。</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165832820?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.7 截图21</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">可以查看到六个消费者进程六个分区，则每个消费者消费一个分区的数据。16 + 16 + 15 + 15 + 16 + 15 = 93条数据，与测试文本中数据总量保持一致，实现了多机多进程分布式消费。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（4）查看名为remoa3的Topic的详细信息：</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">bash /opt/package/kafka_2.10-0.10.1.0/bin/kafka-topics.sh --zookeeper hdp1.example.com:2181/kafka_010 --topic remoa3 --describe</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165844541?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.8 截图22</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">（5）当然，相应的在Kibana也能够查看到结果。</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">GET _cat/indices</span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;">GET logstash-kafka3-2017.09.13/_search</span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"> <img src="https://img-blog.csdn.net/20170913165853072?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.9 截图23</span><br></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><img src="https://img-blog.csdn.net/20170913165906290?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvUmVtb2FfRGVuZ3Fpbnlp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p style="text-align:center;"><span style="font-family:'Times New Roman';font-size:14px;"><span style="text-align:center;">图4.10 截图24</span><br></span></p>
+<p><span style="font-family:'Times New Roman';font-size:14px;"> </span></p>
+            </div>
+                </div>

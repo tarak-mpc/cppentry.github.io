@@ -1,0 +1,134 @@
+---
+layout:     post
+title:      flume源码阅读之生命周期
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="flume-源码阅读之生命周期">flume 源码阅读之生命周期</h1>
+
+<p>阅读flume源码的时候，突然感觉LifeCycleAware这个名字好熟悉啊，感觉没个框架会出现这样的词眼,记得之前看Spring的源码，Tomcat的源码，这写个框架都有对组件的生命周期的管理，那么下面我们就看看flume是怎么进行组件的生命周期的管理的</p>
+
+
+
+<h2 id="flume中有哪些组件">flume中有哪些组件</h2>
+
+<p>从图中可以看出,flume中存在的几大组件 <br>
+1.Source —&gt; SourceRunner  （Source 及 source的处理器） <br>
+2.Sink —-&gt;SinkSelector—&gt;SinkProcessor（Sink 及 Sink的处理器） <br>
+3.Channel（Channel） <br>
+4.ConfigurePropertiesProvider (配置文件解析器) <br>
+5.LifecycleSupervisor(具体LifeCycle的管理类)</p>
+
+
+
+<h2 id="flume的组件分别有哪些个状态">flume的组件分别有哪些个状态</h2>
+
+<ul>
+<li>IDEL (空闲状态)</li>
+<li>START (运行中状态)</li>
+<li>STOP (停止状态)</li>
+<li>ERROR （异常错误状态）</li>
+</ul>
+
+
+
+<h2 id="flume是怎样管理这些组件">flume是怎样管理这些组件</h2>
+
+<p>从代码层面我们可以看到，LifeCycleAware有三个方法分别是:</p>
+
+<ol>
+<li>public void start()  </li>
+<li>public void stop()</li>
+<li>public LifeCycleState getLifeCycleState()</li>
+</ol>
+
+<p>分别是启动组件，停止组件和获取组件的当前状态，具体的对于组件的管理 又委托给LifeCycleSupervisor去处理,那我们接下来就看看 LifeCycleSupervisor是怎么处理的：</p>
+
+
+
+<h3 id="start">Start</h3>
+
+<ul>
+<li>首先是调用了ScheduledThreadPoolExecutor 的purge方法，这个方法是干什么用的呢？之前好像一直也没遇到过,这次刚好看一下：  <br>
+我们先来看一下 purge的源码:</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">purge</span>() {
+        <span class="hljs-keyword">final</span> BlockingQueue&lt;Runnable&gt; q = workQueue;
+        <span class="hljs-keyword">try</span> {
+            Iterator&lt;Runnable&gt; it = q.iterator();
+            <span class="hljs-keyword">while</span> (it.hasNext()) {
+                Runnable r = it.next();
+                <span class="hljs-keyword">if</span> (r <span class="hljs-keyword">instanceof</span> Future&lt;?&gt; &amp;&amp; ((Future&lt;?&gt;)r).isCancelled())
+                    it.remove();
+            }
+        } <span class="hljs-keyword">catch</span> (ConcurrentModificationException fallThrough) {
+            <span class="hljs-comment">// Take slow path if we encounter interference during traversal.</span>
+            <span class="hljs-comment">// Make copy for traversal and call remove for cancelled entries.</span>
+            <span class="hljs-comment">// The slow path is more likely to be O(N*N).</span>
+            <span class="hljs-keyword">for</span> (Object r : q.toArray())
+                <span class="hljs-keyword">if</span> (r <span class="hljs-keyword">instanceof</span> Future&lt;?&gt; &amp;&amp; ((Future&lt;?&gt;)r).isCancelled())
+                    q.remove(r);
+        }
+
+        tryTerminate(); <span class="hljs-comment">// In case SHUTDOWN and now empty</span>
+    }</code></pre>
+
+<p>从代码中，我们可以大致看出，purge的作用是将运行的任务从workqueue中移出，如果出现ConcureentModificationException 这个异常就是我们常说的边迭代边移出会出现的fail-fast问题， 为了解决这个问题，先将workQueue toArray 可以看一下 linkedBlockQueue的源码，发现这里返回的是workQueue的copy,所以可以安全的迭代. 回归到正题， 我们在调用了ScheduledThreadPoolExecutor的cancle方法后只是将要执行的任务状态变成了取消，但是这个任务还在workQueue中，那么调用purge就是为了将任务从workQueue中移出。。 当然我们在构造ScheduledThreadPoolExecutor的时候也可以直接指定在cancle的时候直接将任务从队列里移出，通过调用这个方法就可以： setRemoveOnCancelPolicy(boolean)</p>
+
+<ul>
+<li>设置总体组件的状态为 START</li>
+</ul>
+
+
+
+<h3 id="stop">STOP</h3>
+
+<ul>
+<li>先关闭所有的监控服务，每一个组件启动后,都会被监控服务监控，所以这些先关闭监控服务</li>
+<li>循环关闭所有的组件，依次调用各个组件的stop方法</li>
+<li>设置总体组件的状态为 STOP</li>
+</ul>
+
+
+
+<h3 id="getlifecyclestate">getLifeCycleState</h3>
+
+<ul>
+<li>直接返回全局变量 lifecycleState</li>
+</ul>
+
+
+
+<h2 id="具体的组件启动和关闭过程">具体的组件启动和关闭过程</h2>
+
+<p>看到这里，那么疑问来了,start 和 stop方法又是在什么情况下被调用的呢? 肯定是在服务启动的时候去启动这些个组件的，那么可以看到在 Application start方法中是调用了supervisor.supervise()方法，stop是调用了 supervisor.unsupervise()方法 <br>
+- supervise <br>
+主要的步骤: <br>
+1. 调用MonitorRunnable 启动具体的组件,调用具体组件的start()方法 <br>
+2. 存储组件和对应的启动管理器 <br>
+3. 保存启动结果 </p>
+
+<ul>
+<li>unsupervise <br>
+<ol><li>调用具体组件的stop方法</li>
+<li>移出具体组件对应的启动类</li>
+<li>如果改组件还没有启动,那么取消启动</li></ol></li>
+</ul>
+
+<p>MonitorRunnable：  <br>
+比较产品的状态和预期状态，如果不一致那么就调用对应状态的方法。在代码中的体现就是： <br>
+<code>case start:  <br>
+case stop:</code></p>
+
+<h2 id="总结">总结</h2>
+
+<p>这里写的比较乱，其实要表达的核心的时序图如下:</p>
+
+<p><img src="https://img-blog.csdn.net/20150407153653660" alt="这里写图片描述" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>
