@@ -1,0 +1,118 @@
+---
+layout:     post
+title:      大数据IMF传奇行动绝密课程第28课：Spark天堂之门
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="spark天堂之门">Spark天堂之门</h1>
+
+<p>1、Spark天堂之门 <br>
+2、SparkContext使用案例鉴赏 <br>
+3、SparkContext内幕 <br>
+4、SparkContext源码解密</p>
+
+<p>1、Spark天堂之门 <br>
+1)Spark程序在运行的时候分为Driver和Executors两部分； <br>
+2)Spark的程序编写是基于SparkContext的，具体来说包含两方面： <br>
+    a)Spark编程的核心基础RDD，是由SparkContext来最初创建（第一个RDD一定是由SparkContext来创建的） <br>
+    b)Spark程序的调度优化也是基于SparkContext <br>
+3)Spark程序的注册是通过SparkContext实例化时候生成的对象来完成的（其实是SchedulerBackend来获取计算资源的） <br>
+4)Spark程序运行的时候要通过Cluster Manager获得具体的计算资源，计算资源的获取也是通过SparkContext产生的对象来申请的（其实是SchedulerBackend来获取计算资源的） <br>
+5)SparkContext崩溃或者结束的时候整个Spark程序也结束了！ <br>
+总结：SparkContext开启了天堂之门：Spark程序是通过SparkContext发布到Spark集群的； <br>
+SparkContext导演了天堂世界：Spark程序的运行都是在SparkContext为核心的调度器的指挥下进行的； <br>
+SparkContext关闭天堂之门:SparkContext崩溃或者结束的时候整个Spark程序也结束了！</p>
+
+<p>2、SparkContext使用案例鉴赏 <br>
+3、SparkContext天堂内幕 <br>
+1)SparkContext构建的顶级三大核心对象：DAGScheduler、TaskScheduler、SchedulerBackend，其中 <br>
+    a)DAGScheduler是面向Job的Stage的高层调度器 <br>
+    b)TaskScheduler是一个抽象接口，根据具体的Cluster Manager的不同会有不同的实现，Standalone模式下具体的实现是TaskSchedulerImpl； <br>
+    c)SchedulerBackend是一个接口，根据具体的Cluster Manager的不同会有不同的实现，Standalone模式下具体的实现是SparkDeploySchedulerBackend <br>
+2)从整个程序运行的角度来讲，SparkContext包含四大核心对象：DAGScheduler、TaskScheduler、SchedulerBackend、MapOutputTrackerMaster</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs javascript">    <span class="hljs-comment">// Create and start the scheduler</span>
+    val (sched, ts) = SparkContext.createTaskScheduler(<span class="hljs-keyword">this</span>, master)
+    _schedulerBackend = sched
+    _taskScheduler = ts
+    _dagScheduler = <span class="hljs-keyword">new</span> DAGScheduler(<span class="hljs-keyword">this</span>)
+    _heartbeatReceiver.ask[<span class="hljs-built_in">Boolean</span>](TaskSchedulerIsSet)
+
+    <span class="hljs-comment">// start TaskScheduler after taskScheduler sets DAGScheduler reference in DAGScheduler's</span>
+    <span class="hljs-comment">// constructor</span>
+    _taskScheduler.start()</code></pre>
+
+<pre><code>createTaskScheduler：
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs scala">    <span class="hljs-keyword">case</span> SPARK_REGEX(sparkUrl) =&gt;
+    <span class="hljs-keyword">val</span> scheduler = <span class="hljs-keyword">new</span> TaskSchedulerImpl(sc)
+    <span class="hljs-keyword">val</span> masterUrls = sparkUrl.split(<span class="hljs-string">","</span>).map(<span class="hljs-string">"spark://"</span> + _)
+    <span class="hljs-keyword">val</span> backend = <span class="hljs-keyword">new</span> SparkDeploySchedulerBackend(scheduler, sc, masterUrls)
+    scheduler.initialize(backend)
+    (backend, scheduler)</code></pre>
+
+<p>在Scheduler.initialize调用的时候会创建SchedulerPool</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs scala">  <span class="hljs-keyword">def</span> initialize(backend: SchedulerBackend) {
+    <span class="hljs-keyword">this</span>.backend = backend
+    <span class="hljs-comment">// temporarily set rootPool name to empty</span>
+    rootPool = <span class="hljs-keyword">new</span> Pool(<span class="hljs-string">""</span>, schedulingMode, <span class="hljs-number">0</span>, <span class="hljs-number">0</span>)
+    schedulableBuilder = {
+      schedulingMode <span class="hljs-keyword">match</span> {
+        <span class="hljs-keyword">case</span> SchedulingMode.FIFO =&gt;
+          <span class="hljs-keyword">new</span> FIFOSchedulableBuilder(rootPool)
+        <span class="hljs-keyword">case</span> SchedulingMode.FAIR =&gt;
+          <span class="hljs-keyword">new</span> FairSchedulableBuilder(rootPool, conf)
+      }
+    }
+    schedulableBuilder.buildPools()
+  }
+</code></pre>
+
+<p>SparkDeploySchedulerBackend有三大核心功能： <br>
+负责与Master链接注册当前程序 <br>
+接收集群中为当前应用程序而分配的计算资源Executor的注册并管理Executors； <br>
+负责发送Task到具体的Executor执行 <br>
+补充说明的是：SparkDeploySchedulerBackend是被TaskSchedulerImpl来管理的</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs fsharp"><span class="hljs-comment">// start TaskScheduler after taskScheduler sets DAGScheduler reference in DAGScheduler's</span>
+<span class="hljs-comment">// constructor</span>
+    _taskScheduler.start()
+    <span class="hljs-keyword">val</span> command = Command(<span class="hljs-string">"org.apache.spark.executor.CoarseGrainedExecutorBackend"</span>, args, sc.executorEnvs, classPathEntries ++ testingClassPath, libraryPathEntries, javaOpts)
+</code></pre>
+
+<p>当通过SparkDeploySchedulerBackend注册程序给Master的时候会把上述command提交给Master，Master发指令给Worker去启动Executor所在的进程的时候加载的main方法所在的入口类就是command中的CoarseGrainedExecutorBackend，当然你可以实现自己的ExecutorBackend，在CoarseGrainedExecutorBackend中启动Executor（Executor是先注册再实例化），Executor通过线程池并发执行Task</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cmake">    private[spark] case class ApplicationDescription(
+    name: <span class="hljs-keyword">String</span>,
+    maxCores: <span class="hljs-keyword">Option</span>[Int],
+    memoryPerExecutorMB: Int,
+    command: Command,
+    appUiUrl: <span class="hljs-keyword">String</span>,
+    eventLogDir: <span class="hljs-keyword">Option</span>[URI] = None,
+    // short name of compression codec used when writing event logs, <span class="hljs-keyword">if</span> any (e.g. lzf)
+    eventLogCodec: <span class="hljs-keyword">Option</span>[<span class="hljs-keyword">String</span>] = None,
+    coresPerExecutor: <span class="hljs-keyword">Option</span>[Int] = None,
+    user: <span class="hljs-keyword">String</span> = System.getProperty(<span class="hljs-string">"user.name"</span>, <span class="hljs-string">"&lt;unknown&gt;"</span>)) {
+
+  override def toString: <span class="hljs-keyword">String</span> = <span class="hljs-string">"ApplicationDescription("</span> + name + <span class="hljs-string">")"</span>
+}</code></pre>
+
+<p><img title="" alt="图28-1 SparkCluster" src="https://img-blog.csdn.net/20160810191933421"></p>
+
+<p><img title="" alt="图28-2 SparkContext内幕解密" src="https://img-blog.csdn.net/20160810192003040"></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

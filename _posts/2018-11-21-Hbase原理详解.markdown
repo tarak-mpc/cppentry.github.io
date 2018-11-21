@@ -1,0 +1,122 @@
+---
+layout:     post
+title:      Hbase原理详解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="hbase简介">Hbase简介</h2>
+
+<blockquote>
+  <p>HBASE是一个可以提供数据的实时随机读写的数据库 <br>
+  HBASE与mysql、oralce、db2、sqlserver等关系型数据库不同，它是一个NoSQL数据库（非关系型数据库）</p>
+  
+  <ul>
+  <li>Hbase的表模型与关系型数据库的表模型不同：</li>
+  <li>Hbase的表没有固定的字段定义；</li>
+  <li>Hbase的表中每行存储的都是一些key-value对</li>
+  <li>Hbase的表中有列族的划分，用户可以指定将哪些kv插入哪个列族</li>
+  <li>Hbase的表在物理存储上，是按照列族来分割的，不同列族的数据一定存储在不同的文件中</li>
+  <li>Hbase的表中的每一行都固定有一个行键，而且每一行的行键在表中不能重复</li>
+  <li>Hbase中的数据，包含行键，包含key，包含value，都是byte[ ]类型，hbase不负责为用户维护数据类型</li>
+  <li>HBASE对事务的支持很差</li>
+  </ul>
+</blockquote>
+
+<h2 id="hbase中的角色主要有master和regionserver">Hbase中的角色主要有master和regionserver</h2>
+
+<p>1、MASTER职责</p>
+
+<blockquote>
+  <p>a. 管理HRegionServer，实现其负载均衡。 <br>
+  b. 管理和分配HRegion，比如在HRegion split时分配新的HRegion；在HRegionServer退出时迁移其负责的HRegion到其他HRegionServer上; <br>
+  c. 管理用户对Table的增、删、改、查操作； <br>
+  Admin职能 <br>
+  创建、删除、修改Table的定义。实现DDL操作（namespace和table的增删改，column familiy的增删改等）。 <br>
+  - 管理namespace和table的元数据（实际存储在HDFS上）。 <br>
+  - 权限控制（ACL）。 <br>
+  - 监控集群中所有HRegionServer的状态(通过Heartbeat和监听ZooKeeper中的状态)。</p>
+</blockquote>
+
+<p>2、REGION SERVER职责 </p>
+
+<blockquote>
+  <p>a. 管理自己所负责的region数据的读写。 <br>
+  b. 读写HDFS，管理Table中的数据。 <br>
+  c. Client直接通过HRegionServer读写数据（从HMaster中获取元数据，找到RowKey所在的HRegion/HRegionServer后）。</p>
+</blockquote>
+
+<p>3、.client职责</p>
+
+<blockquote>
+  <p>HBASE Client使用HBASE的RPC机制与HMaster和RegionServer进行通信 <br>
+  管理类操作：Client与HMaster进行RPC； <br>
+  数据读写类操作：Client与HRegionServer进行RPC。</p>
+</blockquote>
+
+<h2 id="hbase读写数据流程">Hbase读写数据流程</h2>
+
+<p>1、Hbase写数据流程</p>
+
+<blockquote>
+  <p>a、client向hregionserver发送写请求。 <br>
+  b、hregionserver将数据写到hlog（write ahead log）。为了数据的持久化和恢复。 <br>
+  c、hregionserver将数据写到内存（memstore）</p>
+  
+  <hr>
+  
+  <p>当memstore数据达到阈值（默认是128M），会溢写数据到硬盘Hfile，将内存中的数据删除，同时删除Hlog中的历史数据。 <br>
+  并将数据存储到hdfs中。 <br>
+  在hlog中做标记点。（数据flush过程）</p>
+  
+  <hr>
+  
+  <p>（1）当溢写出的数据块hfile达到4块，hmaster将数据块加载到本地，进行合并 <br>
+  （2）当合并的数据超过256M，进行拆分，将拆分后的region分配给不同的hregionserver管理 <br>
+  （3）当hregionser宕机后，将hregionserver上的hlog拆分，然后分配给不同的hregionserver加载，修改.META. <br>
+  （4）注意：hlog会同步到hdfs</p>
+  
+  <p>d、反馈client写成功。</p>
+</blockquote>
+
+<p>2、Hbase读数据流程</p>
+
+<blockquote>
+  <p>a、从ZooKeeper(/hbase/meta-region-server)中获取hbase:meta的位置（HRegionServer的位置），缓存该位置信息。 <br>
+  **：hbase:meta表存储了每个用户HRegion的位置信息 <br>
+  b、从HRegionServer中查询用户Table对应请求的RowKey所在的HRegionServer，缓存该位置信息。 <br>
+  c、从查询到HRegionServer中读取Row。</p>
+</blockquote>
+
+
+
+<h1 id="hbase的优缺点">Hbase的优缺点</h1>
+
+<p>1、Hbase的优点</p>
+
+<blockquote>
+  <p>a. 海量存储 <br>
+  　　Hbase适合存储PB级别的海量数据，在PB级别的数据以及采用廉价PC存储的情况下，能在几十到百毫秒内返回数据。这与Hbase的极易扩展性息息相关。正式因为Hbase良好的扩展性，才为海量数据的存储提供了便利。 <br>
+  b. 列式存储 <br>
+  　　这里的列式存储其实说的是列族存储，Hbase是根据列族来存储数据的。列族下面可以有非常多的列，列族在创建表的时候就必须指定。（通常建表会只建一个列簇，） <br>
+  c. 极易扩展 <br>
+  　　Hbase的扩展性主要体现在两个方面，一个是基于上层处理能力（RegionServer）的扩展，一个是基于存储的扩展（HDFS）。 <br>
+  　　通过横向添加RegionSever的机器，进行水平扩展，提升Hbase上层的处理能力，提升Hbsae服务更多Region的能力。 <br>
+  　　备注：RegionServer的作用是管理region、承接业务的访问，这个后面会详细的介绍 <br>
+  　　通过横向添加Datanode的机器，进行存储层扩容，提升Hbase的数据存储能力和提升后端存储的读写能力。 <br>
+  d. 高并发 <br>
+  　　由于目前大部分使用Hbase的架构，都是采用的廉价PC，因此单个IO的延迟其实并不小，一般在几十到上百ms之间。这里说的高并发，主要是在并发的情况下，Hbase的单个IO延迟下降并不多。能获得高并发、低延迟的服务。 <br>
+  e. 稀疏 <br>
+  　　稀疏主要是针对Hbase列的灵活性，在列族中，你可以指定任意多的列，在列数据为空的情况下，是不会占用存储空间的。</p>
+</blockquote>
+
+<p>2、Hbase的缺点</p>
+
+<blockquote>
+  <p>对多表关联查询支持不够好， <br>
+  事物支持不好 <br>
+  不支持sql（加大开发难度）</p>
+</blockquote>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,152 @@
+---
+layout:     post
+title:      HBase体系结构
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2><a name="HBase%E4%BB%8B%E7%BB%8D%E5%8F%8A%E7%AE%80%E6%98%93%E5%AE%89%E8%A3%85-HBase%E4%BD%93%E7%B3%BB%E7%BB%93%E6%9E%84"></a>HBase体系结构</h2>
+<p>HBase的服务器体系结构遵从简单的主从服务器架构，它由<span style="color:#FF0000;">HRegion Server群</span>和<span style="color:#FF0000;">HBase Master服务器</span>构成。HBase Master负责管理所有的HRegion Server，而HBase中的所有RegionServer都是通过ZooKeeper来协调，并处理HBase服务器运行期间可能遇到的错误。HBase Master Server本身并不存储HBase中的任何数据，HBase逻辑上的表可能会被划分成多个Region，然后存储到HRegion
+ Server群中。HBase Master Server中存储的是从数据到HRegion Server的映射。因此HBase体系结构如下图所示。</p>
+<p><span class="image-wrap"><img alt="" src=""></span></p>
+<p><strong>1） Client</strong><br>
+HBase Client使用HBase的RPC机制与HMaster和HRegion Server进行通信，对于管理类操作，Client与HMaster进行RPC；对于数据读写类操作，Client与HRegionServer进行RPC。<br><strong>2）Zookeeper</strong><br>
+Zookeeper Quorum中除了存储了-ROOT-表的地址和HMaster的地址，HRegionServer会把自己以Ephemeral方式注册到Zookeeper中，使得HMaster可以随时感知到各个HRegionServer的健康状态。此外，Zookeeper也避免了HMaster的单点问题。<br><strong>3）HMaster</strong><br>
+每台HRegionServer都会与HMaster进行通信，HMaster的主要任务就是要告诉每台HRegion Server它要维护哪些HRegion。<br>
+当一台新的HRegionServer登录到HMaster时，HMaster会告诉它等待分配数据。而当一台HRegion死机时，HMaster会把它负责的HRegion标记为未分配，然后再把它们分配到其他的HRegion Server中。<br>
+HBase已经解决了HMaster单点故障问题（SPFO），并且HBase中可以启动多个HMaster，那么它就能够通过Zookeeper来保证系统中总有一个Master在运行。</p>
+<p>构建多Hmaster时首先确保你的单Hmaster集群构建正确并且完美启动。 <br>
+剩下的工作很简单。 <br>
+在另一台HMaster的机器上配置hbase.master为这台机子的hostname并且启动hmaster即可，这样这台hmaster会自动去连接已启动的zookeeper与HRegionServer。
+<br>
+启动脚本：在bin目录下，输入./hbase-daemon.sh start master即可。 <br>
+要停Hmaster时，直接kill -9 id  <br></p>
+<p>HMaster在功能上主要负责Table和Region的管理工作，具体包括：</p>
+<ul><li>管理用户对Table的增删改查操作</li><li>管理HRegionServer的负载均衡，调整Region分布</li><li>在Region Split后，负责新Region的分配</li><li>在HRegionServer停机后，负责失效HRegionServer上的Region迁移</li></ul><p><strong>4）HRegion</strong><br>
+当表的大小超过设置值得时候，HBase会自动地将表划分为不同的区域，每个区域包含所有行的一个子集。对用户来说，每个表是一堆数据的集合，靠主键来区分。从物理上来说，一张表被拆分成了多块，每一块就是一个HRegion。我们用<span style="color:#FF0000;">表名+开始/结束</span>主键来区分每一个HRegion，一个HRegion会保存一个表里面某段连续的数据，从开始主键到结束主键，一张完整的表格是保存在多个HRegion上面。</p>
+<p><span class="image-wrap"><img alt="" src=""></span></p>
+<p>上图表示当Table随着记录数不断增加而变大后，会逐渐分裂成多份splits，成为regions，一个region由[startkey, endkey]表示，不同的region会被Master分配给响应的RegionServer进行管理。</p>
+<p><strong>5）HRegionServer</strong><br>
+所有的数据库数据一般都是保存在Hadoop分布式文件系统上面的，用户通过一系列HRegion服务器获取这些数据，<span style="color:#FF0000;">一台机器上面一般只运行一个HRegionServer，且每一个区段的HRegion也只会被一个HRegion服务器维护</span>。如下图所示HRegion Server数据存储关系图。</p>
+<p><span class="image-wrap"><img alt="" src=""></span></p>
+<p>HRegion Server主要负责响应用户的IO请求，向HDFS文件系统中读写数据，是HBase中最核心的模块。HRegionServer内部管理了一系列HRegion对象，每个HRegion对应了Table中的一个Region，HRegion中由多个HStore组成。每个HStore对应了Table中的一个Column Family的存储，可以看出每个ColumnFamily其实就是一个集中的存储单元，因此最好将具备共同IO特性的column放在一个Column Family中，这样最高效。<br>
+HStore存储时HBas存储的核心了，其中由两部分组成，<span style="color:#FF0000;">一部分是MemStore，一部分是StoreFiles</span>。<strong>MemStore*是Sorted Memory Buffer，用户写入数据首先会放入MemStore，当MemStore满了以后会flush成一个*StoreFile</strong>（底层是HFile），当StoreFile文件数增长到一定阈值，会触发Compact合并操作，将多个StoreFile合并成一个StoreFile，合并过程中会进行<span style="color:#FF0000;">版本合并和数据删除</span>，因此可以看出HBase其实只有增加数据，所有的更新和删除操作都是后续的compact过程中进行的，这使得用户的写操作只要进入内存中就可以立刻返回，保证了HBase
+ IO的高性能。当StoreFiles Compact后，会逐步形成越来越大的StoreFile，当单个StoreFile大小超过一定的阈值后，会触发Split操作，同时，会把当前的Region Split成2个Region，父Region会下线，新Split出的2个孩子Region会被HMaster分配到响应的HRegion Server上，使得原先1个Region的压力得以分流道2个Region上。下图描述了Compaction和Split的过程。</p>
+<p><span class="image-wrap"><img alt="" src=""></span></p>
+<p>理解上述HStore的基本原理之后，必须了解一下HLog的功能，因为上述的HStore在系统正常工作的前提下是没有问题的，但是在分布式系统环境中，无法避免系统出错或者宕机，一次一旦HRegion Server意外退出，MemStore中的内存数据将会丢失，这就需要引入HLog了。每一个HRegionServer中都有一个HLog对象，HLog是一个实现Write Ahead Log的类，在每次用户操作写入MemStore的同时，也会写一份数据到HLog文件中，HLog文件定期会滚动出新的，并删除旧的文件，当HRegionServer意外终止后，HMaster会通过Zookeeper感知到，HMaster首先会处理遗留的HLog文件，将其中不同Region的Log数据进行拆分，分别放到相应Region的目录下，然后再将失效的Region重新分配，领取到这些Region的HRegionServer在LoadRegion过程中，会发现有历史HLog需要处理，因此会Replay
+ HLog中的数据到MemStore中，然后flush到StoreFiles，完成数据恢复。<br><strong>6）HBase存储格式</strong><br>
+HBase中的所有数据文件都存储在Hadoop HDFS文件系统上，包括上述提到的两种文件类型：</p>
+<ul><li>HFile HBase中的KeyValue数据的存储格式，HFile是Hadoop的二进制格式文件，实际上StoreFile就是对HFile做了轻量级的包装，即StoreFile底层就是HFile。</li><li>HLogFile，HBase中WAL（Write Ahead Log）的存储格式，物理上是Hadoop的Sequence File</li></ul><p><strong>7）ROOT表和META表</strong><br>
+用户表的Regions元数据被存储在.META.表中，随着Region的增多，.META.表中的数据也会增大，并分裂成多个Regions。为了定位.META.表中各个Regions的位置，把.META.表中的所有Regions的元数据保存在-ROOT-表中，最后由Zookeeper记录-ROOT-表的位置信息。所有客户端访问用户数据前，需要首先访问Zookeeper获得-ROOT-的位置，然后方位-ROOT-表获得.META.表的位置，最后根据.META.表中的信息确定用户数据存放的位置，<span style="color:#FF0000;">-ROOT-表永远不会被分割，它只有一个Region</span>，这样可以保证最多需要三次跳转就可以定位任意一个Region。为了加快访问速度，.META.表的Regions全部保存在内存中，如果.META.表中的每一行在内存中占大约1KB，且每个Region限制为128M，下图中的三层结构可以保存Regions的数目为(128M/1KB)*(128/1KB)=2^34个。</p>
+<p><span class="image-wrap"><img alt="" src=""></span></p>
+<h2><a name="HBase%E4%BB%8B%E7%BB%8D%E5%8F%8A%E7%AE%80%E6%98%93%E5%AE%89%E8%A3%85-HBase%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B"></a>HBase数据模型</h2>
+<p>HBase是一个类似于BigTable的分布式数据库，它是一个稀疏的长期存储的（存在硬盘上）、多维度的、排序的映射表。这张表的<span style="color:#FF0000;">索引是行关键字、列关键字和时间戳</span>。HBase的数据都是字符串，没有类型。<br>
+用户在表格中存储数据，每行都有一个可排序的主键和任意多的列。由于是系数存储，所以同一张表里面的每行数据都可以由截然不同的列。<br>
+列名字的格式是“&lt;family&gt;:&lt;qualifier&gt;”（&lt;列簇&gt;:&lt;限定符&gt;），都是有字符串组成的。每一张表有一个列簇（family）集合，这个集合是固定不变的，只能通过改变表结构来改变。但是限定符（qualifier）的值相对于每一行来说都是可以改变的。HBase把用一个列簇里面的数据存储在同一个目录底下，并且HBase的写操作时琐行的，<span style="color:#FF0000;">每一行来说都是一个原子元素，都可以加锁</span>。HBase所有数据库的更新都有一个<span style="color:#FF0000;">时间戳标记</span>，每个更新都是一个新的版本，HBase会保留一定数量的版本，这个值是可以设定的，客户端可以选择获取距离某个时间点最近的版本单元的值，或者一次获取所有版本单元的值。</p>
+<p><strong>1）逻辑模型</strong><br>
+可以将表想象成一个大的映射关系，通过行健、行健+时间戳或者行健+列（列簇：列修饰符），就可以定位特定数据。由于HBase是稀疏存储数据的，所以某些列可以空白的。如下表，给出的是 www.cnn.com 网站的数据存放逻辑视图，表中仅有一行数据，行的唯一标识为"com.cnn.www" ，对这行数据的每一次逻辑修改都有一个时间戳关联对应。表中共有四列：contents:html、anchor:cnnsi.com、anchor:my.lock.ca、mime:type，每一行以前缀的方式给出其所属的列簇。<br><span class="image-wrap"><img alt="" src=""><br><span style="color:#FF0000;">行健是数据行在表中的唯一标识，并作为检索记录的主键</span>。在HBase中访问表中的行只有三种方式：通过当个行健访问；给定行健的范围访问；全表扫描。行健可以任意字符串（最大长度64KB）并按照字典序进行存储。对那些经常一起读取的行，需要对key值精心设计，以便它们能放在一起存储。</span></p>
+<p><strong>2）概念模型</strong><br>
+HBase是按照列存储的稀疏行/列矩阵，物理模型实际上就是把概念模型中的一行进行切割，并按照列族存储，这点在进行数据设计和程序开发的时候必须牢记。上面的逻辑视图在物理存储的时候应该表现下面的样子：</p>
+<p><span class="image-wrap"><img alt="" src=""></span></p>
+<p>从上图可以看出空值是不被存储的，所以查询时间戳为t8的“contents:html”将返回null，同样查询时间戳为t9,"anchor:my.lock.ca"的项也返回null。如果没有指明时间戳，那么应该返回指定列的最新数据，并且最新的值在表格里也是最先找到的，因为他们是按照时间排序的。所以，如果查询“contents”而不指明时间戳，将返回t6的数据，这种存储结构还有一个优势就是可以随时向表中的任何一个列族添加新列，而不需要事先说明。</p>
+<h2><a name="HBase%E4%BB%8B%E7%BB%8D%E5%8F%8A%E7%AE%80%E6%98%93%E5%AE%89%E8%A3%85-HBase%E5%AE%89%E8%A3%85"></a>HBase安装</h2>
+<p>HBase的安装也有三种模式：单机模式、伪分布模式和完全分布式模式，在这里只介绍完全分布模式。前提<span style="color:#FF0000;">是Hadoop集群和Zookeeper</span>已经安装完毕，并能正确运行。 <br><span style="color:#FF0000;"><strong>第一步</strong></span>：下载安装包，解压到合适位置，并将权限分配给hadoop用户（运行hadoop的账户）<br>
+这里下载的是hbase-0.94.6，Hadoop集群使用的是1.0.4，将其解压到/usr/local下并重命名为hbase</p>
+<div class="code panel">
+<div class="codeContent panelContent">
+<div class="syntaxhighlighter nogutter shell" id="highlighter_609672">
+<table border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="code">
+<div title="Hint: double-click to select code">
+<div class="line number1 index0 alt2"><code class="shell functions">sudo</code> <code class="shell functions">
+cp</code> <code class="shell plain">hbase-0.94.6.</code><code class="shell functions">tar</code><code class="shell plain">.gz</code><code class="shell plain">/usr/local</code></div>
+<div class="line number2 index1 alt1"><code class="shell functions">sudo</code> <code class="shell functions">
+tar</code> <code class="shell plain">-zxf hbase-0.94.6.</code><code class="shell functions">tar</code><code class="shell plain">.gz</code></div>
+<div class="line number3 index2 alt2"><code class="shell functions">sudo</code> <code class="shell functions">
+mv</code> <code class="shell plain">hbase-0.94.6 hbase</code></div>
+<div class="line number4 index3 alt1"><code class="shell functions">sudo</code> <code class="shell functions">
+chown</code> <code class="shell plain">-R hadoop:hadoop hbase</code></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+</div>
+<p><span style="color:#FF0000;"><strong>第二步</strong></span>：配置相关的文件<br>
+（1）配置hbase-env.sh，该文件在/usr/local/hbase/conf<br>
+设置以下值：</p>
+<div class="code panel">
+<div class="codeContent panelContent">
+<div class="syntaxhighlighter nogutter shell" id="highlighter_407108">
+<table border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="code">
+<div title="Hint: double-click to select code">
+<div class="line number1 index0 alt2"><code class="shell functions">export</code><code class="shell plain">JAVA_HOME=</code><code class="shell plain">/usr/local/java/jdk1</code><code class="shell plain">.6.0_27   </code><code class="shell comments">#Java安装路径</code></div>
+<div class="line number2 index1 alt1"><code class="shell functions">export</code><code class="shell plain">HBASE_CLASSPATH=</code><code class="shell plain">/usr/local/hadoop/conf</code>   <code class="shell comments">#HBase类路径</code></div>
+<div class="line number3 index2 alt2"><code class="shell functions">export</code><code class="shell plain">HBASE_MANAGES_ZK=</code><code class="shell functions">true</code>   <code class="shell comments">#由HBase负责启动和关闭Zookeeper</code></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+</div>
+<p>（2）配置hbase-site.xml，该文件位于/usr/local/hbase/conf</p>
+<div class="code panel">
+<div class="codeContent panelContent">
+<div class="syntaxhighlighter nogutter xml" id="highlighter_190382">
+<table border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="code">
+<div title="Hint: double-click to select code">
+<div class="line number1 index0 alt2"><code class="xml plain">&lt;</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number2 index1 alt1"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">name</code><code class="xml plain">&gt;hbase.master&lt;/</code><code class="xml keyword">name</code><code class="xml plain">&gt;</code></div>
+<div class="line number3 index2 alt2"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">value</code><code class="xml plain">&gt;master:6000&lt;/</code><code class="xml keyword">value</code><code class="xml plain">&gt;</code></div>
+<div class="line number4 index3 alt1"><code class="xml spaces">   </code><code class="xml plain">&lt;/</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number5 index4 alt2"><code class="xml spaces">   </code><code class="xml plain">&lt;</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number6 index5 alt1"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">name</code><code class="xml plain">&gt;hbase.master.maxclockskew&lt;/</code><code class="xml keyword">name</code><code class="xml plain">&gt;</code></div>
+<div class="line number7 index6 alt2"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">value</code><code class="xml plain">&gt;180000&lt;/</code><code class="xml keyword">value</code><code class="xml plain">&gt;</code></div>
+<div class="line number8 index7 alt1"><code class="xml spaces">   </code><code class="xml plain">&lt;/</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number9 index8 alt2"><code class="xml spaces">   </code><code class="xml plain">&lt;</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number10 index9 alt1"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">name</code><code class="xml plain">&gt;hbase.rootdir&lt;/</code><code class="xml keyword">name</code><code class="xml plain">&gt;</code></div>
+<div class="line number11 index10 alt2"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">value</code><code class="xml plain">&gt;hdfs://master:9000/hbase&lt;/</code><code class="xml keyword">value</code><code class="xml plain">&gt;</code></div>
+<div class="line number12 index11 alt1"><code class="xml spaces">   </code><code class="xml plain">&lt;/</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number13 index12 alt2"><code class="xml spaces">   </code><code class="xml plain">&lt;</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number14 index13 alt1"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">name</code><code class="xml plain">&gt;hbase.cluster.distributed&lt;/</code><code class="xml keyword">name</code><code class="xml plain">&gt;</code></div>
+<div class="line number15 index14 alt2"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">value</code><code class="xml plain">&gt;true&lt;/</code><code class="xml keyword">value</code><code class="xml plain">&gt;</code></div>
+<div class="line number16 index15 alt1"><code class="xml spaces">   </code><code class="xml plain">&lt;/</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number17 index16 alt2"><code class="xml spaces">   </code><code class="xml plain">&lt;</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number18 index17 alt1"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">name</code><code class="xml plain">&gt;hbase.zookeeper.quorum&lt;/</code><code class="xml keyword">name</code><code class="xml plain">&gt;</code></div>
+<div class="line number19 index18 alt2"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">value</code><code class="xml plain">&gt;master&lt;/</code><code class="xml keyword">value</code><code class="xml plain">&gt;</code></div>
+<div class="line number20 index19 alt1"><code class="xml spaces">   </code><code class="xml plain">&lt;/</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number21 index20 alt2"><code class="xml spaces">   </code><code class="xml plain">&lt;</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number22 index21 alt1"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">name</code><code class="xml plain">&gt;hbase.zookeeper.property.dataDir&lt;/</code><code class="xml keyword">name</code><code class="xml plain">&gt;</code></div>
+<div class="line number23 index22 alt2"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">value</code><code class="xml plain">&gt;/home/${user.name}/tmp/zookeeper&lt;/</code><code class="xml keyword">value</code><code class="xml plain">&gt;</code></div>
+<div class="line number24 index23 alt1"><code class="xml spaces">   </code><code class="xml plain">&lt;/</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number25 index24 alt2"><code class="xml spaces">   </code><code class="xml plain">&lt;</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+<div class="line number26 index25 alt1"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">name</code><code class="xml plain">&gt;dfs.replication&lt;/</code><code class="xml keyword">name</code><code class="xml plain">&gt;</code></div>
+<div class="line number27 index26 alt2"><code class="xml spaces">           </code><code class="xml plain">&lt;</code><code class="xml keyword">value</code><code class="xml plain">&gt;1&lt;/</code><code class="xml keyword">value</code><code class="xml plain">&gt;</code></div>
+<div class="line number28 index27 alt1"><code class="xml spaces">   </code><code class="xml plain">&lt;/</code><code class="xml keyword">property</code><code class="xml plain">&gt;</code></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+</div>
+<p>其中，hbase.master是指定运行HMaster的服务器及端口号；hbase.master.maxclockskew是用来防止HBase节点之间时间不一致造成regionserver启动失败，默认值是30000；hbase.rootdir指定HBase的存储目录；hbase.cluster.distributed设置集群处于分布式模式；hbase.zookeeper.quorum设置Zookeeper节点的主机名，它的值个数必须是奇数；hbase.zookeeper.property.dataDir设置Zookeeper的目录，默认为/tmp，dfs.replication设置数据备份数，集群节点小于3时需要修改，本次试验是一个节点，所以修改为1。</p>
+<p>（3）配置regionservers，该文件位于/usr/local/hbase/conf<br>
+设置所运行HBase的机器，此文件配置和hadoop中的slaves类似，一行指定一台机器，本次试验仅用一台机器，设置master即可。</p>
+<p>（4）设置HBase环境变量，文件位于/etc/profile<br>
+在文件末尾添加：</p>
+<div class="code panel">
+<div class="codeContent panelContent">
+<div class="syntaxhighlighter nogutter shell" id="highlighter_719905">
+<table border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="code">
+<div title="Hint: double-click to select code">
+<div class="line number1 index0 alt2"><code class="shell spaces">   </code><code class="shell comments">#hbase Env</code></div>
+<div class="line number2 index1 alt1"><code class="shell functions">export</code><code class="shell plain">HBASE_HOME=</code><code class="shell plain">/usr/local/hbase</code></div>
+<div class="line number3 index2 alt2"><code class="shell functions">export</code><code class="shell plain">PATH=$PATH:$HBASE_HOME</code><code class="shell plain">/bin</code></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+</div>
+<p>使之生效：source /etc/profile<br><span style="color:#FF0000;"><strong>第三步</strong></span>：运行测试</p>
+<p>启动hadoop后，在终端输入start-hbase.sh，查看运行的进程：</p>
+<p><span class="image-wrap"><img alt="" src=""></span></p>
+<p>关闭：stop-hbase.sh</p>
+            </div>
+                </div>

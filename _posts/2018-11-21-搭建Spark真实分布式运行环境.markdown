@@ -1,0 +1,141 @@
+---
+layout:     post
+title:      搭建Spark真实分布式运行环境
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为原创博客，未经允许，请勿转载。					https://blog.csdn.net/u013095333/article/details/83065458				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1><a id="Spark_0"></a>搭建Spark真实分布式运行环境</h1>
+<p></p><div class="toc"><h3>文章目录</h3><ul><li><a href="#Spark_0" rel="nofollow">搭建Spark真实分布式运行环境</a></li><ul><li><a href="#HDFSspark_standslone_45" rel="nofollow">配置不依赖于HDFS的spark standslone模式</a></li><ul><li><a href="#_47" rel="nofollow">准备工作</a></li><ul><li><a href="#_49" rel="nofollow">配置基本环境</a></li><li><a href="#_61" rel="nofollow">配置免密登录</a></li></ul><li><a href="#spark_standalone_HDFS_113" rel="nofollow">分布式spark standalone 环境部署，不依赖于HDFS</a></li><ul><li><a href="#sparkenvsh_119" rel="nofollow">配置spark-env.sh文件</a></li><li><a href="#_slavestemplate__135" rel="nofollow">配置 slaves.template 文件</a></li><li><a href="#sparkslaves_149" rel="nofollow">将配置好的spark文件分发至slaves机器</a></li><li><a href="#spark_156" rel="nofollow">启动spark</a></li></ul><li><a href="#_180" rel="nofollow">测试</a></li><ul><li><a href="#slave1slave2master_184" rel="nofollow">添加slave1和slave2到master的免密登录</a></li></ul><li><a href="#spark_219" rel="nofollow">运行spark执行任务</a></li></ul></ul></ul></div><br>
+Spark是一个计算分析平台，使用内存进行计算，相当于只是一个计算框架。<p></p>
+<p>Hadoop是一个大数据平台，使用磁盘进行计算。包括HDFS存储平台，MapReduce计算分析平台，Yarn资源调度平台。</p>
+<p>Spark部署模式：</p>
+<p>Local</p>
+<p>Standalone</p>
+<p>Yarn</p>
+<p>Mesos</p>
+<p>具体有什么样的区别，请参考：<a href="https://blog.csdn.net/WYpersist/article/details/79731621" rel="nofollow">https://blog.csdn.net/WYpersist/article/details/79731621</a></p>
+<p>一点点小结：</p>
+<p><strong>1.local</strong>(本地模式)：常用于本地开发测试，本地分为local单线程和local-cluster多线程</p>
+<p><strong>2.standalone</strong>(集群模式)：典型的Mater/slave模式，不过也能看出Master是有单点故障的；Spark支持ZooKeeper来实现 HA</p>
+<p><strong>3.on yarn</strong>(集群模式)：运行在 yarn 资源管理器框架之上，由 yarn 负责资源管理，Spark 负责任务调度和计算</p>
+<p><strong>4.on mesos</strong>(集群模式)：运行在 mesos 资源管理器框架之上，由 mesos 负责资源管理，Spark 负责任务调度和计算</p>
+<p><strong>5.on cloud</strong>(集群模式)：比如 AWS 的 EC2，使用这个模式能很方便的访问 Amazon的 S3;Spark 支持多种分布式存储系统：HDFS 和 S3</p>
+<p>由于只想跑spark，暂时用不到HDFS，所以就了解了一下：</p>
+<p><img src="https://img-blog.csdn.net/20181015215222319?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTMwOTUzMzM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<p>配置standalone模式，不一定需要配置hadoop，因为可以不需要HDFS，从本地文件读取数据需要在每台机器上保证路径一致，或者可以使用NFS代替HDFS。</p>
+<h2><a id="HDFSspark_standslone_45"></a>配置不依赖于HDFS的spark standslone模式</h2>
+<h3><a id="_47"></a>准备工作</h3>
+<h4><a id="_49"></a>配置基本环境</h4>
+<p>基本环境（在三台虚拟机上 ubuntu18.04）：</p>
+<p>安装统一在 /home/wj/apps/ 目录下</p>
+<p>Java：1.8.0</p>
+<p>Scala：2.11.8</p>
+<p>Maven：3.5.4</p>
+<h4><a id="_61"></a>配置免密登录</h4>
+<p>免密登录，现在只配置master免密登录slaves ，我的虚拟机的IP信息如下：</p>
+<pre><code class="prism language-bash">spark-master ：192.168.73.134
+spark-slave1 ：192.168.73.135
+spack-slave2 ：192.168.73.137
+</code></pre>
+<p>安装ssh-server，ubuntu 18.04中只默认安装了 ssh-agent，可以使用命令 ps –e | grep ssh查看。</p>
+<pre><code class="prism language-bash"><span class="token function">sudo</span> <span class="token function">apt-get</span> <span class="token function">install</span> openssh-server
+</code></pre>
+<p>开启ssh-server服务：</p>
+<pre><code class="prism language-bash"><span class="token function">service</span> sshd restart
+</code></pre>
+<p>在 master 上执行 <code>ssh-keygen -t rsa</code> 生成对应 rsa key pair ，在 <code>~/.ssh/</code> 目录下</p>
+<p>将 id_rsa.pub 内容拷贝至 authorized_keys，将这个 authorized_keys 文件放置在 slaves 机器上的 .ssh 目录下便可从该 master 单向免密登录。</p>
+<p>注意，有时需要修改 authorized_keys 的权限：</p>
+<pre><code class="prism language-bash"><span class="token function">chmod</span> 600 authorized_keys
+</code></pre>
+<p><strong>Host文件配置</strong></p>
+<p>为了不直接使用IP，可以通过设置hosts文件达到ssh  Spark-slave1这样的的效果（三个节点设置相同）</p>
+<pre><code class="prism language-bash"><span class="token function">sudo</span> gedit /etc/hosts
+</code></pre>
+<p>在文件尾部添加如下行，保存后退出：</p>
+<pre><code class="prism language-bash">192.168.73.134	spark-master
+192.168.73.135	spark-slave1
+192.168.73.137	spark-slave2
+</code></pre>
+<p>测试，可通过在spark-master上通过 ssh spark-slave1 命令登录到 spark-slave1 上</p>
+<p>（如果slave需要免密登录master，还需要继续配置，这里暂时先不进行配置，<em>一种完全错误的侥幸心理</em>）</p>
+<h3><a id="spark_standalone_HDFS_113"></a>分布式spark standalone 环境部署，不依赖于HDFS</h3>
+<p>使用spark版本为官网下载预编译版本：<code>spark-2.2.0-bin-hadoop2.7.tgz</code></p>
+<p>安装在 <code>/home/wj/apps/</code> 目录下</p>
+<h4><a id="sparkenvsh_119"></a>配置spark-env.sh文件</h4>
+<pre><code class="prism language-bash"><span class="token function">cd</span> conf/
+<span class="token function">mv</span> spark-env.sh.template spark-env.sh
+gedit spark-env.sh
+</code></pre>
+<p>在后面添加 ：</p>
+<pre><code class="prism language-bash"><span class="token function">export</span> JAVA_HOME<span class="token operator">=</span>/home/wj/apps/jdk1.8.0_181
+<span class="token function">export</span> SPARK_MASTER_IP<span class="token operator">=</span>spark-master
+<span class="token function">export</span> SPARK_MASTER_PORT<span class="token operator">=</span>7077
+</code></pre>
+<h4><a id="_slavestemplate__135"></a>配置 slaves.template 文件</h4>
+<pre><code class="prism language-bash"><span class="token function">mv</span> slaves.template slaves
+gedit slaves
+</code></pre>
+<p>在后面添加 ：</p>
+<pre><code class="prism language-bash">spark-slave1
+spark-slave2
+</code></pre>
+<h4><a id="sparkslaves_149"></a>将配置好的spark文件分发至slaves机器</h4>
+<pre><code class="prism language-bash"><span class="token function">scp</span> -r spark-2.2.0-bin-hadoop2.7 spark-slave1:/home/wj/apps/
+<span class="token function">scp</span> -r spark-2.2.0-bin-hadoop2.7 spark-slave2:/home/wj/apps/
+</code></pre>
+<h4><a id="spark_156"></a>启动spark</h4>
+<p>在spark下的文件夹sbin中，执行命令：</p>
+<pre><code class="prism language-bash">./start-all.sh
+</code></pre>
+<p>可见到：</p>
+<p>spark-master：</p>
+<p><img src="https://img-blog.csdn.net/20181015215242295?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTMwOTUzMzM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<p>spark-slave1：</p>
+<p><img src="https://img-blog.csdn.net/20181015215252109?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTMwOTUzMzM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<p>spark-slave2：</p>
+<p><img src="https://img-blog.csdn.net/20181015215259344?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTMwOTUzMzM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<p>配置完成</p>
+<h3><a id="_180"></a>测试</h3>
+<p>通过master主机上访问<a href="http://localhost:8080/" rel="nofollow">http://localhost:8080/</a> 发现Alive workers只有1，且过一段时间之后，slave1和slave2上的worker会死掉，考虑大概率是因为ssh免密登录是单向的。</p>
+<h4><a id="slave1slave2master_184"></a>添加slave1和slave2到master的免密登录</h4>
+<p>在slave1和slave2上生成公钥私钥对（按照上述方式），然后使用<code>ssh-copy-id</code>命令直接完成权限授予，在当前机器下，若想访问某台机器，便将其公钥复制到某台机器上。</p>
+<p><code>ssh-copy-id</code> 命令可以把本地主机的公钥复制到远程主机的<code>authorized_keys</code>文件上，<code>ssh-copy-id</code>命令也会给远程主机的用户主目录（home）和<code>~/.ssh</code>, 和<code>~/.ssh/authorized_keys</code>设置合适的权限。</p>
+<p>现在三台机器之间互相可以免密登录。</p>
+<p>再次启动，slaves 上的 worker 不会自动死掉。</p>
+<p>但是：Alive workers仍然显示只有1个，在网上查询了一下，问题原因如下，解决方案也很简单，在master机器上屏蔽127.0.0.1相关的映射就可以了</p>
+<p><img src="https://img-blog.csdn.net/20181015215309763?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTMwOTUzMzM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+但是，在后一次实践中，发现这个操作方式存在两点问题</p>
+<p>第一，如果127.0.1.1这个地址映射到了nameserver中，即nameserver必须采用这个地址进行域名解析，该文件在/etc/resolv.conf中，如果在/etc/hosts中删除的话，会造成无法联网的问题。在ubuntu16.04中，在我实践过程中，是这个地址，在ubuntu18.04中为127.0.0.53，删除之后无故障。在虚拟机集群中，删除之后该问题得到解决，但是在物理机上，发现并没有解决问题。</p>
+<p>第二，发现最终原因在于/spark/conf/spark-env.sh的配置写得太简陋了，关于slave相关的信息不全，补全之后，这个问题得到了解决。</p>
+<p>之前的配置信息：</p>
+<pre><code>export JAVA_HOME=/home/wj/apps/jdk1.8.0_181
+export SPARK_MASTER_IP=spark-master
+export SPARK_MASTER_PORT=7077
+</code></pre>
+<p>适当补全之后的配置信息：</p>
+<pre><code>export JAVA_HOME=/home/wj/apps/jdk1.8.0_181
+export SPARK_MASTER_IP=spark-master
+export SPARK_MASTER_PORT=7077
+export SPARK_MASTER_HOST=spark-master
+export SPARK_LOCAL_IP=spark-slave
+</code></pre>
+<p>环境整体上应该配置完成</p>
+<h3><a id="spark_219"></a>运行spark执行任务</h3>
+<p>通过bin目录下的<code>spark-shell</code>启动scala面板，<strong>需要给超级权限</strong></p>
+<pre><code class="prism language-bash"><span class="token function">sudo</span> ./spark-shell --master spark://spark-master:7077 --executor-memory 512m --total-executor-cores 3
+</code></pre>
+<p><code>--master</code> 如果在机群中有多个spark集群，需要使用这个参数指定具体是哪一个spark集群</p>
+<p>如果只使用 <code>--master</code> 参数，则启动的是单机版本，<strong>启动多机版本需要指定后面两个参数，第一个参数表示每台机器可用的内存，第二个参数表示所有机器加起来可以使用的core数。</strong></p>
+<p>这与sparkUI上的一致，每个application需要提供cores和memory</p>
+<p><img src="https://img-blog.csdn.net/20181015215320207?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTMwOTUzMzM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<p><img src="https://img-blog.csdn.net/20181015215328382?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTMwOTUzMzM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<p><img src="https://img-blog.csdn.net/20181015215335562?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3UwMTMwOTUzMzM=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

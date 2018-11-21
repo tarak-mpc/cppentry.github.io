@@ -1,0 +1,411 @@
+---
+layout:     post
+title:      Phoenix二级索引再探
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：小兄弟，慢慢熬吧......					https://blog.csdn.net/u013850277/article/details/80978858				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<ul>
+<li>目前分两种情况测试： <br>
+<ul><li>一种是该Hbase表已存在，通过该Hbase表映射一张对应的Phoenix表；</li>
+<li>另一种是该Hbase表不存在，通过Phoenix创建对应的Hbase表。</li></ul></li>
+</ul>
+
+<hr>
+
+
+
+<h2 id="hbase表存在的情况">Hbase表存在的情况：</h2>
+
+
+
+<h4 id="1通过hbase-shell-创建hbase表">1、通过hbase shell 创建Hbase表</h4>
+
+
+
+<pre class="prettyprint"><code class=" hljs coffeescript">hbase(main):<span class="hljs-number">009</span>:<span class="hljs-number">0</span>&gt; create <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'info'</span>
+<span class="hljs-number">0</span> row(s) <span class="hljs-keyword">in</span> <span class="hljs-number">1.5930</span> seconds<span class="hljs-function">
+
+=&gt;</span> <span class="hljs-attribute">Hbase</span>::Table - t_hbase1
+
+hbase(main):<span class="hljs-number">010</span>:<span class="hljs-number">0</span>&gt; desc <span class="hljs-string">'t_hbase1'</span>
+Table t_hbase1 <span class="hljs-keyword">is</span> ENABLED
+t_hbase1
+COLUMN FAMILIES DESCRIPTION
+{NAME<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'info'</span>, BLOOMFILTER<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'ROW'</span>, VERSIONS<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'1'</span>, IN_MEMORY<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'false'</span>, KEEP_DELETED_CELLS<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'FALSE'</span>, DATA_BLOCK_ENCODING<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'NONE'</span>, TTL<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'FOREVER'</span>, COMPRESSION<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'NONE'</span>, MIN_VERS
+IONS<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'0'</span>, BLOCKCACHE<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'true'</span>, BLOCKSIZE<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'65536'</span>, REPLICATION_SCOPE<span class="hljs-function"> =&gt;</span> <span class="hljs-string">'0'</span>}
+<span class="hljs-number">1</span> row(s) <span class="hljs-keyword">in</span> <span class="hljs-number">0.1380</span> seconds</code></pre>
+
+<ul>
+<li>2.这里同时建立hive外部表用来关联hbase1表</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbnet">CREATE EXTERNAL TABLE t_hbase1(
+<span class="hljs-keyword">key</span> <span class="hljs-built_in">string</span>, 
+id <span class="hljs-built_in">string</span>,
+salary <span class="hljs-built_in">string</span>,
+start_date <span class="hljs-built_in">string</span>,
+end_date <span class="hljs-built_in">string</span>)     
+STORED <span class="hljs-keyword">BY</span> <span class="hljs-comment">'org.apache.hadoop.hive.hbase.HBaseStorageHandler'     </span>
+<span class="hljs-keyword">WITH</span> SERDEPROPERTIES (<span class="hljs-string">"hbase.columns.mapping"</span> = <span class="hljs-string">":key,info:id,info:salary,info:start_date,info:end_date"</span>)     
+TBLPROPERTIES(<span class="hljs-string">"hbase.table.name"</span> = <span class="hljs-string">"t_hbase1"</span>);       </code></pre>
+
+<ul>
+<li><p>测试发现：hive外部表关联hbase表并不受hbase表是否通过phoenix还是hbase api插入数据的影响</p></li>
+<li><p>3.往t_hbase1中添加数据</p></li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">      hbase(main):<span class="hljs-number">010</span>:<span class="hljs-number">0</span>&gt; <span class="hljs-built_in">put</span> <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'1'</span>,<span class="hljs-string">'info:id'</span>,<span class="hljs-string">'1'</span>
+      hbase(main):<span class="hljs-number">010</span>:<span class="hljs-number">0</span>&gt; <span class="hljs-built_in">put</span> <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'1'</span>,<span class="hljs-string">'info:salary'</span>,<span class="hljs-string">'1'</span>
+      hbase(main):<span class="hljs-number">011</span>:<span class="hljs-number">0</span>&gt; <span class="hljs-built_in">put</span> <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'1'</span>,<span class="hljs-string">'info:start_date'</span>,<span class="hljs-string">'2017-09-18'</span>
+      hbase(main):<span class="hljs-number">012</span>:<span class="hljs-number">0</span>&gt; <span class="hljs-built_in">put</span> <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'1'</span>,<span class="hljs-string">'info:end_date'</span>,<span class="hljs-string">'2017-09-18'</span>
+
+hbase(main):<span class="hljs-number">016</span>:<span class="hljs-number">0</span>&gt; scan <span class="hljs-string">'t_hbase1'</span>
+ROW                          COLUMN+CELL
+ <span class="hljs-number">1</span>                           column=info:end_date, timestamp=<span class="hljs-number">1530671481354</span>, <span class="hljs-built_in">value</span>=<span class="hljs-number">2017</span>-<span class="hljs-number">09</span>-<span class="hljs-number">18</span>
+ <span class="hljs-number">1</span>                           column=info:id, timestamp=<span class="hljs-number">1530671453795</span>, <span class="hljs-built_in">value</span>=<span class="hljs-number">1</span>
+ <span class="hljs-number">1</span>                           column=info:salary, timestamp=<span class="hljs-number">1530671469153</span>, <span class="hljs-built_in">value</span>=<span class="hljs-number">1</span>
+ <span class="hljs-number">1</span>                           column=info:start_date, timestamp=<span class="hljs-number">1530671475444</span>, <span class="hljs-built_in">value</span>=<span class="hljs-number">2017</span>-<span class="hljs-number">09</span>-<span class="hljs-number">18</span></code></pre>
+
+<ul>
+<li>4、创建phoenix表关联t_hbase1表 <br>
+    进入phoenix shell </li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs asciidoc">[root@hdp3 ~]# /usr/hdp/2.5.3.0-37/phoenix/bin/sqlline.py hdp1,hdp2,hdp3:2181
+<span class="hljs-code"> create table "t_hbase1"(</span>
+"ROW" varchar primary key,
+<span class="hljs-code"> "info"."start_date" varchar ,</span>
+<span class="hljs-code">  "info"."end_date" varchar ,</span>
+<span class="hljs-code">  "info"."id" varchar ,</span>
+<span class="hljs-code">  "info"."salary" varchar);</span>
+
+
+
+通过phoenix查询数据
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from "t_hbase1";
++------+-------------+-------------+-----+---------+</span>
+<span class="hljs-header">| ROW  | start_date  |  end_date   | id  | salary  |
++------+-------------+-------------+-----+---------+</span>
+<span class="hljs-header">| 1    | 2017-09-18  | 2017-09-18  | 1   | 1       |
++------+-------------+-------------+-----+---------+</span>
+
+查询数据量
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select count(*) from "t_hbase1";
++-----------+</span>
+<span class="hljs-header">| COUNT(1)  |
++-----------+</span>
+<span class="hljs-header">| 1         |
++-----------+</span></code></pre>
+
+<ul>
+<li>5、通过hbase shell添加数据到t_hbase1</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">      hbase(main):<span class="hljs-number">010</span>:<span class="hljs-number">0</span>&gt; <span class="hljs-built_in">put</span> <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'2'</span>,<span class="hljs-string">'info:id'</span>,<span class="hljs-string">'2'</span>
+      hbase(main):<span class="hljs-number">010</span>:<span class="hljs-number">0</span>&gt; <span class="hljs-built_in">put</span> <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'2'</span>,<span class="hljs-string">'info:salary'</span>,<span class="hljs-string">'2'</span>
+      hbase(main):<span class="hljs-number">011</span>:<span class="hljs-number">0</span>&gt; <span class="hljs-built_in">put</span> <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'2'</span>,<span class="hljs-string">'info:start_date'</span>,<span class="hljs-string">'2017-09-18'</span>
+      hbase(main):<span class="hljs-number">012</span>:<span class="hljs-number">0</span>&gt; <span class="hljs-built_in">put</span> <span class="hljs-string">'t_hbase1'</span>,<span class="hljs-string">'2'</span>,<span class="hljs-string">'info:end_date'</span>,<span class="hljs-string">'2017-09-18'</span>
+</code></pre>
+
+<ul>
+<li>6、这时通过phoenix查询如下</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs asciidoc"><span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select count(*) from "t_hbase1";
++-----------+</span>
+<span class="hljs-header">| COUNT(1)  |
++-----------+</span>
+<span class="hljs-header">| 2         |
++-----------+</span>
+1 row selected (0.029 seconds)
+
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from "t_hbase1";
++------+-------------+-------------+-----+---------+</span>
+<span class="hljs-header">| ROW  | start_date  |  end_date   | id  | salary  |
++------+-------------+-------------+-----+---------+</span>
+| 1    | 2017-09-18  | 2017-09-18  | 1   | 1       |
+<span class="hljs-header">| 2    | 2017-09-18  | 2017-09-18  | 2   | 2       |
++------+-------------+-------------+-----+---------+</span>
+2 rows selected (0.034 seconds)</code></pre>
+
+<ul>
+<li>7、通过phoenix shell插入数据到t_hbase1表</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">   UPSERT <span class="hljs-keyword">INTO</span> <span class="hljs-string">"t_hbase1"</span> VALUES(<span class="hljs-string">'3'</span>,<span class="hljs-string">'2017-09-18'</span>,<span class="hljs-string">'2017-09-18'</span>,<span class="hljs-string">'3'</span>,<span class="hljs-string">'3'</span>);</code></pre>
+
+<ul>
+<li>8、查询结果并分析</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs asciidoc">phoenix shell:
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from "t_hbase1";
++------+-------------+-------------+-----+---------+</span>
+<span class="hljs-header">| ROW  | start_date  |  end_date   | id  | salary  |
++------+-------------+-------------+-----+---------+</span>
+| 1    | 2017-09-18  | 2017-09-18  | 1   | 1       |
+| 2    | 2017-09-18  | 2017-09-18  | 2   | 2       |
+<span class="hljs-header">| 3    | 2017-09-18  | 2017-09-18  | 3   | 3       |
++------+-------------+-------------+-----+---------+</span>
+3 rows selected (0.057 seconds)
+
+hbase shell:
+hbase(main):022:0&gt; scan <span class="hljs-emphasis">'t_hbase1'</span>
+ROW                       COLUMN+CELL
+<span class="hljs-code"> 1                        column=info:_0, timestamp=1530671481354, value=</span>
+<span class="hljs-code"> 1                        column=info:end_date, timestamp=1530671481354, value=2017-09-18</span>
+<span class="hljs-code"> 1                        column=info:id, timestamp=1530671453795, value=1</span>
+<span class="hljs-code"> 1                        column=info:salary, timestamp=1530671469153, value=1</span>
+<span class="hljs-code"> 1                        column=info:start_date, timestamp=1530671475444, value=2017-09-18</span>
+<span class="hljs-code"> 2                        column=info:end_date, timestamp=1530672268599, value=2017-09-18</span>
+<span class="hljs-code"> 2                        column=info:id, timestamp=1530672247623, value=2</span>
+<span class="hljs-code"> 2                        column=info:salary, timestamp=1530672253810, value=2</span>
+<span class="hljs-code"> 2                        column=info:start_date, timestamp=1530672262302, value=2017-09-18</span>
+<span class="hljs-code"> 3                        column=info:_0, timestamp=1530672889061, value=x</span>
+<span class="hljs-code"> 3                        column=info:end_date, timestamp=1530672889061, value=2017-09-18</span>
+<span class="hljs-code"> 3                        column=info:id, timestamp=1530672889061, value=3</span>
+<span class="hljs-code"> 3                        column=info:salary, timestamp=1530672889061, value=3</span>
+<span class="hljs-code"> 3                        column=info:start_date, timestamp=1530672889061, value=2017-09-18</span>
+
+hive shell:
+hive&gt; select * from t<span class="hljs-emphasis">_hbase1;
+OK
+1       1       1       2017-09-18      2017-09-18
+2       2       2       2017-09-18      2017-09-18
+3       3       3       2017-09-18      2017-09-18
+Time taken: 0.902 seconds, Fetched: 3 row(s)
+
+</span>通过phoenix删除指定数据
+0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; delete from "t<span class="hljs-emphasis">_hbase1" where "id"='3';
+1 row affected (0.052 seconds)
+0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from "t_</span>hbase1";
+<span class="hljs-code">+------+</span>-------------<span class="hljs-code">+-------------+</span>-----<span class="hljs-code">+---------+</span>
+<span class="hljs-header">| ROW  | start_date  |  end_date   | id  | salary  |
++------+-------------+-------------+-----+---------+</span>
+| 1    | 2017-09-18  | 2017-09-18  | 1   | 1       |
+<span class="hljs-header">| 2    | 2017-09-18  | 2017-09-18  | 2   | 2       |
++------+-------------+-------------+-----+---------+</span>
+2 rows selected (0.057 seconds)</code></pre>
+
+<ul>
+<li>测试结果分析： <br>
+<ul><li>通过上述结果表明：无论通过hbase还是phoenix操作数据，在没有二级索引的情况下hbase中的数据与phoenix的数据都是可以保持同步的。</li></ul></li>
+</ul>
+
+<hr>
+
+
+
+<h3 id="创建phoenix对应表的二级索引">创建phoenix对应表的二级索引</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbnet">CREATE INDEX THBASE1_INDEX_ID <span class="hljs-keyword">ON</span> <span class="hljs-string">"t_hbase1"</span>(<span class="hljs-string">"info"</span>.<span class="hljs-string">"id"</span>);
+
+创建成功后，phoenix中会添加一张索引表（THBASE1_INDEX_ID ），
+当然同时hbase中也会添加对应表（THBASE1_INDEX_ID ）
+该索引表只存储Row与ID，即存储了hbase原rowkey与二级索引对应的字段，如下所示：
+<span class="hljs-number">0</span>: jdbc:phoenix:hdp04,hdp05,hdp06:<span class="hljs-number">2181</span>&gt; <span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> THBASE1_INDEX_ID ;
++----------+-------+
+| info:id  | :ROW  |
++----------+-------+
+| <span class="hljs-number">1</span>        | <span class="hljs-number">1</span>     |
+| <span class="hljs-number">2</span>        | <span class="hljs-number">2</span>     |
++----------+-------+
+
+因此笔者觉得如果是想通过二级索引快速查询到对应的数据，可先通过二级索引查询到其对应的rowkey,
+再通过该rowkey查询实际数据，实测速度可提升几十陪至百陪，sql如下：
+<span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> <span class="hljs-string">"t_hbase1"</span>  t1 
+INNER <span class="hljs-keyword">JOIN</span>  
+(<span class="hljs-keyword">select</span> <span class="hljs-string">"ROW"</span> <span class="hljs-keyword">FROM</span> <span class="hljs-string">"t_hbase1"</span>  <span class="hljs-keyword">WHERE</span> <span class="hljs-string">"id"</span>=<span class="hljs-comment">'200002') t2</span>
+<span class="hljs-keyword">on</span> t1.<span class="hljs-string">"ROW"</span> = t2.<span class="hljs-string">"ROW"</span>;
+
+或者
+<span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> <span class="hljs-string">"t_hbase1"</span>  <span class="hljs-keyword">where</span> <span class="hljs-string">"ROW"</span> <span class="hljs-keyword">in</span> 
+(<span class="hljs-keyword">select</span> <span class="hljs-string">"ROW"</span> <span class="hljs-keyword">FROM</span> <span class="hljs-string">"t_hbase1"</span>  <span class="hljs-keyword">WHERE</span> <span class="hljs-string">"id"</span>=<span class="hljs-comment">'200002');</span>
+测试发现第二种方式会快一点。</code></pre>
+
+<ul>
+<li>1、同样进行上述操作</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs asciidoc">通过hbase shell添加数据到t<span class="hljs-emphasis">_hbase1
+      hbase(main):010:0&gt; put 't_</span>hbase1',<span class="hljs-emphasis">'3'</span>,<span class="hljs-emphasis">'info:id'</span>,<span class="hljs-emphasis">'3'</span>
+<span class="hljs-code">      hbase(main):010:0&gt; put 't_hbase1','3','info:salary','3'</span>
+<span class="hljs-code">      hbase(main):011:0&gt; put 't_hbase1','3','info:start_date','2017-09-18'</span>
+<span class="hljs-code">      hbase(main):012:0&gt; put 't_hbase1','3','info:end_date','2017-09-18'</span>
+
+插入后查询结果如下所示：
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from "t_hbase1";
++------+-------------+-------------+-----+---------+</span>
+<span class="hljs-header">| ROW  | start_date  |  end_date   | id  | salary  |
++------+-------------+-------------+-----+---------+</span>
+| 1    | 2017-09-18  | 2017-09-18  | 1   | 1       |
+| 2    | 2017-09-18  | 2017-09-18  | 2   | 2       |
+<span class="hljs-header">| 3    | 2017-09-18  | 2017-09-18  | 3   | 3       |
++------+-------------+-------------+-----+---------+</span>
+3 rows selected (0.058 seconds)
+
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select count(*) from "t_hbase1";
++-----------+</span>
+<span class="hljs-header">| COUNT(1)  |
++-----------+</span>
+<span class="hljs-header">| 2         |
++-----------+</span>
+1 row selected (0.083 seconds)
+
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from "t_hbase1" where "id"='3';
++------+-------------+-------------+-----+---------+</span>
+<span class="hljs-header">| ROW  | start_date  |  end_date   | id  | salary  |
++------+-------------+-------------+-----+---------+</span>
+<span class="hljs-header">| 3    | 2017-09-18  | 2017-09-18  | 3   | 3       |
++------+-------------+-------------+-----+---------+</span>
+1 row selected (0.059 seconds)
+
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from THBASE1_INDEX_ID;
++----------+-------+</span>
+<span class="hljs-header">| info:id  | :ROW  |
++----------+-------+</span>
+| 1        | 1     |
+<span class="hljs-header">| 2        | 2     |
++----------+-------+</span>
+2 rows selected (0.034 seconds)</code></pre>
+
+<ul>
+<li>2.通过phoenix shell 插入数据</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs asciidoc"><span class="hljs-code"> UPSERT INTO "t_hbase1" VALUES('4','2017-09-18','2017-09-18','4','4');</span>
+
+插入后查询结果如下所示：
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from THBASE1_INDEX_ID;
++----------+-------+</span>
+<span class="hljs-header">| info:id  | :ROW  |
++----------+-------+</span>
+| 1        | 1     |
+| 2        | 2     |
+<span class="hljs-header">| 4        | 4     |
++----------+-------+</span>
+3 rows selected (0.055 seconds)
+
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select count(*) from "t_hbase1";
++-----------+</span>
+<span class="hljs-header">| COUNT(1)  |
++-----------+</span>
+<span class="hljs-header">| 3         |
++-----------+</span>
+1 row selected (0.027 seconds)
+
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05,hdp06:2181&gt; select * from "t_hbase1";
++------+-------------+-------------+-----+---------+</span>
+<span class="hljs-header">| ROW  | start_date  |  end_date   | id  | salary  |
++------+-------------+-------------+-----+---------+</span>
+| 1    | 2017-09-18  | 2017-09-18  | 1   | 1       |
+| 2    | 2017-09-18  | 2017-09-18  | 2   | 2       |
+| 3    | 2017-09-18  | 2017-09-18  | 3   | 3       |
+<span class="hljs-header">| 4    | 2017-09-18  | 2017-09-18  | 4   | 4       |
++------+-------------+-------------+-----+---------+</span>
+4 rows selected (0.113 seconds)</code></pre>
+
+<hr>
+
+
+
+<h2 id="批量导入确认是否会自动更新索引表">批量导入确认是否会自动更新索引表</h2>
+
+<ul>
+<li>通过测试确认批量导入会自动更新phoenix二级索引（这个结果不受是否先有hbase表的影响），下面以直接创建phoenix表自动生成hbase表为例，具体测试如下</li>
+</ul>
+
+<p>创建phoenix表</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> example (
+    my_pk bigint <span class="hljs-keyword">not</span> <span class="hljs-keyword">null</span>,
+    m.first_name <span class="hljs-keyword">varchar</span>(<span class="hljs-number">50</span>),
+    m.last_name <span class="hljs-keyword">varchar</span>(<span class="hljs-number">50</span>) 
+    <span class="hljs-keyword">CONSTRAINT</span> pk <span class="hljs-keyword">PRIMARY</span> <span class="hljs-keyword">KEY</span> (my_pk));</span></code></pre>
+
+<p>创建二级索引</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"> <span class="hljs-operator"><span class="hljs-keyword">create</span> index example_first_name_index <span class="hljs-keyword">on</span> example(m.first_name);</span></code></pre>
+
+<p>创建data.csv文件</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ">12345,John,Doe
+67890,Mary,Poppins</code></pre>
+
+<p>批量写入数据</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[root@hdp18 Templates]<span class="hljs-preprocessor"># </span>
+/usr/hdp/<span class="hljs-number">2.5</span><span class="hljs-number">.3</span><span class="hljs-number">.0</span>-<span class="hljs-number">37</span>/phoenix/bin/psql<span class="hljs-preprocessor">.py</span> -t EXAMPLE hdp14:<span class="hljs-number">2181</span> /root/Templates/data<span class="hljs-preprocessor">.csv</span></code></pre>
+
+<p>验证索引表是否有进行同步更新</p>
+
+<pre class="prettyprint"><code class=" hljs asciidoc"><span class="hljs-header">0: jdbc:phoenix:hdp14,hdp15&gt; select * from example;
++--------+-------------+------------+</span>
+<span class="hljs-header">| MY_PK  | FIRST_NAME  | LAST_NAME  |
++--------+-------------+------------+</span>
+| 12345  | John        | Doe        |
+<span class="hljs-header">| 67890  | Mary        | Poppins    |
++--------+-------------+------------+</span>
+2 rows selected (0.023 seconds)
+<span class="hljs-header">0: jdbc:phoenix:hdp04,hdp05&gt; select * from example_first_name_index;
++---------------+---------+</span>
+<span class="hljs-header">| M:FIRST_NAME  | :MY_PK  |
++---------------+---------+</span>
+| John          | 12345   |
+<span class="hljs-header">| Mary          | 67890   |
++---------------+---------+</span>
+2 rows selected (0.018 seconds)</code></pre>
+
+<p>通过上述结果可知批量导入数据的情况是会自动更新索引表的。</p>
+
+<hr>
+
+<h2 id="hbase表不存在的情况">Hbase表不存在的情况</h2>
+
+<p>Hbase表不存在的情况经过跟上述操作步骤一样的测试，结果与hbase表已存在的情况是一样的。</p>
+
+<hr>
+
+<ul>
+<li>通过上述结果发现，当给t_hbase1表创建了二级索引后，如果通过hbase shell 进行插入数据时，该二级索引表数据是不会同步进行更新的。</li>
+<li>当给t_hbase1表创建了二级索引后，如果通过phoenix shell 进行插入数据时，该二级索引表数据是会自动同步的，原理主要是通过协处理器进行更新。</li>
+<li>总的来说如果需要维护phoenix表所创建的二级索引，源表数据的操作需要通过Phoenix客户端进行操作，当然如果不用维护对应的二级索引，数据的操作就无所谓通过什么方式进行了。</li>
+<li>另外，Phoenix对应的表与其所对应的视图所拥有的功能与性质基本一致，只不过视图只提供查询功能，以及视图对于二级索引的支持跟表对于二有索引的支持也是基本一致的。</li>
+<li>个人觉得这种机制有一个小缺点，就是我数据本来就是通过非phoenix客户端的方式写入的这时改动就会比较大了。</li>
+</ul>
+
+<hr>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

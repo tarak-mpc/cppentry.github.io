@@ -1,0 +1,43 @@
+---
+layout:     post
+title:      Spark内核架构流程深度剖析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_37142346/article/details/81204921				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<blockquote>
+  <p>最近一直在研究Spark，也自己练习做了几个项目，对于Spark这个框架特别的喜爱，尤其是其一站式的大数据解决方案，而且也对Spark MLlib中的机器学习算法很感兴趣，也学习过一段时间。但是在自己空闲下来回想，对于Spark的理解自己仅仅只是停留在表层，如果只是使用API来编写Spark程序，那么无疑将Spark与其他普通的框架混为一谈，发挥不了其作用，根本谈不上说熟悉Spark。因此，想花一段时间来研究Spark的内核架构与源码，常听大牛们说学习技术不仅要知道它怎么使用，更要知其所以然。那么，抱着这种心态来开启Spark的内核与源码的剖析之旅吧！</p>
+</blockquote>
+
+<p>本篇文章主要介绍Spark的内核架构，详细介绍从Saprk程序编写完成使用Spark submit(shell)的方式提交到完成任务的流程，为后续阅读Spark源码打下基础。</p>
+
+<p>在这之前我也写过一篇文章<a href="https://blog.csdn.net/qq_37142346/article/details/80201159" rel="nofollow">Spark RDD核心详解</a>，这篇文章也详细介绍了Spark的核心，因此本篇 文章主要是更细粒度来剖析其架构原理，对之前的文章的全面概述与总结。因此，对于Spark Core了解不够详细的读者可以先阅读之前的这篇文章，然后看下面的内容。</p>
+
+<p>下面是Spark启动到执行应用的架构图（自己手动画的，如果有问题欢迎留言）： <br>
+<img src="https://img-blog.csdn.net/20180725155654957?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM3MTQyMzQ2/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""> <br>
+在我们日常开发中，我们常常会在IDEA中编写好Spark应用程序，然后打包到集群上执行，上面的这幅图就是以standalone模式提交应用执行的流程。</p>
+
+<ol>
+<li>首先是提交打包的应用程序，使用Spark submit或者spark shell工具执行。</li>
+<li>提交应用程序后后台会在后台启动Driver进程（注意：这里的Driver是在Client上启动，如果使用cluster模式提交任务，Driver进程会在Worker节点启动）。</li>
+<li>开始构建Spark应用上下文。一般的一个Spark应用程序都会先创建一个Sparkconf，然后来创建SparkContext。如下代码所示：<code>val conf=new SparkConf() val sc=new SparkContext(conf)</code>。在创建SparkContext对象时有两个重要的对象，DAGScheduler和TaskScheduler（具体作用后面会详细讲解）。</li>
+<li>构建好TaskScheduler后，它对应着一个后台进程，接着它会去连接Master集群，向Master集群注册Application。</li>
+<li>Master节点接收到应用程序之后，会向该Application分配资源，启动一个或者多个Worker节点。</li>
+<li>每一个Worker节点会为该应用启动一个Executor进程来执行该应用程序。</li>
+<li>向Master节点注册应用之后，master为应用分配了节点资源，在Worker启动Executor完成之后，此时，Executo会向TaskScheduler反向注册，以让它知道Master为应用程序分配了哪几台Worker节点和Executor进程来执行任务。到此时为止，整个SparkContext创建完成。</li>
+<li>创建好SparkContext之后，继续执行我们的应用程序，每执行一个action操作就创建为一个job，将job交给DAGScheduler执行，然后DAGScheduler会将多个job划分为stage（这里涉及到stage的划分算法，比较复杂）。然后每一个stage创建一个TaskSet。</li>
+<li>实际上TaskScheduler有自己的后台进程会处理创建好的TaskSet。</li>
+<li>然后就会将TaskSet中的每一个task提交到Executor上去执行。（这里也涉及到task分配算法，提交到哪几个worker节点的executor中去执行）。</li>
+<li>Executor会创建一个线程池，当executor接收到一个任务时就从线程池中拿出来一个线程将Task封装为一个TaskRunner。</li>
+<li>在TaskRunner中会将我们程序的拷贝，反序列化等操作，然后执行每一个Task。对于这个Task一般有两种，ShufflerMapTask和ResultTask，只有最后一个stage的task是ResultTask，其它的都是ShufflerMapTask。</li>
+<li>最后会执行完所有的应用程序，将stage的每一个task分批次提交到executor中去执行，每一个Task针对一个RDD的partition，执行我们定义的算子和函数，直到全部执行完成。</li>
+</ol>
+
+<p>对于Spark架构流程的关键是理解上面的架构图，只有理解了Spark的内核架构，才能继续阅读源码或者去研究建立在Spark Core之上的Spark SQL，Spark Steaming，Spark MLlib等框架。</p>
+
+<p><strong>结语：</strong>本篇文章内容不多，但是涉及到知识点很多，要想完全理解其内核架构，还需要查阅更多的资料或者阅读笔者之前的博客。那么，本篇文章就到这里，如有任何问题欢迎留言讨论，谢谢！！！</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

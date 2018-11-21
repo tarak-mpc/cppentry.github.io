@@ -1,0 +1,96 @@
+---
+layout:     post
+title:      Spark总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div id="cnblogs_post_body" class="blogpost-body" style="font-family:Verdana, Arial, Helvetica, sans-serif;">
+<p><span>Spark简介</span></p>
+<p>     spark 可以很容易和yarn结合，直接调用HDFS、Hbase上面的数据，和hadoop结合。配置很容易。</p>
+<p>     spark发展迅猛，框架比hadoop更加灵活实用。减少了延时处理，提高性能效率实用灵活性。也可以与hadoop切实相互结合。 </p>
+<p>     spark核心部分分为RDD。Spark SQL、Spark Streaming、MLlib、GraphX、Spark R等核心组件解决了很多的大数据问题，其完美的框架日受欢迎。其相应的生态环境包括zepplin等可视化方面，正日益壮大。大型公司争相实用spark来代替原有hadoop上相应的功能模块。Spark读写过程不像hadoop溢出写入磁盘，都是基于内存，因此速度很快。另外DAG作业调度系统的宽窄依赖让Spark速度提高。</p>
+<p> </p>
+<hr><p> </p>
+<p><span>Spark核心组成</span></p>
+<p>1、RDD</p>
+<p>     是弹性分布式数据集，完全弹性的，如果数据丢失一部分还可以重建。有自动容错、位置感知调度和可伸缩性，通过数据检查点和记录数据更新金象容错性检查。通过SparkContext.textFile()加载文件变成RDD，然后通过transformation构建新的RDD，通过action将RDD存储到外部系统。</p>
+<p>     RDD使用延迟加载，也就是懒加载，只有当用到的时候才加载数据。如果加载存储所有的中间过程会浪费空间。因此要延迟加载。一旦spark看到整个变换链，他可以计算仅需的结果数据，如果下面的函数不需要数据那么数据也不会再加载。转换RDD是惰性的，只有在动作中才可以使用它们。</p>
+<p>     Spark分为driver和executor，driver提交作业，executor是application早worknode上的进程，运行task，driver对应为sparkcontext。Spark的RDD操作有transformation、action。Transformation对RDD进行依赖包装，RDD所对应的依赖都进行DAG的构建并保存，在worknode挂掉之后除了通过备份恢复还可以通过元数据对其保存的依赖再计算一次得到。当作业提交也就是调用runJob时，spark会根据RDD构建DAG图，提交给DAGScheduler，这个DAGScheduler是在SparkContext创建时一同初始化的，他会对作业进行调度处理。当依赖图构建好以后，从action开始进行解析，每一个操作作为一个task，每遇到shuffle就切割成为一个taskSet，并把数据输出到磁盘，如果不是shuffle数据还在内存中存储。就这样再往前推进，直到没有算子，然后运行从前面开始，如果没有action的算子在这里不会执行，直到遇到action为止才开始运行，这就形成了spark的懒加载，taskset提交给TaskSheduler生成TaskSetManager并且提交给Executor运行，运行结束后反馈给DAGScheduler完成一个taskSet，之后再提交下一个，当TaskSet运行失败时就返回DAGScheduler并重新再次创建。一个job里面可能有多个TaskSet，一个application可能包含多个job。</p>
+<p> </p>
+<hr><p> </p>
+<p>2、Spark Streaming </p>
+<p>     通过对kafka数据读取，将Stream数据分成小的时间片段（几秒），以类似batch批处理的方式来处理这一部分小数据，每个时间片生成一个RDD，有高效的容错性，对小批量数据可以兼容批量实时数据处理的逻辑算法，用一些历史数据和实时数据联合进行分析，比如分类算法等。也可以对小批量的stream进行mapreduce、join等操作，而保证其实时性。针对数据流时间要求不到毫秒级的工程性问题都可以。</p>
+<p>     Spark Streaming也有一个StreamingContext，其核心是DStream，是通过以组时间序列上的连续RDD来组成的，包含一个有Time作为key、RDD作为value的结构体，每一个RDD都包含特定时间间隔的数据流，可以通过persist将其持久化。在接受不断的数据流后，在blockGenerator中维护一个队列，将流数据放到队列中，等处理时间间隔到来后将其中的所有数据合并成为一个RDD(这一间隔中的数据)。其作业提交和spark相似，只不过在提交时拿到DStream内部的RDD并产生Job提交，RDD在action触发之后，将job提交给jobManager中的JobQueue，又jobScheduler调度，JobScheduler将job提交到spark的job调度器，然后将job转换成为大量的任务分发给spark集群执行。Job从outputStream中生成的，然后触发反向回溯执行DStreamDAG。在流数据处理的过程中，一般节点失效的处理比离线数据要复杂。Spark
+ streamin在1.3之后可以周期性的将DStream写入HDFS，同时将offset也进行存储，避免写到zk。一旦主节点失效，会通过checkpoint的方式读取之前的数据。当worknode节点失效，如果HDFS或文件作为输入源那Spark会根据依赖关系重新计算数据，如果是基于Kafka、Flume等网络数据源spark会将手机的数据源在集群中的不同节点进行备份，一旦有一个工作节点失效，系统能够根据另一份还存在的数据重新计算，但是如果接受节点失效会丢失一部分数据，同时接受线程会在其他的节点上重新启动并接受数据。</p>
+<p> </p>
+<hr><p> </p>
+<p>3、Graphx</p>
+<p>     主要用于图的计算。核心算法有PageRank、SVD奇异矩阵、TriangleConut等。</p>
+<p> </p>
+<hr><p> </p>
+<p>4、Spark SQL</p>
+<p>    是Spark新推出的交互式大数据SQL技术。把sql语句翻译成Spark上的RDD操作可以支持Hive、Json等类型的数据。</p>
+<p> </p>
+<hr><p> </p>
+<p>5、Spark R</p>
+<p>     通过R语言调用spark，目前不会拥有像Scala或者java那样广泛的API，Spark通过RDD类提供Spark API，并且允许用户使用R交互式方式在集群中运行任务。同时集成了MLlib机器学习类库。</p>
+<p> </p>
+<hr><p> </p>
+<p>6、MLBase</p>
+<p>     从上到下包括了MLOptimizer（给使用者）、MLI（给算法使用者）、MLlib（给算法开发者）、Spark。也可以直接使用MLlib。ML Optimizer，一个优化机器学习选择更合适的算法和相关参数的模块，还有MLI进行特征抽取和高级ML编程 抽象算法实现API平台，MLlib分布式机器学习库，可以不断扩充算法。MLRuntime基于spark计算框架，将Spark的分布式计算应用到机器学习领域。MLBase提供了一个简单的声明方法指定机器学习任务，并且动态地选择最优的学习算法。</p>
+<p> </p>
+<hr><p> </p>
+<p>7、Tachyon</p>
+<p>      高容错的分布式文件系统。宣称其性能是HDFS的3000多倍。有类似java的接口，也实现了HDFS接口，所以Spark和MR程序不需要任何的修改就可以运行。目前支持HDFS、S3等。</p>
+<hr><p> </p>
+<p>8、Spark算子</p>
+<p>1、Map。对原数据进行处理，类似于遍历操作，转换成MappedRDD，原分区不变。</p>
+<p>2、flatMap。将原来的RDD中的每一个元素通过函数转换成新的元素，将RDD的每个集合中的元素合并成一个集合。比如一个元素里面多个list，通过这个函数都合并成一个大的list，最经典的就是wordcount中将每一行元素进行分词以后成为，通过flapMap变成一个个的单词，line.flapMap(_.split(“ ”)).map((_,1))如果通过map就会将一行的单词变成一个list。</p>
+<p>3、mapPartitions。对每个分区进行迭代，生成MapPartitionsRDD。</p>
+<p>4、Union。是将两个RDD合并成一个。使用这个函数要保证两个RDD元素的数据类型相同，返回的RDD的数据类型和被合并的RDD数据类型相同。</p>
+<p>5、Filter。其功能是对元素进行过滤，对每个元素调用f函数，返回值为true的元素就保留在RDD中。</p>
+<p>6、Distinct。对RDD中元素进行去重操作。</p>
+<p>7、Subtract。对RDD1中取出RDD1与RDD2交集中的所有元素。</p>
+<p>8、Sample。对RDD中的集合内元素进行采样，第一个参数withReplacement是true表示有放回取样，false表示无放回。第二个参数表示比例，第三个参数是随机种子。如data.sample(true, 0.3,new Random().nextInt())。</p>
+<p>9、takeSample。和sample用法相同，只不第二个参数换成了个数。返回也不是RDD，而是<span>collect</span>。</p>
+<p>10、Cache。将RDD缓存到内存中。相当于persist（MEMORY_ONLY）。可以通过参数设置缓存和运行内存之间的比例，如果数据量大于cache内存则会丢失。</p>
+<p>11、Persist。里面参数可以选择DISK_ONLY/MEMORY_ONLY/MEMORY_AND_DISK等，其中的MEMORY_AND_DISK当缓存空间满了后自动溢出到磁盘。</p>
+<p>12、MapValues。针对KV数据，对数据中的value进行map操作，而不对key进行处理。</p>
+<p>13、reduceByKey。针对KV数据将相同key的value聚合到一起。与groupByKey不同，会进行一个类似mapreduce中的combine操作，减少相应的数据IO操作，加快效率。如果想进行一些非叠加操作，我们可以将value组合成字符串或其他格式将相同key的value组合在一起，再通过迭代，组合的数据拆开操作。</p>
+<p>14、partitionBy。可以将RDD进行分区，重新生成一个ShuffleRDD，进行一个shuffle操作，对后面进行频繁的shuffle操作可以加快效率。</p>
+<p>15、randomSplit。对RDD进行随机切分。如data.randomSplit(new double[]{0.7, 0.3})返回一个RDD的数组。</p>
+<p>16、Cogroup。对两个RDD中的KV元素，每个RDD中相同key中的元素分别聚合成一个集合。与reduceByKey不同的是针对两个RDD中相同的key的元素进行合并。</p>
+<p>17、Join。相当于inner join。对两个需要连接的RDD进行cogroup，然后对每个key下面的list进行笛卡尔积的操作，输出两两相交的两个集合作为value。 相当于sql中where a.key=b.key。</p>
+<p>18、leftOutJoin，rightOutJoin。在数据库中<span>左连接以左表为坐标将表中所有的数据列出来，</span>右面不存在的用null填充。在这里面对join的基础上判断左侧的RDD元素是否是空，如果是空则填充。右连接则相反。</p>
+<p>19、saveAsTestFile。将数据输出到HDFS的指定目录。</p>
+<p>20、saveAsObjectFile。写入HDFS为SequenceFile格式。</p>
+<p>21、Collect、collectAsMap。将RDD转换成list或者Map。结果以List或者HashMap的方式输出。</p>
+<p>22、Count。对RDD的元素进行统计，返回个数。</p>
+<p>23、Top（k）。返回最大的k个元素，返回List的形式。</p>
+<p>24、Take返回数据的前k个元素。</p>
+<p>25、takeOrdered。返回数据的最小的k个元素，并在返回中保持元素的顺序。</p>
+<hr><p> </p>
+<p>9、Tips</p>
+<p>1、RDD.repartition(n)可以在最初对RDD进行分区操作，这个操作实际上是一个shuffle，可能比较耗时，但是如果之后的action比较多的话，可以减少下面操作的时间。其中的n值看cpu的个数，一般大于2倍cpu，小于1000。</p>
+<p>2、Action不能够太多，每一次的action都会将以上的taskset划分一个job，这样当job增多，而其中task并不释放，会占用更多的内存，使得gc拉低效率。</p>
+<p>3、在shuffle前面进行一个过滤，减少shuffle数据，并且过滤掉null值，以及空值。</p>
+<p>4、groupBy尽量通过reduceBy替代。reduceBy会在work节点做一次reduce，在整体进行reduce，相当于做了一次hadoop中的combine操作，而combine操作和reduceBy逻辑一致，这个groupBy不能保证。</p>
+<p>5、做join的时候，尽量用小RDD去join大RDD，用大RDD去join超大的RDD。</p>
+<p>6、避免collect的使用。因为collect如果数据集超大的时候，会通过各个work进行收集，io增多，拉低性能，因此当数据集很大时要save到HDFS。</p>
+<p>7、RDD如果后面使用迭代，建议cache，但是一定要估计好数据的大小，避免比cache设定的内存还要大，如果大过内存就会删除之前存储的cache，可能导致计算错误，如果想要完全的存储可以使用persist（MEMORY_AND_DISK），因为cache就是persist（MEMORY_ONLY）。</p>
+<p>8、设置spark.cleaner.ttl，定时清除task，因为job的原因可能会缓存很多执行过去的task，所以定时回收可能避免集中gc操作拉低性能。</p>
+<p>9、适当pre-partition，通过partitionBy（）设定，每次partiti</p>
+<p> </p>
+<p>转：http://www.cnblogs.com/hellochennan/p/5372946.html</p>
+</div>
+<div id="MySignature" style="font-family:Verdana, Arial, Helvetica, sans-serif;">
+<p style="text-indent:2em;background:rgb(230,250,230);border:1px dashed rgb(224,224,224);font-family:'微软雅黑';font-size:13px;">
+作者：<a href="http://www.cnblogs.com/seaspring/" rel="nofollow" style="color:rgb(0,0,0);">明翼（XGogo）</a> <br>
+出处：<a href="http://www.cnblogs.com/seaspring/" rel="nofollow" style="color:rgb(0,0,0);">http://www.cnblogs.com/seaspring/</a> <br>
+本文版权归作者和博客园共有，欢迎转载，但未经作者同意必须保留此段声明，且在文章页面明显位置给出原文连接，否则保留追究法律责任的权利。 <br>
+不能用于商业用户，若商业使用请联系：</p>
+</div>
+            </div>
+                </div>

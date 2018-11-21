@@ -1,0 +1,187 @@
+---
+layout:     post
+title:      基于shark-0.9.1 spark0.9.1 hadoop 2.3.0的环境搭建（os redhat 6.4）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>OS version:redhat 6.4</p>
+<p>1、从apache官网下载hadoop2.3.0版本，并正确配置参数（此处不详述）</p>
+<p>2、在github的apache/spark页面下载spark-0.9.1的源代码：http://www.apache.org/dyn/closer.cgi/incubator/spark/spark-0.9.1/spark-0.9.1.tgz</p>
+<p><span></span>需要注意的是截止目前官方提供的spark的版本是基于CDH5/hadoop 2.2.0编译的，spark-0.9.1在hadoop2.3.0上还存在点小问题：<br>
+spark启动时需要读取yarn-site.xml中的yarn.application.classpath，如果此参数没有显示配置，则默认的值是空，这时会抛出异常：</p>
+<p>Exception in thread "main" java.lang.NullPointerException<br>
+        at scala.collection.mutable.ArrayOps$ofRef$.length$extension(ArrayOps.scala:114)<br>
+        at scala.collection.mutable.ArrayOps$ofRef.length(ArrayOps.scala:114)<br>
+        at scala.collection.IndexedSeqOptimized$class.foreach(IndexedSeqOptimized.scala:32)<br>
+        at scala.collection.mutable.ArrayOps$ofRef.foreach(ArrayOps.scala:108)<br>
+        at org.apache.spark.deploy.yarn.Client$.populateHadoopClasspath(Client.scala:498)<br>
+        at org.apache.spark.deploy.yarn.Client$.populateClasspath(Client.scala:519)<br>
+        at org.apache.spark.deploy.yarn.Client.setupLaunchEnv(Client.scala:333)<br>
+        at org.apache.spark.deploy.yarn.Client.runApp(Client.scala:94)<br>
+        at org.apache.spark.scheduler.cluster.YarnClientSchedulerBackend.start(YarnClientSchedulerBackend.scala:78)<br>
+        at org.apache.spark.scheduler.TaskSchedulerImpl.start(TaskSchedulerImpl.scala:125)<br>
+        at org.apache.spark.SparkContext.&lt;init&gt;(SparkContext.scala:200)<br>
+        at shark.SharkContext.&lt;init&gt;(SharkContext.scala:42)<br>
+        at shark.SharkContext.&lt;init&gt;(SharkContext.scala:61)<br>
+        at shark.SharkEnv$.initWithSharkContext(SharkEnv.scala:78)<br>
+        at shark.SharkEnv$.init(SharkEnv.scala:38)<br>
+        at shark.SharkCliDriver.&lt;init&gt;(SharkCliDriver.scala:278)<br>
+        at shark.SharkCliDriver$.main(SharkCliDriver.scala:162)<br>
+        at shark.SharkCliDriver.main(SharkCliDriver.scala)<br></p>
+<p>需要修改下源码，再根据hadoo 2.3.0再重新编译一次，由于编译需要联网下载，而依赖包关系也比较复杂，所以不能上公网的机器就只能暂时呵呵了，不过重编译环境不需要hadoop ，可以随便找一台对应版本的linux机器编译.</p>
+<p><span style="color:#ff0000;">基于hadoop 2.3.0 的spark编译：</span></p>
+<p>3、修改spark源码：<br>
+spark source code下载后存放路径为：/data/spark-0.9.1-source<br>
+进入如下路径：<br>
+/data/spark-0.9.1-source/spark-0.9.1/yarn/stable/target/scala-2.10/classes/org/apache/spark/deploy/yarn<br>
+修改Client.scala源文件，搜索关键字找到populateHadoopClasspath函数所在的行<br>
+将这个函数修改如下：<br>
+def populateHadoopClasspath(conf: Configuration, env: HashMap[String, String]) {<br>
+    val classpathEntries = Option(conf.getStrings(YarnConfiguration.YARN_APPLICATION_CLASSPATH)).getOrElse(<br>
+        YarnConfiguration.DEFAULT_YARN_APPLICATION_CLASSPATH)<br>
+    for (c &lt;- classpathEntries) {<br>
+      Apps.addToEnvironment(env, Environment.CLASSPATH.name, c.trim)<br>
+    }<br>
+  }<br><br><br>
+此函数中的问题是conf.getStrings(YarnConfiguration.YARN_APPLICATION_CLASSPATH)有可能取空，导致空的scala collection进行迭代，就会产生异常。<br><br><br>
+4、根据对应的hadoop版本编译spark，集群环境为：<br>
+hadoop 版本为2.3.0<br>
+hostname：  server1             server2             server3<br>
+角色：   nn、rm、zk、hive， dn、nm、zk、hive， dn、nm、zk、hive<br><br><br>
+进入spark源码所在的路径<br>
+$ cd /data/spark-0.9.1-source<br>
+用sbt工具重新编译（需要联网执行，会下载sbt-launcher等组件和依赖包）<br>
+$ SPARK_HADOOP_VERSION=2.3.0 SPARK_YARN=true sbt/sbt clean assembly<br>
+经过一段时间的等待（与网速有关，中间如果卡住，ctrl+c停止后重新执行上述命令），结果显示success，完成编译<br>
+5、配置spark：<br>
+$ cd /app/spark/conf<br>
+$ mv spark-env.sh.template spark-env.sh<br>
+$ mv log4j.properties.template log4j.properties<br>
+$vi spark-env.sh<br>
+设置如下参数：<br>
+#hadoop的配置文件(hadoop-env.sh,*.xml所在的目录）<br>
+export YARN_CONF_DIR=/app/hadoop/etc/hadoop<br>
+#spark的worker数量<br>
+export SPARK_WORKER_INSTANCES=2<br>
+#spark worker和master可使用的内存，此处的数值不能低于384M(spark要求)，同时要综合考虑yarn-site.xml中的关于内存的设置，不能超过resource.memory-mb的大小。<br>
+export SPARK_WORKER_MEMORY=512M<br>
+export SPARK_MASTER_MEMORY=512M<br>
+#spark的jar包设置<br>
+export SPARK_JAR=/app/spark/assembly/target/scala-2.10/spark-assembly-0.9.1-hadoop2.3.0.jar<br>
+export SPARK_YARN_APP_JAR=/app/spark/examples/target/scala-2.10/spark-examples-assembly-0.9.1.jar<br>
+#spark运行模式<br>
+export MASTER=yarn-client</p>
+<p>6、将编译后的spark分发到hadoop集群上，因为后面要使用shark，所以集群中的节点都要分发，分发后安装路径为为/app/spark，建议将此路径配置到用户的环境变量中.</p>
+<p><span style="color:#ff0000;">基于hadoop 2.3.0 的shark编译：</span><br></p>
+<p>7、在github页面上下载shark-0.9.1：https://github.com/amplab/shark/releases<br>
+截止目前download link中只有两个版本，所以选择Shark with Hadoop 2 (cdh5)下载，下载后解压<br>
+$ tar -zxvf shark-0.9.1-bin-hadoop2.tgz <br>
+进入解压后的目录，根据对应的hadoop版本用sbt工具编译（需要联网执行，会下载sbt-launcher等组件和依赖包）：<br>
+$ SHARK_HADOOP_VERSION=2.3.0 SHARK_YARN=true sbt/sbt clean package<br>
+同上，经过等待结果显示success，完成编译，并分发到hadoop集群中的每个节点上，分发后安装路径为/app/shark，建议将此路径配置到用户的环境变量中。<br>
+8、配置shark<br>
+$ cd /app/shark/conf<br>
+$ mv shark-env.sh.template shark-env.sh<br>
+$vi shark-env.sh<br>
+#shark和spark的内存设置，可与之前的spark保持一致<br>
+export SPARK_MEM=512m<br>
+export SHARK_MASTER_MEM=512m<br>
+# 配置hive路径，此处使用amplab的hive，放在/app/hive下，并已正确配置<br>
+export HIVE_CONF_DIR=/app/hive/conf<br>
+export HIVE_HOME=/app/hive<br>
+# spark和hadoop的相关配置<br>
+export HADOOP_HOME="/app/hadoop"<br>
+export SPARK_HOME="/app/spark"<br>
+export MASTER="yarn-client"<br>
+#shark运行在yarn上的必要配置<br>
+export SHARK_EXEC_MODE=yarn<br>
+export SPARK_ASSEMBLY_JAR=/app/spark/assembly/target/scala-2.10/spark-assembly-0.9.1-hadoop2.3.0.jar<br>
+export SHARK_ASSEMBLY_JAR=/app/shark/target/scala-2.10/shark_2.10-0.9.1.jar<br><br><br>
+# On EC2, change the local.dir to /mnt/tmp<br>
+SPARK_JAVA_OPTS=" -Dspark.local.dir=/tmp "<br>
+SPARK_JAVA_OPTS+="-Dspark.kryoserializer.buffer.mb=10 "<br>
+SPARK_JAVA_OPTS+="-verbose:gc -XX:-PrintGCDetails -XX:+PrintGCTimeStamps "<br>
+export SPARK_JAVA_OPTS<br></p>
+<p><br></p>
+<p>9、将配置后的shark分发到hadoop集群中的所有节点，分发后安装路径为为/app/shark，建议将此路径配置到用户的环境变量中<br>
+此时shark和spark都已安装配置完成，直接启动spark-shell即可使用spark的命令行模式，<br>
+但目前由于shark-0.9.1自身的问题，导致此时直接启动shark不会报错，建表后也不会报错，但在操作dml语句时会报错:<br>
+shark&gt; select * from tb01;<br>
+336.301: [GC 148256K-&gt;24886K(501248K), 0.0209300 secs]<br>
+org.apache.spark.SparkException: Job aborted: Task 1.0:0 failed 4 times (most recent failure: Exception failure: java.lang.RuntimeException: readObject can't find class org.apache.hadoop.hive.conf.HiveConf)<br>
+        at org.apache.spark.scheduler.DAGScheduler$$anonfun$org$apache$spark$scheduler$DAGScheduler$$abortStage$1.apply(DAGScheduler.scala:1020)<br>
+        at org.apache.spark.scheduler.DAGScheduler$$anonfun$org$apache$spark$scheduler$DAGScheduler$$abortStage$1.apply(DAGScheduler.scala:1018)<br>
+        at scala.collection.mutable.ResizableArray$class.foreach(ResizableArray.scala:59)<br>
+        at scala.collection.mutable.ArrayBuffer.foreach(ArrayBuffer.scala:47)<br>
+        at org.apache.spark.scheduler.DAGScheduler.org$apache$spark$scheduler$DAGScheduler$$abortStage(DAGScheduler.scala:1018)<br>
+        at org.apache.spark.scheduler.DAGScheduler$$anonfun$processEvent$10.apply(DAGScheduler.scala:604)<br>
+        at org.apache.spark.scheduler.DAGScheduler$$anonfun$processEvent$10.apply(DAGScheduler.scala:604)<br>
+        at scala.Option.foreach(Option.scala:236)<br>
+        at org.apache.spark.scheduler.DAGScheduler.processEvent(DAGScheduler.scala:604)<br>
+        at org.apache.spark.scheduler.DAGScheduler$$anonfun$start$1$$anon$2$$anonfun$receive$1.applyOrElse(DAGScheduler.scala:190)<br>
+        at akka.actor.ActorCell.receiveMessage(ActorCell.scala:498)<br>
+        at akka.actor.ActorCell.invoke(ActorCell.scala:456)<br>
+        at akka.dispatch.Mailbox.processMailbox(Mailbox.scala:237)<br>
+        at akka.dispatch.Mailbox.run(Mailbox.scala:219)<br>
+        at akka.dispatch.ForkJoinExecutorConfigurator$AkkaForkJoinTask.exec(AbstractDispatcher.scala:386)<br>
+        at scala.concurrent.forkjoin.ForkJoinTask.doExec(ForkJoinTask.java:260)<br>
+        at scala.concurrent.forkjoin.ForkJoinPool$WorkQueue.runTask(ForkJoinPool.java:1339)<br>
+        at scala.concurrent.forkjoin.ForkJoinPool.runWorker(ForkJoinPool.java:1979)<br>
+        at scala.concurrent.forkjoin.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:107)<br>
+FAILED: Execution Error, return code -101 from shark.execution.SparkTask<br><br><br>
+解决报错的方法:将/app/shark/lib,/app/shark/lib_managed/jars,/app/shark/lib_managed/bundles目录和子目录下的所有jar包转移到一个固定的路径，并将此路径配置到yarn.application.classpath中去：<br>
+10、在hadoop集群中的所有节点上执行：<br>
+10.1 创建shark的集中lib库目录<br>
+$ mkdir -p /app/sharklib<br>
+10.2 编写移动jar文件的脚本<br>
+$ cd /app<br>
+$ vi mvjar_script.sh<br>
+#!/bin/bash<br>
+for jar in `find /app/shark/lib -name '*jar'`; do<br>
+  cp $jar /app/sharklib/<br>
+done<br>
+for jar in `find /app/shark/lib_managed/jars -name '*jar'`; do<br>
+  cp $jar /app/sharklib/<br>
+done<br>
+for jar in `find /app/shark/lib_managed/bundles -name '*jar'`; do<br>
+  cp $jar /app/sharklib/<br>
+done<br>
+10.3 执行脚本<br>
+$ chmod +x mvjar_script.sh<br>
+$ ./mvjar_script.sh<br>
+11、更改yarn-site.xml参数，并分发到集群中所有节点，需重启hadoop：<br>
+将/app/sharklib加入到yarn.application.classpath中，此处“…………”用来表示之前已有的的配置：<br>
+&lt;property&gt;<br>
+  &lt;name&gt;yarn.application.classpath&lt;/name&gt;<br>
+  &lt;value&gt;/app/sharklib/*,………………&lt;/value&gt;<br>
+&lt;/property&gt;<br>
+12、启动shark命令行：<br>
+shark&gt; CREATE TABLE log01(<br>
+     userid int,<br>
+     name STRING)<br>
+ ROW FORMAT DELIMITED<br>
+   FIELDS TERMINATED BY '\t'<br>
+ STORED AS TEXTFILE;<br>
+shark&gt; LOAD DATA LOCAL INPATH '/home/hadoop/t01.txt'  INTO TABLE log01;<br>
+shark&gt; select count(1) from log01;<br>
+65.461: [GC 150825K-&gt;24878K(500736K), 0.0185750 secs]<br>
+69.203: [GC 152366K-&gt;22449K(501760K), 0.0169070 secs]<br>
+OK<br>
+28<br>
+Time taken: 5.625 seconds<br>
+shark&gt; select count(1) from log01;<br>
+OK<br>
+28<br>
+Time taken: 1.533 seconds<br>
+shark&gt; select count(1) from log01;<br>
+75.695: [GC 148274K-&gt;22303K(501248K), 0.0193210 secs]<br>
+OK<br>
+28<br>
+Time taken: 1.293 seconds<br><br><br>
+会发现执行第一次时count时间较长，第二次开始执行时间就有显著缩短。<br>
+至此基于hadoop2.3.0，spark-0.9.1,shark-0.9.1的安装配置完成，可以使用shark-withinfo，shark，spark-shell，或者启动shar server使用beeline等命令行工具开始愉快的玩耍了。<br></p>
+<p><br></p>
+            </div>
+                </div>

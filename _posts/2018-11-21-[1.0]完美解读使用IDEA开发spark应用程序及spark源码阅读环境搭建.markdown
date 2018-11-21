@@ -1,0 +1,170 @@
+---
+layout:     post
+title:      [1.0]完美解读使用IDEA开发spark应用程序及spark源码阅读环境搭建
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，转载请标明出处					https://blog.csdn.net/PENGYUCHENG32109/article/details/51611192				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h3 id="场景">场景</h3>
+
+<p>第一次使用Intellij IDEA开发第一个spark应用程序？对 idea的操作相当不熟悉?听别人说spark高手更喜欢使用IDEA? <br>
+怎么在Intellij Idea导入 spark的源代码？使用 eclipse-scala阅读spark源代码相当不方便:没法在一个源文件中直接关联查询另一个源文件，必须另外从新<code>ctrl+shift+t</code>! <br>
+怎么编写脚本提交spark应用程序到spark集群中？</p>
+
+<h3 id="实验">实验</h3>
+
+
+
+<h4 id="实验环境">实验环境</h4>
+
+<p>操作系统：Ubuntu Kylin 14.0.4 <br>
+Intellij IDEA：Intellij IDEA 2016.1.1 <br>
+JDK版本：1.8.0_77 <br>
+scala版本：2.10.4 <br>
+spark版本：1.6.0</p>
+
+
+
+<h4 id="第一个spark应用程序的开发"><strong><em>第一个spark应用程序的开发</em></strong></h4>
+
+
+
+<h4 id="步骤">步骤</h4>
+
+<ul>
+<li><p>建一个新的项目 <br>
+这里以新建一个名为hellospark的项目为例加以说明：</p>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160608004241328"></p></li>
+</ul>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160608004353402"> <br>
+ - 导入spark依赖包</p>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160608004636662"></p>
+
+<ul>
+<li>编写wordcount应用程序 <br>
+先建包,以 cool.pengych.spark.core为例：</li>
+</ul>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160608010252279"></p>
+
+<p>然后，选中包，鼠标右键 - New -&gt; Scala Class -&gt; 下拉框选择 object 输入对象名称： WordCount 。接下来编写 word count程序:</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-keyword">package</span> cool.pengych.spark.core
+<span class="hljs-keyword">import</span> org.apache.spark.{SparkConf, SparkContext}
+<span class="hljs-javadoc">/**
+ * Created by pengyucheng on 16-4-28.
+  */</span>
+<span class="hljs-class"><span class="hljs-keyword">object</span> <span class="hljs-title">WordCount</span> {</span>
+  <span class="hljs-keyword">def</span> main(args: Array[String]) {
+    <span class="hljs-keyword">val</span> conf = <span class="hljs-keyword">new</span> SparkConf()
+    conf.setAppName(<span class="hljs-string">"my first spark app "</span>) 
+    <span class="hljs-keyword">val</span> sc: SparkContext = <span class="hljs-keyword">new</span> SparkContext(conf)  
+    <span class="hljs-keyword">val</span> lines = sc.textFile(<span class="hljs-string">"hdfs://112.74.21.122:9000/input/test.log"</span>)
+    <span class="hljs-keyword">val</span> words = lines.flatMap {line =&gt; line.split(<span class="hljs-string">" "</span>) } 
+    <span class="hljs-keyword">val</span> pairs = words.map { word =&gt; (word,<span class="hljs-number">1</span>) }
+    <span class="hljs-keyword">val</span> wordCounts = pairs.reduceByKey(_+_).map(pair =&gt; (pair._2,pair._1)).sortByKey(<span class="hljs-keyword">false</span>).map(pair =&gt; (pair._2,pair._1))
+    wordCounts.collect.foreach(wordNumberPair =&gt; println(wordNumberPair._1 +<span class="hljs-string">":"</span> + wordNumberPair._2)) 
+    sc.stop
+  }
+}</code></pre>
+
+<p>此时的目录结构：</p>
+
+<p><img title="" alt="目录结果" src="https://img-blog.csdn.net/20160608010738927"> </p>
+
+<ul>
+<li>手动构建jar包</li>
+</ul>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160609090306250"></p>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160609090339016"></p>
+
+<ul>
+<li>提交应用程序</li>
+</ul>
+
+<p>这里假设把上面手动构建好的jar包，放在 /home/pengyucheng/resource目录下。这里假设你提交应用程序的机器的spark安装目录为：<code>/home/hadoop/spark-1.6.0-bin-hadoop2.6</code>且spark集群已经在运行了，master地址为：<code>spark://sparker:7077</code>。接下来在任意目录下，编写一个可执行脚本wordcount.sh，用于向spark集群提交该应用程序。脚本内容如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">/home/hadoop/spark-<span class="hljs-number">1.6</span><span class="hljs-number">.0</span>-bin-hadoop2<span class="hljs-number">.6</span>/bin/spark-submit --class cool<span class="hljs-preprocessor">.pengych</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.core</span><span class="hljs-preprocessor">.WordCount</span> --master spark://sparker:<span class="hljs-number">7077</span> /home/pengyucheng/resource/WordCount<span class="hljs-preprocessor">.jar</span></code></pre>
+
+<p>提交应用程序：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vala"><span class="hljs-preprocessor">#./wordcount.sh</span></code></pre>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160609100258129"></p>
+
+<p>执行结果：</p>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160609100330520"></p>
+
+<p>至此，成功的使用IDEA完成了第一个应用程序的开发与使用脚本提交到集群环境上运行！    </p>
+
+
+
+<h4 id="源代码阅读环境搭建"><strong><em>源代码阅读环境搭建</em></strong></h4>
+
+<p>编写好WordCount.scala应用程序后，如果想看看<code>org.apache.spark.{SparkConf, SparkContext}</code>等类的源文件怎么办呢？ 当然，直接按下 <code>ctrl+鼠标选中并点击</code>会出现idea自动反编译后的源代码，但是没有注释，阅读相当费劲：</p>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160609092914755"></p>
+
+<p>好，接下来我们开始导入spark源代码！</p>
+
+<ul>
+<li>下载源代码</li>
+</ul>
+
+<p>打开IntelliJ IDEA 后，在菜单栏中选择 VCS→Check out from Version Control→Git，之后在 Git Repository URL 中填入 Spark 项目的地址，并指定好本地路径，如下图所示：</p>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160609092238401"></p>
+
+<p>点击该窗口中的的 Clone 后，开始从 Github 中 clone 该项目，该过程试你网速而定，大概需要3-10分钟。 <br>
+当 clone 完毕后，IntelliJ IDEA 会自动提示你该项目有对应的 pom.xml 文件，是否打开。这里直接选择 Open 该 pom.xml 文件，然后系统会自动解析项目的相关依赖，该步骤也会因你的网络和系统相关环境，所需时间不同。 </p>
+
+<ul>
+<li>关联源代码</li>
+</ul>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160609093616655"></p>
+
+<p>成功导入了源代码，现在再<code>ctrl+鼠标选中</code>点击相关spark相关类就可以看到有详细注释的源文件：</p>
+
+<p><img title="" alt="这里写图片描述" src="https://img-blog.csdn.net/20160609093800185"></p>
+
+<p>自我陶醉！成功的迈出了spark程序人生的第一步：开心啊！！！</p>
+
+<p><em>[ 注 ] idea 常用操作基本快捷键</em></p>
+
+<p>Ctrl+N   查找类 <br>
+Ctrl+Shift+N 查找文件 <br>
+Ctrl+Shift+Alt+N 查找类中的方法或变量 <br>
+Ctrl+H 显示类结构图 <br>
+Shift+F6  重构-重命名 <br>
+Ctrl+X 删除行 <br>
+Ctrl+D 复制行 <br>
+Ctrl+/ 或 Ctrl+Shift+/  注释（// 或者/<em>…</em>/ ） <br>
+Ctrl+E 最近打开的文件 <br>
+Alt+1 快速打开或隐藏工程面板</p>
+
+
+
+<h3 id="参考">参考</h3>
+
+<p><a href="http://weibo.com/ilovepains" rel="nofollow">王家林DT大数据梦工厂</a> <br>
+<a href="http://www.open-open.com/lib/view/open1422067624734.html" rel="nofollow">源码导入</a> <br>
+<a href="http://lavasoft.blog.51cto.com/62575/97730" rel="nofollow">idea常用快捷键</a> <br>
+<a href="http://blog.csdn.net/korder/article/details/46234735" rel="nofollow">使用maven管理scala项目</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

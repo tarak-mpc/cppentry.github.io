@@ -1,0 +1,589 @@
+---
+layout:     post
+title:      Spark系统运行内幕机制循环流程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/bingo_liu/article/details/54929071				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>在SparkContext实例化的时候调用createTaskScheduler来创建TaskSchedulerImpl和SparkDeploySchedulerBackend，同时在SparkContext实例化的时候会调用TaskSchedulerImpl的start方法，在start方法中会调用SparkDeploySchedulerBackend的start方法，在该start方法中会创建AppClient对象并调用AppClient对象的start方法，在该start方法中会创建ClientEndpoint，在创建ClientEndpoint会传入Command来指定具体为当前应用程序启动的Executor进行的入口类的名称为CoarseGrainedExecutorBackend，然后ClientEndpoint启动并通过tryRegisterMaster来注册当前的应用程序到Master中，Master接收到注册信息后，如果可以运行程序，则会为该程序生成JobID并通过schedule来分配计算资源，具体计算资源的分配是通过应用程序的运行方式、Memory、Cores等配置信息来决定的，最后Master会发送指令给Worker，Worker中为当前应用程序分配计算资源时会首先分配ExecutorRunner，ExecutorRunner内部会通过Thread的方式构建ProcessBuilder来启动另外一个JVM进程，这个JVM进程启动时加载的main方法所在的类的名称就是在创建ClientEndpoint时传入Command来指定具体为CoarseGrainedExecutorBackend的类，此时JHVM在通过ProcessBuilder启动的时候获得了CoarseGrainedExecutorBackend后加载并调用了其中的main方法，在main方法中会实例化CoarseGrainedExecutorBackend本身这个消息循环体，而CoarseGrainedExecutorBackend在实例化的时候会通过回调onStart向DriverEndpoint发送RegisterExecutor来注册当前的CoarseGrainedExecutorBackend，此时DriverEndoint收到该注册信息，并保存在了SparkDeploySchedulerBackend实例的内存数据结构中，这样Driver就获得了计算资源，同时并发送RegisteredExecutor给CoarseGrainedExecutorBackend </p>
+
+<p>【用户程序】WordCount.scala</p>
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-class"><span class="hljs-keyword">object</span> <span class="hljs-title">WordCount</span> {</span>
+  <span class="hljs-keyword">def</span> main(args: Array[String]): Unit = {
+    <span class="hljs-keyword">val</span> conf = <span class="hljs-keyword">new</span> SparkConf()
+    conf.setAppName(<span class="hljs-string">"WordCount"</span>)
+    conf.setMaster(<span class="hljs-string">"local"</span>) <span class="hljs-comment">//程序在本地运行，但是以下的例子以standlone模式分析</span>
+
+    <span class="hljs-keyword">val</span> sc = <span class="hljs-keyword">new</span> SparkContext(conf)
+
+    <span class="hljs-keyword">val</span> lines = sc.textFile(<span class="hljs-string">"D://code//scala//WordCount//wordcount.txt"</span>)
+    <span class="hljs-keyword">val</span> line=lines.flatMap(_.split(<span class="hljs-string">" "</span>)).map((_, <span class="hljs-number">1</span>)).reduceByKey(_+_).map(s=&gt;(s._2,s._1)).sortByKey(<span class="hljs-keyword">false</span>).map(s=&gt;(s._2,s._1)).collect().foreach(println)
+    sc.stop()
+
+  }
+}</code></pre>
+
+<p>new SparkContext(conf): 初始化SparkContext</p>
+
+<p>【源代码】SparkContext.scala：</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-comment">// 属性初始化</span>
+<span class="hljs-comment">// Create and start the scheduler</span>
+<span class="hljs-keyword">val</span> (sched, ts) = SparkContext.createTaskScheduler(<span class="hljs-keyword">this</span>, master)
+_schedulerBackend = sched
+_taskScheduler = ts
+_dagScheduler = <span class="hljs-keyword">new</span> DAGScheduler(<span class="hljs-keyword">this</span>)
+_heartbeatReceiver.ask[Boolean](TaskSchedulerIsSet)
+
+<span class="hljs-comment">// start TaskScheduler after taskScheduler sets DAGScheduler reference in DAGScheduler's</span>
+<span class="hljs-comment">// constructor</span>
+_taskScheduler.start()
+...
+
+<span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> createTaskScheduler(
+      sc: SparkContext,
+      master: String): (SchedulerBackend, TaskScheduler) = {
+...
+<span class="hljs-keyword">case</span> SPARK_REGEX(sparkUrl) =&gt;
+    <span class="hljs-keyword">val</span> scheduler = <span class="hljs-keyword">new</span> TaskSchedulerImpl(sc)
+    <span class="hljs-keyword">val</span> masterUrls = sparkUrl.split(<span class="hljs-string">","</span>).map(<span class="hljs-string">"spark://"</span> + _)
+    <span class="hljs-keyword">val</span> backend = <span class="hljs-keyword">new</span> SparkDeploySchedulerBackend(scheduler, sc, masterUrls)
+    scheduler.initialize(backend)
+    (backend, scheduler)
+...
+}</code></pre>
+
+<p>scheduler.initialize(backend):</p>
+
+<p>【源代码】TaskSchedulerImpl.scala:</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">def</span> initialize(backend: SchedulerBackend) {
+    <span class="hljs-keyword">this</span>.backend = backend
+    <span class="hljs-comment">// temporarily set rootPool name to empty</span>
+    rootPool = <span class="hljs-keyword">new</span> Pool(<span class="hljs-string">""</span>, schedulingMode, <span class="hljs-number">0</span>, <span class="hljs-number">0</span>)
+    schedulableBuilder = {
+      schedulingMode <span class="hljs-keyword">match</span> {
+        <span class="hljs-keyword">case</span> SchedulingMode.FIFO =&gt;
+          <span class="hljs-keyword">new</span> FIFOSchedulableBuilder(rootPool)
+        <span class="hljs-keyword">case</span> SchedulingMode.FAIR =&gt;
+          <span class="hljs-keyword">new</span> FairSchedulableBuilder(rootPool, conf)
+      }
+    }
+    schedulableBuilder.buildPools()
+  }</code></pre>
+
+<p>_taskScheduler.start()</p>
+
+<p>【源代码】TaskSchedulerImpl.scala:</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> start() {
+    backend.start()
+
+    <span class="hljs-keyword">if</span> (!isLocal &amp;&amp; conf.getBoolean(<span class="hljs-string">"spark.speculation"</span>, <span class="hljs-keyword">false</span>)) {
+      logInfo(<span class="hljs-string">"Starting speculative execution thread"</span>)
+      speculationScheduler.scheduleAtFixedRate(<span class="hljs-keyword">new</span> Runnable {
+        <span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> run(): Unit = Utils.tryOrStopSparkContext(sc) {
+          checkSpeculatableTasks()
+        }
+      }, SPECULATION_INTERVAL_MS, SPECULATION_INTERVAL_MS, TimeUnit.MILLISECONDS)
+    }
+  }</code></pre>
+
+<p>backend.start()</p>
+
+<p>【源代码】SparkDeploySchedulerBackend.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> start() {
+    <span class="hljs-keyword">super</span>.start()
+    launcherBackend.connect()
+
+    <span class="hljs-comment">// The endpoint for executors to talk to us</span>
+    <span class="hljs-keyword">val</span> driverUrl = rpcEnv.uriOf(SparkEnv.driverActorSystemName,
+      RpcAddress(sc.conf.get(<span class="hljs-string">"spark.driver.host"</span>), sc.conf.get(<span class="hljs-string">"spark.driver.port"</span>).toInt),
+      CoarseGrainedSchedulerBackend.ENDPOINT_NAME)
+    <span class="hljs-keyword">val</span> args = Seq(
+      <span class="hljs-string">"--driver-url"</span>, driverUrl,
+      <span class="hljs-string">"--executor-id"</span>, <span class="hljs-string">"{{EXECUTOR_ID}}"</span>,
+      <span class="hljs-string">"--hostname"</span>, <span class="hljs-string">"{{HOSTNAME}}"</span>,
+      <span class="hljs-string">"--cores"</span>, <span class="hljs-string">"{{CORES}}"</span>,
+      <span class="hljs-string">"--app-id"</span>, <span class="hljs-string">"{{APP_ID}}"</span>,
+      <span class="hljs-string">"--worker-url"</span>, <span class="hljs-string">"{{WORKER_URL}}"</span>)
+    <span class="hljs-keyword">val</span> extraJavaOpts = sc.conf.getOption(<span class="hljs-string">"spark.executor.extraJavaOptions"</span>)
+      .map(Utils.splitCommandString).getOrElse(Seq.empty)
+    <span class="hljs-keyword">val</span> classPathEntries = sc.conf.getOption(<span class="hljs-string">"spark.executor.extraClassPath"</span>)
+      .map(_.split(java.io.File.pathSeparator).toSeq).getOrElse(Nil)
+    <span class="hljs-keyword">val</span> libraryPathEntries = sc.conf.getOption(<span class="hljs-string">"spark.executor.extraLibraryPath"</span>)
+      .map(_.split(java.io.File.pathSeparator).toSeq).getOrElse(Nil)
+
+    <span class="hljs-comment">// When testing, expose the parent class path to the child. This is processed by</span>
+    <span class="hljs-comment">// compute-classpath.{cmd,sh} and makes all needed jars available to child processes</span>
+    <span class="hljs-comment">// when the assembly is built with the "*-provided" profiles enabled.</span>
+    <span class="hljs-keyword">val</span> testingClassPath =
+      <span class="hljs-keyword">if</span> (sys.props.contains(<span class="hljs-string">"spark.testing"</span>)) {
+        sys.props(<span class="hljs-string">"java.class.path"</span>).split(java.io.File.pathSeparator).toSeq
+      } <span class="hljs-keyword">else</span> {
+        Nil
+      }
+
+    <span class="hljs-comment">// Start executors with a few necessary configs for registering with the scheduler</span>
+    <span class="hljs-keyword">val</span> sparkJavaOpts = Utils.sparkJavaOpts(conf, SparkConf.isExecutorStartupConf)
+    <span class="hljs-keyword">val</span> javaOpts = sparkJavaOpts ++ extraJavaOpts
+    <span class="hljs-keyword">val</span> command = Command(<span class="hljs-string">"org.apache.spark.executor.CoarseGrainedExecutorBackend"</span>,
+      args, sc.executorEnvs, classPathEntries ++ testingClassPath, libraryPathEntries, javaOpts)
+    <span class="hljs-keyword">val</span> appUIAddress = sc.ui.map(_.appUIAddress).getOrElse(<span class="hljs-string">""</span>)
+    <span class="hljs-keyword">val</span> coresPerExecutor = conf.getOption(<span class="hljs-string">"spark.executor.cores"</span>).map(_.toInt)
+    <span class="hljs-keyword">val</span> appDesc = <span class="hljs-keyword">new</span> ApplicationDescription(sc.appName, maxCores, sc.executorMemory,
+      command, appUIAddress, sc.eventLogDir, sc.eventLogCodec, coresPerExecutor)
+    client = <span class="hljs-keyword">new</span> AppClient(sc.env.rpcEnv, masters, appDesc, <span class="hljs-keyword">this</span>, conf)
+    client.start()
+    launcherBackend.setState(SparkAppHandle.State.SUBMITTED)
+    waitForRegistration()
+    launcherBackend.setState(SparkAppHandle.State.RUNNING)
+  }</code></pre>
+
+<p>这里传入Command来指定具体为当前应用程序启动的Executor进行的入口类的名称为CoarseGrainedExecutorBackend，然后将appDesc内容作为AppClient的参数，。创建AppClient对象并调用AppClient对象的start方法</p>
+
+<p>client.start():AppClient对象的start方法，在该start方法中会创建ClientEndpoint</p>
+
+<p>【源代码】AppClient.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">def</span> start() {
+    <span class="hljs-comment">// Just launch an rpcEndpoint; it will call back into the listener.</span>
+    endpoint.set(rpcEnv.setupEndpoint(<span class="hljs-string">"AppClient"</span>, <span class="hljs-keyword">new</span> ClientEndpoint(rpcEnv)))
+  }</code></pre>
+
+<p>new ClientEndpoint(rpcEnv): ClientEndpoint.onStart() <br>
+【源代码】AppClient.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ClientEndpoint</span><span class="hljs-params">(override val rpcEnv: RpcEnv)</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">ThreadSafeRpcEndpoint</span></span>
+    <span class="hljs-keyword">with</span> Logging {
+    ...
+    <span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> onStart(): Unit = {
+      <span class="hljs-keyword">try</span> {
+        registerWithMaster(<span class="hljs-number">1</span>)
+      } <span class="hljs-keyword">catch</span> {
+        <span class="hljs-keyword">case</span> e: Exception =&gt;
+          logWarning(<span class="hljs-string">"Failed to connect to master"</span>, e)
+          markDisconnected()
+          stop()
+      }
+    }
+    ...
+}</code></pre>
+
+<p>registerWithMaster(1): registerWithMaster再调用tryRegisterMaster来注册当前的应用程序到Master中</p>
+
+<p>【源代码】AppClient.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> registerWithMaster(nthRetry: Int) {
+      registerMasterFutures.set(tryRegisterAllMasters())
+      registrationRetryTimer.set(registrationRetryThread.scheduleAtFixedRate(<span class="hljs-keyword">new</span> Runnable {
+        <span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> run(): Unit = {
+          Utils.tryOrExit {
+            <span class="hljs-keyword">if</span> (registered.get) {
+              registerMasterFutures.get.foreach(_.cancel(<span class="hljs-keyword">true</span>))
+              registerMasterThreadPool.shutdownNow()
+            } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (nthRetry &gt;= REGISTRATION_RETRIES) {
+              markDead(<span class="hljs-string">"All masters are unresponsive! Giving up."</span>)
+            } <span class="hljs-keyword">else</span> {
+              registerMasterFutures.get.foreach(_.cancel(<span class="hljs-keyword">true</span>))
+              registerWithMaster(nthRetry + <span class="hljs-number">1</span>)
+            }
+          }
+        }
+      }, REGISTRATION_TIMEOUT_SECONDS, REGISTRATION_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+    }</code></pre>
+
+<p>tryRegisterAllMasters(): 发送RegisterApplication(appDescription,self))消息向Master注册</p>
+
+<p>【源代码】AppClient.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> tryRegisterAllMasters(): Array[JFuture[_]] = {
+      <span class="hljs-keyword">for</span> (masterAddress &lt;- masterRpcAddresses) <span class="hljs-keyword">yield</span> {
+        registerMasterThreadPool.submit(<span class="hljs-keyword">new</span> Runnable {
+          <span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> run(): Unit = <span class="hljs-keyword">try</span> {
+            <span class="hljs-keyword">if</span> (registered.get) {
+              <span class="hljs-keyword">return</span>
+            }
+            logInfo(<span class="hljs-string">"Connecting to master "</span> + masterAddress.toSparkURL + <span class="hljs-string">"..."</span>)
+            <span class="hljs-keyword">val</span> masterRef =
+              rpcEnv.setupEndpointRef(Master.SYSTEM_NAME, masterAddress, Master.ENDPOINT_NAME)
+            masterRef.send(RegisterApplication(appDescription, self))
+          } <span class="hljs-keyword">catch</span> {
+            <span class="hljs-keyword">case</span> ie: InterruptedException =&gt; <span class="hljs-comment">// Cancelled</span>
+            <span class="hljs-keyword">case</span> NonFatal(e) =&gt; logWarning(s<span class="hljs-string">"Failed to connect to master $masterAddress"</span>, e)
+          }
+        })
+      }
+    }</code></pre>
+
+<p>masterRef.send(RegisterApplication(appDescription, self)): master收到RegisterApplication消息以后，Master接受到注册信息后如何可以运行程序，则会为该程序生产Job ID并通过schedule来分配计算资源，具体计算资源的分配是通过应用程序的运行方式、Memory、cores等配置信息来决定的，schedule()资源调度</p>
+
+<p>【源代码】Master.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> receive: PartialFunction[Any, Unit] = {
+    ...
+    <span class="hljs-keyword">case</span> RegisterApplication(description, driver) =&gt; {
+      <span class="hljs-comment">// TODO Prevent repeated registrations from some driver</span>
+      <span class="hljs-keyword">if</span> (state == RecoveryState.STANDBY) {
+        <span class="hljs-comment">// ignore, don't send response</span>
+      } <span class="hljs-keyword">else</span> {
+        logInfo(<span class="hljs-string">"Registering app "</span> + description.name)
+        <span class="hljs-keyword">val</span> app = createApplication(description, driver)
+        registerApplication(app)
+        logInfo(<span class="hljs-string">"Registered app "</span> + description.name + <span class="hljs-string">" with ID "</span> + app.id)
+        persistenceEngine.addApplication(app)
+        driver.send(RegisteredApplication(app.id, self))
+        schedule()
+      }
+    }
+    ...
+}</code></pre>
+
+<p>schedule(): master进行schedule()资源调度，在一台worker上启动driver，launchDriver(worker, driver)，然后在worker上启动executors</p>
+
+<p>【源代码】Master.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> schedule(): Unit = {
+    <span class="hljs-keyword">if</span> (state != RecoveryState.ALIVE) { <span class="hljs-keyword">return</span> }
+    <span class="hljs-comment">// Drivers take strict precedence over executors</span>
+    <span class="hljs-keyword">val</span> shuffledWorkers = Random.shuffle(workers) <span class="hljs-comment">// Randomization helps balance drivers</span>
+    <span class="hljs-keyword">for</span> (worker &lt;- shuffledWorkers <span class="hljs-keyword">if</span> worker.state == WorkerState.ALIVE) {
+      <span class="hljs-keyword">for</span> (driver &lt;- waitingDrivers) {
+        <span class="hljs-keyword">if</span> (worker.memoryFree &gt;= driver.desc.mem &amp;&amp; worker.coresFree &gt;= driver.desc.cores) {
+          launchDriver(worker, driver)
+          waitingDrivers -= driver
+        }
+      }
+    }
+    startExecutorsOnWorkers()
+  }</code></pre>
+
+<p>startExecutorsOnWorkers(): master进行schedule()资源调度， 在workers上启动executors</p>
+
+<p>【源代码】Master.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> startExecutorsOnWorkers(): Unit = {
+    <span class="hljs-comment">// Right now this is a very simple FIFO scheduler. We keep trying to fit in the first app</span>
+    <span class="hljs-comment">// in the queue, then the second app, etc.</span>
+    <span class="hljs-keyword">for</span> (app &lt;- waitingApps <span class="hljs-keyword">if</span> app.coresLeft &gt; <span class="hljs-number">0</span>) {
+      <span class="hljs-keyword">val</span> coresPerExecutor: Option[Int] = app.desc.coresPerExecutor
+      <span class="hljs-comment">// Filter out workers that don't have enough resources to launch an executor</span>
+      <span class="hljs-keyword">val</span> usableWorkers = workers.toArray.filter(_.state == WorkerState.ALIVE)
+        .filter(worker =&gt; worker.memoryFree &gt;= app.desc.memoryPerExecutorMB &amp;&amp;
+          worker.coresFree &gt;= coresPerExecutor.getOrElse(<span class="hljs-number">1</span>))
+        .sortBy(_.coresFree).reverse
+      <span class="hljs-keyword">val</span> assignedCores = scheduleExecutorsOnWorkers(app, usableWorkers, spreadOutApps)
+
+      <span class="hljs-comment">// Now that we've decided how many cores to allocate on each worker, let's allocate them</span>
+      <span class="hljs-keyword">for</span> (pos &lt;- <span class="hljs-number">0</span> until usableWorkers.length <span class="hljs-keyword">if</span> assignedCores(pos) &gt; <span class="hljs-number">0</span>) {
+        allocateWorkerResourceToExecutors(
+          app, assignedCores(pos), coresPerExecutor, usableWorkers(pos))
+      }
+    }
+  }</code></pre>
+
+<p>allocateWorkerResourceToExecutors(app, assignedCores(pos), coresPerExecutor, usableWorkers(pos))： master决定好了分配多少cores给worker，就开始分配启动worker</p>
+
+<p>【源代码】Master.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> allocateWorkerResourceToExecutors(
+      app: ApplicationInfo,
+      assignedCores: Int,
+      coresPerExecutor: Option[Int],
+      worker: WorkerInfo): Unit = {
+    <span class="hljs-comment">// If the number of cores per executor is specified, we divide the cores assigned</span>
+    <span class="hljs-comment">// to this worker evenly among the executors with no remainder.</span>
+    <span class="hljs-comment">// Otherwise, we launch a single executor that grabs all the assignedCores on this worker.</span>
+    <span class="hljs-keyword">val</span> numExecutors = coresPerExecutor.map { assignedCores / _ }.getOrElse(<span class="hljs-number">1</span>)
+    <span class="hljs-keyword">val</span> coresToAssign = coresPerExecutor.getOrElse(assignedCores)
+    <span class="hljs-keyword">for</span> (i &lt;- <span class="hljs-number">1</span> to numExecutors) {
+      <span class="hljs-keyword">val</span> exec = app.addExecutor(worker, coresToAssign)
+      launchExecutor(worker, exec)
+      app.state = ApplicationState.RUNNING
+    }
+  }</code></pre>
+
+<p>launchExecutor(worker, exec): master启动worker</p>
+
+<p>【源代码】Master.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> launchExecutor(worker: WorkerInfo, exec: ExecutorDesc): Unit = {
+    logInfo(<span class="hljs-string">"Launching executor "</span> + exec.fullId + <span class="hljs-string">" on worker "</span> + worker.id)
+    worker.addExecutor(exec)
+    worker.endpoint.send(LaunchExecutor(masterUrl,
+      exec.application.id, exec.id, exec.application.desc, exec.cores, exec.memory))
+    exec.application.driver.send(
+      ExecutorAdded(exec.id, worker.id, worker.hostPort, exec.cores, exec.memory))
+  }</code></pre>
+
+<p>worker.endpoint.send(…): worker收到LaunchExecutor消息了，首先分配ExecutorRunner</p>
+
+<p>【源代码】Worker.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> receive: PartialFunction[Any, Unit] = synchronized {
+    ...
+    <span class="hljs-keyword">case</span> LaunchExecutor(masterUrl, appId, execId, appDesc, cores_, memory_) =&gt;
+      <span class="hljs-keyword">if</span> (masterUrl != activeMasterUrl) {
+        logWarning(<span class="hljs-string">"Invalid Master ("</span> + masterUrl + <span class="hljs-string">") attempted to launch executor."</span>)
+      } <span class="hljs-keyword">else</span> {
+        <span class="hljs-keyword">try</span> {
+          logInfo(<span class="hljs-string">"Asked to launch executor %s/%d for %s"</span>.format(appId, execId, appDesc.name))
+
+          <span class="hljs-comment">// Create the executor's working directory</span>
+          <span class="hljs-keyword">val</span> executorDir = <span class="hljs-keyword">new</span> File(workDir, appId + <span class="hljs-string">"/"</span> + execId)
+          <span class="hljs-keyword">if</span> (!executorDir.mkdirs()) {
+            <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> IOException(<span class="hljs-string">"Failed to create directory "</span> + executorDir)
+          }
+
+          <span class="hljs-comment">// Create local dirs for the executor. These are passed to the executor via the</span>
+          <span class="hljs-comment">// SPARK_EXECUTOR_DIRS environment variable, and deleted by the Worker when the</span>
+          <span class="hljs-comment">// application finishes.</span>
+          <span class="hljs-keyword">val</span> appLocalDirs = appDirectories.get(appId).getOrElse {
+            Utils.getOrCreateLocalRootDirs(conf).map { dir =&gt;
+              <span class="hljs-keyword">val</span> appDir = Utils.createDirectory(dir, namePrefix = <span class="hljs-string">"executor"</span>)
+              Utils.chmod700(appDir)
+              appDir.getAbsolutePath()
+            }.toSeq
+          }
+          appDirectories(appId) = appLocalDirs
+          <span class="hljs-keyword">val</span> manager = <span class="hljs-keyword">new</span> ExecutorRunner(
+            appId,
+            execId,
+            appDesc.copy(command = Worker.maybeUpdateSSLSettings(appDesc.command, conf)),
+            cores_,
+            memory_,
+            self,
+            workerId,
+            host,
+            webUi.boundPort,
+            publicAddress,
+            sparkHome,
+            executorDir,
+            workerUri,
+            conf,
+            appLocalDirs, ExecutorState.RUNNING)
+          executors(appId + <span class="hljs-string">"/"</span> + execId) = manager
+          manager.start()
+          coresUsed += cores_
+          memoryUsed += memory_
+          sendToMaster(ExecutorStateChanged(appId, execId, manager.state, None, None))
+        } <span class="hljs-keyword">catch</span> {
+          <span class="hljs-keyword">case</span> e: Exception =&gt; {
+            logError(s<span class="hljs-string">"Failed to launch executor $appId/$execId for ${appDesc.name}."</span>, e)
+            <span class="hljs-keyword">if</span> (executors.contains(appId + <span class="hljs-string">"/"</span> + execId)) {
+              executors(appId + <span class="hljs-string">"/"</span> + execId).kill()
+              executors -= appId + <span class="hljs-string">"/"</span> + execId
+            }
+            sendToMaster(ExecutorStateChanged(appId, execId, ExecutorState.FAILED,
+              Some(e.toString), None))
+          }
+        }
+      }
+      ...
+}</code></pre>
+
+<p>manager.start()</p>
+
+<p>【源代码】ExecutorRunner.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span>[worker] <span class="hljs-keyword">def</span> start() {
+    workerThread = <span class="hljs-keyword">new</span> Thread(<span class="hljs-string">"ExecutorRunner for "</span> + fullId) {
+      <span class="hljs-keyword">override</span> <span class="hljs-keyword">def</span> run() { fetchAndRunExecutor() }
+    }
+    workerThread.start()
+    <span class="hljs-comment">// Shutdown hook that kills actors on shutdown.</span>
+    shutdownHook = ShutdownHookManager.addShutdownHook { () =&gt;
+      <span class="hljs-comment">// It's possible that we arrive here before calling `fetchAndRunExecutor`, then `state` will</span>
+      <span class="hljs-comment">// be `ExecutorState.RUNNING`. In this case, we should set `state` to `FAILED`.</span>
+      <span class="hljs-keyword">if</span> (state == ExecutorState.RUNNING) {
+        state = ExecutorState.FAILED
+      }
+      killProcess(Some(<span class="hljs-string">"Worker shutting down"</span>)) }
+  }</code></pre>
+
+<p>fetchAndRunExecutor(): 下载运行的程序并运行executor</p>
+
+<p>【源代码】ExecutorRunner.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> fetchAndRunExecutor() {
+    <span class="hljs-keyword">try</span> {
+      <span class="hljs-comment">// Launch the process</span>
+      <span class="hljs-keyword">val</span> builder = CommandUtils.buildProcessBuilder(appDesc.command, <span class="hljs-keyword">new</span> SecurityManager(conf),
+        memory, sparkHome.getAbsolutePath, substituteVariables)
+      <span class="hljs-keyword">val</span> command = builder.command()
+      <span class="hljs-keyword">val</span> formattedCommand = command.asScala.mkString(<span class="hljs-string">"\""</span>, <span class="hljs-string">"\" \""</span>, <span class="hljs-string">"\""</span>)
+      logInfo(s<span class="hljs-string">"Launch command: $formattedCommand"</span>)
+
+      builder.directory(executorDir)
+      builder.environment.put(<span class="hljs-string">"SPARK_EXECUTOR_DIRS"</span>, appLocalDirs.mkString(File.pathSeparator))
+      <span class="hljs-comment">// In case we are running this from within the Spark Shell, avoid creating a "scala"</span>
+      <span class="hljs-comment">// parent process for the executor command</span>
+      builder.environment.put(<span class="hljs-string">"SPARK_LAUNCH_WITH_SCALA"</span>, <span class="hljs-string">"0"</span>)
+
+      <span class="hljs-comment">// Add webUI log urls</span>
+      <span class="hljs-keyword">val</span> baseUrl =
+        s<span class="hljs-string">"http://$publicAddress:$webUiPort/logPage/?appId=$appId&amp;executorId=$execId&amp;logType="</span>
+      builder.environment.put(<span class="hljs-string">"SPARK_LOG_URL_STDERR"</span>, s<span class="hljs-string">"${baseUrl}stderr"</span>)
+      builder.environment.put(<span class="hljs-string">"SPARK_LOG_URL_STDOUT"</span>, s<span class="hljs-string">"${baseUrl}stdout"</span>)
+
+      process = builder.start()
+      <span class="hljs-keyword">val</span> header = <span class="hljs-string">"Spark Executor Command: %s\n%s\n\n"</span>.format(
+        formattedCommand, <span class="hljs-string">"="</span> * <span class="hljs-number">40</span>)
+
+      <span class="hljs-comment">// Redirect its stdout and stderr to files</span>
+      <span class="hljs-keyword">val</span> stdout = <span class="hljs-keyword">new</span> File(executorDir, <span class="hljs-string">"stdout"</span>)
+      stdoutAppender = FileAppender(process.getInputStream, stdout, conf)
+
+      <span class="hljs-keyword">val</span> stderr = <span class="hljs-keyword">new</span> File(executorDir, <span class="hljs-string">"stderr"</span>)
+      Files.write(header, stderr, UTF_8)
+      stderrAppender = FileAppender(process.getErrorStream, stderr, conf)
+
+      <span class="hljs-comment">// Wait for it to exit; executor may exit with code 0 (when driver instructs it to shutdown)</span>
+      <span class="hljs-comment">// or with nonzero exit code</span>
+      <span class="hljs-keyword">val</span> exitCode = process.waitFor()
+      state = ExecutorState.EXITED
+      <span class="hljs-keyword">val</span> message = <span class="hljs-string">"Command exited with code "</span> + exitCode
+      worker.send(ExecutorStateChanged(appId, execId, state, Some(message), Some(exitCode)))
+    } <span class="hljs-keyword">catch</span> {
+      <span class="hljs-keyword">case</span> interrupted: InterruptedException =&gt; {
+        logInfo(<span class="hljs-string">"Runner thread for executor "</span> + fullId + <span class="hljs-string">" interrupted"</span>)
+        state = ExecutorState.KILLED
+        killProcess(None)
+      }
+      <span class="hljs-keyword">case</span> e: Exception =&gt; {
+        logError(<span class="hljs-string">"Error running executor"</span>, e)
+        state = ExecutorState.FAILED
+        killProcess(Some(e.toString))
+      }
+    }
+  }</code></pre>
+
+<p>ExecutorRunner内部会通过Thread的方式构建ProcessBuilder来启动另外一个JVM进程，这个JVM进程启动时候加载的main方法所在的类的名称就是在创建ClientEndpoint时传入的Command来指定具体名称为CoarseGrainedExecutorBackend的类，此时JVM在通过ProcessBuilder启动的时候获得了CoarseGrainedExecutorBackend后加载并调用其中的main方法，在main方法中会实例化CoarseGrainedExecutorBackend本身这个消息循环体</p>
+
+<p>补充说明： <br>
+【源代码】ExecutorRunner.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">val</span> builder = CommandUtils.buildProcessBuilder(appDesc.command, <span class="hljs-keyword">new</span> SecurityManager(conf),memory, sparkHome.getAbsolutePath,substituteVariables)</code></pre>
+
+<p>直接调用object对象CommandUtils的buildProcessBuilder方法，记录command的spark classpath信息</p>
+
+<p>【源代码】CommandUtils.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs "><span class="hljs-keyword">def</span> buildProcessBuilder(
+      command: Command,
+      securityMgr: SecurityManager,
+      memory: Int,
+      sparkHome: String,
+      substituteArguments: String =&gt; String,
+      classPaths: Seq[String] = Seq[String](),
+      env: Map[String, String] = sys.env): ProcessBuilder = {
+    <span class="hljs-keyword">val</span> localCommand = buildLocalCommand(
+      command, securityMgr, substituteArguments, classPaths, env)
+    <span class="hljs-keyword">val</span> commandSeq = buildCommandSeq(localCommand, memory, sparkHome)
+    <span class="hljs-keyword">val</span> builder = <span class="hljs-keyword">new</span> ProcessBuilder(commandSeq: _*)
+    <span class="hljs-keyword">val</span> environment = builder.environment()
+    <span class="hljs-keyword">for</span> ((key, value) &lt;- localCommand.environment) {
+      environment.put(key, value)
+    }
+    builder
+  }</code></pre>
+
+<p>builder.start(): ProcessImpl就是jvm新开辟的线程 <br>
+【源代码】ProcessBuilder.scala</p>
+
+
+
+<pre class="prettyprint"><code class="language-scala hljs ">public Process start() <span class="hljs-keyword">throws</span> IOException {
+        <span class="hljs-comment">// Must convert to array first -- a malicious user-supplied</span>
+        <span class="hljs-comment">// list might try to circumvent the security check.</span>
+        String[] cmdarray = command.toArray(<span class="hljs-keyword">new</span> String[command.size()]);
+        cmdarray = cmdarray.clone();
+
+        <span class="hljs-keyword">for</span> (String arg : cmdarray)
+            <span class="hljs-keyword">if</span> (arg == <span class="hljs-keyword">null</span>)
+                <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> NullPointerException();
+        <span class="hljs-comment">// Throws IndexOutOfBoundsException if command is empty</span>
+        String prog = cmdarray[<span class="hljs-number">0</span>];
+
+        SecurityManager security = System.getSecurityManager();
+        <span class="hljs-keyword">if</span> (security != <span class="hljs-keyword">null</span>)
+            security.checkExec(prog);
+
+        String dir = directory == <span class="hljs-keyword">null</span> ? <span class="hljs-keyword">null</span> : directory.toString();
+
+        <span class="hljs-keyword">for</span> (int i = <span class="hljs-number">1</span>; i &lt; cmdarray.length; i++) {
+            <span class="hljs-keyword">if</span> (cmdarray[i].indexOf(<span class="hljs-string">'\u0000'</span>) &gt;= <span class="hljs-number">0</span>) {
+                <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> IOException(<span class="hljs-string">"invalid null character in command"</span>);
+            }
+        }
+
+        <span class="hljs-keyword">try</span> {
+            <span class="hljs-keyword">return</span> ProcessImpl.start(cmdarray,
+                                     environment,
+                                     dir,
+                                     redirects,
+                                     redirectErrorStream);
+        } <span class="hljs-keyword">catch</span> (IOException | IllegalArgumentException e) {
+            String exceptionInfo = <span class="hljs-string">": "</span> + e.getMessage();
+            Throwable cause = e;
+            <span class="hljs-keyword">if</span> ((e instanceof IOException) &amp;&amp; security != <span class="hljs-keyword">null</span>) {
+                <span class="hljs-comment">// Can not disclose the fail reason for read-protected files.</span>
+                <span class="hljs-keyword">try</span> {
+                    security.checkRead(prog);
+                } <span class="hljs-keyword">catch</span> (SecurityException se) {
+                    exceptionInfo = <span class="hljs-string">""</span>;
+                    cause = se;
+                }
+            }
+            <span class="hljs-comment">// It's much easier for us to create a high-quality error</span>
+            <span class="hljs-comment">// message than the low-level C code which found the problem.</span>
+            <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> IOException(
+                <span class="hljs-string">"Cannot run program \""</span> + prog + <span class="hljs-string">"\""</span>
+                + (dir == <span class="hljs-keyword">null</span> ? <span class="hljs-string">""</span> : <span class="hljs-string">" (in directory \""</span> + dir + <span class="hljs-string">"\")"</span>)
+                + exceptionInfo,
+                cause);
+        }
+    }</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

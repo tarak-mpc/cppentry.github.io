@@ -1,0 +1,23 @@
+---
+layout:     post
+title:      RDD操作详解1——Transformation和Actions概况
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2 id="Spark算子的作用">Spark算子的作用</h2>
+<p>下图描述了Spark在运行转换中通过算子对RDD进行转换。 算子是RDD中定义的函数，可以对RDD中的数据进行转换和操作。<br><img src="http://7nj1qk.com1.z0.glb.clouddn.com/@/spark/rdd/rdd_dataspace.jpg" alt=""></p>
+<ol><li>输入：在Spark程序运行中，数据从外部数据空间（如分布式存储：textFile读取HDFS等，parallelize方法输入Scala集合或数据）输入Spark，数据进入Spark运行时数据空间，转化为Spark中的数据块，通过BlockManager进行管理。</li><li>运行：在Spark数据输入形成RDD后便可以通过变换算子，如filter等，对数据进行操作并将RDD转化为新的RDD，通过Action算子，触发Spark提交作业。 如果数据需要复用，可以通过Cache算子，将数据缓存到内存。</li><li>输出：程序运行结束数据会输出Spark运行时空间，存储到分布式存储中（如saveAsTextFile输出到HDFS），或Scala数据或集合中（collect输出到Scala集合，count返回Scala int型数据）。</li></ol><p>Spark的核心数据模型是RDD，但RDD是个抽象类，具体由各子类实现，如MappedRDD、ShuffledRDD等子类。Spark将常用的大数据操作都转化成为RDD的子类。<br><img src="http://7nj1qk.com1.z0.glb.clouddn.com/@/spark/rdd/runtime_logic.png" alt=""></p>
+<h2 id="Transformation和Actions操作概况"><a href="http://blog.jasonding.top/2015/07/08/Spark/%E3%80%90Spark%E3%80%91RDD%E6%93%8D%E4%BD%9C%E8%AF%A6%E8%A7%A31%E2%80%94%E2%80%94Transformation%E5%92%8CActions%E6%A6%82%E5%86%B5/#Transformation%E5%92%8CActions%E6%93%8D%E4%BD%9C%E6%A6%82%E5%86%B5" rel="nofollow" class="headerlink" title="Transformation和Actions操作概况"></a>Transformation和Actions操作概况</h2>
+<h3 id="Transformation具体内容"><a href="http://blog.jasonding.top/2015/07/08/Spark/%E3%80%90Spark%E3%80%91RDD%E6%93%8D%E4%BD%9C%E8%AF%A6%E8%A7%A31%E2%80%94%E2%80%94Transformation%E5%92%8CActions%E6%A6%82%E5%86%B5/#Transformation%E5%85%B7%E4%BD%93%E5%86%85%E5%AE%B9" rel="nofollow" class="headerlink" title="Transformation具体内容"></a>Transformation具体内容</h3>
+<ul><li>map(func) :返回一个新的分布式数据集，由每个原元素经过func函数转换后组成</li><li>filter(func) : 返回一个新的数据集，由经过func函数后返回值为true的原元素组成<br>
+*flatMap(func) : 类似于map，但是每一个输入元素，会被映射为0到多个输出元素（因此，func函数的返回值是一个Seq，而不是单一元素）</li><li>flatMap(func) : 类似于map，但是每一个输入元素，会被映射为0到多个输出元素（因此，func函数的返回值是一个Seq，而不是单一元素）</li><li>sample(withReplacement, frac, seed) :<br>
+根据给定的随机种子seed，随机抽样出数量为frac的数据</li><li>union(otherDataset) : 返回一个新的数据集，由原数据集和参数联合而成</li><li>groupByKey([numTasks]) :<br>
+在一个由（K,V）对组成的数据集上调用，返回一个（K，Seq[V])对的数据集。注意：默认情况下，使用8个并行任务进行分组，你可以传入numTask可选参数，根据数据量设置不同数目的Task</li><li>reduceByKey(func, [numTasks]) : 在一个（K，V)对的数据集上使用，返回一个（K，V）对的数据集，key相同的值，都被使用指定的reduce函数聚合到一起。和groupbykey类似，任务的个数是可以通过第二个可选参数来配置的。</li><li>join(otherDataset, [numTasks]) :<br>
+在类型为（K,V)和（K,W)类型的数据集上调用，返回一个（K,(V,W))对，每个key中的所有元素都在一起的数据集</li><li>groupWith(otherDataset, [numTasks]) : 在类型为（K,V)和(K,W)类型的数据集上调用，返回一个数据集，组成元素为（K, Seq[V], Seq[W]) Tuples。这个操作在其它框架，称为CoGroup</li><li>cartesian(otherDataset) : 笛卡尔积。但在数据集T和U上调用时，返回一个(T，U）对的数据集，所有元素交互进行笛卡尔积。</li><li>flatMap(func) :<br>
+类似于map，但是每一个输入元素，会被映射为0到多个输出元素（因此，func函数的返回值是一个Seq，而不是单一元素）</li></ul><h3 id="Actions具体内容"><a href="http://blog.jasonding.top/2015/07/08/Spark/%E3%80%90Spark%E3%80%91RDD%E6%93%8D%E4%BD%9C%E8%AF%A6%E8%A7%A31%E2%80%94%E2%80%94Transformation%E5%92%8CActions%E6%A6%82%E5%86%B5/#Actions%E5%85%B7%E4%BD%93%E5%86%85%E5%AE%B9" rel="nofollow" class="headerlink" title="Actions具体内容"></a>Actions具体内容</h3>
+<ul><li>reduce(func) : 通过函数func聚集数据集中的所有元素。Func函数接受2个参数，返回一个值。这个函数必须是关联性的，确保可以被正确的并发执行</li><li>collect() : 在Driver的程序中，以数组的形式，返回数据集的所有元素。这通常会在使用filter或者其它操作后，返回一个足够小的数据子集再使用，直接将整个RDD集Collect返回，很可能会让Driver程序OOM</li><li>count() : 返回数据集的元素个数</li><li>take(n) : 返回一个数组，由数据集的前n个元素组成。注意，这个操作目前并非在多个节点上，并行执行，而是Driver程序所在机器，单机计算所有的元素(Gateway的内存压力会增大，需要谨慎使用）</li><li>first() : 返回数据集的第一个元素（类似于take(1)）</li><li>saveAsTextFile(path) : 将数据集的元素，以textfile的形式，保存到本地文件系统，hdfs或者任何其它hadoop支持的文件系统。Spark将会调用每个元素的toString方法，并将它转换为文件中的一行文本</li><li>saveAsSequenceFile(path) : 将数据集的元素，以sequencefile的格式，保存到指定的目录下，本地系统，hdfs或者任何其它hadoop支持的文件系统。RDD的元素必须由key-value对组成，并都实现了Hadoop的Writable接口，或隐式可以转换为Writable（Spark包括了基本类型的转换，例如Int，Double，String等等）</li><li>foreach(func) : 在数据集的每一个元素上，运行函数func。这通常用于更新一个累加器变量，或者和外部存储系统做交互</li></ul><h2 id="算子分类"><a href="http://blog.jasonding.top/2015/07/08/Spark/%E3%80%90Spark%E3%80%91RDD%E6%93%8D%E4%BD%9C%E8%AF%A6%E8%A7%A31%E2%80%94%E2%80%94Transformation%E5%92%8CActions%E6%A6%82%E5%86%B5/#%E7%AE%97%E5%AD%90%E5%88%86%E7%B1%BB" rel="nofollow" class="headerlink" title="算子分类"></a>算子分类</h2>
+<p>大致可以分为三大类算子:</p>
+<ol><li>Value数据类型的Transformation算子，这种变换并不触发提交作业，针对处理的数据项是Value型的数据。</li><li>Key-Value数据类型的Transfromation算子，这种变换并不触发提交作业，针对处理的数据项是Key-Value型的数据对。</li><li>Action算子，这类算子会触发SparkContext提交Job作业。</li></ol>            </div>
+                </div>

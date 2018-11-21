@@ -1,0 +1,236 @@
+---
+layout:     post
+title:      大数据开发进阶之HBase开发实例介绍
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span></span>这周学习了HBase的开发实例，主要有一些HBase API的使用。（文中的代码，是经过实际运行有效的，只截取片段，关于全部的可参考前一篇文章中全局变量的设置,关于运行环境也与前一篇一样）</p>
+<h2>一、HBase基本操作</h2>
+<h2>1.追加插入-Append</h2>
+<p>在原有的value中追加值，即在其后追加值，例如原有value为a，追加b之后value值为ab</p>
+<p></p>
+<pre><code class="language-java">	//追加数据
+	public static void appendData(String tablename)
+	{
+		TableName tableName = TableName.valueOf(tablename);
+		try {
+			Connection conn = ConnectionFactory.createConnection(configuration);
+			Table table = conn.getTable(tableName);
+			//创建Append对象,rowkey为"rowkey1"
+			Append append = new Append("rowkey1".getBytes());
+			// 在append对象中设置列族、列、值  
+			append.add("column1".getBytes(), "name".getBytes(), "123".getBytes());  
+			// 追加数据  
+			table.append(append);  
+			// 关闭资源  
+			table.close();  
+			conn.close(); 
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}</code></pre>
+<p></p>
+<p>运行之前数据</p>
+<p> rowkey1              column=column1:name, timestamp=1477141062736, value=aaa <br></p>
+<p>运行之后数据</p>
+<p> rowkey1              column=column1:name, timestamp=1477141062736, value=aaa123<br></p>
+<h2>2.符合条件插入-CheckAndPut</h2>
+<p>检查是否有符合某个条件的值，有的话则插入数据，这里的插入是会替换原有的值。</p>
+<p></p>
+<pre><code class="language-java">	//检查符合某一条件则插入数据
+	public static void checkAndPutData(String tablename)
+	{
+		try {
+			TableName tableName = TableName.valueOf(tablename);
+			Connection conn = ConnectionFactory.createConnection(configuration);
+			//获取tablename表
+			Table htable = conn.getTable(tableName);
+			//Put 单个插入，rowkey为rowkey3
+			Put put = new Put("rowkey3".getBytes());
+			//列族为column1，列为name，可有多行，value值为ddd，这里值都需要转化为bytes类型，hbase都是以bytes存储
+			put.addColumn("column1".getBytes(), "name".getBytes(), "ddd".getBytes());
+			//检查是否有值是否存在,若存在则插入
+			boolean result = htable.checkAndPut("rowkey3".getBytes(), "column1".getBytes(),   
+					           "name".getBytes(), "ccc".getBytes(), put);  
+			//插入
+			htable.put(put);
+			htable.close();
+			conn.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}</code></pre>结果如下：插入之前值为ccc，插入之后值为ddd
+<p></p>
+<p><img src="https://img-blog.csdn.net/20161023150809753?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br></p>
+<h2>3.符合条件删除-CheckAndDelete</h2>
+<p>检查是否有符合某个条件的值，有的话则删除某一行。<br></p>
+<p></p>
+<pre><code class="language-java">//检查符合某一条件则删除数据
+	public static void checkAndDeleteData(String tablename)
+	{
+		try {
+			TableName tableName = TableName.valueOf(tablename);
+			Connection conn = ConnectionFactory.createConnection(configuration);
+			//获取tablename表
+			Table htable = conn.getTable(tableName);
+			//申请delete对象,rowkey为rowkey3
+			Delete delete = new Delete("rowkey3".getBytes());
+			//列族为column1，列为name
+			delete.addColumn("column1".getBytes(), "name".getBytes());
+			//检查是否有值是否存在,若存在则删除
+			htable.checkAndDelete("rowkey3".getBytes(), "column1".getBytes(), "name".getBytes(), "ccc".getBytes(), delete);
+			System.out.println("delete=========end");
+			htable.close();
+			conn.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}</code></pre>运行后的结果如下
+<p></p>
+<p><img src="https://img-blog.csdn.net/20161023152715168?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br></p>
+<h2>4.计数器-incrementColumnValue</h2>
+<p>用于实时收集信息，如点赞之类的。0代表获取当前值，正数则加，负数则减。</p>
+<p></p>
+<pre><code class="language-java">        //计数器
+	public static void incrementColumn(String tablename)
+	{
+		try {
+			TableName tableName = TableName.valueOf(tablename);
+			Connection conn = ConnectionFactory.createConnection(configuration);
+			//获取tablename表
+			Table htable = conn.getTable(tableName);
+			//为某一行计数
+			long result = htable.incrementColumnValue("rowkey3".getBytes(), "column1".getBytes(), "name".getBytes(), 5);
+			//打印计数结果
+			System.out.println("the num is:" + result);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}</code></pre><br><br><p></p>
+<h2>二、HBase过滤器</h2>
+<h3>1.Rowkey过滤器-RowFilter</h3>
+<p>Rowkey过滤器主要对rowkey进行过滤，通过条件的设置获得想要的行列。一般情况下不太使用filter，因为会降低运行的效率。</p>
+<p>以下为代码的示例，其中RowFilter的条件设置为EQUAL（相等），还可设置为NOT_EQUAL（不等于），GREATER_OR_EQUAL（大于或等于）等一些值，如果满足条件，则输出。</p>
+<p>比较器使用的是BinaryComparator，全字符比较，匹配完整的字符。</p>
+<p>还有以下几种：</p>
+<p></p>
+<pre><code class="language-html">BinaryPrefixComparator     匹配字节数组前缀 
+BitComparator
+NullComparator
+RegexStringComparator    正则表达式匹配
+SubstringComparator        子串匹配</code></pre><br><span style="font-family:Tahoma;font-size:14px;">setCacheBlocks 设置获取的数据是否存在于内存中，一般设置为false，提高hbase查询的性能</span>
+<p></p>
+<p></p>
+<pre><code class="language-java">       //rowkey过滤器
+	public static void rowkeyFilter(String tablename)
+	{
+		TableName tableName = TableName.valueOf(tablename);
+		try {
+			Connection conn = ConnectionFactory.createConnection(configuration);
+			Table table = conn.getTable(tableName);
+			Scan scan = new Scan();
+			scan.setCacheBlocks(false);
+			Filter filter = new RowFilter(CompareFilter.CompareOp.EQUAL, new BinaryComparator(("abc").getBytes()));
+			scan.setFilter(filter);
+			ResultScanner results = table.getScanner(scan);
+			//每一行和每一列组成一个cell
+			for(Result result:results)
+			{
+				Cell[] cells = result.rawCells();
+				for(Cell cell:cells) {
+					//打印rowkey
+					System.out.println("RowKey:"+new String(CellUtil.cloneRow(cell))+" ");  
+		                        //打印时间戳
+					System.out.println("Timetamp:"+cell.getTimestamp()+" ");  
+					//打印列族
+		                    &lt;span style="white-space:pre"&gt;	&lt;/span&gt;System.out.println("column Family:"+new String(CellUtil.cloneFamily(cell))+" ");  
+		            &lt;span style="white-space:pre"&gt;		&lt;/span&gt;//打印行名
+		            &lt;span style="white-space:pre"&gt;		&lt;/span&gt;System.out.println("row Name:"+new String(CellUtil.cloneQualifier(cell))+" ");  
+		            &lt;span style="white-space:pre"&gt;		&lt;/span&gt;//打印value值
+		           &lt;span style="white-space:pre"&gt;		&lt;/span&gt; System.out.println("value:"+new String(CellUtil.cloneValue(cell))+" ");
+				}
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}</code></pre>运行之前的study-habse如下：
+<p></p>
+<p><img src="https://img-blog.csdn.net/20161023115601732?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>运行之后的结果如下：</p>
+<p><img src="https://img-blog.csdn.net/20161023115625591?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br></p>
+<h2>2.Qualifier过滤器-QualifierFilter</h2>
+<p>QualifierFilter是基于列（column）的比较，与rowkey相似，与此相似的还有FamilyFilter，基于列族的比较。一般Qualifier比Family较常用。</p>
+<p>QuaiifierFilter对大小写敏感。</p>
+<p>这里就不举例了。</p>
+<h2>3.FilterList</h2>
+<p>FilterList 过滤器链，它包含一组满足于条件的数据。参数有FilterList.Operator.MUST_PASS_ALL 和FilterList.Operator.MUST_PASS_ONE 两种，表达形式如下：</p>
+<p></p>
+<pre><code class="language-java">FilterList list = new FilterList(FilterList.Operator.MUST_PASS_ONE);   //数据只要满足一组过滤器中的一个就可以
+FilterList list = new FilterList(FilterList.Operator.MUST_PASS_ALL);   //数据必须满足所有过滤器</code></pre>默认为MUST_PASS_ALL<br><p></p>
+<h2>4.列值过滤器-SingleColumnValueFilter</h2>
+<p>SingleColumnValueFilter  列值过滤器 过滤列值是否满足于某个条件的<br>
+setFilterIfMissing可设置为true或者false，其意义在于若符合我们设定的某一列值本身不存在，则是否过滤掉。<br>
+设置为true，则过滤掉；设置为false，则不过滤掉。默认为false<br></p>
+<p><br></p>
+<p>以下例子为FilterList和SingleColumnValunFilter结合使用</p>
+<p></p>
+<pre><code class="language-java">&lt;/pre&gt;&lt;pre name="code" class="java"&gt;public static void filterList(String tablename)
+	{
+		TableName tableName = TableName.valueOf(tablename);
+		try {
+			Connection conn = ConnectionFactory.createConnection(configuration);
+			Table table = conn.getTable(tableName);
+			Scan scan = new Scan();
+			scan.setCacheBlocks(false);
+			
+			//设置为MUST_PAST_ALL，过滤器中的条件必须同时满足
+			FilterList filterlist = new FilterList(FilterList.Operator.MUST_PASS_ALL);
+			//过滤列值大于或等于某一个值
+			SingleColumnValueFilter filter1 = new SingleColumnValueFilter(
+					"column1".getBytes(),
+					"num".getBytes(),
+					CompareOp.GREATER_OR_EQUAL,
+					"20".getBytes());			
+			filter1.setFilterIfMissing(true); 
+			filterlist.addFilter(filter1);
+			//过滤列值小于或等于某一个值
+			SingleColumnValueFilter filter2 = new SingleColumnValueFilter(
+					"column1".getBytes(),
+					"num".getBytes(),
+					CompareOp.LESS_OR_EQUAL,
+					"30".getBytes());
+			//设置某一列值若本身不存在，则过滤掉
+			filter1.setFilterIfMissing(true); 
+			filterlist.addFilter(filter2);
+			scan.setFilter(filterlist);
+			ResultScanner results = table.getScanner(scan);
+			//每一行和每一列组成一个cell
+			for(Result result:results)
+			{
+				Cell[] cells = result.rawCells();
+				for(Cell cell:cells) {
+					//打印rowkey
+					System.out.print("RowKey:"+new String(CellUtil.cloneRow(cell))+" ");  
+		            //打印时间戳
+					System.out.print("Timetamp:"+cell.getTimestamp()+" ");  
+					//打印列族
+		            System.out.print("column Family:"+new String(CellUtil.cloneFamily(cell))+" ");  
+		            //打印行名
+		            System.out.print("row Name:"+new String(CellUtil.cloneQualifier(cell))+" ");  
+		            //打印value值
+		            System.out.println("value:"+new String(CellUtil.cloneValue(cell))+" ");
+				}
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}</code></pre><br>
+使用的tablename为study-habse1,表中的数据如下：
+<p></p>
+<p><img src="https://img-blog.csdn.net/20161023124000705?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>运行之后，结果如下，获取列值在20到30之间的行</p>
+<p><img src="https://img-blog.csdn.net/20161023124028065?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br></p>
+            </div>
+                </div>

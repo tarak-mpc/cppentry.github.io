@@ -1,0 +1,140 @@
+---
+layout:     post
+title:      Spark动态分配资源
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="spark动态分配资源">Spark动态分配资源</h1>
+
+<p>标签（空格分隔）： spark</p>
+
+<hr>
+
+
+
+<h2 id="作业调度job-scheduling">作业调度（Job Scheduling）</h2>
+
+
+
+<h3 id="overview">OverView</h3>
+
+<ul>
+<li>在一个集群中的每一个spark application（一个sparkContext的实例）维持着一系列独立的executor集合。集群管理着这些spark application之间的资源调度。</li>
+<li>在一个spark application之内，可能同时运行着多个job，spark使用公平调度器来为这些job分配资源。</li>
+</ul>
+
+
+
+<h3 id="不同application之间的资源调度">不同application之间的资源调度</h3>
+
+<ul>
+<li>spark application维持着一些独立的executor jvms，这些jvm用于applcaiton的数据存储和task的运行。</li>
+<li>在不同applicationzh 之间分配资源的最简单的方案是使用静态资源分配，即每一个application给予一个最大的可用资源，在这个applicaiton的生命周期中，这部分资源都不会被释放。 <br>
+<ul><li>standalone模式：在此模式下，applicaiton会按照FIFO的顺序执行，在执行时，applicaiton会尝试使用所有的可用节点.可以通过参数<code>spark.core.max</code>设置，或者通过<code>spark.deploy.defaultCores</code>设置使用的核数，最后，对于每个核的内存控制，使用<code>spark.executor.memeory</code>进行控制。</li>
+<li>Mesos模式：在此模式下，将<code>spark.mesos.coarse</code>设置为true来启用这种粗粒度的控制方式，和standalone模式一样，使用<code>spark.core.max</code>和<code>spark.executor.memory</code>来分别控制core和memory。</li>
+<li>Yarn模式：在这种模式下，使用<code>--num-executors</code>来设置分配给这个applicaiton的executor，使用<code>--executor-memory</code>来是指每个executor的内存，使用<code>--executor-cores</code>来设置每个executor的核数。</li>
+<li>在Mesos模式下，spark还可以共享一台机器上不同的core，但是，所有的模式下，内存都是不可共享的，</li></ul></li>
+</ul>
+
+
+
+<h3 id="动态资源分配">动态资源分配</h3>
+
+<ul>
+<li>Spark1.2之后，有了动态分配资源的特性，每个applicaiton从资源池里申请资源，当不再使用时，放回到资源池，可以继续被其他的applicaiton使用。</li>
+<li>Spark的动态资源分配是在executor层面上进行的，也就是说，从资源池申请和放回到资源池的是一个个executor，而不会对executor内的core和memory动态分配和共享。</li>
+<li>通过修改spark/conf/spark-default.conf文件，添加<code>spark.dynamicAllocation.enabled true</code>来开启。</li>
+</ul>
+
+
+
+<h3 id="启用external-shuffle-service">启用external shuffle service</h3>
+
+<ul>
+<li>启用此服务的目的是保护executor所写的shuffle文件，以便shuffle可以安全的删除。</li>
+<li>在spark配置文件中，设置<code>spark.shffle.service.enabled true</code>在Yarn模式下，这个shuffle服务是通过运行在每个nodemanager上的org.apache.spark.yarn.network.YarnShuffleService实现的。通过以下步骤来启用服务。 <br>
+<ul><li>在spark的lib下找到spark--yarn-shuffle.jar文件。</li>
+<li>将这个文件加入到nodemanager的classpath。</li>
+<li>在每个节点的yarn-site.xml中，修改</li></ul></li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.aux-services<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>mapreduce_shuffle,spark_shuffle<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>yarn.nodemanager.aux-services.spark_shuffle.class<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>org.apache.spark.network.yarn.YarnShuffleService<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>spark.shuffle.service.port<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>7337<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+</code></pre>
+
+<ul>
+<li>重启nodeManager。</li>
+</ul>
+
+
+
+<h3 id="资源分配策略">资源分配策略</h3>
+
+
+
+<h4 id="请求资源策略">请求资源策略</h4>
+
+<ul>
+<li>当现有的excutor不足够同时执行已提交的task时，便会向集群申请新的executor。</li>
+<li>真正触发申请操作的是，当集群pending的task达到<code>spark.dynamicAllocation.schedulerBacklogTimeout</code>时间时，便会触发申请操作。然后每<code>spark.dynamicAllocation.sustainedSchedulerBacklogTimeout</code>秒重新检测，如果还有pending的task，再次申请资源。每次申请的资源是成指数递增的，比如，1,2,4,8这种。和tcp慢启动的原理很类似。</li>
+</ul>
+
+
+
+<h4 id="删除资源策略">删除资源策略</h4>
+
+<ul>
+<li>spark application 删除那些经过<code>spark.dynamicAllocation.executorIdleTimeout</code>时间未使用的executor。</li>
+</ul>
+
+
+
+<h3 id="如何释放不使用的executor">如何释放不使用的executor</h3>
+
+<ul>
+<li>在动态分配资源时，当释放掉不使用的executor之后，applicaiton可能还需要访问存储在那个executor上的文件。所以，spark需要在释放executor的时候保留相关的executor状体和文件。</li>
+<li>上述的这种情况在shuffle过程中是常见的，shuffle时，每个excutor首先将自己的map输出写到自身的本地硬盘中。当别的executor想要使用时，这个executor作为server向其他executor提供数据。</li>
+<li>有可能出现这样一种情况，当shuffle还没完成时，某个executor被释放掉，这时候，如果想要使用他map的输出，就需要重复的进行计算，这是很没有必要的。</li>
+<li>解决方案是引入第三方的服务来保存这些文件和相应的状态信息。称之为extern shuffle service。这是一个在每个节点长时间独立运行的服务，独立于spark的application和executor之外。当启用这个服务时，executor通过这个服务来获取相应的文件和状态信息，而不是直接从executor上拿。</li>
+</ul>
+
+
+
+<h2 id="applicaiton内的调度">Applicaiton内的调度</h2>
+
+<ul>
+<li>一个spark application（sparkContext instance）中可能同时运行着多个job。比如，通过thrift执行spark-sql时，thrift的进程是一个applicaiton，thrfit可以接受多个sql进行查询，这一个个的sql就是job。</li>
+<li>默认的调度器是FIFO的，每个job被分为不同的stage（如，map阶段和reduce阶段）在队列头的会优先执行，执行完之后才会轮到下一个job执行。</li>
+<li>可以配置使用fair scheduler，不同的job会轮转的获取集群上的资源，而不用等到前面的job都执行完毕后才能执行。通过设置<code>spark.scheduler.mode FAIR</code>来启用。还可以在配置sparkContext的conf来设置</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs r">val conf = new SparkConf().setMaster(<span class="hljs-keyword">...</span>).setAppName(<span class="hljs-keyword">...</span>)
+conf.set(<span class="hljs-string">"spark.scheduler.mode"</span>, <span class="hljs-string">"FAIR"</span>)
+val sc = new SparkContext(conf)</code></pre>
+
+
+
+<h2 id="参考">参考</h2>
+
+<ul>
+<li><a href="http://spark.apache.org/docs/1.5.0/job-scheduling.html#graceful-decommission-of-executors" rel="nofollow" target="_blank">http://spark.apache.org/docs/1.5.0/job-scheduling.html#graceful-decommission-of-executors</a></li>
+<li><a href="http://lxw1234.com/archives/2015/12/593.htm" rel="nofollow" target="_blank">http://lxw1234.com/archives/2015/12/593.htm</a></li>
+</ul>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

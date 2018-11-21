@@ -1,0 +1,210 @@
+---
+layout:     post
+title:      Spark调优（0.8.1中文版）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>翻译自Spark官方文档 <a href="http://spark.incubator.apache.org/docs/latest/tuning.html" rel="nofollow">
+<span style="color:#62a6e4;">Tuning Spark</span></a>，由团队的月禾mm初审，以及微博上的Spark达人@crazyjvm复审，非常感谢</p>
+<h1><strong>Spark调优</strong></h1>
+<ul><li><a href="http://rdc.taobao.org/?p=2034#%E6%95%B0%E6%8D%AE%E5%BA%8F%E5%88%97%E5%8C%96" rel="nofollow"><span style="color:#62a6e4;">数据序列化</span></a></li><li><a href="http://rdc.taobao.org/?p=2034#%E5%86%85%E5%AD%98%E8%B0%83%E4%BC%98" rel="nofollow"><span style="color:#62a6e4;">内存调优</span></a>
+<ul><li><a href="http://rdc.taobao.org/?p=2034#%E5%88%A4%E6%96%AD%E5%86%85%E5%AD%98%E6%B6%88%E8%80%97" rel="nofollow"><span style="color:#62a6e4;">判断内存消耗</span></a></li><li><a href="http://rdc.taobao.org/?p=2034#%E8%B0%83%E4%BC%98%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84" rel="nofollow"><span style="color:#62a6e4;">调优数据结构</span></a></li><li><a href="http://rdc.taobao.org/?p=2034#%E5%BA%8F%E5%88%97%E5%8C%96RDD%E7%9A%84%E5%AD%98%E5%82%A8" rel="nofollow"><span style="color:#62a6e4;">序列化RDD的存储</span></a></li><li><a href="http://rdc.taobao.org/?p=2034#%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E8%B0%83%E4%BC%98" rel="nofollow"><span style="color:#62a6e4;">垃圾回收调优</span></a></li></ul></li><li><a href="http://rdc.taobao.org/?p=2034#%E5%85%B6%E4%BB%96%E9%9C%80%E8%A6%81%E8%80%83%E8%99%91%E7%9A%84%E5%86%85%E5%AE%B9" rel="nofollow"><span style="color:#62a6e4;">其他需要考虑的内容</span></a>
+<ul><li><a href="http://rdc.taobao.org/?p=2034#%E5%B9%B6%E8%A1%8C%E5%BA%A6" rel="nofollow"><span style="color:#62a6e4;">并行度</span></a></li><li><a href="http://rdc.taobao.org/?p=2034#Reduce%E4%BB%BB%E5%8A%A1%E7%9A%84%E5%86%85%E5%AD%98%E4%BD%BF%E7%94%A8" rel="nofollow"><span style="color:#62a6e4;">Reduce任务的内存使用</span></a></li><li><a href="http://rdc.taobao.org/?p=2034#%E5%B9%BF%E6%92%AD%E5%A4%A7%E5%8F%98%E9%87%8F" rel="nofollow"><span style="color:#62a6e4;">广播大变量</span></a></li></ul></li><li><a href="http://rdc.taobao.org/?p=2034#%E6%80%BB%E7%BB%93" rel="nofollow"><span style="color:#62a6e4;">总结</span></a></li></ul><p>由于Spark大部分计算在内存中进行的特性，Spark程序会受到集群中以下任一因素制约：CPU，网络带宽，或内存。最常见的情况，如果数据和内存大小匹配的话，那么瓶颈就是网络带宽。但是有时候，你还是需要做一些调优，例如<a href="http://spark.incubator.apache.org/docs/latest/scala-programming-guide.html#rdd-persistence" rel="nofollow"><span style="color:#62a6e4;">storing
+ RDDs in serialized form</span></a>来减少内存的使用。这个指引将覆盖2个大主题：数据序列化，这对好的网络性能和减少内存使用起关键性作用，以及内存调优。另外我们还会涉及几个小话题。</p>
+<h1 id="数据序列化">数据序列化</h1>
+<p>序列化在任何分布式应用中都扮演着一个重要的角色。那些序列化很慢，或占用大量字节的格式，都将会大大拖慢计算速度。通常，在优化Spark应用时这会是你需要调优的第一件事情。Spark致力于在方便和性能间取得平衡（允许你在操作中使用任何的Java类型），它提供了2个序列化库：</p>
+<ul><li>Java序列化（<a href="http://docs.oracle.com/javase/6/docs/api/java/io/Serializable.html" rel="nofollow"><span style="color:#62a6e4;">Java serialization</span></a>）：默认情况下，Spark使用Java的<samp>ObjectOutputStream</samp>框架来序列化对象，可以兼容所有实现了<a href="http://docs.oracle.com/javase/6/docs/api/java/io/Serializable.html" rel="nofollow"><span style="color:#62a6e4;">java.io.Serializable</span></a>接口的对象。通过扩展<a href="http://docs.oracle.com/javase/6/docs/api/java/io/Externalizable.html" rel="nofollow"><span style="color:#62a6e4;">java.io.Externalizable</span></a>接口，你可以更加细致的控制序列化性能。Java的序列化很灵活，但是通常很慢，大量的类会导致大量的序列化格式。</li><li>Kryo序列化（<a href="https://code.google.com/p/kryo/" rel="nofollow"><span style="color:#62a6e4;">Kryo serialization</span></a>）: Spark也可以使用Kyro库（版本2）来更快的序列化对象。Kryo比Java序列化更快，更紧凑（通常是Java序列化的10倍），但是不支持所有的<samp>Serializable</samp>类型，而且需要你把程序中要用到的类预先注册，从而获得更好的性能。</li></ul><p>你可以通过在创建SparkContext之前调用<samp>System.setProperty(“spark.serializer”, “spark.KryoSerializer”)</samp>切换到使用Kryo。我们不使用它作为默认实现的唯一理由，是它需要用户自己注册一下。但是我们推荐使用它，在任何对网络要求较高的应用。</p>
+<p>最后，要在Kryo中注册你的类，你需要要建立一个公共类来继承<a href="http://spark.incubator.apache.org/docs/latest/api/core/index.html#org.apache.spark.serializer.KryoRegistrator" rel="nofollow"><span style="color:#62a6e4;">org.apache.spark.serializer.KryoRegistrator</span></a>类，并设置<samp>spark.kryo.registrator</samp>的系统属性指向它，如下：</p>
+<div id="crayon-52e6f9bf0c53a472587170" class="crayon-syntax crayon-theme-solarized-dark crayon-font-monaco crayon-os-pc print-yes" style="line-height:15px !important;clear:both;font-size:12px !important;">
+<div class="crayon-toolbar" style="line-height:18px !important;font-size:12px !important;z-index:2;">
+<span class="crayon-title"></span>
+<div class="crayon-tools" style="line-height:18px !important;font-size:12px !important;">
+<div class="crayon-button crayon-nums-button crayon-pressed" title="切换显示行编号">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-plain-button" title="纯文本显示代码">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-wrap-button" title="切换自动换行">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-expand-button" title="Expand Code">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-copy-button" title="Expand Code">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-popup-button" title="在新窗口中显示代码">
+<div class="crayon-button-icon"></div>
+</div>
+</div>
+</div>
+<div class="crayon-info" style="line-height:16.8px !important;min-height:16.8px !important;">
+</div>
+<div class="crayon-plain-wrap"><textarea style="line-height:15px !important;overflow:hidden;font-size:12px !important;z-index:0;opacity:0;" class="crayon-plain print-no" readonly cols="22" rows="3">import com.esotericsoftware.kryo.Kryo
+import org.apache.spark.serializer.KryoRegistrator
+
+class MyRegistrator extends KryoRegistrator {
+  override def registerClasses(kryo: Kryo) {
+kryo.register(classOf[MyClass1])
+kryo.register(classOf[MyClass2])
+  }
+}
+
+// Make sure to set these properties *before* creating a SparkContext!
+System.setProperty("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+System.setProperty("spark.kryo.registrator", "mypackage.MyRegistrator")
+val sc = new SparkContext(...)</textarea></div>
+<div class="crayon-main" style="overflow:hidden;z-index:1;">
+<table class="crayon-table"><tbody><tr class="crayon-row"><td class="crayon-nums">
+<div class="crayon-nums-content" style="line-height:15px !important;font-size:12px !important;">
+<div class="crayon-num">1</div>
+<div class="crayon-num crayon-striped-num">2</div>
+<div class="crayon-num">3</div>
+<div class="crayon-num crayon-striped-num">4</div>
+<div class="crayon-num">5</div>
+<div class="crayon-num crayon-striped-num">6</div>
+<div class="crayon-num">7</div>
+<div class="crayon-num crayon-striped-num">8</div>
+<div class="crayon-num">9</div>
+<div class="crayon-num crayon-striped-num">10</div>
+<div class="crayon-num">11</div>
+<div class="crayon-num crayon-striped-num">12</div>
+<div class="crayon-num">13</div>
+<div class="crayon-num crayon-striped-num">14</div>
+</div>
+</td>
+<td class="crayon-code">
+<div class="crayon-pre" style="line-height:15px !important;font-size:12px !important;">
+<div id="crayon-52e6f9bf0c53a472587170-1" class="crayon-line"><span class="crayon-e">import
+</span><span class="crayon-v">com</span><span class="crayon-sy">.</span><span class="crayon-v">esotericsoftware</span><span class="crayon-sy">.</span><span class="crayon-v">kryo</span><span class="crayon-sy">.</span><span class="crayon-e">Kryo</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-2" class="crayon-line crayon-striped-line">
+<span class="crayon-e">import </span><span class="crayon-v">org</span><span class="crayon-sy">.</span><span class="crayon-v">apache</span><span class="crayon-sy">.</span><span class="crayon-v">spark</span><span class="crayon-sy">.</span><span class="crayon-v">serializer</span><span class="crayon-sy">.</span><span class="crayon-e">KryoRegistrator</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-3" class="crayon-line"></div>
+<div id="crayon-52e6f9bf0c53a472587170-4" class="crayon-line crayon-striped-line">
+<span class="crayon-t">class</span><span class="crayon-h"> </span><span class="crayon-e">MyRegistrator</span><span class="crayon-h">
+</span><span class="crayon-r">extends</span><span class="crayon-h"> </span><span class="crayon-e">KryoRegistrator</span><span class="crayon-h">
+</span><span class="crayon-sy">{</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-5" class="crayon-line"><span class="crayon-h"> 
+</span><span class="crayon-e">override </span><span class="crayon-e">def </span><span class="crayon-e">registerClasses</span><span class="crayon-sy">(</span><span class="crayon-i">kryo</span><span class="crayon-o">:</span><span class="crayon-h">
+</span><span class="crayon-i">Kryo</span><span class="crayon-sy">)</span><span class="crayon-h">
+</span><span class="crayon-sy">{</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-6" class="crayon-line crayon-striped-line">
+<span class="crayon-v">kryo</span><span class="crayon-sy">.</span><span class="crayon-e">register</span><span class="crayon-sy">(</span><span class="crayon-v">classOf</span><span class="crayon-sy">[</span><span class="crayon-i">MyClass1</span><span class="crayon-sy">]</span><span class="crayon-sy">)</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-7" class="crayon-line"><span class="crayon-v">kryo</span><span class="crayon-sy">.</span><span class="crayon-e">register</span><span class="crayon-sy">(</span><span class="crayon-v">classOf</span><span class="crayon-sy">[</span><span class="crayon-i">MyClass2</span><span class="crayon-sy">]</span><span class="crayon-sy">)</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-8" class="crayon-line crayon-striped-line">
+<span class="crayon-h">  </span><span class="crayon-sy">}</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-9" class="crayon-line"><span class="crayon-sy">}</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-10" class="crayon-line crayon-striped-line">
+</div>
+<div id="crayon-52e6f9bf0c53a472587170-11" class="crayon-line"><span class="crayon-c">// Make sure to set these properties *before* creating a SparkContext!</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-12" class="crayon-line crayon-striped-line">
+<span class="crayon-v">System</span><span class="crayon-sy">.</span><span class="crayon-e">setProperty</span><span class="crayon-sy">(</span><span class="crayon-s">"spark.serializer"</span><span class="crayon-sy">,</span><span class="crayon-h">
+</span><span class="crayon-s">"org.apache.spark.serializer.KryoSerializer"</span><span class="crayon-sy">)</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-13" class="crayon-line"><span class="crayon-v">System</span><span class="crayon-sy">.</span><span class="crayon-e">setProperty</span><span class="crayon-sy">(</span><span class="crayon-s">"spark.kryo.registrator"</span><span class="crayon-sy">,</span><span class="crayon-h">
+</span><span class="crayon-s">"mypackage.MyRegistrator"</span><span class="crayon-sy">)</span></div>
+<div id="crayon-52e6f9bf0c53a472587170-14" class="crayon-line crayon-striped-line">
+<span class="crayon-e">val </span><span class="crayon-v">sc</span><span class="crayon-h">
+</span><span class="crayon-o">=</span><span class="crayon-h"> </span><span class="crayon-r">new</span><span class="crayon-h">
+</span><span class="crayon-e">SparkContext</span><span class="crayon-sy">(</span><span class="crayon-sy">.</span><span class="crayon-sy">.</span><span class="crayon-sy">.</span><span class="crayon-sy">)</span></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+<p><a href="http://code.google.com/p/kryo/" rel="nofollow"><span style="color:#62a6e4;">Kryo的文档</span></a>，描述了更多的高级注册选项，例如添加自定义的序列化代码。</p>
+<p>如果你的对象很大，你需要增强<samp>Spark.kryoserializer.buffer.mb</samp>的系统属性，该值默认是2，但是它需要足够大来容纳你序列化中最大的对象。</p>
+<p>最后，如果你不注册你的类，Kryo依然可以工作，但是它会对每个对象都存储全类名，这将是非常浪费的。</p>
+<h1 id="内存调优">内存调优</h1>
+<p>内存使用调优有3个考虑点：你的对象使用的内存量（你很可能希望将你所有的数据，装入内存）；访问对象的代价；集合<em>垃圾回收</em>的开销（如果从对象角度来说你有较高的进出）</p>
+<p>默认来说，Java对象访问起来很快，但是会很容易就消耗比成员变量的原始数据大2-5倍的空间。这是由于如下几个原因：</p>
+<ul><li>每一个Java对象都有一个”对象头部“，大概是16个字节，包含了诸如指向它的类的指针的信息。对于一个包含非常小的数据的对象（例如<samp>Int</samp>成员变量），这个可能比数据还要大。</li><li>Java字符串比起原始的字符串数据有40个字节的额外开销（因为它们将它存储在一个字符数组中，并保存额外的数据，例如长度），而且由于Unicode的原因，每个字符要占用2个字节。一个10字符的字符串，会轻松的消耗60个字节。</li><li>通用集合的类，例如<samp>HashMap</samp>和<samp>LinkedList</samp>, 使用链式数据结构，因此，每一个Entry都会有一个封装对象（例如：<samp>Map.Entry</samp>)。这个对象不仅仅有头部，而且还会有指针（典型情况下每个8个字节）指向列表中的下一个对象。</li><li>原始类型的集合通常将他们存储为封箱对象进行自动装箱。例如<samp>java.lang.Integer</samp></li></ul><p>本章节将会讨论如何判断你的对象的内存使用量，以及如何改进它，无论是通过改变你的数据结构，或者是通过用序列化的方式来存储数据。我们将会谈到调优Spark的缓存大小，还有Java垃圾回收器。</p>
+<h2 id="判断内存消耗">判断内存消耗</h2>
+<p>判断内存消耗大小的最佳方法，就是创建一个RDD，把它放进缓存，然后看SparkContext上的Driver程序的日志。日志会告诉你，每个分区消耗了多少的内存，把这些内存加起来，你就能够得到RDD的总大小。你会看到类似主要的消息：</p>
+<div id="crayon-52e6f9bf0c55b220692591" class="crayon-syntax crayon-theme-solarized-dark crayon-font-monaco crayon-os-pc print-yes" style="line-height:15px !important;clear:both;font-size:12px !important;">
+<div class="crayon-toolbar" style="line-height:18px !important;font-size:12px !important;z-index:4;">
+<span class="crayon-title"></span>
+<div class="crayon-tools" style="line-height:18px !important;font-size:12px !important;">
+<div class="crayon-button crayon-nums-button crayon-pressed" title="切换显示行编号">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-plain-button" title="纯文本显示代码">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-wrap-button" title="切换自动换行">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-expand-button" title="Expand Code">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-copy-button" title="Expand Code">
+<div class="crayon-button-icon"></div>
+</div>
+<div class="crayon-button crayon-popup-button" title="在新窗口中显示代码">
+<div class="crayon-button-icon"></div>
+</div>
+</div>
+</div>
+<div class="crayon-info" style="line-height:16.8px !important;min-height:16.8px !important;">
+</div>
+<div class="crayon-plain-wrap"><textarea style="line-height:15px !important;overflow:hidden;font-size:12px !important;z-index:0;opacity:0;" class="crayon-plain print-no" readonly cols="22" rows="3">INFO BlockManagerMasterActor: Added rdd_0_1 in memory on mbk.local:50311 (size: 717.5 KB, free: 332.3 MB)</textarea></div>
+<div class="crayon-main" style="overflow:hidden;z-index:1;">
+<table class="crayon-table"><tbody><tr class="crayon-row"><td class="crayon-nums">
+<div class="crayon-nums-content" style="line-height:15px !important;font-size:12px !important;">
+<div class="crayon-num">1</div>
+</div>
+</td>
+<td class="crayon-code">
+<div class="crayon-pre" style="line-height:15px !important;font-size:12px !important;">
+<div id="crayon-52e6f9bf0c55b220692591-1" class="crayon-line"><span class="crayon-e">INFO
+</span><span class="crayon-i">BlockManagerMasterActor</span><span class="crayon-o">:</span><span class="crayon-h">
+</span><span class="crayon-e">Added </span><span class="crayon-e">rdd_0_1 </span>
+<span class="crayon-st">in</span><span class="crayon-h"> </span><span class="crayon-e">memory
+</span><span class="crayon-e">on </span><span class="crayon-v">mbk</span><span class="crayon-sy">.</span><span class="crayon-i">local</span><span class="crayon-o">:</span><span class="crayon-cn">50311</span><span class="crayon-h">
+</span><span class="crayon-sy">(</span><span class="crayon-i">size</span><span class="crayon-o">:</span><span class="crayon-h">
+</span><span class="crayon-cn">717.5</span><span class="crayon-h"> </span><span class="crayon-i">KB</span><span class="crayon-sy">,</span><span class="crayon-h">
+</span><span class="crayon-i">free</span><span class="crayon-o">:</span><span class="crayon-h">
+</span><span class="crayon-cn">332.3</span><span class="crayon-h"> </span><span class="crayon-i">MB</span><span class="crayon-sy">)</span></div>
+</div>
+</td>
+</tr></tbody></table></div>
+</div>
+<p>这个代表了RDD 0 的分区 1，消耗了717.5KB的内存。</p>
+<h2 id="调优数据结构">调优数据结构</h2>
+<p>减少内存消耗的第一方法，是避免使用增加额外负担的Java特性，例如基于指针的数据结构和封装对象。这有几个方法来实现它：</p>
+<ol><li>设计你的数据结构使其倾向于使用对象数组和原始类型，而不是标准的Java或Scala集合类（例如<samp>HashMap</samp>）。<a href="http://fastutil.di.unimi.it/" rel="nofollow"><span style="color:#62a6e4;">fastutil</span></a>库提供了方便的原始类型集合类，兼容Java的标准库。</li><li>尽可能避免带着众多的小数据和指针的嵌套的数据结构。</li><li>考虑使用数字型ID或枚举型对象来代替字符串作为Keys。</li><li>如果你的内存小于32GB，设置JVM的标志为<samp>-XX:+UseCompressedOops</samp>使得让指针为4个字节，而不是8个。而且，在Java 7或者更高的版本上，尝试使用<samp>-XX:+UseCompressedStrings</samp>以8位每个字符来存储ASCII字符串。你可以在<a href="http://spark.incubator.apache.org/docs/latest/configuration.html#environment-variables-in-spark-envsh" rel="nofollow"><span style="color:#62a6e4;">spark-env.sh</span></a>中添加这些配置项.</li></ol><h2 id="序列化RDD的存储">序列化RDD的存储</h2>
+<p>当你的对象太大，以至于不管如何调优，都不能被高效的存储。一个更简单减少内存使用的方式是以序列化的方式存储它们，使用在<a href="http://spark.incubator.apache.org/docs/latest/scala-programming-guide.html#rdd-persistence" rel="nofollow"><span style="color:#62a6e4;">RDD persistence API</span></a>中的序列化存储级别，例如<samp>MEMORY<em>ONLY</em>SER</samp>.
+ Spark将会把每个RDD分区作为一个大的字节数组来存储。将数据用序列化的方式存储的唯一缺点是较慢的存取时间，由于需要在运行中反序列化每一个对象。如果你想要以序列化的形式缓存数据，我们强烈的推荐<a href="http://spark.incubator.apache.org/docs/latest/tuning.html#data-serialization" rel="nofollow"><span style="color:#62a6e4;">使用Kryo</span></a>，因为它将比Java序列化小很多。（当然比原始的Java对象更小）</p>
+<h2 id="垃圾回收调优">垃圾回收调优</h2>
+<p>当你有大量作为RDDs的”churn“存储在你程序中时，JVM垃圾回收可能成为一个问题。（如果是对于那些读取一个RDD一次，然后运行很多的操作符的程序，这通常不会成为问题）当Java需要抛弃大量的旧对象来腾出新空间给新对象时，它需要跟踪所有的JAVA对象，来找出无用的那些。要记住的重点是<em>垃圾回收</em>的成本与Java对象的数目成正比，因此选择有更少对象的数据结构（比如数组用<samp>Ints</samp><samp>而不是</samp>LinkedList）将会极大的降低开销。一个更好的办法是将对象以序列化的形式进行保存，正如上面所描述的：现在每一个RDD分块将会只有一个对象（一字节数组）。如果GC存在问题，在尝试其他技术之前，可以先尝试一下序列化缓存（<a href="http://spark.incubator.apache.org/docs/latest/tuning.html#serialized-rdd-storage" rel="nofollow"><span style="color:#62a6e4;">serialized
+ caching</span></a>）。</p>
+<p>由于你的工作内存和缓存在结点上的RDD的相互干扰，GC可能会成为一个问题。我们将讨论如何控制RDD缓存空间分配来缓解这个问题。</p>
+<h3 id="衡量GC的影响"><strong>衡量GC的影响</strong></h3>
+<p>垃圾回收调优的第一步，是收集关于垃圾回收发生的的频率和GC耗费时间的统计数据。这可以通过添加<samp>-verbose:gc -XX:+PrintGCDetails -XX:+PrintGCTimeStamp</samp>到SPARK_JAVA_OPTS环境变量来完成。你下一次运行Spark Job时，会看到每一次垃圾回收时，消息在Worker的日志中打印出来。注意这些日志会在你的集群Worker节点上（它们工作目录的stdout文件），而不是在你的Driver程序上。</p>
+<h3 id="缓存大小调优"><strong>缓存大小调优</strong></h3>
+<p>GC一个重要的配置参数，是缓存RDDs需要用的内存量。默认来说，Spark使用66%已配置的Executor内存（<samp>spark.executor.memory或者SPARK_MEM</samp>)来缓存RDDs。这意味这33%的内存可以用来容纳任务执行中创建的任意对象。</p>
+<p>当你的任务变慢，而且你的JVM正在频繁的垃圾回收或者内存溢出时，降低这个值可以帮助减少内存的消耗。假设把它改到50%，你可以调用<samp>System.setProperty(“spark.storage.memoryFraction”, “0.5”)</samp>.结合使用序列化缓存，使用一个更小的缓存，足以缓解大部分的垃圾回收问题。如果你对更进一步的JAVA垃圾回收感兴趣，那么请继续阅读下文。</p>
+<h3 id="高级垃圾回收调优"><strong>高级垃圾回收调优</strong></h3>
+<p>为了更好的垃圾回收调优，我们首先必须明白一些关于JVM内存管理的基本信息：</p>
+<ul><li>Java的堆空间被切分成2个区：老年代和新生代。新生代用来保存生命周期短的对象，而老年代用于保存有长生命周期的对象。</li><li>新生代被进一步切分成三个区[Eden, Survivor1, Survivor2]</li><li>关于垃圾回收步骤的简单描述是：当Eden区满了，一个Minor GC会在Eden区触发，存活在Eden和Survivior1区的对象会被拷贝到Survior2区。Survivior区域被交换。当对象够老，或者Survivior2满了，它会被移动到Old区。最后，当Old区满了，一次full GC就会被触发。</li></ul><p>Spark垃圾回收调优的目的，在于确保只有长生命周期的RDD被存储在年长代，而年轻代有足够的空间来存储短生命周期的对象。这可以帮助避免过多的Full GC在任务执行的期间收集临时对象。可能有用的步骤如下：</p>
+<ul><li>通过收集GC统计检查是否有太多的垃圾回收。如果Full GC在一个Task完成前被触发多次，这意味着没有足够的内存来执行任务。</li><li>在被印出的GC统计中，如果老年代接近满了，要减少用于缓存的内存量。这可以通过设置<samp>spark.storage.memoryFraction</samp>属性来实现。缓存少一些的对象比任务执行慢要相对好一些。</li><li>如果有很多的Minor GC，而不是很多的Full GC，分配更多的内存给Eden代会有所帮助。你可以把Eden设置的比每个任务估计会需要的内存稍微大些。 如果Eden的大小被估计为E，那么你可以通过选项<em>-Xmn=4/3</em>E*来设置年轻代的大小。（4/3的比例也是为了留出被survivor regions使用的空间）</li><li>例如，如果你的任务，是从HDFS读取数据，那么任务使用的内存量，可以通过数据块的大小来估计。注意一个解压后数据块的大小通常是这个块大小的2到3倍。所以如果我们希望希望有3到4个任务大小的工作空间，而且HDFS的Block Size是64MB，我们可以估计Eden的大小为4*<em>3*</em>64MB.</li><li>监控垃圾回收的频率和时间随着设置的变化。</li></ul><p>我们的经验建议，垃圾回收调优的效果，取决于你的应用和可用的内存。网上有更多的在线调优的<a href="http://www.oracle.com/technetwork/java/javase/gc-tuning-6-140523.html" rel="nofollow"><span style="color:#62a6e4;">选择</span></a>，但是在一个高的层次上，控制Full GC发生的频率，可以有效的帮助降低预算。</p>
+<h1 id="其他需要考虑的内容">其他需要考虑的内容</h1>
+<h2 id="并行度">并行度</h2>
+<p>除非你为每一步操作都设置足够高的并行度，否则集群不会得到最大化的利用。对于”map”操作，Spark会根据文件的大小自动设置在每个文件上的任务数（尽管你可以通过<samp>SparkContext.textFile</samp>的可选参数，来控制它）；对于分布式的”reduce”操作，例如<samp>groupByKey</samp>和<samp>reduceByKey</samp>，它会使用最大一个父RDD分区数目作为分块数。你可以传递并行度作为第二个参数（参考<a href="http://spark.incubator.apache.org/docs/latest/api/core/index.html#org.apache.spark.rdd.PairRDDFunctions" rel="nofollow"><span style="color:#62a6e4;">spark.PairRDDFunctions</span></a>文档），或者设置系统属性:
+ s<samp>park.default.parallelism</samp>来改变默认值。总的来说，在集群中，我们推荐在每个CPU Core上分配2-3个Tasks。</p>
+<h2 id="Reduce任务的内存使用">Reduce任务的内存使用</h2>
+<p>有时你会遇到OutOfMemoryError，不是因为RDDs在内存中装不下了，而是因为你的tasks中有一个工作集，例如在groupByKey中一个Reduce任务太大了。Spark的Shuffle操作（<samp>sortByKey,groupByKey,reduceByKey,join,</samp>等）会，在每一个任务中建立一个哈希表来进行grouping操作，这个通常会很大。修复这个问题的最简单方式，是增加<em>并行度</em>，使得每个任务的输入集能够更小。因为Spark能够在一个Worker的Jvm中的所有的Task中有效的重用内存，并有一个很低的任务启动开销，它能够支持执行时间短到200ms的任务。所以你可以安全的增加并行度，即使多于你集群中的核数。</p>
+<h2 id="广播大变量">广播大变量</h2>
+<p>使用SparkContext中的广播功能（<a href="http://spark.incubator.apache.org/docs/latest/scala-programming-guide.html#broadcast-variables" rel="nofollow"><span style="color:#62a6e4;">broadcast functionality</span></a>），能够很大的降低每个任务的大小，以及在集群上启动一个任务的开销。如果你的任务，调用Driver程序中的任意大对象（例如一个静态查询表），那可以考虑将它转变为一个广播变量。Spark在Master上会打印每个Task序列化后的大小。所以你可以通过查看它，来判断你的Task到底是不是太大了。一般来说，超过20KB大小的Task可能就需要该优化了。</p>
+<h1 id="总结">总结</h1>
+<p>这是一个简单的指引，指出在你优化一个Spark应用时，需要了解的最关键点。最重要的就是数据序列化和内存调优。对于大部分的程序来说，切换到Kryo序列化和用序列化的方式持久化数据，可以解决大部分常见的性能问题。如果有任何关于调优最佳实践的问题，欢迎到Spark的<a href="http://groups.google.com/group/spark-users" rel="nofollow"><span style="color:#62a6e4;">邮件列表</span></a>中进行询问。</p>
+<div class="clear"></div>
+<p class="entry-utility">Posted in <a title="查看 数据 中的全部文章" href="http://rdc.taobao.org/?cat=13" rel="nofollow">
+<span style="color:#62a6e4;">数据</span></a>, <a title="查看 机器学习 中的全部文章" href="http://rdc.taobao.org/?cat=43" rel="nofollow">
+<span style="color:#62a6e4;">机器学习</span></a>. Tagged with <a href="http://rdc.taobao.org/?tag=spark" rel="nofollow">
+<span style="color:#62a6e4;">spark</span></a>, <a href="http://rdc.taobao.org/?tag=%E8%B0%83%E4%BC%98" rel="nofollow">
+<span style="color:#62a6e4;">调优</span></a>. </p>
+<p class="entry-utility">原博客链接<a href="http://rdc.taobao.org/?p=2034" rel="nofollow">http://rdc.taobao.org/?p=2034</a></p>
+            </div>
+                </div>

@@ -1,0 +1,146 @@
+---
+layout:     post
+title:      导入hbase01
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/qq_19968255/article/details/80151045				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p> </p>
+
+<p>数据导入有如下几种方式： <br>
+1．利用HBase提供的ImportTsv将csv文件导入到HBase （舍弃）<br>
+2．利用HBase提供的completebulkload将数据导入到HBase </p>
+
+<p> </p>
+
+<p>3．利用HBase提供的Import将数据导入到HBase（舍弃）</p>
+
+<p>实际生产环境上很难使用命令行的方式。毕竟源数据不可能直接用来写HBase。在数据迁移的过程中会涉及到数据清洗、整理归并等许多额外的工作。显然不够灵活。</p>
+
+<p><span style="color:#990000;">本文用的是MapReduce+completebulkload</span></p>
+
+<p><span style="color:#cc0000;">注意，不要使用reducer。mapper到reducer需要走网络，受限于集群带宽。</span></p>
+
+<p> </p>
+
+<p>public static class DBMapper extends Mapper&lt;LongWritable, DBImportBean, ImmutableBytesWritable, Put&gt; {<br><br>
+        static String family[] = {"studentinfo"};<br>
+        Put put=null;<br>
+        ImmutableBytesWritable rowkey=null;<br>
+        @Override<br>
+        protected void map(LongWritable key, DBImportBean value, Context context) throws IOException, InterruptedException {<br>
+            rowkey = new ImmutableBytesWritable(value.getTestunit_id_accountid().getBytes());<br>
+            put = new Put(Bytes.toBytes(value.getTestunit_id_accountid()));<br>
+            //put.setWriteToWAL(false);<br>
+            put.addColumn(Bytes.toBytes(family[0]),Bytes.toBytes(DBImportBean.columnName.get(2)), Bytes.toBytes(value.getJob()));<br>
+           .......<br>
+            //++count;<br>
+            context.write(rowkey, put);<br>
+        }</p>
+
+<p> </p>
+
+<p>    }</p>
+
+<p> </p>
+
+<p><span style="color:#000000;">public static void main(String[] args) {</span></p>
+
+<p> </p>
+
+<p><span style="color:#000000;">        Configuration conf = HBaseUtils.getConfiguration();<br>
+     <br>
+       try {<br>
+            TableName tableName = TableName.valueOf("test_unit_stutranscript");<br>
+            HTable xTable = new HTable(conf,tableName);<br>
+            xTable.setWriteBufferSize(12*1024*1024);<br>
+            xTable.setAutoFlushTo(false);<br><br><br>
+            //mysql的jdbc驱动<br>
+           // DBConnector dbConnector = DBConnectorUtil.getDBConnector();<br>
+            String userName = "test";<br>
+            String password = "test";<br>
+            DBConfiguration.configureDB(conf,"com.mysql.jdbc.Driver", "jdbc:mysql://ip:3306/test?useUnicode=true&amp;characterEncoding=utf8", userName, password);<br>
+            Job job = Job.getInstance(conf);<br>
+            //当前类<br>
+            job.setJarByClass(DBImportHbase2.class);<br><br>
+            job.setMapperClass(DBMapper.class);<br>
+             //设置map key类型<br>
+            //job.setMapOutputKeyClass(LongWritable.class);<br>
+            //job.setMapOutputValueClass(DBImportBean.class);<br>
+            job.setMapOutputKeyClass(ImmutableBytesWritable.class);</span></p>
+
+<p> </p>
+
+<p><span style="color:#000000;">           //设置map value类型 </span></p>
+
+<p><span style="color:#000000;">           job.setMapOutputValueClass(Put.class);</span></p>
+
+<p> </p>
+
+<p><span style="color:#000000;">           // job.setReducerClass(KeyValueSortReducer.class);<br>
+            //job.setReducerClass(PutSortReducer.class);<br>
+         <br>
+            job.setSpeculativeExecution(false);<br>
+            job.setReduceSpeculativeExecution(false);</span></p>
+
+<p> </p>
+
+<p><span style="color:#000000;">            </span></p>
+
+<p><span style="color:#000000;">           job.setInputFormatClass(DBInputFormat.class);</span></p>
+
+<p> </p>
+
+<p><span style="color:#000000;">            job.setOutputFormatClass(HFileOutputFormat2.class);</span></p>
+
+<p> </p>
+
+<p><span style="color:#000000;">            //设置<span style="color:#000000;">Reduce数目</span></span></p>
+
+<p><span style="color:#000000;">           job.setNumReduceTasks(0);</span></p>
+
+<p> </p>
+
+<p><span style="color:#000000;">            //String[] fields = { "id", "name" };<br>
+//          DBInputFormat.setInput(job, DBRecord.class, "test1", null,null, fields);<br>
+            //通过sql语句，传数据,sqlcount总数据<br>
+            DBInputFormat.setInput(job, DBImportBean.class, sql,sqlcount);<br><br>
+          //  System.exit(job.waitForCompletion(true) ? 0 : 1);</span></p>
+
+<p> </p>
+
+<p><span style="color:#000000;">           //生成中间文件Hfile后，最后通过<span style="color:#000000;">BulkLoad，迁移到hbase数据目录下</span></span></p>
+
+<p><span style="color:#000000;">     </span>       <span style="color:#000000;">//1、消除了对HBase集群的插入压力 </span></p>
+
+<p><span style="color:#000000;">            //2、提高了Job的运行速度，降低了Job的执行时间</span></p>
+
+<p><span style="color:#000000;">           String outputPath="/dataset/hbase";</span></p>
+
+<p><span style="color:#000000;">            FileSystem fs = FileSystem.get(conf);<br>
+            Path output = new Path(outputPath);<br>
+            if (fs.exists(output)) {<br>
+                fs.delete(output, true);//如果输出路径存在，就将其删除<br>
+            }<br>
+            FileOutputFormat.setOutputPath(job, output);//输出路径<br>
+            HFileOutputFormat2.configureIncrementalLoad(job, xTable.getTableDescriptor(), xTable.getRegionLocator());<br>
+            job.waitForCompletion(true);<br>
+            if (job.isSuccessful()){<br>
+                //加载到hbase表<br>
+               FsShell shell = new FsShell(conf);<br>
+                shell.run(new String[]{"-chmod", "-R", "777", outputPath});<br>
+                LoadIncrementalHFiles loader = new LoadIncrementalHFiles(conf);<br>
+                loader.doBulkLoad(new Path(outputPath), xTable);<br>
+                /**/<br>
+                //HBaseUtils.doBulkLoad(outputPath, tableName.getName().toString());<br>
+                logger.info("成功-----------------");<br>
+            } else {<br>
+                logger.error("失败-----------------");<br>
+            }<br>
+         } catch (Exception e) {<br>
+            e.printStackTrace();<br>
+            }<br>
+         }</span></p>            </div>
+                </div>

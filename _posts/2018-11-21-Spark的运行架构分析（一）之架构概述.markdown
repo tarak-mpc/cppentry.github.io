@@ -1,0 +1,125 @@
+---
+layout:     post
+title:      Spark的运行架构分析（一）之架构概述
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：【http://thinkgamer.cn】					https://blog.csdn.net/Gamer_gyt/article/details/51822765				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">1：Spark的运行模式</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">2：Spark中的一些名词解释</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">3：Spark的运行基本流程</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">4：RDD的运行基本流程</span></span></p>
+<h1><span style="font-family:'Microsoft YaHei';font-size:24px;">一：Spark的运行模式</span></h1>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">        Spark的运行模式多种多样，灵活多变，部署在单机上时，既可以用本地模式运行，也可以用伪分布模式运行，而当以分布式集群的方式部署时，也有众多的运行模式可供选择，这取决于集群的实际情况，底层的资源调度即可以依赖外部资源调度框架，也可以使用Spark内建的Standalone模式。对于外部资源调度框架的支持，目前的实现包括相对稳定的Mesos模式，以及还在持续开发更新中的hadoop
+ YARN模式。</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">        在实际应用中，Spark应用程序的运行模式取决于传递给SparkContext 的Master环境变量的值，个别模式还需要依赖辅助的程序接口来配合使用，目前所支持的Master环境变量由特定的字符串或URL组成，如下：</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Local[N]</span>：本地模式，使用N个线程</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Local cluster[worker,core,Memory]</span>：伪分布模式，可以配置所需要启动的虚拟工作节点的数量，以及每个工作节点所管理的CPU数量和内存尺寸<br></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Spark://hostname:port</span> ：Standalone模式，需要部署Spark到相关节点，URL为Spark Master主机地址和端口</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Mesos://hostname:port</span>：Mesos模式，需要部署Spark和Mesos到相关节点，URL为Mesos主机地址和端口</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+YARN standalone/YARN cluster</span>：YARN模式之一，主程序逻辑和任务都运行在YARN集群中</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+YARN client</span>：YARN模式二，主程序逻辑运行在本地，具体任务运行在YARN集群中</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       Spark ON YARN模式图解（详细解释参考<a href="http://www.aboutyun.com/thread-12294-1-1.htmltp://" rel="nofollow">点击阅读</a>）：</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <img src="https://img-blog.csdn.net/20160704184424848?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></span></p>
+<h1><span style="font-family:'Microsoft YaHei';font-size:24px;">二：Spark的一些名词解释</span></h1>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <img src="https://img-blog.csdn.net/20160704182303822?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;"> Application</span>：Spark中的Application和Hadoop MapReduce中的概念是相似的，指的是用户编写的Spark应用程序，内含了一个Driver功能的代码和分布在集群中多个节点上运行的Executor代码<span style="color:#000000;font-size:15px;"></span><br></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">Driver Program</span>：<span style="font-size:15px;"><span lang="en-us" style="color:#000000;" xml:lang="en-us">Spark</span>中的<span lang="en-us" style="color:#000000;" xml:lang="en-us">Driver</span>即运行上述<span lang="en-us" style="color:#000000;" xml:lang="en-us">Application</span>的<span lang="en-us" style="color:#000000;" xml:lang="en-us">main()</span>函数并且创建<span lang="en-us" style="color:#000000;" xml:lang="en-us">SparkContext</span>，其中创建<span lang="en-us" xml:lang="en-us"><span style="color:#ff0000;">SparkContext</span></span>的目的是为了准备<span lang="en-us" style="color:#000000;" xml:lang="en-us">Spark</span>应用程序的运行环境。在<span lang="en-us" style="color:#000000;" xml:lang="en-us">Spark</span>中由<span lang="en-us" style="color:#000000;" xml:lang="en-us">SparkContext</span>负责和<span lang="en-us" xml:lang="en-us"><span style="color:#ff0000;">ClusterManager</span></span>通信，进行资源的申请、任务的分配和监控等；当<span lang="en-us" style="color:#000000;" xml:lang="en-us">Executor</span>部分运行完毕后，<span lang="en-us" style="color:#000000;" xml:lang="en-us">Driver</span>负责将<span lang="en-us" style="color:#000000;" xml:lang="en-us">SparkContext</span>关闭。<span style="color:#c00000;">通常用<span lang="en-us" xml:lang="en-us">SparkContext</span>代表<span lang="en-us" xml:lang="en-us">Drive</span>r</span></span></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       通用的形式应该是这样的</span></span></p>
+<p><span style="font-family:'Microsoft YaHei';"><span style="font-size:14px;"></span></span></p>
+<pre><code class="language-java">package thinkgamer
+
+import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.SparkContext._
+
+object WordCount{
+  def main(args: Array[String]) {
+    if (args.length == 0) {
+      System.err.println("Usage: WordCount &lt;file1&gt;")
+      System.exit(1)
+    }
+
+    val conf = new SparkConf().setAppName("WordCount")
+    val sc = new SparkContext(conf)
+    
+    .....//此处写你编写的Spark代码
+
+    sc.stop()
+  }
+}</code></pre><span style="font-family:'Microsoft YaHei';"><span style="font-size:14px;"></span></span>
+<p></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">Executor</span>：<span style="color:#000000;font-size:15px;"><span lang="en-us" xml:lang="en-us">Application</span>运行在<span lang="en-us" xml:lang="en-us">Worker</span>节点上的一个进程，该进程负责运行<span lang="en-us" xml:lang="en-us">Task</span>，并且负责将数据存在内存或者磁盘上，每个<span lang="en-us" xml:lang="en-us">Application</span>都有各自独立的一批<span lang="en-us" xml:lang="en-us">Executor</span>。在<span lang="en-us" xml:lang="en-us">Spark
+ on Yarn</span>模式下，其进程名称为<span lang="en-us" xml:lang="en-us">CoarseGrainedExecutorBackend</span>，类似于<span lang="en-us" xml:lang="en-us">Hadoop MapReduce</span>中的<span lang="en-us" xml:lang="en-us">YarnChild</span>。一个<span lang="en-us" xml:lang="en-us">CoarseGrainedExecutorBackend</span>进程有且仅有一个<span lang="en-us" xml:lang="en-us">executor</span>对象，它负责将<span lang="en-us" xml:lang="en-us">Task</span>包装成<span lang="en-us" xml:lang="en-us">taskRunner</span>，并从线程池中抽取出一个空闲线程运行<span lang="en-us" xml:lang="en-us">Task</span>。每个<span lang="en-us" xml:lang="en-us">CoarseGrainedExecutorBackend</span>能并行运行<span lang="en-us" xml:lang="en-us">Task</span>的数量就取决于分配给它的<span lang="en-us" xml:lang="en-us">CPU</span>的个数了</span></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Cluster Mananger</span>：<span style="color:#000000;">指的是在集群上获取资源的外部服务，目前有：</span></span></span></p>
+<p align="justify"><span style="font-family:'Microsoft YaHei';"><span style="color:#000000;">                    Ø</span>  Standalone：Spark原生的资源管理，由Master负责资源的分配；</span></p>
+<p align="justify"><span style="font-family:'Microsoft YaHei';"><span style="color:#000000;">                    Ø</span>  Hadoop Yarn：由YARN中的ResourceManager负责资源的分配；</span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Worker</span>：<span style="color:#000000;font-size:15px;">集群中任何可以运行<span lang="en-us" xml:lang="en-us">Application</span>代码的节点，类似于<span lang="en-us" xml:lang="en-us">YARN</span>中的<span lang="en-us" xml:lang="en-us">NodeManager</span>节点。在<span lang="en-us" xml:lang="en-us">Standalone</span>模式中指的就是通过<span lang="en-us" xml:lang="en-us">Slave</span>文件配置的<span lang="en-us" xml:lang="en-us">Worker</span>节点，在<span lang="en-us" xml:lang="en-us">Spark
+ on Yarn</span>模式中指的就是<span lang="en-us" xml:lang="en-us">NodeManager</span>节点</span></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Job</span>：<span style="color:#000000;font-size:15px;">包含多个<span lang="en-us" xml:lang="en-us">Task</span>组成的并行计算，往往由<span lang="en-us" xml:lang="en-us">Spark Action</span>催生，一个<span lang="en-us" xml:lang="en-us">JOB</span>包含多个<span lang="en-us" xml:lang="en-us">RDD</span>及作用于相应<span lang="en-us" xml:lang="en-us">RDD</span>上的各种<span lang="en-us" xml:lang="en-us">Operation</span></span></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Starge</span>：<span style="color:#000000;font-size:15px;">每个<span lang="en-us" xml:lang="en-us">Job</span>会被拆分很多组<span lang="en-us" xml:lang="en-us">Task</span>，每组任务被称为<span lang="en-us" xml:lang="en-us">Stage</span>，也可称<span lang="en-us" xml:lang="en-us">TaskSet</span>，一个作业分为多个阶段</span></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <span style="color:#FF0000;">
+Task</span>：<span style="color:#000000;font-size:15px;">被送到某个<span lang="en-us" xml:lang="en-us">Executor</span>上的工作任务</span></span></span></p>
+<h1><span style="font-family:'Microsoft YaHei';font-size:24px;">三：Spark的基本运行流程</span></h1>
+<h2><span style="font-family:'Microsoft YaHei';"><span style="font-size:14px;">    </span>
+<span style="font-size:18px;">1：Spark的基本运行流程如下图：</span></span></h2>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       <img src="https://img-blog.csdn.net/20160705103451140?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">         (1)：构建Spark Application的运行环境，启动SparkContext</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">         (2)：SparkContext向资源管理器（可以是Standalone，Mesos，Yarn）申请运行Executor资源，并启动StandaloneExecutorbackend，Executor向SparkContext申请Task</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">         (3)：SparkContext将应用程序分发给Executor</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">         (4)：SparkContext构建成DAG图，将DAG图分解成Stage、将Taskset发送给Task Scheduler，最后由Task Scheduler将Task发送给Executor运行</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">         (5)：Task在Executor上运行，运行完释放所有资源</span></span></p>
+<h2><span style="font-family:'Microsoft YaHei';"><span style="font-size:14px;">    </span>
+<span style="font-size:18px;">2：Spark运行架构的特点</span></span></h2>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       (1)：每个Application获取专属的executor进程，该进程在Application期间一直驻留，并以多线程方式运行Task。这种Application隔离机制是有优势的，无论是从调度角度看（每个Driver调度他自己的任务），还是从运行角度看（来自不同Application的Task运行在不同JVM中），当然这样意味着Spark Application不能跨应用程序共享数据，除非将数据写入外部存储系统</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       (2)：Spark与资源管理器无关，只要能够获取executor进程，并能保持相互通信就可以了</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       (3)：提交SparkContext的Client应该靠近Worker节点（运行Executor的节点），最好是在同一个Rack里，因为Spark Application运行过程中SparkContext和Executor之间有大量的信息交换，如果在远程集群中运行，最好使用RPC将SparkContext提交给集群，不要远离Worker运行SparkContext</span></span></p>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';">       (4)Task采用了数据本地性和推测执行的优化机制</span></span></p>
+<h2><span style="font-family:'Microsoft YaHei';"><span style="font-size:14px;">    </span>
+<span style="font-size:18px;">3：DAGscheduler</span></span></h2>
+<p><span style="font-size:14px;"><span style="font-family:'Microsoft YaHei';"><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">        DAGScheduler</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">把一个</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">Spark</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">作业转换成</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">Stage</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">的</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">DAG</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">（</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">Directed
+ Acyclic Graph</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">有向无环图），根据</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">RDD</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">和</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">Stage</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">之间的关系找出开销最小的调度方法，然后把</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">Stage</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">以</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">TaskSet</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">的形式提交给</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">TaskScheduler</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">，下图展示了</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us">DAGScheduler</span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">的作用：</span></span></span></p>
+<p><span style="font-size:14px;"><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);"><span style="font-family:'Microsoft YaHei';">         <img src="https://img-blog.csdn.net/20160705153658558?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></span></span></p>
+<h2><span style="text-align:justify;text-indent:28px;background-color:rgb(250,247,239);"><span style="font-family:'Microsoft YaHei';"><span style="font-size:15px;">   </span><span style="font-size:18px;">4：TaskScheduler</span></span></span></h2>
+<p><span style="font-size:14px;"><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);"><span style="font-family:'Microsoft YaHei';">          DAGScheduler决定了Task的理想位置，并把这些信息传递给下层的TaskScheduler。此外，DAGScheduler还处理由于Shuffle数据丢失导致的失败，还有可能需要重新提交运行之前的Stage（非Shuffle数据丢失导致的Task失败由TaskScheduler处理）</span></span></span></p>
+<p></p>
+<div style="text-align:justify;text-indent:28px;"><span style="color:#393939;"><span style="font-size:15px;background-color:rgb(250,247,239);"><span style="font-family:'Microsoft YaHei';">    TaskScheduler维护所有TaskSet，当Executor向Driver发生心跳时，TaskScheduler会根据资源剩余情况分配相应的Task。另外TaskScheduler还维护着所有Task的运行标签，重试失败的Task。下图展示了TaskScheduler的作用：</span></span></span></div>
+<div style="text-align:justify;text-indent:28px;"><span style="color:#393939;"><span style="font-size:15px;background-color:rgb(250,247,239);"><span style="font-family:'Microsoft YaHei';"><img src="https://img-blog.csdn.net/20160705154418302?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></span></span></div>
+<div style="text-align:justify;text-indent:28px;"><span style="font-size:15px;background-color:rgb(250,247,239);"><span style="font-family:'Microsoft YaHei';"></span></span>
+<p align="justify" style="color:rgb(57,57,57);"><span style="color:#000000;">在不同运行模式中任务调度器具体为：</span></p>
+<p align="justify">(1)：<span style="color:#393939;">Spark on Standalone模式为TaskScheduler；</span></p>
+<p align="justify">(2)：<span style="color:#393939;">YARN-Client模式为YarnClientClusterScheduler</span></p>
+<p align="justify">(3)：<span style="color:#393939;">YARN-Cluster模式为YarnClusterScheduler</span></p>
+</div>
+<h1><span style="font-family:'Microsoft YaHei';font-size:24px;">  四：RDD的运行基本流程</span></h1>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">     那么RDD在Spark中怎么运行的？大概分为以下三步：</span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">     1：创建RDD对象</span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">     2：DAGScheduler模块介入运算，计算RDD之间的依赖关系，RDD之间的依赖关系就形成了DAG</span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">     3：每一个Job被分为多个Stage。划分Stage的一个主要依据是当前计算因子的输入是否是确定的，如果是则将其分在同一个Stage，避免多个Stage之间的消息传递开销。</span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;">       <img src="https://img-blog.csdn.net/20160705172202033?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;"><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">       以下面一个按</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us"> A-Z </span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">首字母分类，查找相同首字母下不同姓名总个数的例子来看一下</span><span lang="en-us" style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);" xml:lang="en-us"> RDD </span><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">是如何运行起来的</span><br></span></p>
+<p><span style="font-family:'Microsoft YaHei';font-size:14px;"><span style="font-size:15px;text-align:justify;text-indent:28px;background-color:rgb(250,247,239);">       <img src="https://img-blog.csdn.net/20160705172316781?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></span></span></p>
+<p align="justify" style="color:rgb(57,57,57);"><span style="color:#000000;">步骤 1 </span>：创建 RDD  上面的例子除去最后一个 collect 是个动作，不会创建 RDD 之外，前面四个转换都会创建出新的 RDD 。因此第一步就是创建好所有 RDD( 内部的五项信息 ) 。</p>
+<p align="justify" style="color:rgb(57,57,57);"><span style="color:#000000;">步骤 2 </span>：创建执行计划 Spark 会尽可能地管道化，并基于是否要重新组织数据来划分 <strong>阶段 (stage) </strong>，例如本例中的 groupBy() 转换就会将整个执行计划划分成两阶段执行。最终会产生一个 <strong>DAG(directed acyclic graph ，有向无环图 ) </strong>作为逻辑执行计划。</p>
+<p align="justify" style="color:rgb(57,57,57);"> <img src="https://img-blog.csdn.net/20160705172405954?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p align="justify" style="color:rgb(57,57,57);"></p>
+<p align="justify" style="color:rgb(57,57,57);"><span style="color:#000000;">步骤 3 </span>：调度任务  将各阶段划分成不同的 <strong>任务 (task) </strong>，每个任务都是数据和计算的合体。在进行下一阶段前，当前阶段的所有任务都要执行完成。因为下一阶段的第一个转换一定是重新组织数据的，所以必须等当前阶段所有结果数据都计算出来了才能继续。</p>
+<p align="justify" style="color:rgb(57,57,57);"><span style="color:#000000;">假设本例中的 hdfs://names </span>下有四个文件块，那么 HadoopRDD 中 partitions 就会有四个分区对应这四个块数据，同时 preferedLocations会指明这四个块的最佳位置。现在，就可以创建出四个任务，并调度到合适的集群结点上。</p>
+<img src="https://img-blog.csdn.net/20160705172741925?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><p></p>
+<div style="font-size:14px;"><span style="color:#333333;font-size:15px;"><span style="font-family:'微软雅黑';"><br></span></span></div>
+<div><span style="font-family:'微软雅黑';color:#333333;"><span style="font-size:15px;">在下一篇我们将会讨论YARN框架和Spark 的运行模式：<a href="http://blog.csdn.net/gamer_gyt/article/details/51833681" rel="nofollow">http://blog.csdn.net/gamer_gyt/article/details/51833681</a></span></span></div>
+<p></p>
+            </div>
+                </div>

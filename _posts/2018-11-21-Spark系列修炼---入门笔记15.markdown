@@ -1,0 +1,134 @@
+---
+layout:     post
+title:      Spark系列修炼---入门笔记15
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/a2011480169/article/details/53393940				</div>
+								            <div id="content_views" class="markdown_views prism-tomorrow-night">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<hr>
+
+<p>核心内容： <br>
+1、Spark架构入门笔记 <br>
+2、ClusterManager–资源调度、Driver—作业运行调度的详解</p>
+
+<hr>
+
+<p>今天进一步深入学习了Spark,主要学习的内容为Spark的核心架构，好的，进入本篇文章的正题。 <br>
+注意：本篇文章谈的是Spark的StanAlone模式。 <br>
+<img src="https://img-blog.csdn.net/20161129200444059" alt="这里写图片描述" title=""> <br>
+先谈一下我自己对于Spark程序的运行机制： <br>
+1&gt;用户的应用程序通过Spark的客户端向我们的Master提交程序 <br>
+2&gt;Driver将程序提交给Master之后，首先向Master进行注册，这样用户可以通过Master节点查看应用程序的运行状态 <br>
+3&gt;随后Driver通过RPC协议向Master节点申请资源并领取资源 <br>
+4&gt;Driver申请到资源后，便于对应的Worker节点进行通信，要求它启动任务 <br>
+5&gt;Worker节点启动完任务后，各个任务将通过RPC协议向Driver报告自己的状态和进度，以让Driver节点随时掌握各个任务的运行状态，从而可以在任务失败时重新启动任务。 <br>
+6&gt;Spark程序运行完成后，Driver节点向Master节点注销并关闭自己，资源被回收。到此任务运行完毕。 <br>
+上面是我自己现在自己的理解。 <br>
+<img src="https://img-blog.csdn.net/20161129201458253" alt="这里写图片描述" title=""></p>
+
+<hr>
+
+<p>好的，接下来对Spark的核心架构依次进行详述：从Spark集群部署的角度来看，Spark集群由以下部分组成：Cluster Manager、Worker、Executor、Driver App。 <br>
+<strong>Cluster Manager</strong>： <br>
+Spark的集群管理器，主要负责资源的分配与管理。集群管理器分配的资源属于一级资源，它将各个Worker上的内存、CPU等资源分配给应用程序，但是并不负责对Executor的资源分配。目前，Standalone、YARN、Mesos等都可以作为Spark的集群管理器。 <br>
+即ClusterManager是集群获取资源的外部服务，Spark应用程序向ClusterManager注册成功之后，Master就提前直接分配好资源，很显然这种资源分配的方式是粗粒度的资源分配方式。（呵呵，可以想象一下，分配完资源之后，Master就告诉应用程序，以后别来烦我！） <br>
+Master接收用户提交的程序，并发送指令给worker为当前程序分配计算资源。每个worker所在节点默认为当前程序分配一个executor,在excutor中通过线程池并发执行。 <br>
+深度思考1：我们的程序现在仅仅是注册，还没有具体执行，我们的Master怎么知道分配多少资源而一劳永逸呢？即如何知道给应用程序分配多少内存、CPU呢？ <br>
+这是由3个方面决定的： <br>
+①spark-env.sh和spark-defaults.sh决定 <br>
+例： <br>
+<img src="https://img-blog.csdn.net/20161129204636471" alt="这里写图片描述" title=""> <br>
+<img src="https://img-blog.csdn.net/20161129204725785" alt="这里写图片描述" title=""> <br>
+从图中我们可以看出，Master事先已经为我们的每个Worker已经分配好了1个G的内存 <br>
+②spark-submit提交的参数 <br>
+③程序中SparkConf配置的参数 <br>
+深度思考2：在应用程序运行的过程中，Worker会不会向当前的Master汇报当前机器的资源(内存和CPU)的信息？ <br>
+错误答案：会的，因为在应用程序的运行过程中，Worker会不断的发送心跳给Master，然后Master就可以从心跳中获取当前节点的内存和CPU。这种说法是错误的，因为Worker发送心跳主要只有一个作用：Worker ID，如下图所示： <br>
+<img src="https://img-blog.csdn.net/20161129205920631" alt="这里写图片描述" title=""> <br>
+Worker并不会向Master汇报资源的相关情况，所以在应用程序运行的过程中，Worker会不会向当前的Master汇报当前机器的资源。 <br>
+深度思考3：在应用程序的运行过程中，Worker既然不会向Master汇报资源的使用情况，那么Master如何知道Worker上面的资源呢，即Master如何知道各个节点额资源信息呢？ <br>
+Master分配资源的时候就已经知道了：当我们的应用程序在向Master注册时，注册成功后master就会分配资源，分配时Master就会记录资源，因此既然所有的资源都是Master分配的，所以Master当然知道各节点的资源信息了。所以只有当Worker出现故障时才会向Master汇报资源情况，然后在动态调整一下资源。 <br>
+<strong>因此应用程序在运行的过程中，千万不要以为Worker会向Master汇报资源的信息，因为老大已经知道了，就不用再汇报了(呵呵，小样！别烦我，有问题的时候在找我。)</strong> <br>
+从上面可以看出，Spark的应用程序在运行的过程中并不会依赖于ClusterManager。</p>
+
+<hr>
+
+<p>接下来谈一下<strong>Worker</strong>： <br>
+从上面的Master中我们可以知道，虽然Worker作为服务器自身有相关的内存、CPU等。但是具体能够为Spark的应用程序提供多少内存等资源是由我们的Master来决定的（呵呵，老大就是老大！） <br>
+Worker：Spark的工作节点。对Spark的应用程序来说，由集群管理器Master分配得到资源的Worker节点主要负责以下工作：创建Executor，将资源和任务进一步分配给Executor，同步资源信息给Cluster Manager。（先由老大Master分配资源给Worker，然后Worker在将资源分配给Executor，很明显属于资源的二次分配嘛） <br>
+Worker节点管理着当前节点的内存和CPU等资源的使用状况，接受Master分配资源的指令，Worker不会运行程序的代码的。</p>
+
+<hr>
+
+<p>接下来具体介绍我们的<strong>Driver</strong>（呵呵，Driver显得好重要啊！） <br>
+默认情况下Driver运行在当前提交的机器上。 <br>
+Driver App：客户端驱动程序，也可以理解为客户端应用程序，用于将任务程序转换为RDD和DAG，并与Cluster Manager进行通信与调度(这里应该主要就是注册程序同时申请资源吧)。 <br>
+Driver是应用程序运行时候的核心，因为它负责了整个作业的调度，并且它会向Master申请资源来完成具体作业的工作过程。 <br>
+<img src="https://img-blog.csdn.net/20161129214702099" alt="这里写图片描述" title=""> <br>
+在这里面插一句：所谓作业调度就是按照一定的策略，从作业队列中选择出合适的作业，为它们分配资源并让它们得到执行。 <br>
+从图示中我们可以发现，Driver就是我们运行程序的时候，具有main方法并且创建了SparkContext这样的一个环境对象。Driver本身就是以SparkContext为核心的，可以理解为SparkContext就是我们的Driver。<strong>SparkContext是通往集群的唯一通道，是开发者使用各种功能的唯一通道。</strong>（呵呵，是不是很类似于HDFS中的FileSystem），SparkContext是整个程序运行调度的核心，这里所说的程序运行调度不是指的资源调度，而是指的是作业调度。当我们的应用程序在最开始运行的时候就要实例化SparkContext，<strong>SparkContext在具体实例化之后主要做了两件事情</strong>： <br>
+第一：SparkContext将创建DAGScheduler、TaskScheduler、SchedulerBackend。 <br>
+DAGScheduler（高层调度器）的作用：用于将任务程序转换为RDD，并根据后面的RDD和前面的RDD之间的依赖关系（运行shuffle的时候）将我们的整个作业划分成几个阶段Stage。（发现如果是宽依赖的话，就划分成不同的Stage） <br>
+依赖构成了DAG，如果是宽依赖DAG Scheduler就会划分Stage，Stage内部是基于内存迭代的，当然也可以基于磁盘迭代。 <br>
+一般情况下当通过Action触发job时sparkContext会通过DAGscheduler来把job中的RDD构成的DAG划分成不同的stage(划分依据是宽依赖），每个stage内部是一系列业务逻辑完全相同 但处理数据不同的tasks，构成了task set（任务集合）。 <br>
+在这里我是这么理解的：在Hadoop中，MapReduce分为两个阶段Mapper阶段和Reducer阶段，而在Spark中作业具体分为几个阶段则是由我们的DAGScheduler决定的，从而指导我们程序的运行。也就是说Application这个应用程序到底怎么运行，作为驱动的Driver本身要有谱。 <br>
+TaskScheduler的作用（低层调度器）的作用：负责管理每个阶段里面的任务该怎么处理，即负责一个作业内部运行的。TaskScheduler运行在Driver所在的机器上面。 <br>
+SchedulerBackend的作用：管理整个集群中为这个当前程序分配的计算资源（Executor），分配的计算资源本身就是Executor。即SchedulerBackend是管理（握住）计算资源的。 <br>
+（呵呵，当我们的Driver申请到资源之后，底下有一个小弟SchedulerBackend专门负责记账的）即当我们的Master为我们的应用程序分配好资源（Executor）后，在Executor启动之后，会向Driver注册，Driver会通过ScheduleBackend握住所有Executor的计算资源。当TaskSchedule在底层执行的时候会找scheduleBacend要具体的Excuter计算资源。 <br>
+第二：在创建这些对象的过程中向Master注册当前的程序，注册的时候如果没有任何问题，Master就会分配资源。 <br>
+注意：Driver是负责整个应用程序的作业调度的，驱动Application的运行，并且在应用程序运行的过程中，要不断的指挥所有的Worker的工作，并且频繁的与Executor进行交互通信（因为Executor线程池里面的线程要不断的工作，所以当然要不断的与Executor进行交互通信）！ <br>
+即Task scheduler和Schedulerbackend负责具体任务的运行（遵循数据本地性）。 <br>
+好的，在这里总结一下：<strong>具体工作的运行过程</strong>： <br>
+当我们用户的应用程序通过Spark的客户端程序SparkContext将我们的应用程序提交到主节点Master之后，首先先完成程序的注册，注册成功之后Master就开始分配资源，与此同时，在注册的过程中，SparkContext将实例化DAGScheduler、TaskScheduler、SchedulerBackend。其中SchedulerBackend管理整个集群中为这个当前程序分配的计算资源（心里有数），同时高层调度器DAGScheduler将应用程序划分成不同的阶段（总体上知道这个应用程序该怎么运行）Stage，Stage划分完之后，Stage就会被提交给低层调度器TaskScheduler，TaskScheduler拿到任务的集合(一个Stage的内部是计算逻辑完全一样的任务，只不过是计算的数据不一样而已)之后，便于对应的Worker节点进行通信，根据数据的本地性把任务发到Executor进行执行。Executor在执行任务的过程当中，将通过RPC协议向Driver报告自己的状态和进度，以让Driver节点随时掌握各个任务的运行状态，从而可以在任务失败时重新启动任务。 程序运行完之后SparkContext将会关闭。同时SparkContext关闭之后其创建的对象也都会关闭。</p>
+
+<hr>
+
+<p>好的，接下来具体讲述我们的<strong>Executor</strong>： <br>
+Executor让我想起了Yarn中的Container，不知道对不对？ <br>
+之前已经讲述了，Worker是不会直接处理运行我们的任务作业的，而具体运行我们作业的就是Executor <br>
+Executor：执行计算任务的一线进程（呵呵，包工头worker是不干活的，干活的是工人Executor）。主要负责任务的执行以及与Worker、DriverApp的信息同步。 <br>
+Executor是具体处理数据分片的，用户所写的业务逻辑（textFile、flatMap、reduceByKey等）都是在具体的集群上的Worker上的Excuter中得到处理的。 <br>
+注意：一个Worker默认情况下会为当前的应用程序只开辟一个Executor，只分配这么一个Excuter，当然也可以配置多个；Executor部分的代码其实就是main方法中的new  SparkConf。 <br>
+Excuter具体的工作机制：Executor内部是线程池并发地处理数据分片，Executor负责具体Task的运行，通过线程池中的线程并发的执行和线程复用的方式，线程池中的每一个线程可以运行一个任务，任务完成后回收到线程池中进行线程的复用。 <br>
+Executor靠线程池中的线程来运行task的时候，Task肯定要从磁盘或内存中读写数据，<strong>每个Application都有自己独立的一批Executor。</strong> <br>
+ 在这里说明一下关于Hadoop与Spark的一个不同点：Hadoop中开启一个JVM去执行一个Mapper或者Reducer，而这个JVM是不能进行复用的，即Hadoop中的JVM是不能进行复用的。而Spark在一个节点上默认情况下只为当前程序开辟一个JVM进程，这个JVM进程中是以线程池的方式，通过线程来处理具体的任务，而Executor就是进程里的对象。</p>
+
+<hr>
+
+<p><strong>应用程序Application</strong>的相关概念： <br>
+应用程序其实就是用户编写的Spark代码打包后的Jar包及打相关的依赖，一个应用程序本身包含两部分：它里面包含了driver（SparkConf+SparkContext）功能的代码和分布在集群中多个节点上的Executor的代码。即应用程序有两个层面，application(应用程序)=driver+executor。Driver是驱动Executor工作的，Executor是具体处理数据分片的，内部是线程池并发地处理数据分片。</p>
+
+<hr>
+
+<p><strong>Job</strong>的概念： <br>
+JOB就是包含了一系列Task的并行计算：一个Job包含若干个Stage，每个阶段又包含一组taskSet。Stage内部计算逻辑完全一样，只是计算的数据不同，Stage内部有很多并行任务，这和我们的数据规模有关系。 <br>
+应用程序与Job之间的关系： <br>
+一个Application（应用程序）里面可以有多个Job。一个Application里可以有多个Job。因为一个应用程序中可以有不同的Action，一般一个Action操作就会触发(对应)一个JOB。Ation不会产生RDD，只会导致RunJob。注意：Checkpoint也可以导致Job，排序时进行Range范围的划分也会触发Job。 <br>
+任务（Task）就是计算一个数据分片的，数据分片：例如从HDFS上读取数据时默认数据分片就是128MB。</p>
+
+<hr>
+
+<p>Spark的三种模式：StandAlone、Yarn或者Mesos。 <br>
+1）StandAlone这种模式是Spark自带的，大家下载下来Spark之后默认运行的都是StandAlone模式。 <br>
+2）由于这种模式是Spark自带的，所以其效率比在Yarn和Mesos上好很多，也不需要其他的内容。 <br>
+3）如果在实际的生产环境中进行数据处理的话，只要Spark一个框架就可以了。不用搞Mesos或者Yarn一大堆的 <br>
+东西。</p>
+
+<hr>
+
+<p>呵呵，在补充一点：为什么不能够在IDE集成开发环境中直接发布Spark程序到Spark集群中？ <br>
+第一点：内存和Cores的限制，默认情况下Spark程序的Driver会在提交Spark程序的机器上，所以如果在IDE中提交程序的话，那IDE机器就必须非常强大。 <br>
+第二点：Driver要指挥Workers的运行并频繁的发生通信。如果开发环境IDE和Spark集群不在同样一个网络下，就会出现任务丢失，运行缓慢等多种不必要的问题。 <br>
+第三点：这是不安全的！</p>
+
+<p>实际执行的时候运行的Task有两种类型： <br>
+最后一个stage中的task称为ResultTask,产生job的结果，其它前面的stage中的task都是shuffleMapTask,为下一阶段的stage做数据准备，相当于MapReduce的Mapper。 <br>
+Hadoop中的MapReduce和Spark都是对MapReduce思想的实现，Spark是一个更精致和高效的实现！</p>
+
+<p><strong>总结</strong>： <br>
+在Spark当中整个应用程序的运行，首先由DAGScheduler将我们额Job划分成不同的Stage，并将Stage中的taskset提交给taskScheduler，进而提交给Worker中的executor执行(符合数据本地性)，每个task会计算RDD中的一个partition，基于该partition（数据）来具体执行我们定义的一系列同一个stage内部的函数，以此类推直到整个程序运行完成！！</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

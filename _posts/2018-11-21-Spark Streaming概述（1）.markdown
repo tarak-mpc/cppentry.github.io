@@ -1,0 +1,9 @@
+---
+layout:     post
+title:      Spark Streaming概述（1）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h2>一、Spark Streming 概述</h2><p>Spark Streming是一个可扩展、高可靠、容错的一个流处理框架<br></p><p></p><h2>二、Spark Streaming特点</h2><p>低延时、容错、能够运行到成白上千的节点上、能够将批处理、机器学习、图计算等子框架和Spark Streaming综合起来使用</p><h2>三、Spark Streaming处理流程</h2><p>将不同的数据源的数据经过Spark Streaming处理后将结果输出到外部文件系统，如下图所示：</p><p><img src="https://img-blog.csdn.net/20180521225702559?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2ZlbmdmZW5nY2hlbjk1/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="">四、Spark Stream 工作流程</p><p></p><p style="margin-bottom:10px;color:rgb(29,31,34);font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;">Internally, it works as follows. Spark Streaming receives live input data streams and divides the data into batches, which are then processed by the Spark engine to generate the final stream of results in batches.</p><p style="margin-bottom:10px;color:rgb(29,31,34);font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;text-align:center;"><img src="http://spark.apache.org/docs/latest/img/streaming-flow.png" title="Spark Streaming data flow" alt="Spark Streaming" style="height:auto;vertical-align:middle;border:0px;"></p><p style="margin-bottom:10px;color:rgb(29,31,34);font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;text-align:center;"><br></p><br>            </div>
+                </div>
