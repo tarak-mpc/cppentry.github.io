@@ -1,0 +1,97 @@
+---
+layout:     post
+title:      HDFS HA补充
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1><a id="HDFS_HA_0"></a>HDFS HA补充</h1>
+<p>#hadoop</p>
+<h2><a id="HDFS_HA_2"></a>HDFS HA命令</h2>
+<p>hdfs dfsadmin -report 报告集群情况<br>
+hdfs haadmin -getServiceState nn2 查看NameNode2 是active还是standby<br>
+hdfs hasdmin -transitionToActive --forcemanual nn2 手动将nn2 转为active<br>
+<code>会报告nn1 is already active</code>所以无法切换<br>
+第二种方式是将nn1切换为standby：<br>
+hdfs hasdmin -transitionToStandby --forcemanual nn1<br>
+hdfs zkfc -help zookeeper failover control 的帮助<br>
+yarn rmadmin - 高可用情况下yarn的命令使用</p>
+<h2><a id="Uber_12"></a>Uber</h2>
+<p>用户可以通过启用Uber组件来允许jvm重用—即在同一个container里面依次执行多个task，在yarn-site.xml文件中，改变几个参数的配置即可启用Uber<br>
+mapreduce.job.ubertask.enable<br>
+值为true<br>
+mapreduce.job.ubertask.maxmaps<br>
+map任务数的阀值  9<br>
+mapreduce.job.ubertask.maxreduces<br>
+reduce任务数的阀值  1<br>
+mapreduce.job.ubertask.maxbytes<br>
+application的输入大小的阀值<br>
+默认为dfs.block.size的值</p>
+<h2><a id="_24"></a>动态增删节点</h2>
+<p>在不重启集群的情况下添加节点</p>
+<h3><a id="DataNode_26"></a>动态添加DataNode节点：</h3>
+<ol>
+<li>在etc/hadoop下新建dfs-hosts.conf文件，添加主机名字</li>
+<li>在hdfs-site中添加 dfs.hosts标签<br>
+<img src="https://img-blog.csdn.net/20180920154940731?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM3OTEzNDM1/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></li>
+<li>hdfs dfsadmin –refreshNodes 刷新节点(动态添加时刷不刷新都可以)</li>
+<li>Hdfs dfsadmin –report 报告节点</li>
+<li>在新节点中启动: <a href="http://start-balancer.sh" rel="nofollow">start-balancer.sh</a> 均衡当前的hdfs块（按需求而定***小心）（若NameNode已经没有负载空间）</li>
+</ol>
+<h3><a id="_34"></a>删除节点：</h3>
+<ol>
+<li>需要在hdfs-site.xml配置文件中配置：<br>
+<img src="https://img-blog.csdn.net/2018092015492836?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM3OTEzNDM1/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></li>
+<li>文件中添加需要删除的节点</li>
+<li>然后执行刷新命令hdfs.dfsadmin -refreshNodes</li>
+<li>根据hdfs dfsadmin -report 查看该节点的情况</li>
+<li>在节点中关闭进程：<br>
+sbin/hadoop-daemon.sh stop datanode<br>
+sbin/hadoop-daemon.sh stop nodemanager</li>
+</ol>
+<h2><a id="_44"></a>服务器的时间同步</h2>
+<ol>
+<li>date -s 直接设置服务器的时间 hwclock -w 生效</li>
+<li>ntpdate  时间服务器</li>
+<li>同步到一台服务器上（NameNode）<br>
+1.在NameNode节点上配置时间服务器<br>
+检查ntpd服务器是否存在,如果不存在先安装该服务<br>
+yum -y install ntp.x86_64<br>
+::安装成功之后,配置时间服务器文件::<br>
+<code>#restrict 192.168.1.0 mask 255.255.255.0 nomodify notrap</code></li>
+</ol>
+<pre><code>#server 0.centos.pool.ntp.org iburst
+#server 1.centos.pool.ntp.org iburst
+#server 2.centos.pool.ntp.org iburst
+#server 3.centos.pool.ntp.org iburst
+server 127.127.1.0
+</code></pre>
+<p>客户端：<br>
+先安装ntpdate<br>
+yum -y install ntpdate.x86_64<br>
+测试：<br>
+ntpdate hadoop02<br>
+编辑定时任务列表：<br>
+crontab -e<br>
+*/1 * * * * /usr/sbin/ntpdate hadoop01 &gt;&gt; /dev/null<br>
+配置ntpd开机自启：<br>
+chkconfig ntpd on</p>
+<h2><a id="_71"></a>安全模式</h2>
+<p>安全模式：</p>
+<ol>
+<li>调整配置</li>
+<li>手动离开安全模式<br>
+hdfs dfsadmin -safemode enter/leave<br>
+检查错误的块<br>
+hdfs fsck /<br>
+解决方法：删除<br>
+Hdfs fsck -delete /</li>
+<li>暴力解决<br>
+重新格式化：<br>
+删除hadoopdata</li>
+</ol>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

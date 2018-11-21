@@ -1,0 +1,176 @@
+---
+layout:     post
+title:      HDFS总结 思维导图
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：来自暴走的xzy					https://blog.csdn.net/qq_37162090/article/details/83037271				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-light">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc"><h3>HDFS总结</h3><ul><li><a href="#HDFS_1" rel="nofollow">HDFS</a></li><ul><li><a href="#HDFS_2" rel="nofollow">HDFS存储管理</a></li><ul><li><a href="#_3" rel="nofollow">各个角色及作用</a></li><ul><li><a href="#NameNode_4" rel="nofollow">NameNode</a></li><li><a href="#DataNode_15" rel="nofollow">DataNode</a></li><li><a href="#SecondaryNameNode_22" rel="nofollow">SecondaryNameNode</a></li><li><a href="#ZKFC_36" rel="nofollow">ZKFC</a></li><li><a href="#journalNode_39" rel="nofollow">journalNode</a></li><li><a href="#NNstandby_44" rel="nofollow">备用的NN(standby)</a></li></ul><li><a href="#_48" rel="nofollow">备份机制</a></li><ul><li><a href="#_49" rel="nofollow">集群外操作</a></li><li><a href="#_53" rel="nofollow">集群内操作</a></li></ul><li><a href="#HDFS_56" rel="nofollow">HDFS读写流程</a></li><ul><li><a href="#_57" rel="nofollow">读流程</a></li><li><a href="#_60" rel="nofollow">写流程</a></li></ul><li><a href="#_77" rel="nofollow">搭建集群的三种模式</a></li><li><a href="#HDFS_81" rel="nofollow">HDFS优缺点</a></li><ul><li><a href="#_82" rel="nofollow">优点</a></li><li><a href="#_90" rel="nofollow">缺点</a></li></ul></ul></ul></ul></div><p></p>
+<h1><a id="HDFS_1"></a>HDFS</h1>
+<h2><a id="HDFS_2"></a>HDFS存储管理</h2>
+<h3><a id="_3"></a>各个角色及作用</h3>
+<h4><a id="NameNode_4"></a>NameNode</h4>
+<ul>
+<li>接收客户端的读写请求</li>
+<li>管理元数据
+<ol>
+<li>上传文件的权限</li>
+<li>上传文件的属主以及属组</li>
+<li>上传文件的时间</li>
+<li>上传文件的block数以及ID号</li>
+<li>每个block的位置信息 是由DN在集群启动时汇报的 不会持久化</li>
+<li>各个位置的DN位置</li>
+</ol>
+</li>
+<li>管理DataNode</li>
+</ul>
+<h4><a id="DataNode_15"></a>DataNode</h4>
+<ul>
+<li>接收客户端的读请求</li>
+<li>存储block块</li>
+<li>向active NN汇报心跳信息</li>
+<li>构建管道pipeline</li>
+<li>管理本机上block元数据</li>
+</ul>
+<h4><a id="SecondaryNameNode_22"></a>SecondaryNameNode</h4>
+<ul>
+<li>负责持久化
+<ul>
+<li>拉取NN节点上的edits+fsimage文件合并
+<ul>
+<li>edits文件存储客户端对HDFS的操作</li>
+<li>使用edits来存储操作是怕某个NN挂掉</li>
+</ul>
+</li>
+<li>合并过程
+<ul>
+<li>文件拉取之时，在NN节点创建edits_new 目的为了存储在合并期间产生的操作</li>
+<li>基于拉来的edits文件重演 产出了元数据</li>
+<li>将重演产出的元数据合并到fsimage中</li>
+<li>将合并后fsimage推送给NN</li>
+<li>将edits.new文件的后缀去掉</li>
+</ul>
+</li>
+<li>合并触发机制
+<ul>
+<li>超过3600s合并一次</li>
+<li>edits文件大小超过64M</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h4><a id="ZKFC_36"></a>ZKFC</h4>
+<ul>
+<li>监控各自的NN，将监控的情况汇报给ZooKeeper集群</li>
+<li>接收zk的选举结果，确认一下另外一个NN是否真的挂了，将自己监控的NN提升为active状态</li>
+</ul>
+<h4><a id="journalNode_39"></a>journalNode</h4>
+<ul>
+<li>写数据的时候只需要保证半数以上的节点写入成功就可以了
+<ul>
+<li>防止出现脑裂问题 也成为网络分区问题</li>
+</ul>
+</li>
+<li>最终一致性/弱一致性</li>
+<li>存储的是edits文件</li>
+</ul>
+<h4><a id="NNstandby_44"></a>备用的NN(standby)</h4>
+<ul>
+<li>监控journalnode中数据变化，实时更新自己的内存元数据</li>
+<li>将内存中元数据持久化到fsimage中，然后推送给NN</li>
+</ul>
+<h3><a id="_48"></a>备份机制</h3>
+<h4><a id="_49"></a>集群外操作</h4>
+<ul>
+<li>第一个block存储在负载不高的节点上</li>
+<li>第二个存储在相邻的机架的节点上</li>
+<li>第三个存储在第二个机架的另一随机节点上</li>
+</ul>
+<h4><a id="_53"></a>集群内操作</h4>
+<ul>
+<li>第一个block存储在本机</li>
+<li>第二个 第三个同<strong>集群外操作</strong></li>
+</ul>
+<h3><a id="HDFS_56"></a>HDFS读写流程</h3>
+<h4><a id="_57"></a>读流程</h4>
+<ul>
+<li>从NN中获取block块的Id和相对于的DN地址</li>
+<li>通过以上信息去相对于的DN中读取数据</li>
+</ul>
+<h4><a id="_60"></a>写流程</h4>
+<ul>
+<li>计算文件的block数量  文件大小/block大小128MB</li>
+<li>client向namenode汇报
+<ul>
+<li>当前大文件的block数量</li>
+<li>当前大文件属主 属组</li>
+<li>当前大文件 权限</li>
+<li>上传时间</li>
+</ul>
+</li>
+<li>client切割出来一个block</li>
+<li>请求block的id以及存放block的地址</li>
+<li>由于NN掌控全局，管理所有的DN，所以他将负载不高的DN地址返回的client</li>
+<li>client拿到地址后，找到DN 去上传数据
+<ul>
+<li>从NN得到了block信息 包括ID等</li>
+<li>通过id查询到该把这些block存储到哪些datanode中</li>
+<li>再把block切割成一个个packet 64k</li>
+<li>并在客户端和DN间建立了管道，源源不断的传输packet
+<ul>
+<li>使用管道 与 切割成packet的理由：并行存储 增加效率</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>DN将block存储完毕后，会向NN汇报当前的存储情况</li>
+</ul>
+<h3><a id="_77"></a>搭建集群的三种模式</h3>
+<ul>
+<li>伪分布式</li>
+<li>完全分布式</li>
+<li>高可用的完全分布式</li>
+</ul>
+<h3><a id="HDFS_81"></a>HDFS优缺点</h3>
+<h4><a id="_82"></a>优点</h4>
+<ul>
+<li>副本机制，数据更安全</li>
+<li>分布式的，所以适合批处理</li>
+<li>高可用性</li>
+<li>元数据持久化</li>
+<li>禁掉了一些功能，使得集群更加完美
+<ul>
+<li>不能修改文件</li>
+<li>文件上传成功后，不能修改block大小</li>
+</ul>
+</li>
+</ul>
+<h4><a id="_90"></a>缺点</h4>
+<ul>
+<li>无法毫秒级的读写数据
+<ul>
+<li>读写复杂 需要找nn请求</li>
+<li>形成管道 文件切割block 形成packet</li>
+</ul>
+</li>
+<li>不适合存储大量的小文件
+<ul>
+<li>容易造成元数据，NN内存溢出</li>
+<li>解决的办法
+<ul>
+<li>小文件合成大文件</li>
+<li>联邦机制</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>不能并发写入，但可以并发的读</li>
+</ul>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

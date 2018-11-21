@@ -1,0 +1,798 @@
+---
+layout:     post
+title:      HDFS中读取文件总结
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div>主要参考Hadoop 1.0.3代码</div>
+<div><a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/" rel="nofollow">http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/</a></div>
+一 HDFS读取过程概述
+<div>1.打开文件</div>
+<div>1.1客户端</div>
+<div>HDFS打开文件时，调用DistributedFileSystem.open(Path f, int bufferSize)，该方法在<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/DistributedFileSystem.java" rel="nofollow">DistributedFileSystem.java</a>的第152-156行</div>
+<div>如下所示：</div>
+<div>
+<hr></div>
+<pre><code class="language-java">public FSDataInputStream open(Path f, int bufferSize) throws IOException {
+    statistics.incrementReadOps(1);
+    return new DFSClient.DFSDataInputStream(
+          dfs.open(getPathName(f), bufferSize, verifyChecksum, statistics));
+  }</code></pre><br><div>
+<hr></div>
+<div>其中dfs为DistributedFileSystem的成员变量(类型为DFSClient)。</div>
+<div><br></div>
+<div>dfs.open(String src, int buffersize, boolean verifyChecksum, FileSystem.Statistics stats)这一方法，在<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/DFSClient.java" rel="nofollow">DFSClient.java</a>的第573-579行</div>
+<div>如下所示：</div>
+<div>
+<hr></div>
+<div><pre><code class="language-html">public DFSInputStream open(String src, int buffersize, boolean verifyChecksum,
+                      FileSystem.Statistics stats
+      ) throws IOException {
+    checkOpen();
+    //    Get block info from namenode
+    return new DFSInputStream(src, buffersize, verifyChecksum);
+  }</code></pre><br></div>
+<div>
+<hr></div>
+<div>可以看到DFSInputStream被创建并返回。</div>
+<div>在DFSInputStream创建过程中，构造函数在<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/DFSClient.java" rel="nofollow">DFSClient.java</a>的第1828-1835行，</div>
+<div>如下所示：</div>
+<div>
+<hr></div>
+<div><pre><code class="language-java">DFSInputStream(String src, int buffersize, boolean verifyChecksum
+                   ) throws IOException {
+      this.verifyChecksum = verifyChecksum;
+      this.buffersize = buffersize;
+      this.src = src;
+      prefetchSize = conf.getLong("dfs.read.prefetch.size", prefetchSize);
+      openInfo();
+    }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>可以看到，openInfo被调用。具体代码可以在<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/DFSClient.java" rel="nofollow">DFSClient.java</a>的第1840-1861行，</div>
+<div>如下所示：</div>
+<div>
+<hr></div>
+<div><pre><code class="language-html">synchronized void openInfo() throws IOException {
+      LocatedBlocks newInfo = callGetBlockLocations(namenode, src, 0, prefetchSize);
+      if (newInfo == null) {
+        throw new FileNotFoundException("File does not exist: " + src);
+      }
+
+      // I think this check is not correct. A file could have been appended to
+      // between two calls to openInfo().
+      if (locatedBlocks != null &amp;&amp; !locatedBlocks.isUnderConstruction() &amp;&amp;
+          !newInfo.isUnderConstruction()) {
+        Iterator&lt;LocatedBlock&gt; oldIter = locatedBlocks.getLocatedBlocks().iterator();
+        Iterator&lt;LocatedBlock&gt; newIter = newInfo.getLocatedBlocks().iterator();
+        while (oldIter.hasNext() &amp;&amp; newIter.hasNext()) {
+          if (! oldIter.next().getBlock().equals(newIter.next().getBlock())) {
+            throw new IOException("Blocklist for " + src + " has changed!");
+          }
+        }
+      }
+      updateBlockInfo(newInfo);
+      this.locatedBlocks = newInfo;
+      this.currentNode = null;
+    }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>updateBlockInfo主要实现了“在文件构造过程中，基于从datanode返回的block长度更新最后一个block的大小” For files under construction,update the last block size based on the length of the block from the datanode.“</div>
+<div>
+<hr></div>
+<div><pre><code class="language-java">private void updateBlockInfo(LocatedBlocks newInfo) {
+      if (!serverSupportsHdfs200 || !newInfo.isUnderConstruction()
+          || !(newInfo.locatedBlockCount() &gt; 0)) {
+        return;
+      }
+
+      LocatedBlock last = newInfo.get(newInfo.locatedBlockCount() - 1);
+      boolean lastBlockInFile = (last.getStartOffset() + last.getBlockSize() == newInfo
+          .getFileLength());
+      if (!lastBlockInFile || last.getLocations().length &lt;= 0) {
+        return;
+      }
+      ClientDatanodeProtocol primary = null;
+      DatanodeInfo primaryNode = last.getLocations()[0];
+      try {
+        primary = createClientDatanodeProtocolProxy(primaryNode, conf,
+            last.getBlock(), last.getBlockToken(), socketTimeout);
+        Block newBlock = primary.getBlockInfo(last.getBlock());
+        long newBlockSize = newBlock.getNumBytes();
+        long delta = newBlockSize - last.getBlockSize();
+        // if the size of the block on the datanode is different
+        // from what the NN knows about, the datanode wins!
+        last.getBlock().setNumBytes(newBlockSize);
+        long newlength = newInfo.getFileLength() + delta;
+        newInfo.setFileLength(newlength);
+        LOG.debug("DFSClient setting last block " + last + " to length "
+            + newBlockSize + " filesize is now " + newInfo.getFileLength());
+      } catch (IOException e) {
+        if (e.getMessage().startsWith(
+            "java.io.IOException: java.lang.NoSuchMethodException: "
+                + "org.apache.hadoop.hdfs.protocol"
+                + ".ClientDatanodeProtocol.getBlockInfo")) {
+          // We're talking to a server that doesn't implement HDFS-200.
+          serverSupportsHdfs200 = false;
+        } else {
+          LOG.debug("DFSClient file " + src
+              + " is being concurrently append to" + " but datanode "
+              + primaryNode.getHostName() + " probably does not have block "
+              + last.getBlock());
+        }
+      }
+    }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>callGetBlockLocations主要用于获取block的信息</div>
+<div>
+<hr></div>
+<div><pre><code class="language-java">static LocatedBlocks callGetBlockLocations(ClientProtocol namenode,
+      String src, long start, long length) throws IOException {
+    try {
+      return namenode.getBlockLocations(src, start, length);
+    } catch(RemoteException re) {
+      throw re.unwrapRemoteException(AccessControlException.class,
+                                    FileNotFoundException.class);
+    }
+  }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>可以看到返回的LocatedBlocks，他是一个链表List&lt;LocatedBlock&gt; blocks，每个blocks包含</div>
+<div>
+<ul><li>Block b: block的信息</li><li>long offset: block在文件中的偏移量</li><li>DatanodeInfo[]locs: 位于哪些Datanode</li></ul></div>
+<div>上面namenode.getBlockLocations 是一个RPC 调用，最终调用NameNode 类的getBlockLocations 函数。 </div>
+<div>1.2namenode</div>
+<div>客户端的部分已经执行完毕，下来接着分析namenode部分，可以看到namenode.getBlockLocations调用了namenode的方法。</div>
+<div>目前把目光转移到namenode上，它位于<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/server/namenode/" rel="nofollow">release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/server/namenode/</a>。</div>
+<div>重点关注一下<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/server/namenode/NameNode.java" rel="nofollow">NameNode.java</a>，在其580-586行</div>
+<div>发现了函数的具体实现</div>
+<div>
+<hr></div>
+<div> <pre><code class="language-java">public LocatedBlocks   getBlockLocations(String src,
+                                          long offset,
+                                          long length) throws IOException {
+    myMetrics.incrNumGetBlockLocations();
+    return namesystem.getBlockLocations(getClientMachine(),
+                                        src, offset, length);
+  }</code></pre><br></div>
+<div>
+<hr></div>
+<div>namesystem是NameNode的一个成员变量，类型为FSNamesystem。</div>
+<div>进里面看看到底做了些什么。</div>
+<div>在<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/server/namenode/FSNamesystem.java" rel="nofollow">/hdfs/server/namenode/FSNamesystem.java</a>中，923行发现了这个函数。</div>
+<div>
+<hr></div>
+<div><br></div>
+<div>  <pre><code class="language-java">public LocatedBlocks getBlockLocations(String src, long offset, long length,
+      boolean doAccessTime, boolean needBlockToken) throws IOException {
+    if (isPermissionEnabled) {
+      checkPathAccess(src, FsAction.READ);
+    }
+
+    if (offset &lt; 0) {
+      throw new IOException("Negative offset is not supported. File: " + src );
+    }
+    if (length &lt; 0) {
+      throw new IOException("Negative length is not supported. File: " + src );
+    }
+    final LocatedBlocks ret = getBlockLocationsInternal(src,
+        offset, length, Integer.MAX_VALUE, doAccessTime, needBlockToken); 
+    if (auditLog.isInfoEnabled() &amp;&amp; isExternalInvocation()) {
+      logAuditEvent(UserGroupInformation.getCurrentUser(),
+                    Server.getRemoteIp(),
+                    "open", src, null, null);
+    }
+    return ret;
+  }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>重点在于这个 <span style="color:#FF0000;">getBlockLocationsInternal</span></div>
+<div>继续往下看，就可以看到这个函数的实现</div>
+<div>
+<hr></div>
+<div>  <pre><code class="language-java">private synchronized LocatedBlocks getBlockLocationsInternal(String src,
+                                                       long offset,
+                                                       long length,
+                                                       int nrBlocksToReturn,
+                                                       boolean doAccessTime,
+                                                       boolean needBlockToken)
+                                                       throws IOException {
+    INodeFile inode = dir.getFileINode(src);
+    if(inode == null) {
+      return null;
+    }
+    if (doAccessTime &amp;&amp; isAccessTimeSupported()) {
+      dir.setTimes(src, inode, -1, now(), false);
+    }
+    //获得此block的信息
+    Block[] blocks = inode.getBlocks();
+    if (blocks == null) {
+      return null;
+    }
+    if (blocks.length == 0) {
+      return inode.createLocatedBlocks(new ArrayList&lt;LocatedBlock&gt;(blocks.length));
+    }
+    List&lt;LocatedBlock&gt; results;
+    results = new ArrayList&lt;LocatedBlock&gt;(blocks.length);
+    //从offset-&gt;offset+length，所涉及的blocks
+    int curBlk = 0;
+    long curPos = 0, blkSize = 0;
+    int nrBlocks = (blocks[0].getNumBytes() == 0) ? 0 : blocks.length;
+    for (curBlk = 0; curBlk &lt; nrBlocks; curBlk++) {
+      blkSize = blocks[curBlk].getNumBytes();
+      assert blkSize &gt; 0 : "Block of size 0";
+      if (curPos + blkSize &gt; offset) {
+    //没超过block长度则curPos还指向当前block
+        break;
+      }
+      curPos += blkSize;
+    }
+   
+    if (nrBlocks &gt; 0 &amp;&amp; curBlk == nrBlocks)   // offset &gt;= end of file
+      return null;
+   
+    long endOff = offset + length;
+   
+    do {
+      // get block locations
+      int numNodes = blocksMap.numNodes(blocks[curBlk]);
+      int numCorruptNodes = countNodes(blocks[curBlk]).corruptReplicas();
+      int numCorruptReplicas = corruptReplicas.numCorruptReplicas(blocks[curBlk]);
+      if (numCorruptNodes != numCorruptReplicas) {
+        LOG.warn("Inconsistent number of corrupt replicas for " +
+            blocks[curBlk] + "blockMap has " + numCorruptNodes +
+            " but corrupt replicas map has " + numCorruptReplicas);
+      }
+    //找到block所对应的datanode
+      DatanodeDescriptor[] machineSet = null;
+      boolean blockCorrupt = false;
+      if (inode.isUnderConstruction() &amp;&amp; curBlk == blocks.length - 1
+          &amp;&amp; blocksMap.numNodes(blocks[curBlk]) == 0) {
+        // get unfinished block locations
+        INodeFileUnderConstruction cons = (INodeFileUnderConstruction)inode;
+        machineSet = cons.getTargets();
+        blockCorrupt = false;
+      } else {
+        blockCorrupt = (numCorruptNodes == numNodes);
+        int numMachineSet = blockCorrupt ? numNodes :
+                            (numNodes - numCorruptNodes);
+        machineSet = new DatanodeDescriptor[numMachineSet];
+        if (numMachineSet &gt; 0) {
+          numNodes = 0;
+          for(Iterator&lt;DatanodeDescriptor&gt; it =
+              blocksMap.nodeIterator(blocks[curBlk]); it.hasNext();) {
+            DatanodeDescriptor dn = it.next();
+            boolean replicaCorrupt = corruptReplicas.isReplicaCorrupt(blocks[curBlk], dn);
+            if (blockCorrupt || (!blockCorrupt &amp;&amp; !replicaCorrupt))
+              machineSet[numNodes++] = dn;
+          }
+        }
+      }
+    //构造一个LocatedBlock
+      LocatedBlock b = new LocatedBlock(blocks[curBlk], machineSet, curPos,
+          blockCorrupt);
+      if(isAccessTokenEnabled &amp;&amp; needBlockToken) {
+        b.setBlockToken(accessTokenHandler.generateToken(b.getBlock(),
+            EnumSet.of(BlockTokenSecretManager.AccessMode.READ)));
+      }
+    //加入到results中
+      results.add(b);
+      curPos += blocks[curBlk].getNumBytes();
+      curBlk++;
+    } while (curPos &lt; endOff
+          &amp;&amp; curBlk &lt; blocks.length
+          &amp;&amp; results.size() &lt; nrBlocksToReturn);
+    //返回结果
+    return inode.createLocatedBlocks(results);
+  }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>1.3总结</div>
+<div>可以看到，最终返回给用户的是FSDataInputStream</div>
+<div>通过client访问namenode完成了整个”打开文件“的过程，我个人理解的打开过程，其实就是从namenode搜集block所对应的datanode、基本信息等内容，以用于接下来的read。</div>
+<div><br></div>
+<div>二 文件的读取</div>
+<div>2.1客户端</div>
+<div>在文件读取的时候，直接调用DFSDataInputStream.read</div>
+<div>目光再回到<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/DFSClient.java" rel="nofollow">hdfs/DFSClient.java</a>，2376行开始</div>
+<div>
+<hr></div>
+<div>   <pre><code class="language-java">public int read(long position, byte[] buffer, int offset, int length)
+      throws IOException {
+      // sanity checks
+      checkOpen();
+      if (closed) {
+        throw new IOException("Stream closed");
+      }
+      failures = 0;
+      long filelen = getFileLength();
+      if ((position &lt; 0) || (position &gt;= filelen)) {
+        return -1;
+      }
+      int realLen = length;
+      if ((position + length) &gt; filelen) {
+        realLen = (int)(filelen - position);
+      }
+     
+      // determine the block and byte range within the block
+      // corresponding to position and realLen
+      // 获取从offset到offset+length内容的block列表
+      // 例如从100M开始，读取长度为128M的数据
+      // ■64■128■192■256■320  .....
+      // 则应该读取的为第2、3、4块
+      List&lt;LocatedBlock&gt; blockRange = getBlockRange(position, realLen);
+      int remaining = realLen;
+      //例如，第二块从36M(100-64)开始，第三块64M全读，第四块到36M(228M-192M)结束
+      for (LocatedBlock blk : blockRange) {
+        long targetStart = position - blk.getStartOffset();
+        long bytesToRead = Math.min(remaining, blk.getBlockSize() - targetStart);
+        fetchBlockByteRange(blk, targetStart,
+                            targetStart + bytesToRead - 1, buffer, offset);
+        remaining -= bytesToRead;
+        position += bytesToRead;
+        offset += bytesToRead;
+      }
+      assert remaining == 0 : "Wrong number of bytes read.";
+      if (stats != null) {
+        stats.incrementBytesRead(realLen);
+      }
+      return realLen;
+    }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>可以看到在获取blockRange调用了<strong><span style="color:#FF0000;">getBlockRange(position, realLen)这一方法</span></strong></div>
+<div>从DFSClient.java，第1991行可以看到如下实现</div>
+<div>
+<hr></div>
+<div>  <pre><code class="language-java">private synchronized List&lt;LocatedBlock&gt; getBlockRange(long offset,
+                                                          long length)
+                                                        throws IOException {
+      assert (locatedBlocks != null) : "locatedBlocks is null";
+      List&lt;LocatedBlock&gt; blockRange = new ArrayList&lt;LocatedBlock&gt;();
+      // search cached blocks first
+      //首先从缓存的locatedBlocks中查找offset所在的block在缓存链表中的位置
+      int blockIdx = locatedBlocks.findBlock(offset);
+      if (blockIdx &lt; 0) { // block is not cached
+        blockIdx = LocatedBlocks.getInsertIndex(blockIdx);
+      }
+      long remaining = length;
+      long curOff = offset;
+      while(remaining &gt; 0) {
+        LocatedBlock blk = null;
+      //按照blockIdx的位置找到block 
+        if(blockIdx &lt; locatedBlocks.locatedBlockCount())
+          blk = locatedBlocks.get(blockIdx);
+      //如果block为空，则缓存中没有此block，则直接从NameNode中查找这些block，并加入缓存
+        if (blk == null || curOff &lt; blk.getStartOffset()) {
+          LocatedBlocks newBlocks;
+          newBlocks = callGetBlockLocations(namenode, src, curOff, remaining);
+          locatedBlocks.insertRange(blockIdx, newBlocks.getLocatedBlocks());
+          continue;
+        }
+        assert curOff &gt;= blk.getStartOffset() : "Block not found";
+       //如果block找到，则放入结果集 
+        blockRange.add(blk);
+        long bytesRead = blk.getStartOffset() + blk.getBlockSize() - curOff;
+        remaining -= bytesRead;
+        curOff += bytesRead;
+        //取下一个block
+        blockIdx++;
+      }
+      return blockRange;
+    }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>read当中，还有一个比较关键的调用<strong><span style="color:#FF0000;">fetchBlockByteRange(blk, targetStart, </span><span style="color:#FF0000;"> targetStart + bytesToRead - 1, buffer, offset);</span></strong></div>
+<div>在2291行找到了其实现，</div>
+<div>
+<hr></div>
+<div>   <pre><code class="language-java">private void fetchBlockByteRange(LocatedBlock block, long start,
+                                     long end, byte[] buf, int offset) throws IOException {
+      //
+      // Connect to best DataNode for desired Block, with potential offset
+      //
+      Socket dn = null;
+      int refetchToken = 1; // only need to get a new access token once
+     
+      while (true) {
+        // cached block locations may have been updated by chooseDataNode()
+        // or fetchBlockAt(). Always get the latest list of locations at the
+        // start of the loop.
+        block = getBlockAt(block.getStartOffset(), false);
+       //选择一个Datanode读取数据
+        DNAddrPair retval = chooseDataNode(block);
+        DatanodeInfo chosenNode = retval.info;
+        InetSocketAddress targetAddr = retval.addr;
+        BlockReader reader = null;
+
+        int len = (int) (end - start + 1);
+        try {
+          Token&lt;BlockTokenIdentifier&gt; accessToken = block.getBlockToken();
+          // first try reading the block locally.
+          if (shouldTryShortCircuitRead(targetAddr)) {
+            try {
+              reader = getLocalBlockReader(conf, src, block.getBlock(),
+                  accessToken, chosenNode, DFSClient.this.socketTimeout, start);
+            } catch (AccessControlException ex) {
+              LOG.warn("Short circuit access failed ", ex);
+              //Disable short circuit reads
+              shortCircuitLocalReads = false;
+              continue;
+            }
+          } else {
+            //如果本地没有，
+            // go to the datanode
+           //创建Socket连接
+            dn = socketFactory.createSocket();
+            NetUtils.connect(dn, targetAddr, socketTimeout);
+            dn.setSoTimeout(socketTimeout);
+           //利用建立的Socket链接，生成一个reader负责从DataNode读取数据
+            reader = BlockReader.newBlockReader(dn, src,
+                block.getBlock().getBlockId(), accessToken,
+                block.getBlock().getGenerationStamp(), start, len, buffersize,
+                verifyChecksum, clientName);
+          }
+          //读取数据
+          int nread = reader.readAll(buf, offset, len);
+          if (nread != len) {
+            throw new IOException("truncated return from reader.read(): " +
+                                  "excpected " + len + ", got " + nread);
+          }
+          return;
+        } catch (ChecksumException e) {
+          LOG.warn("fetchBlockByteRange(). Got a checksum exception for " +
+                   src + " at " + block.getBlock() + ":" +
+                   e.getPos() + " from " + chosenNode.getName());
+          reportChecksumFailure(src, block.getBlock(), chosenNode);
+        } catch (IOException e) {
+          if (refetchToken &gt; 0 &amp;&amp; tokenRefetchNeeded(e, targetAddr)) {
+            refetchToken--;
+            fetchBlockAt(block.getStartOffset());
+            continue;
+          } else {
+            LOG.warn("Failed to connect to " + targetAddr + " for file " + src
+                + " for block " + block.getBlock() + ":" + e);
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("Connection failure ", e);
+            }
+          }
+        } finally {
+          IOUtils.closeStream(reader);
+          IOUtils.closeSocket(dn);
+        }
+        // Put chosen node into dead list, continue
+        //如果读取失败，则将此DataNode标记为失败节点
+        addToDeadNodes(chosenNode);
+      }
+    }</code></pre><br><br></div>
+<div>
+<hr></div>
+<div>此句， <br><pre><code class="language-java">reader = BlockReader.newBlockReader(dn, src, 
+                block.getBlock().getBlockId(), accessToken,
+                block.getBlock().getGenerationStamp(), start, len, buffersize, 
+                verifyChecksum, clientName);</code></pre><br><br></div>
+<div>调用了 <strong><span style="color:#FF0000;">BlockReader.newBlockReader</span>，</strong>见DFSClient.java 1689行</div>
+<div>
+<hr></div>
+<div>   <pre><code class="language-java">public static BlockReader newBlockReader( Socket sock, String file,
+                                       long blockId,
+                                       Token&lt;BlockTokenIdentifier&gt; accessToken,
+                                       long genStamp,
+                                       long startOffset, long len,
+                                       int bufferSize, boolean verifyChecksum,
+                                       String clientName)
+                                       throws IOException {
+      // in and out will be closed when sock is closed (by the caller)
+     //使用Socket建立写入流，向DataNode发送读指令
+      DataOutputStream out = new DataOutputStream(
+        new BufferedOutputStream(NetUtils.getOutputStream(sock,HdfsConstants.WRITE_TIMEOUT)));
+
+      //write the header.
+      out.writeShort( DataTransferProtocol.DATA_TRANSFER_VERSION );
+      out.write( DataTransferProtocol.OP_READ_BLOCK );
+      out.writeLong( blockId );
+      out.writeLong( genStamp );
+      out.writeLong( startOffset );
+      out.writeLong( len );
+      Text.writeString(out, clientName);
+      accessToken.write(out);
+      out.flush();
+     
+      //
+      // Get bytes in block, set streams
+      //
+     //使用Socket建立读入流，用于从DataNode读取数据
+      DataInputStream in = new DataInputStream(
+          new BufferedInputStream(NetUtils.getInputStream(sock),
+                                  bufferSize));
+     
+      short status = in.readShort();
+      if (status != DataTransferProtocol.OP_STATUS_SUCCESS) {
+        if (status == DataTransferProtocol.OP_STATUS_ERROR_ACCESS_TOKEN) {
+          throw new InvalidBlockTokenException(
+              "Got access token error for OP_READ_BLOCK, self="
+                  + sock.getLocalSocketAddress() + ", remote="
+                  + sock.getRemoteSocketAddress() + ", for file " + file
+                  + ", for block " + blockId + "_" + genStamp);
+        } else {
+          throw new IOException("Got error for OP_READ_BLOCK, self="
+              + sock.getLocalSocketAddress() + ", remote="
+              + sock.getRemoteSocketAddress() + ", for file " + file
+              + ", for block " + blockId + "_" + genStamp);
+        }
+      }
+      DataChecksum checksum = DataChecksum.newDataChecksum( in );
+      //Warning when we get CHECKSUM_NULL?
+     
+      // Read the first chunk offset.
+      long firstChunkOffset = in.readLong();
+     
+      if ( firstChunkOffset &lt; 0 || firstChunkOffset &gt; startOffset ||
+          firstChunkOffset &gt;= (startOffset + checksum.getBytesPerChecksum())) {
+        throw new IOException("BlockReader: error in first chunk offset (" +
+                              firstChunkOffset + ") startOffset is " +
+                              startOffset + " for file " + file);
+      }
+      //生成一个reader，主要包含读入流，用于读取数据
+      return new BlockReader( file, blockId, in, checksum, verifyChecksum,
+                              startOffset, firstChunkOffset, sock );
+    }</code></pre><br><br></div>
+<div>
+<hr>
+2.2 DataNode</div>
+<div>DataNode存储着具体的数据，可以在DataNode看到其主要实现，现在来分析。<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/server/datanode/DataNode.java" rel="nofollow">hdfs/server/datanode/DataNode.java</a></div>
+<div>在其320行，有start的实现，重点关注399-419，有Socket Server初始化的过程</div>
+<div>
+<hr></div>
+<div> <pre><code class="language-java">void startDataNode(Configuration conf,
+                     AbstractList&lt;File&gt; dataDirs, SecureResources resources
+                     ) throws IOException 
+{
+     ........
+    // find free port or use privileged port provide
+    ServerSocket ss;
+    if(secureResources == null) {
+     //建立ServerSocket
+      ss = (socketWriteTimeout &gt; 0) ?
+        ServerSocketChannel.open().socket() : new ServerSocket();
+      Server.bind(ss, socAddr, 0);
+    } else {
+      ss = resources.getStreamingSocket();
+    }
+    ss.setReceiveBufferSize(DEFAULT_DATA_SOCKET_SIZE);
+    // adjust machine name with the actual port
+    tmpPort = ss.getLocalPort();
+    selfAddr = new InetSocketAddress(ss.getInetAddress().getHostAddress(),
+                                     tmpPort);
+    this.dnRegistration.setName(machineName + ":" + tmpPort);
+    LOG.info("Opened info server at " + tmpPort);
+     
+    this.threadGroup = new ThreadGroup("dataXceiverServer");
+    this.dataXceiverServer = new Daemon(threadGroup,
+        new DataXceiverServer(ss, conf, this));
+    this.threadGroup.setDaemon(true); // auto destroy when empty
+     ......
+}</code></pre><br><div>
+<hr></div>
+<div>接下来关注<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/server/datanode/DataXceiverServer.java" rel="nofollow">DataXceiverServer.java</a> DataXceiverServer.run()</div>
+<div>第128行开始</div>
+<div>
+<hr></div>
+<pre><code class="language-java">public void run() {
+    while (datanode.shouldRun) {
+      try {
+        //接受客户端的连接
+        Socket s = ss.accept();
+        s.setTcpNoDelay(true);
+        //生成一个线程DataXceiver来对建立的链接提供服务
+        new Daemon(datanode.threadGroup,
+            new DataXceiver(s, datanode, this)).start();
+      } catch (SocketTimeoutException ignored) {
+        // wake up to see if should continue to run
+      } catch (AsynchronousCloseException ace) {
+          LOG.warn(datanode.dnRegistration + ":DataXceiveServer:"
+                  + StringUtils.stringifyException(ace));
+          datanode.shouldRun = false;
+      } catch (IOException ie) {
+        LOG.warn(datanode.dnRegistration + ":DataXceiveServer: IOException due to:"
+                                 + StringUtils.stringifyException(ie));
+      } catch (Throwable te) {
+        LOG.error(datanode.dnRegistration + ":DataXceiveServer: Exiting due to:"
+                                 + StringUtils.stringifyException(te));
+        datanode.shouldRun = false;
+      }
+    }
+    try {
+      ss.close();
+    } catch (IOException ie) {
+      LOG.warn(datanode.dnRegistration + ":DataXceiveServer: Close exception due to: "
+                               + StringUtils.stringifyException(ie));
+    }
+    LOG.info("Exiting DataXceiveServer");
+  }</code></pre><br><br><div>
+<hr></div>
+<div>之后再看看<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/server/datanode/DataXceiver.java" rel="nofollow">DataXceiver.java</a></div>
+<div>77行，关注run()</div>
+<div>
+<hr></div>
+<div> <pre><code class="language-java">public void run() {
+    DataInputStream in=null;
+    try {
+    //建立一个输入流，读取客户端发送的指令
+      in = new DataInputStream(
+          new BufferedInputStream(NetUtils.getInputStream(s),
+                                  SMALL_BUFFER_SIZE));
+      short version = in.readShort();
+      if ( version != DataTransferProtocol.DATA_TRANSFER_VERSION ) {
+        throw new IOException( "Version Mismatch" );
+      }
+      boolean local = s.getInetAddress().equals(s.getLocalAddress());
+      byte op = in.readByte();
+      // Make sure the xciver count is not exceeded
+      int curXceiverCount = datanode.getXceiverCount();
+      if (curXceiverCount &gt; dataXceiverServer.maxXceiverCount) {
+        throw new IOException("xceiverCount " + curXceiverCount
+                              + " exceeds the limit of concurrent xcievers "
+                              + dataXceiverServer.maxXceiverCount);
+      }
+      long startTime = DataNode.now();
+      switch ( op ) {
+     //读取
+      case DataTransferProtocol.OP_READ_BLOCK:
+        readBlock( in );
+        datanode.myMetrics.addReadBlockOp(DataNode.now() - startTime);
+        if (local)
+          datanode.myMetrics.incrReadsFromLocalClient();
+        else
+          datanode.myMetrics.incrReadsFromRemoteClient();
+        break;
+      case DataTransferProtocol.OP_WRITE_BLOCK:
+        writeBlock( in );
+        datanode.myMetrics.addWriteBlockOp(DataNode.now() - startTime);
+        if (local)
+          datanode.myMetrics.incrWritesFromLocalClient();
+        else
+          datanode.myMetrics.incrWritesFromRemoteClient();
+        break;
+      case DataTransferProtocol.OP_REPLACE_BLOCK: // for balancing purpose; send to a destination
+        replaceBlock(in);
+        datanode.myMetrics.addReplaceBlockOp(DataNode.now() - startTime);
+        break;
+      case DataTransferProtocol.OP_COPY_BLOCK:
+            // for balancing purpose; send to a proxy source
+        copyBlock(in);
+        datanode.myMetrics.addCopyBlockOp(DataNode.now() - startTime);
+        break;
+      case DataTransferProtocol.OP_BLOCK_CHECKSUM: //get the checksum of a block
+        getBlockChecksum(in);
+        datanode.myMetrics.addBlockChecksumOp(DataNode.now() - startTime);
+        break;
+      default:
+        throw new IOException("Unknown opcode " + op + " in data stream");
+      }
+    } catch (Throwable t) {
+      LOG.error(datanode.dnRegistration + ":DataXceiver",t);
+    } finally {
+      LOG.debug(datanode.dnRegistration + ":Number of active connections is: "
+                               + datanode.getXceiverCount());
+      IOUtils.closeStream(in);
+      IOUtils.closeSocket(s);
+      dataXceiverServer.childSockets.remove(s);
+    }
+  }</code></pre><br></div>
+<div>
+<hr></div>
+<div> 在<a href="http://svn.apache.org/repos/asf/hadoop/common/tags/release-1.0.3/src/hdfs/org/apache/hadoop/hdfs/server/datanode/DataXceiver.java" rel="nofollow">DataXceiver.java</a>中146行</div>
+<div> <pre><code class="language-java">private void readBlock(DataInputStream in) throws IOException {
+    //
+    // Read in the header
+    //
+    long blockId = in.readLong();         
+    Block block = new Block( blockId, 0 , in.readLong());
+
+    long startOffset = in.readLong();
+    long length = in.readLong();
+    String clientName = Text.readString(in);
+    //创建一个写入流，用于向客户端写数据
+    Token&lt;BlockTokenIdentifier&gt; accessToken = new Token&lt;BlockTokenIdentifier&gt;();
+    accessToken.readFields(in);
+    OutputStream baseStream = NetUtils.getOutputStream(s,
+        datanode.socketWriteTimeout);
+    DataOutputStream out = new DataOutputStream(
+                 new BufferedOutputStream(baseStream, SMALL_BUFFER_SIZE));
+    if (datanode.isBlockTokenEnabled) {
+      try {
+        datanode.blockTokenSecretManager.checkAccess(accessToken, null, block,
+            BlockTokenSecretManager.AccessMode.READ);
+      } catch (InvalidToken e) {
+        try {
+
+          out.writeShort(DataTransferProtocol.OP_STATUS_ERROR_ACCESS_TOKEN);
+          out.flush();
+          throw new IOException("Access token verification failed, for client "
+              + remoteAddress + " for OP_READ_BLOCK for block " + block);
+        } finally {
+          IOUtils.closeStream(out);
+        }
+      }
+    }
+    // send the block
+    BlockSender blockSender = null;
+    final String clientTraceFmt =
+      clientName.length() &gt; 0 &amp;&amp; ClientTraceLog.isInfoEnabled()
+        ? String.format(DN_CLIENTTRACE_FORMAT, localAddress, remoteAddress,
+            "%d", "HDFS_READ", clientName, "%d",
+            datanode.dnRegistration.getStorageID(), block, "%d")
+        : datanode.dnRegistration + " Served block " + block + " to " +
+            s.getInetAddress();
+    try {
+      try {
+    //生成BlockSender用于读取本地的block的数据，并发送给客户端 
+    //BlockSender有一个成员变量InputStream blockIn用于读取本地block的数据  
+        blockSender = new BlockSender(block, startOffset, length,
+            true, true, false, datanode, clientTraceFmt);
+      } catch(IOException e) {
+        out.writeShort(DataTransferProtocol.OP_STATUS_ERROR);
+        throw e;
+      }
+      //向客户端写入数据
+      out.writeShort(DataTransferProtocol.OP_STATUS_SUCCESS); // send op status
+      long read = blockSender.sendBlock(out, baseStream, null); // send data
+
+      if (blockSender.isBlockReadFully()) {
+        // See if client verification succeeded.
+        // This is an optional response from client.
+        try {
+          if (in.readShort() == DataTransferProtocol.OP_STATUS_CHECKSUM_OK  &amp;&amp;
+              datanode.blockScanner != null) {
+            datanode.blockScanner.verifiedByClient(block);
+          }
+        } catch (IOException ignored) {}
+      }
+     
+      datanode.myMetrics.incrBytesRead((int) read);
+      datanode.myMetrics.incrBlocksRead();
+    } catch ( SocketException ignored ) {
+      // Its ok for remote side to close the connection anytime.
+      datanode.myMetrics.incrBlocksRead();
+    } catch ( IOException ioe ) {
+      /* What exactly should we do here?
+       * Earlier version shutdown() datanode if there is disk error.
+       */
+      LOG.warn(datanode.dnRegistration +  ":Got exception while serving " +
+          block + " to " +
+                s.getInetAddress() + ":\n" +
+                StringUtils.stringifyException(ioe) );
+      throw ioe;
+    } finally {
+      IOUtils.closeStream(out);
+      IOUtils.closeStream(blockSender);
+    }
+  }</code></pre><br></div>
+<div>
+<hr></div>
+<div><br></div>
+<div><br></div>
+<div>三 UML序列图</div>
+<div><br></div>
+<div>打开过程</div>
+<div><img name="fc775409-f4a1-4482-9d63-553c0cb696e0" src="https://www.evernote.com/shard/s136/res/fc775409-f4a1-4482-9d63-553c0cb696e0/HDFS_open.png" class="en-media" alt=""><br></div>
+<div>读取过程</div>
+<div><img name="500c5909-5fa5-432d-ae7b-3774e48bf93e" src="https://www.evernote.com/shard/s136/res/500c5909-5fa5-432d-ae7b-3774e48bf93e/HDFS_read.png" class="en-media" alt="" align="left"><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+<div><br></div>
+</div>
+<br>            </div>
+                </div>

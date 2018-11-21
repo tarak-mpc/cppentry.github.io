@@ -1,0 +1,384 @@
+---
+layout:     post
+title:      《Hadoop 2.x HDFS源码剖析》2 — HDFS 通信协议
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/Mark_LQ/article/details/54174781				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><center></center><p></p>
+
+<iframe border="0" src="//music.163.com/outchain/player?type=2&amp;id=5046367&amp;auto=1&amp;height=66" width="330" height="86"></iframe>
+
+<p> <br>
+  HDFS 涉及数据节点、名字节点和客户端之间的配合、相互调用，为了降低节点间代码的耦合性，提高单个节点代码的内聚性，HDFS 将这些节点间的通信抽象城不同的接口。HDFS 节点间的接口主要有如下两种：</p>
+
+<ul>
+<li>Hadoop RPC 接口：HDFS 中基于 Hadoop RPC 框架实现的接口；</li>
+<li>流式接口：HDFS 中基于 TCP 或者 HTTP 实现的接口； <br>
+<center> <br>
+<img src="https://img-blog.csdn.net/20170107164446233?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTWFya19MUQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" width="80%" height="80%"> <br>
+Figure 1. HDFS 组建通信接口，绿色: Hadoop RPC接口；蓝色: 表示流式接口 <br>
+</center></li>
+</ul>
+
+<h1 id="1-hadoop-rpc-接口">1. Hadoop RPC 接口</h1>
+
+<p>  Hadoop RPC 接口调用使得 HDFS 进程能够像调用本地调用一样调用另一个进程（本机或远程）中的方法，并且可以传递 Java 基本类型或自定义类型作为参数，同时可以接受返回值，和捕获异常。Hadoop RPC 框架基于 <a href="https://github.com/google/protobuf" rel="nofollow">Protobuf</a> 实现的。接口主要在 <code>org.apache.hadoop.hdfs.protocol</code> 和 <code>org.apache.hadoop.hdfs.server.protocol</code> 包下。</p>
+
+<ul>
+<li>ClientProtocol：HDFS 客户端DFSClient与 Namenode 节点间的通信接口，用于客户端对文件系统的所有操作，同时客户端读写文件操作也需要先通过该接口与 Namenode 协商之后，再进行与 Datanode 数据块的读写操作。</li>
+<li>ClientDatanodeProtocol：HDFS 客户端与数据节点间的通信接口，主要用于客户端获取数据节点信息，而真正的数据读写交互则是通过流式接口进行的。</li>
+<li>DatanodeProtocol：Datanode与 Namenode 通信的唯一方式，Datanode 通过该接口向 Namenode 注册、汇报数据块已经缓存情况等信息，同时 Namenode 会在该接口的返回值中向 Datanode 下发指令，根据这些指令，数据节点会执行数据块的复制、删除、以及回复操作。</li>
+<li>InterDatanodeProtocol：Datanode 与 Datanode 之间的通信，主要用于数据块的恢复操作，以及同步数据节点上存储的数据块副本的信息。</li>
+<li>NamenodeProtocol：第二名字节点 Standby Namenode 与 Namenode 节点间的接口，Hadoop 2.x 引入 HA 机制，检查点操作不再由第二名字节点（Secondary Namenode）执行了。</li>
+<li>其他接口：主要包括安全相关接口（RefreshAuthorizationPolicyProtocol、RefreshUserMappingsProtocol）。 <br>
+  ClientProtocol 和 ClientDatanodeProtocol 都是由客户端发起调用的接口。</li>
+</ul>
+
+<h2 id="11-clientprotocol">1.1 ClientProtocol</h2>
+
+<p>  <code>ClientProtocol</code>定义了所有由客户端发起，由 Namenode 响应的操作。主要包括如下几类：</p>
+
+<ul>
+<li>HDFS 文件读相关操作；</li>
+<li>HDFS 文件写/追加写的相关操作；</li>
+<li>管理命名空间 namespace 相关操作；</li>
+<li>系统问题与管理相关的操作；</li>
+<li>快照相关操作；</li>
+<li>缓存相关操作；</li>
+<li>其他操作。</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-comment">/*
+ * ClientProtocol is used by user code via 
+ * {@link org.apache.hadoop.hdfs.DistributedFileSystem} class to communicate 
+ * with the NameNode.  User code can manipulate the directory namespace, 
+ * as well as open/close file streams, etc.
+ *
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">interface</span> <span class="hljs-title">ClientProtocol</span> {</span></code></pre>
+
+<p>  HDFS 文件读操作、写/追加写操作，以及命名空间的管理操作，都可以在 <code>DistributedFileSystem</code>类中找到对应的方法，<font color="#fe6673">用户的代码不是直接实现<code>ClientProtocol</code>接口来操作 HDFS 文件系统的，而是通过<code>FileSystem</code>接口实现的</font>。</p>
+
+
+
+<h3 id="1dfsclient-读取数据">（1）DFSClient 读取数据</h3>
+
+<p>  主要包括<code>getBlockLocations()</code>和<code>reportBadBlocks()</code>。</p>
+
+<pre class="prettyprint"><code class="language-java hljs ">  <span class="hljs-javadoc">/**
+   * Get locations of the blocks of the specified file within the specified range.
+   * DataNode locations for each block are sorted by the proximity to the client.
+   * Return {LocatedBlocks} which contains file length, blocks and their locations.
+   * DataNode locations for each block are sorted by the distance to the client's address.
+   * The client will then have to contact one of the indicated DataNodes to obtain the actual data.
+   */</span>
+  <span class="hljs-annotation">@Idempotent</span>
+  <span class="hljs-keyword">public</span> LocatedBlocks <span class="hljs-title">getBlockLocations</span>(String src,
+                                         <span class="hljs-keyword">long</span> offset,
+                                         <span class="hljs-keyword">long</span> length) 
+      <span class="hljs-keyword">throws</span> AccessControlException, FileNotFoundException,
+      UnresolvedLinkException, IOException;</code></pre>
+
+<p>  客户端调用<code>getBlockLocations()</code>方法获取 HDFS 文件指定范围内数据块的文件名以及位置信息，使用<code>LocatedBlocks</code>对象封装。<font color="#fe6673">数据块的位置信息指的是存储该数据块副本的 Datanode 的信息，这些 Datanode 以与当前客户端的距离远近进行排序。</font> 客户端读取数据时，首先调用<code>getBlockLocations()</code>获取 HDFS 文件所有数据块的位置信息，然后通过流式接口从 Datanode 读取数据块。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">  <span class="hljs-javadoc">/**
+   * The client wants to report corrupted blocks (blocks with specified
+   * locations on datanodes).
+   *<span class="hljs-javadoctag"> @param</span> blocks Array of located blocks to report
+   */</span>
+  <span class="hljs-annotation">@Idempotent</span>
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">reportBadBlocks</span>(LocatedBlock[] blocks) <span class="hljs-keyword">throws</span> IOException;</code></pre>
+
+<p>  当客户端调用<code>getBlockLocations()</code>读取数据块发现其校验和错误时，就会调用<code>reportBadBlocks()</code>方法向 Namenode 汇报错误的数据块信息，Namenode 会协调进行数据块的重新备份操作。</p>
+
+
+
+<h3 id="2dfsclient-写追加写数据">（2）DFSClient 写/追加写数据</h3>
+
+<p>  <code>ClientProtocol.create()</code>方法用于在 HDFS 的文件系统目录树中创建一个新的空文件，创建后对于其他客户端是“只读”的，不能删除、重命名或移动该文件，直到该文件关闭或租约过期。<br> </p>
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-javadoc">/**
+   * Create a new file entry in the namespace.
+   * This will create an empty file specified by the source path.
+   * The path should reflect a full path originated at the root.
+   * The name-node does not have a notion of "current" directory for a client.
+   * 即提供根据 root 路径下的完整路径名
+   * Once created, the file is visible and available for read to other clients.
+   * Although, other clients cannot {delete}, re-create or {rename} it until the file is completed
+   * or explicitly as a result of lease expiration.
+   * Blocks have a maximum size.  Clients that intend to create
+   * multi-block files must also use {addBlock}
+   */</span>
+  <span class="hljs-annotation">@AtMostOnce</span>
+  <span class="hljs-keyword">public</span> HdfsFileStatus <span class="hljs-title">create</span>(String src, FsPermission masked,
+      String clientName, EnumSetWritable&lt;CreateFlag&gt; flag,
+      <span class="hljs-keyword">boolean</span> createParent, <span class="hljs-keyword">short</span> replication, <span class="hljs-keyword">long</span> blockSize, 
+      CryptoProtocolVersion[] supportedVersions) <span class="hljs-keyword">throws</span> xxxException;</code></pre>
+
+<p>  <code>ClientProtocol.create()</code>方法向指定文件添加一个新的数据块，并获取存储该数据块副本的所有数据节点的位置信息（LocatedBlock对象封装）。previous 为上一个数据块的引用；excludeNodes 表示数据节点的黑名单，保存了客户端无法链接的数据节点；favoredNodes 表示客户端希望保存数据块副本的数据节点列表。</p>
+
+<pre class="prettyprint"><code class="language-java hljs ">  <span class="hljs-javadoc">/**
+   * A client that wants to write an additional block to the 
+   * indicated filename (which must currently be open for writing)
+   * should call addBlock().  
+   * addBlock() allocates a new block and datanodes the block data
+   * should be replicated to.
+   * addBlock() also commits the previous block by reporting
+   * to the name-node the actual generation stamp and the length
+   * of the block that the client has transmitted to data-nodes.
+   */</span>
+  <span class="hljs-annotation">@Idempotent</span>
+  <span class="hljs-keyword">public</span> LocatedBlock <span class="hljs-title">addBlock</span>(String src, String clientName,
+      ExtendedBlock previous, DatanodeInfo[] excludeNodes, <span class="hljs-keyword">long</span> fileId, 
+      String[] favoredNodes) <span class="hljs-keyword">throws</span> xxxException;</code></pre>
+
+<p>  <font color="#fe6673">客户端写一个文件时，会首先调用 <code>create()</code>方法在文件系统目录数中创建一个空文件，然后调用<code>addBlock()</code>方法获取存储文件数据的数据块的位置信息，建立到这些数据节点的数据流管道，并通过数据流管道将数据写入数据节点。</font> <br>
+  当客户端完成写操作后，调用<code>complete()</code>方法通知 Namenode，提交新写入 HDFS 文件的所有数据块。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">  <span class="hljs-javadoc">/**
+   * The client is done writing data to the given filename, and would 
+   * like to complete it.  
+   * The function returns whether the file has been closed successfully.
+   * If the function returns false, the caller should try again.
+   * 即客户端会重复调用该方法，直到返回为 true。
+   * 
+   * close() also commits the last block of file by reporting
+   * to the name-node the actual generation stamp and the length
+   * of the block that the client has transmitted to data-nodes.
+   * close() 方法也会进行类型的操作。
+   * 
+   * A call to complete() will not return true until all the file's
+   * blocks have been replicated the minimum number of times.  Thus,
+   * DataNode failures may cause a client to call complete() several
+   * times before succeeding.
+   * 当文件的所有数据块副本达到最小数目（默认为1）时才会返回true
+   */</span>
+  <span class="hljs-annotation">@Idempotent</span>
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">complete</span>(String src, String clientName,
+                          ExtendedBlock last, <span class="hljs-keyword">long</span> fileId)
+                          <span class="hljs-keyword">throws</span> xxxException;</code></pre>
+
+<p>  当客户端获取到一个新申请的数据块，但无法建立到存储该数据块副本的某些数据节点的连接时，会调用<code>abandonBlock()</code>方法通知 Namenode 放弃该数据块，客户端再次调用<code>addBlock()</code>方法，并将失效的数据块所在数据节点传入<code>excludeNodes</code>，避免 Namenode 将数据块的副本又备份到该节点上而无法连接该节点。<font color="#fe6673"><code>abandonBlock()</code>方法用于处理客户端建立数据流管道时数据节点出现故障的情况</font>。</p>
+
+<h3 id="3命名空间管理相关操作">（3）命名空间管理相关操作</h3>
+
+<p>  ClientProtocol 中涉及的命名空间管理的方法（创建文件/目录、重命名等）都有与之对应的 HDFS 文件系统 API（FileSystem接口），用户的代码一般通过 FileSystem 接口的实现类操作 HDFS，而非实现 ClientProtocol 接口。</p>
+
+
+
+<h2 id="12-clientdatanodeprotocol">1.2 ClientDatanodeProtocol</h2>
+
+<p>  ClientDatanodeProtocol 定义了 DFSClient 与 Datanode 之间的接口，用户客户端获取数据节点信息。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-javadoc">/** 
+ * An client-datanode protocol for block recovery
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">interface</span> <span class="hljs-title">ClientDatanodeProtocol</span> {</span>
+
+  <span class="hljs-javadoc">/** 
+   * Return the visible length of a replica. 
+   * 从数据节点获取数据块副本真实的数据长度，用于建立数据块的输入流，然后读取数据。
+   * Namenode元数据中文件的最后一个数据块长度与 Datanode 实际存储的可能不一致（未写满），
+   * 所以客户端在创建读取输入流时需要调用该方法获取实际长度。
+   */</span>
+  <span class="hljs-keyword">long</span> getReplicaVisibleLength(ExtendedBlock b) <span class="hljs-keyword">throws</span> IOException;
+
+  <span class="hljs-javadoc">/**
+   * Refresh the list of federated namenodes from updated configuration
+   * Adds new namenodes and stops the deleted namenodes.
+   * 用户管理员命令中可以指定 Datanode 重新加载配置文件，停止服务哪些已经从配置文件中删除的块池（block pool），
+   * 开始服务新添加的块池，其底层就是采用该方法。客户端通过该接口触发对应的 Datanode 执行操作。
+   */</span>
+  <span class="hljs-keyword">void</span> refreshNamenodes() <span class="hljs-keyword">throws</span> IOException;
+
+  <span class="hljs-javadoc">/**
+   * Delete the block pool directory. If force is false it is deleted only if
+   * it is empty, otherwise it is deleted along with its contents.
+   * 用于从指定 Datanode 删除 blockpoolId 指定的块池。如果 Datanode 还在服务该块池，删除操作会失败，需要先配置删除的
+   * 块池，再调用 refreshNamenodes()。
+   */</span>
+  <span class="hljs-keyword">void</span> deleteBlockPool(String bpid, <span class="hljs-keyword">boolean</span> force) <span class="hljs-keyword">throws</span> IOException;
+
+  <span class="hljs-javadoc">/**
+   * Retrieves the path names of the block file and metadata file stored on the
+   * local file system.
+   * 
+   * In order for this method to work, one of the following should be satisfied:
+   * 1. The client user must be configured at the datanode to be able to use this
+   * method.
+   * 2. When security is enabled, kerberos authentication must be used to connect
+   * to the datanode.
+   * HDFS 本地化读取，即 Client 和保存该数据块的 Datanode 在同一台物理机器上，可以利用本地路径执行文件
+   * 的读取操作，而不是通过流式接口执行远程读取，大大优化文件读取性能。
+   */</span>
+  BlockLocalPathInfo getBlockLocalPathInfo(ExtendedBlock block,
+      Token&lt;BlockTokenIdentifier&gt; token) <span class="hljs-keyword">throws</span> IOException;
+
+  <span class="hljs-javadoc">/**
+   * Retrieves volume location information about a list of blocks on a datanode.
+   * This is in the form of an opaque {@link org.apache.hadoop.fs.VolumeId}
+   * for each configured data directory, which is not guaranteed to be
+   * the same across DN restarts.
+   * 获取数据块存储在哪个 Datanode 的哪个卷（volume）
+   */</span>
+  HdfsBlocksMetadata getHdfsBlocksMetadata(String blockPoolId,
+      <span class="hljs-keyword">long</span> []blockIds, List&lt;Token&lt;BlockTokenIdentifier&gt;&gt; tokens) <span class="hljs-keyword">throws</span> IOException; 
+
+  <span class="hljs-javadoc">/**
+   * Shuts down a datanode.
+   */</span>
+  <span class="hljs-keyword">void</span> shutdownDatanode(<span class="hljs-keyword">boolean</span> forUpgrade) <span class="hljs-keyword">throws</span> IOException;  
+
+  <span class="hljs-javadoc">/**
+   * Obtains datanode info
+   * 获取 Datanode 的信息，包括 Datanode 运行的 HDFS 版本、 Datanode 配置的 HDFS 版本，以及 Datanode 的启动时间。
+   *<span class="hljs-javadoctag"> @return</span> software/config version and uptime of the datanode
+   */</span>
+  DatanodeLocalInfo getDatanodeInfo() <span class="hljs-keyword">throws</span> IOException;
+
+  <span class="hljs-javadoc">/**
+   * Asynchronously reload configuration on disk and apply changes.
+   * 触发 Datanode 异步加载配置
+   */</span>
+  <span class="hljs-keyword">void</span> startReconfiguration() <span class="hljs-keyword">throws</span> IOException;
+
+  <span class="hljs-javadoc">/**
+   * Get the status of the previously issued reconfig task.
+   *<span class="hljs-javadoctag"> @see</span> {@link org.apache.hadoop.conf.ReconfigurationTaskStatus}.
+   */</span>
+  ReconfigurationTaskStatus getReconfigurationStatus() <span class="hljs-keyword">throws</span> IOException;
+
+  <span class="hljs-javadoc">/**
+   * Trigger a new block report.
+   */</span>
+  <span class="hljs-keyword">void</span> triggerBlockReport(BlockReportOptions options)
+    <span class="hljs-keyword">throws</span> IOException;
+}</code></pre>
+
+<h2 id="13-datanodeprotocol">1.3 DatanodeProtocol</h2>
+
+<p>  DatanodeProtocol 是 Datanode 与 Namenode 间的接口，Datanode 会使用该接口与 Namenode 握手、注册、发送心跳、进行全量/增量的数据块汇报。Namenode 会在 Datanode的心跳响应中携带名字节点下发的指令，Datanode 根据返回的命令执行相应的操作。<font color="#fe6673">Namenode 向 Datanode 下发名字节点指令没有其他如何接口，只会通过 DatanodeProtocol 的返回值来下发命令</font>。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs ">  <span class="hljs-javadoc">/** HeartbeatResponse 作为返回值 */</span>
+  <span class="hljs-keyword">public</span> HeartbeatResponse <span class="hljs-title">sendHeartbeat</span>(DatanodeRegistration registration,
+                                       StorageReport[] reports,
+                                       <span class="hljs-keyword">long</span> dnCacheCapacity,
+                                       <span class="hljs-keyword">long</span> dnCacheUsed,
+                                       <span class="hljs-keyword">int</span> xmitsInProgress,
+                                       <span class="hljs-keyword">int</span> xceiverCount,
+                                       <span class="hljs-keyword">int</span> failedVolumes,
+                                       VolumeFailureSummary volumeFailureSummary)
+      <span class="hljs-keyword">throws</span> IOException;
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">HeartbeatResponse</span> {</span>
+  <span class="hljs-javadoc">/** 
+   * Commands returned from the namenode to the datanode 
+   * 包含 Namenode 向 Datanode 下发名字节点的指令
+   */</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> DatanodeCommand[] commands;
+
+  <span class="hljs-javadoc">/** Information about the current HA-related state of the NN */</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> NNHAStatusHeartbeat haStatus;
+
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> RollingUpgradeStatus rollingUpdateStatus;
+  }</code></pre>
+
+<p>  <font color="#fe6673">一个完整的 Datanode 启动操作会与 Namenode 进行 4 次交互，调用 DatanodeProtocol 定义的方法。首先调用 <code>versionRequest()</code>方法与 Namenode 进行握手操作，然后调用 <code>registerDatanode（）</code> 向 Namenode 注册当前的 Datanode，接着调用 <code>blockReport（）</code>汇报 Datanode 上存储的所有数据块，最后调用 <code>cacheReport（）</code>汇报缓存的所有数据块</font>。 <br>
+DatanodeCommand 定义了 10 个名字节点指令，每个指令都有唯一编号与之对应：</p>
+
+<pre class="prettyprint"><code class="language-java hljs ">  <span class="hljs-javadoc">/**
+   * Determines actions that data node should perform 
+   * when receiving a datanode command. 
+   */</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_UNKNOWN = <span class="hljs-number">0</span>;    <span class="hljs-comment">// unknown action   </span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_TRANSFER = <span class="hljs-number">1</span>;   <span class="hljs-comment">// 数据块复制</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_INVALIDATE = <span class="hljs-number">2</span>; <span class="hljs-comment">// 数据块删除</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_SHUTDOWN = <span class="hljs-number">3</span>;   <span class="hljs-comment">// 关闭数据节点</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_REGISTER = <span class="hljs-number">4</span>;   <span class="hljs-comment">// 重新注册数据节点</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_FINALIZE = <span class="hljs-number">5</span>;   <span class="hljs-comment">// 提交上一次升级</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_RECOVERBLOCK = <span class="hljs-number">6</span>;  <span class="hljs-comment">// 数据块恢复</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_ACCESSKEYUPDATE = <span class="hljs-number">7</span>;  <span class="hljs-comment">// 安全相关，更新访问的access key</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_BALANCERBANDWIDTHUPDATE = <span class="hljs-number">8</span>; <span class="hljs-comment">// 更新平衡器带宽</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_CACHE = <span class="hljs-number">9</span>;      <span class="hljs-comment">// 缓存数据块</span>
+  <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">int</span> DNA_UNCACHE = <span class="hljs-number">10</span>;   <span class="hljs-comment">// 解除缓存数据块 uncache blocks</span></code></pre>
+
+<p></p><center> <br>
+<img src="https://img-blog.csdn.net/20170107192854945?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTWFya19MUQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" width="100%" height="100%"> <br>
+Figure 2. DatanodeCommand 类结构图 <br>
+</center><p></p>
+
+<h2 id="14-interdatanodeprotocol">1.4 InterDatanodeProtocol</h2>
+
+<p>  InterDatanodeProtocol 是 Datanode 与 Datanode 之间的接口，主要用于租约回复操作。</p>
+
+
+
+<pre class="prettyprint"><code class="language-java hljs "><span class="hljs-javadoc">/**
+ * An inter-datanode protocol for updating generation stamp
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">interface</span> <span class="hljs-title">InterDatanodeProtocol</span> {</span>
+  ...
+  <span class="hljs-javadoc">/**
+   * Initialize a replica recovery.
+   * 
+   *<span class="hljs-javadoctag"> @return</span> actual state of the replica on this data-node or 
+   * null if data-node does not have the replica.
+   */</span>
+  ReplicaRecoveryInfo initReplicaRecovery(RecoveringBlock rBlock)
+  <span class="hljs-keyword">throws</span> IOException;
+
+  <span class="hljs-javadoc">/**
+   * Update replica with the new generation stamp and length.  
+   */</span>
+  String updateReplicaUnderRecovery(ExtendedBlock oldBlock, <span class="hljs-keyword">long</span> recoveryId,
+                                    <span class="hljs-keyword">long</span> newBlockId, <span class="hljs-keyword">long</span> newLength)
+      <span class="hljs-keyword">throws</span> IOException;
+}</code></pre>
+
+<p>  <font color="#fe6673">当客户端打开一个文件进行写操作时，首先需要获取这个文件的租约，并且需要定期更新租约。</font>当 Namenode 的租约监控线程发现某个 HDFS 文件租约长期没有更新，就会认为写该文件的客户端发生异常，这时 Namenode 就需要触发租约恢复操作——同步数据流管道中所有 Datanode 上该文件数据块的状态，并强制关闭该文件。 <br>
+  Namenode 从数据流管道中选出一个主恢复节点，然后通过下发 DatanodeCommand 的恢复指令触发该数据节点控制租约恢复操作，主恢复节点调用 InterDatanodeProtocol 接口来智慧数据流管道的其他数据节点进行租约回复，协调整个租约恢复操作的过程。</p>
+
+
+
+<h1 id="2-流式接口">2. 流式接口</h1>
+
+<p>  <font color="#fe6673">流式接口是 HDFS 中基于 TCP 或 HTTP 实现的接口，包括：基于TCP 的 DataTransferProtocol 的流式接口，以及 HA 价格中 ActiveNamenode 和StandbyNamenode 之间的 HTTP 接口。</font></p>
+
+<h2 id="21-datatransferprotocol">2.1 DataTransferProtocol</h2>
+
+<p>  DataTransferProtocol 用来描述写入或者读出 Datanode 上数据的基于 TCP 的流式接口，用于 HDFS 客户端与 Datanode 以及 Datanode 与 Datanode 之间的数据块的传输。Hadoop RPC 框架的效率还不足以支撑超大文件的读写，HDFS 并没有采用 Hadoop RPC，而是采用寄语 TCP 的流式接口有利于批量处理数据，同时提高数据的吞吐量。 <br>
+</p><center> <br>
+<img src="https://img-blog.csdn.net/20170107204716114?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTWFya19MUQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" width="80%" height="80%"> <br>
+Figure 3. DataTransferProtocol调用流程 <br>
+</center> <br>
+  DataTransferProtocol 主要包括发送 DataTransferProtocol 请求的 Sender 类，以及用于响应 DataTransferProtocol 请求的 Receiver 类。Sender 和 Receiver都实现了 DataTransferProtocol 接口。当 DFSClient 发起一个 <code>DataTransferProtocol.readBlock()</code>操作，DFSClient 会调用 Sender 将请求序列化，传输给远程的 Receiver。远程的 Receiver 接受到请求后反序列化，然后调用代码执行读操作。 <br>
+  DataTransferProtocol 主要包含如下方法： <br>
+<center> <br>
+<img src="https://img-blog.csdn.net/20170107205529307?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvTWFya19MUQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" width="90%" height="80%"> <br>
+Figure 4. DataTransferProtocol 接口 <br>
+</center> <br>
+  注意其中的<code>transferBlock()</code>方法，用于将指定数据块复制到另一个 Datanode 上。<font color="#fe6673">数据块复制操作是指数据流管道中的数据节点出现故障（即写数据的数据流管道），需要用新的数据节点替换异常的数据节点时，DFSClient 会调用这个方法将数据刘管道中异常数据节点上已经写入的数据块复制到新添加的数据节点上。</font><p></p>
+
+
+
+<h2 id="22-active-namenode-和standby-namenode-间的-http-接口">2.2 Active Namenode 和Standby Namenode 间的 HTTP 接口</h2>
+
+<p>  Namenode 会定期将文件系统的命名空间（文件目录数、文件/目录元信息）保存到 fsimage 文件中，如果实时同步 fsimage 会严重消耗资源影响性能。<font color="#fe6673">Namenode 会先将命名空间的修改操作保存在 editlog 文件中，然后定期合并 fsimage 和 editlog 文件</font>。 <br>
+  Hadoop 2.x中 Standby Namenode 会不断将读入的 editlog 文件与当前的命名空间进行合并，从而始终保持一个最新的命名空间，Standby Namenode 只需定期将自己的命名空间写入一个新的 fsimage 文件，并通过 HTTP 协议将 fsimage 传回 Active Namenode。 <br>
+  Active Namenode 和 Standby Namenode 之间的 HTTP 接口就是用来传输新的 fsimage 文件。Standby Namenode 写入新的 fsimage 文件后，向 Active Namenode 的 ImageServlet 发送 HTTP GET 请求/getimage?putimage=1，其中包含  Standby Namenode 用于下载的 ip 和端口， Active Namenode 会根据该信息向 Standby Namenode 的 ImageServlet 发送 HTTP GET 请求下载最新的 fsimage。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

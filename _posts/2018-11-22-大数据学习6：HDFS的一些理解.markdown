@@ -1,0 +1,139 @@
+---
+layout:     post
+title:      大数据学习6：HDFS的一些理解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/ggwxk1990/article/details/77659491				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>HDFS的一些理解</p>
+<p>---------------------------------</p>
+<p>一、HDFS 的3个部分<br></p>
+<p>二、jps命令<br></p>
+<p>三、文件的读写流程：<br></p>
+<p>四、进程<br></p>
+<p>五、几个hdfs常用命令：<br></p>
+<p>---------------------------------</p>
+一、HDFS 的3个部分<br>
+namenode 作用<br>
+（1）类似于维护文件系统，名字，时间，大小<br>
+（2）文件划分哪些block块，block块分到哪些机器上<br><br>
+datanode 作用<br>
+（1）存储数据块<br>
+（2）存放数据的校验和<br>
+（3）3秒一个心跳，每10个心跳向namenode发送一个block report<br><br>
+secondary namenode 作用：<br>
+存储： fsimgage+editlog<br>
+作用：每隔1小时 checkpoint 去namenode 的fsimage+editlog，合并成fsimage.ckpt的文件，推送给namenode，进行覆盖，类似于定时备份。<br>
+在官网文档中由这个参数控制<br>
+参数：dfs.namenode.checkpoint.period <br>
+解释：The number of seconds between two periodic checkpoints.<br><br>
+例子：<br>
+namenode 11点运行到11点59分宕机，此时secondary namenode在11点时进行了合并，工作正常，该如何处理？<br>
+答：<br>
+（1）如果namenode进程挂了，文件路径还在（fsimage+editlog等文件），重启namenode，重新加载信息到内存即可恢复。<br>
+（2）如果namenode机器挂了，文件路径丢失（磁盘，文件损坏）。用secondary namenode的fsimage来进行恢复到namenode上，时间为11点。此时，59分钟数据虽然存在于datanode上，但是editlog丢失，所以59分钟数据丢失。<br>
+注意：secondary namenode 不是一般想象中的热备节点，仅是一个定时备份节点，无法承担生产业务。<br><br><br>
+二、jps<br>
+1、jps命令为java命令 ，一般在JAVA_HOME/bin下<br>
+2、jsp 能展示本机的hdfs相关进程<br>
+[hadoop@hadoop001 ~]$ jps<br>
+43474 Jps<br>
+41330 DataNode<br>
+26232 ResourceManager<br>
+41195 NameNode<br>
+41499 SecondaryNameNode<br>
+26333 NodeManager<br>
+或者<br>
+[hadoop@hadoop001 ~]$ jps -l<br>
+41330 org.apache.hadoop.hdfs.server.datanode.DataNode<br>
+43490 sun.tools.jps.Jps<br>
+26232 org.apache.hadoop.yarn.server.resourcemanager.ResourceManager<br>
+41195 org.apache.hadoop.hdfs.server.namenode.NameNode<br>
+41499 org.apache.hadoop.hdfs.server.namenode.SecondaryNameNode<br>
+26333 org.apache.hadoop.yarn.server.nodemanager.NodeManager<br>
+其实，jps读取的目录为这个文件下的文件：<br>
+[hadoop@hadoop001 tmp]$ cd hsperfdata_hadoop/<br>
+[hadoop@hadoop001 hsperfdata_hadoop]$ ll<br>
+total 160<br>
+-rw-------. 1 hadoop hadoop 32768 Aug 18 10:39 26232<br>
+-rw-------. 1 hadoop hadoop 32768 Aug 18 10:39 26333<br>
+-rw-------. 1 hadoop hadoop 32768 Aug 18 10:40 41195<br>
+-rw-------. 1 hadoop hadoop 32768 Aug 18 10:39 41330<br>
+-rw-------. 1 hadoop hadoop 32768 Aug 18 10:40 41499<br><br><br>
+注意：当机器异常中断后，进程全部停止后，jps发现还有残留信息，那么我们要去这个目录下将残留信息删除，再次jps 后正常。<br><br><br>
+三、文件的读写流程：<br>
+写文件流程<br>
+[hadoop@hadoop001 bin]$ hadoop fs -put wxk.log /<br>
+流程为：<br><br><br>
+client -&gt;- FileSystemm -&gt;- namenode<br>
+   |<br>
+FSData OnputStream<br>
+   |<br>
+datanode1 --- datanode2 --- datanode3 <br>
+（1）client 调用 FileSystem 的方法去和namenode通讯【RPC通信】<br>
+（2）namenode 检查文件是否存在，是否有权限，创建一个新文件，此文件不关联任何block块和信息，返回空对象给客户端。<br>
+（3）客户端调用一个对象FSData OutputStream ，write方法，写入datanode 产生a1。<br>
+（4）有a1 的 datanode 会向其他datanode写入a1块。<br>
+（5）最后datanode会反馈 ack package 包 写操作成功，逐层反馈 到 FSData outputStream 传递一个close 到 <br><br><br>
+client。<br>
+（6）client 通过 FfileSystem 方法 向namenode 报告 complete 。<br>
+（7）这时，namenode 中就包含了 block块信息，还有操作log。<br><br><br>
+读文件流程：<br><br><br>
+HDFS Client--rpc--open-&gt;--FileSystem对象----rpc-------&gt;---------namenode<br>
+|   |                                                                                                           |<br>
+|   |---read----&gt; FSdataInputStream对象&lt;------返回该文件的block块以及datanode(部分)地址列表           <br>
+|                 | |            |_________<br>
+|----&lt;--close-----| |read               |read<br>
+                  | |                              |<br>
+                  Datanode1 ---- Datanode2 ---- Datanode3<br><br><br>
+四、进程<br>
+每个进程都会生成一个pid<br>
+pid 文件存在：<br>
+（1）进程ok<br>
+（2）进程死掉了，pid文件残留，下次启动服务时，报pid已存在，需手动删除。<br>
+[hadoop@hadoop001 tmp]$ cat hadoop-hadoop-namenode.pid <br>
+41195<br>
+[hadoop@hadoop001 tmp]$ jps<br>
+41330 DataNode<br>
+43763 Jps<br>
+26232 ResourceManager<br>
+41195 NameNode<br>
+41499 SecondaryNameNode<br>
+26333 NodeManager<br><br><br>
+五、几个hdfs常用命令：<br>
+1、[hadoop@hadoop001 bin]$ hadoop jar //运行jar 包<br><br><br>
+2、[hadoop@hadoop001 bin]$ hadoop fs 和 hdfs dfs 是一样的，因为调用同一个类<br>
+mkdir , cat ,ls ，rm ，mv 等命令与Linux类似。<br><br><br>
+3、[hadoop@hadoop001 bin]$ hdfs dfsadmin -report // 这条命令与web界面看到的信息是一样的。<br><br><br>
+Configured Capacity: 40028807168 (37.28 GB)<br>
+Present Capacity: 27428790272 (25.55 GB)<br>
+DFS Remaining: 27428302848 (25.54 GB)<br>
+DFS Used: 487424 (476 KB)<br>
+DFS Used%: 0.00%<br>
+Under replicated blocks: 0<br>
+Blocks with corrupt replicas: 0<br>
+Missing blocks: 0<br>
+Missing blocks (with replication factor 1): 0<br>
+Pending deletion blocks: 0<br>
+-------------------------------------------------<br>
+Live datanodes (1):<br>
+Name: 192.168.137.11:50010 (hadoop001)<br>
+Hostname: hadoop001<br>
+Decommission Status : Normal<br>
+Configured Capacity: 40028807168 (37.28 GB)<br>
+DFS Used: 487424 (476 KB)<br>
+Non DFS Used: 10566672384 (9.84 GB)<br>
+DFS Remaining: 27428302848 (25.54 GB)<br>
+DFS Used%: 0.00%<br>
+DFS Remaining%: 68.52%<br>
+Configured Cache Capacity: 0 (0 B)<br>
+Cache Used: 0 (0 B)<br>
+Cache Remaining: 0 (0 B)<br>
+Cache Used%: 100.00%<br>
+Cache Remaining%: 0.00%<br>
+Xceivers: 1<br>
+Last contact: Fri Aug 18 11:57:05 CST 2017<br><br>            </div>
+                </div>

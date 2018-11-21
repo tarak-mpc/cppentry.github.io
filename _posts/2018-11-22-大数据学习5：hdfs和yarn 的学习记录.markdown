@@ -1,0 +1,177 @@
+---
+layout:     post
+title:      大数据学习5：hdfs和yarn 的学习记录
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/ggwxk1990/article/details/77603420				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p align="left"><strong>大数据学习5：hdfs和yarn 的学习记录</strong></p>
+<p align="left"><strong>=======================</strong></p>
+<p align="left"><strong><strong>一、hdfs启动过程的解析</strong><br></strong></p>
+<p align="left"><strong><strong><strong>二、hdfs配置参数</strong><br></strong></strong></p>
+<p align="left"><strong><strong><strong>三、yarn资源调度配置</strong><br></strong></strong></p>
+<p align="left"><strong><strong><strong><strong>四、hdfs使用，yarn的任务检查</strong><br></strong></strong></strong></p>
+<p align="left"><strong><strong><strong><strong><strong>五、配置过程中的检查</strong><br></strong></strong></strong></strong></p>
+<p align="left"><strong><strong><strong><strong><strong>========================</strong></strong></strong></strong></strong></p>
+<p align="left"><strong>一、hdfs启动过程的解析</strong></p>
+<p align="left">在伪分布式hadoop部署中，启动hdfs</p>
+<p align="left"> [hadoop@hadoop001 sbin]$ ./start-dfs.sh </p>
+<p align="left">Startingnamenodes on [hadoop001]</p>
+<p align="left">hadoop001:starting <span style="color:#FF0000;">namenode</span>, logging to/opt/software/hadoop-2.8.1/logs/hadoop-hadoop-namenode-hadoop001.out</p>
+<p align="left">localhost:starting <span style="color:#FF0000;">datanode</span>, logging to/opt/software/hadoop-2.8.1/logs/hadoop-hadoop-datanode-hadoop001.out</p>
+<p align="left">Startingsecondary <span style="color:#FF0000;">namenodes [0.0.0.0]</span></p>
+<p align="left">0.0.0.0:starting secondarynamenode, logging to/opt/software/hadoop-2.8.1/logs/hadoop-hadoop-secondarynamenode-hadoop001.out</p>
+<p align="left">在启动过程中，会发现用到了3种地址，由于是伪分布式，这3个地址应该为同一个地址，如何调整呢？</p>
+<p align="left">[hadoop@hadoop001sbin]$ vi start-dfs.sh</p>
+<p align="left">#---------------------------------------------------------</p>
+<p align="left"># <span style="color:#FF0000;">namenodes</span></p>
+<p align="left"> </p>
+<p align="left">NAMENODES=$(<span style="color:#FF0000;">$HADOOP_PREFIX/bin/hdfs getconf -namenodes</span>)</p>
+<p align="left"> </p>
+<p align="left">echo"Starting namenodes on [$NAMENODES]"</p>
+<p align="left"> </p>
+<p align="left">"$HADOOP_PREFIX/sbin/hadoop-daemons.sh"\</p>
+<p align="left">  --config "$HADOOP_CONF_DIR" \</p>
+<p align="left">  --hostnames "$NAMENODES" \</p>
+<p align="left">  --script "$bin/hdfs" start namenode$nameStartOpt</p>
+<p align="left"> </p>
+<p align="left">#---------------------------------------------------------</p>
+<p align="left"># <span style="color:#FF0000;">datanodes (using default slaves file</span>)</p>
+<p align="left"> </p>
+<p align="left">if [ -n"$HADOOP_SECURE_DN_USER" ]; then</p>
+<p align="left">  echo \</p>
+<p align="left">    "Attempting to start secure cluster,skipping datanodes. " \</p>
+<p align="left">    "Run start-secure-dns.sh as root tocomplete startup."</p>
+<p align="left">else</p>
+<p align="left">  "$HADOOP_PREFIX/sbin/hadoop-daemons.sh"\</p>
+<p align="left">    --config "$HADOOP_CONF_DIR" \</p>
+<p align="left">    --script "$bin/hdfs" startdatanode $dataStartOpt</p>
+<p align="left">fi</p>
+<p align="left"> </p>
+<p align="left">#---------------------------------------------------------</p>
+<p align="left"># <span style="color:#FF0000;">secondary namenodes (if any)</span></p>
+<p align="left"> </p>
+<p align="left">SECONDARY_NAMENODES=$($HADOOP_PREFIX/bin/hdfsgetconf -secondarynamenodes 2&gt;/dev/null)</p>
+<p align="left"> </p>
+<p align="left">if [ -n"$SECONDARY_NAMENODES" ]; then</p>
+<p align="left">  echo "Starting secondary namenodes[$SECONDARY_NAMENODES]"</p>
+<p align="left"> </p>
+<p align="left"> "$HADOOP_PREFIX/sbin/hadoop-daemons.sh" \</p>
+<p align="left">      --config "$HADOOP_CONF_DIR" \</p>
+<p align="left">      --hostnames"$SECONDARY_NAMENODES" \</p>
+<p align="left">      --script "$bin/hdfs" startsecondarynamenode</p>
+<p align="left">fi</p>
+<p align="left"> </p>
+<p align="left">#---------------------------------------------------------</p>
+<p align="left">有此可见，在启动脚本中，打印出来的几个地址就是脚本中获得的。</p>
+<p align="left"><span style="color:#FF0000;">namenode</span> 为 $HADOOP_PREFIX/bin/hdfsgetconf –namenodes</p>
+<p align="left"><span style="color:#FF0000;">datanode</span>  为 /opt/software/hadoop/etc/hadoop/slaves</p>
+<p align="left"><span style="color:#FF0000;">secondary namenode</span> 为默认的配置，在hdfs-site.xml中要手动配置，可以在hadoop.apache.org-&gt; document-&gt; stable中，右侧最下方几个默认参数xml列表中找到默认配置。</p>
+<p align="left"><span style="color:#FF0000;">dfs.namenode.secondary.http-address         0.0.0.0:50090 Thesecondary namenode http server address and port.</span></p>
+<p align="left"><span style="color:#FF0000;">dfs.namenode.secondary.https-address       0.0.0.0:50091 Thesecondary namenode HTTPS server address and port.</span></p>
+<p align="left">这里手动配置hdfs-site.xml </p>
+<p align="left">[hadoop@hadoop001hadoop]$ vi hdfs-site.xml ，在configuration中添加</p>
+<p align="left">&lt;configuration&gt;</p>
+<p align="left">    &lt;property&gt;</p>
+<p align="left">       &lt;name&gt;dfs.replication&lt;/name&gt;</p>
+<p align="left">        &lt;value&gt;1&lt;/value&gt;</p>
+<p align="left">    &lt;/property&gt;</p>
+<p align="left">    <span style="color:#FF0000;">&lt;property&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">       &lt;name&gt;dfs.namenode.secondary.http-address&lt;/name&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">        &lt;value&gt;192.168.137.11:50090&lt;/value&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">    &lt;/property&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">    &lt;property&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">       &lt;name&gt;dfs.namenode.secondary.https-address&lt;/name&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">       &lt;value&gt;192.168.137.11:50091&lt;/value&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">    &lt;/property&gt;</span></p>
+<p align="left">&lt;/configuration&gt;</p>
+<p align="left">重新启动（stop-dfs.sh，start-dfs.sh）后为：</p>
+<p align="left">[hadoop@hadoop001sbin]$ ./start-dfs.sh </p>
+<p align="left">Startingnamenodes on [hadoop001]</p>
+<p align="left">hadoop001:starting <span style="color:#FF0000;">namenode</span>, logging to/opt/software/hadoop-2.8.1/logs/hadoop-hadoop-namenode-hadoop001.out</p>
+<p align="left">hadoop001:starting <span style="color:#FF0000;">datanode</span>, logging to/opt/software/hadoop-2.8.1/logs/hadoop-hadoop-datanode-hadoop001.out</p>
+<p align="left">Startingsecondary <span style="color:#FF0000;">namenodes</span> [hadoop001]</p>
+<p align="left">hadoop001:starting secondarynamenode, logging to/opt/software/hadoop-2.8.1/logs/hadoop-hadoop-secondarynamenode-hadoop001.out</p>
+<p align="left"> </p>
+<p align="left">登陆<a href="http://192.168.137.11:50070/" rel="nofollow">http://192.168.137.11:50070/</a> 可检查hdfs 情况</p>
+<p align="left"> </p>
+<p align="left"><strong>二、          hdfs配置参数</strong></p>
+<p align="left">在hadoop.apache.org-&gt;document-&gt; stable中，右侧最下方几个默认参数xml列表中找到默认配置。</p>
+<p align="left">把对应的参数配置到对应的xml文件中即可。格式如下：</p>
+<p align="left">&lt;configuration&gt;</p>
+<p align="left">    &lt;property&gt;</p>
+<p align="left">       &lt;name&gt;dfs.replication&lt;/name&gt;</p>
+<p align="left">        &lt;value&gt;1&lt;/value&gt;</p>
+<p align="left">    &lt;/property&gt;</p>
+<p align="left">    <span style="color:#FF0000;">&lt;property&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">       &lt;name&gt;dfs.namenode.secondary.http-address&lt;/name&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">        &lt;value&gt;192.168.137.11:50090&lt;/value&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">    &lt;/property&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">    &lt;property&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">       &lt;name&gt;dfs.namenode.secondary.http-address&lt;/name&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">       &lt;value&gt;192.168.137.11:50091&lt;/value&gt;</span></p>
+<p align="left"><span style="color:#FF0000;">    &lt;/property&gt;</span></p>
+<p align="left">&lt;/configuration&gt;</p>
+<p align="left"> </p>
+<p align="left"><strong>三、          yarn资源调度配置</strong></p>
+<p align="left">在hadoop.apache.org中，找到yarn配置部分，按照官方文档进行配置。</p>
+<p align="left"> [这里注意，可能只有mapred-site.xml.template，yarn-site.xml.template文件，拷贝一份改名去掉.template]增加配置</p>
+<p align="left">修改etc/hadoop/mapred-site.xml:</p>
+<p align="left">&lt;configuration&gt;</p>
+<p align="left">    &lt;property&gt;</p>
+<p align="left">       &lt;name&gt;mapreduce.framework.name&lt;/name&gt;</p>
+<p align="left">        &lt;value&gt;yarn&lt;/value&gt;</p>
+<p align="left">    &lt;/property&gt;</p>
+<p align="left">&lt;/configuration&gt;</p>
+<p align="left">修改etc/hadoop/yarn-site.xml:</p>
+<p align="left">&lt;configuration&gt;</p>
+<p align="left">    &lt;property&gt;</p>
+<p align="left">       &lt;name&gt;yarn.nodemanager.aux-services&lt;/name&gt;</p>
+<p align="left">        &lt;value&gt;mapreduce_shuffle&lt;/value&gt;</p>
+<p align="left">    &lt;/property&gt;</p>
+<p align="left">&lt;/configuration&gt;</p>
+<p align="left">启动</p>
+<p align="left">$sbin/start-yarn.sh</p>
+<p align="left">查看</p>
+<p align="left">ResourceManager- <a href="http://192.168.137.11:8088/" rel="nofollow">
+http://192.168.137.11:8088/</a></p>
+<p align="left">报错的话看第五部分。</p>
+<p align="left"> </p>
+<p align="left"><strong>四、          hdfs使用，yarn的任务检查</strong></p>
+<p align="left">（1）    开始一个任务：</p>
+<p align="left">进入这个目录，可以找到例子程序jar</p>
+<p align="left">[hadoop@hadoop001hadoop]$ cd /opt/software/hadoop-2.8.1/share/hadoop/mapreduce</p>
+<p align="left">[hadoop@hadoop001mapreduce]$ hadoop jar hadoop-mapreduce-examples-2.8.1.jar pi 10 10</p>
+<p align="left">求π。</p>
+<p align="left">（2）    检查任务：</p>
+<p align="left">runing</p>
+<p align="left"><img src="https://img-blog.csdn.net/20170826170154083?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZ2d3eGsxOTkw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p align="left">finish</p>
+<p align="left"><img src="https://img-blog.csdn.net/20170826170223044?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZ2d3eGsxOTkw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p align="left">点击任务连接，还可以显示详情，可以点击log等信息。</p>
+<p align="left"><img src="https://img-blog.csdn.net/20170826170235545?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZ2d3eGsxOTkw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p align="left"></p>
+<p align="left"><span style="color:#FF0000;">注意：</span>在本处，点击log可能会网页打不开，是因为登陆电脑没有做DNS解析，无法识别hadoop中主机名，在win7 中修改<span style="color:#FF0000;">hosts</span>文件，添加映射关系即可。</p>
+<p align="left">C:\Windows\System32\drivers\etc\hosts中添加</p>
+<p align="left">192.168.137.11hadoop001</p>
+<p align="left"> </p>
+<p align="left">（3）    hdfs 一些简单使用</p>
+<p align="left">上传一个文件到hdfs 根目录：hadoop fs-put hadoop.log / </p>
+<p align="left">查看根目录下文件：hadoop fs-ls /</p>
+<p align="left">查看一个文件：hadoop fs-cat  /hadoop.log</p>
+<p align="left">也可以在网页的browsedirectory 里查看文件，甚至上传下载。</p>
+<p align="left"></p>
+<p align="left"><img src="https://img-blog.csdn.net/20170826170253725?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZ2d3eGsxOTkw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p align="left"><img src="https://img-blog.csdn.net/20170826170302373?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZ2d3eGsxOTkw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p align="left"> </p>
+<p align="left"><strong>五、          配置过程中的检查</strong></p>
+<p align="left">[root@hadoop001~]# cat /opt/software/hadoop-2.8.1/logs/yarn-hadoop-resourcemanager-hadoop001.out</p>
+<p align="left">[FatalError] <span style="background:#FFFF00;">yarn-site.xml:20:6:</span>The markup in the document<span style="background:#FFFF00;">followingthe root element must be well-formed</span>.</p>
+<p align="left">这里的意思是yarn-site.xml文件的第20行有错误，去检查即可。</p>
+<p align="left"> </p>
+<p align="left"> </p>
+            </div>
+                </div>

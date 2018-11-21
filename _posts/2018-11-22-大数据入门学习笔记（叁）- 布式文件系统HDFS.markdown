@@ -1,0 +1,423 @@
+---
+layout:     post
+title:      大数据入门学习笔记（叁）- 布式文件系统HDFS
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/bingdianone/article/details/83863115				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc"><h3>文章目录</h3><ul><li><a href="#HDFS_1" rel="nofollow">HDFS概述及设计目标</a></li><ul><li><a href="#HDFS_5" rel="nofollow">什么是HDFS</a></li><li><a href="#HDFS_9" rel="nofollow">HDFS的设计目标</a></li></ul><li><a href="#HDFS_13" rel="nofollow">HDFS架构</a></li><li><a href="#HDFS_32" rel="nofollow">HDFS副本机制</a></li><ul><li><a href="#httpsimgblogcsdnimgcn20181109091413763png_44" rel="nofollow">副本存放策略![在这里插入图片描述](https://img-blog.csdnimg.cn/20181109091413763.png)</a></li></ul><li><a href="#HDFS_52" rel="nofollow">HDFS环境搭建</a></li><li><a href="#HDFS_shell_116" rel="nofollow">HDFS shell</a></li><ul><li><a href="#HDFS_shell_117" rel="nofollow">HDFS shell常用命令的使用</a></li><ul><li><a href="#Is_121" rel="nofollow">Is</a></li><li><a href="#get_130" rel="nofollow">get</a></li><li><a href="#mkdir_136" rel="nofollow">mkdir</a></li><li><a href="#rm_147" rel="nofollow">rm</a></li><li><a href="#put_153" rel="nofollow">put</a></li></ul></ul><li><a href="#Java_API_165" rel="nofollow">Java API操作</a></li><li><a href="#HDFS_366" rel="nofollow">HDFS文件读写流程</a></li><ul><li><a href="#_369" rel="nofollow">文件写流程图解</a></li><li><a href="#_389" rel="nofollow">文件读流程图解</a></li></ul><li><a href="#HDFS_396" rel="nofollow">HDFS错误处理机制</a></li><li><a href="#HDFS_400" rel="nofollow">HDFS优缺点</a></li></ul></div><p></p>
+<h1><a id="HDFS_1"></a>HDFS概述及设计目标</h1>
+<p>如果让我们自己来设计一个分布式文件系统，咋办？<br>
+下图是普通分布式文件系统<br>
+<img src="https://img-blog.csdnimg.cn/20181108162852394.png" alt="在这里插入图片描述"></p>
+<h2><a id="HDFS_5"></a>什么是HDFS</h2>
+<ul>
+<li>Hadoop实现了一个分布式文件系统( Hadoop Distributed File System) ,简称HDFS</li>
+<li>源自Google的GFS论文</li>
+<li>发表于2003年，HDFS是GFS的克隆版</li>
+</ul>
+<h2><a id="HDFS_9"></a>HDFS的设计目标</h2>
+<ul>
+<li>非常巨大的分布式文件系统</li>
+<li>运行在普通廉价的硬件上</li>
+<li>易扩展、为用户提供性能不错的文件存储服务</li>
+</ul>
+<h1><a id="HDFS_13"></a>HDFS架构</h1>
+<p>HDFS有主从架构。HDFS集群由一个NameNode组成，它是一个主服务器，管理文件系统名称空间并管理客户机对文件的访问。此外，还有许多datanode，通常每个节点一个，管理连接到它们运行的节点的存储。HDFS公开一个文件系统名称空间，并允许用户数据存储在文件中。在内部，文件被分割成一个或多个块，这些块存储在一组数据节点（datanode）中。NameNode执行文件系统操作，如打开、关闭和重命名文件和目录。它还确定块到datanode的映射。datanode负责服务来自文件系统客户端的读写请求。根据NameNode的指令，datanode还执行块的创建、删除和复制。<br>
+<img src="https://img-blog.csdnimg.cn/20181108165722539.png" alt="在这里插入图片描述"><br>
+上图中</p>
+<ul>
+<li>1 个Master(NameNode/NN)  带 N个Slaves(DataNode/DN)<br>
+HDFS/YARN/HBase其实都是一样的</li>
+<li>1个文件会被拆分成多个Block理解为：<br>
+blocksize：128M<br>
+130M ==&gt; 2个Block： 128M 和 2M</li>
+</ul>
+<blockquote>
+<p>NN：<br>
+1）负责客户端请求的响应<br>
+2）负责元数据（文件的名称、副本系数、Block存放的DN）的管理</p>
+<p>DN：<br>
+1）存储用户的文件对应的数据块(Block)<br>
+2）要定期向NN发送心跳信息，汇报本身及其所有的block信息，健康状况</p>
+</blockquote>
+<p>一个典型的部署是一台机器运行一个namenade，集群中的其他机器都运行一个DataNode。该体系结构不排除在同一台机器上运行多个DataNode<br>
+但在实际部署中却很少出现这种情况。</p>
+<h1><a id="HDFS_32"></a>HDFS副本机制</h1>
+<p>HDFS支持传统的分层文件组织。用户或应用程序可以在这些目录中创建目录并存储文件。文件系统名称空间层次结构与大多数现有文件系统相似;可以创建和删除文件，将文件从一个目录移动到另一个目录，或者重命名文件。<br>
+NameNode维护文件系统名称空间。对文件系统名称空间或其属性的任何更改都由NameNode记录。应用程序可以指定由HDFS维护的文件的副本数量。一个文件的副本数量称为该文件的副本因子。这些信息由NameNode存储。<br>
+<img src="https://img-blog.csdnimg.cn/20181108171407106.png" alt="在这里插入图片描述"><br>
+<strong>数据副本</strong><br>
+HDFS被设计为在大型集群中的机器之间可靠地存储非常大的文件。它以块序列的形式存储每个文件。为了容错，复制文件的块。每个文件的块大小和复制因子都是可配置的。</p>
+<p>除了最后一个块之外，文件中的所有块大小都相同。</p>
+<p>应用程序可以指定文件的副本数量。副本因子可以在文件创建时指定，以后可以更改。HDFS中的文件只写一次(除了追加和截断之外)，<strong>并且在任何时候都有一个写入者</strong>。</p>
+<p>NameNode就块的复制做出所有决定。它定期从集群中的每个datanode接收心跳和数据块报告。接收到心跳表示DataNode正常工作。块报表包含datanode上所有块的列表。</p>
+<h2><a id="httpsimgblogcsdnimgcn20181109091413763png_44"></a>副本存放策略<img src="https://img-blog.csdnimg.cn/20181109091413763.png" alt="在这里插入图片描述"></h2>
+<p>上图代表数据中心，两个机架，黄色代表客户端所在的节点（默认三个副本）</p>
+<blockquote>
+<p>第一个副本存放在同client的节点上面；<br>
+第二个副本存放在不同第一个副本机架的随意一个节点；<br>
+第三个副本存放在与第二个副本相同机架的另一个节点上；<br>
+如果只有一个机架，则在不同节点存储；如果高于三个副本则高于三的随意挑选机架和节点。</p>
+</blockquote>
+<h1><a id="HDFS_52"></a>HDFS环境搭建</h1>
+<p>官网安装文档<br>
+Hadoop伪分布式安装步骤<br>
+<a href="http://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-common/SingleCluster.html" rel="nofollow">http://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-common/SingleCluster.html</a></p>
+<p>下载Hadoop<br>
+<a href="http://archive.cloudera.com/cdh5/cdh/5/" rel="nofollow">http://archive.cloudera.com/cdh5/cdh/5/</a><br>
+2.6.0-cdh5.7.0<br>
+或则 wget <a href="http://archive.cloudera.com/cdh5/cdh/5/hadoop-2.6.0-cdh5.7.0.tar.gz" rel="nofollow">http://archive.cloudera.com/cdh5/cdh/5/hadoop-2.6.0-cdh5.7.0.tar.gz</a></p>
+<ol>
+<li>
+<p>jdk安装<br>
+解压：tar -zxvf jdk-7u79-linux-x64.tar.gz -C ~/app<br>
+添加到系统环境变量： ~/.bash_profile<br>
+export JAVA_HOME=/home/hadoop/app/jdk1.7.0_79<br>
+export PATH=$JAVA_HOME/bin:$PATH<br>
+使得环境变量生效： source ~/.bash_profile<br>
+验证java是否配置成功： java -v</p>
+</li>
+<li>
+<p>安装ssh<br>
+sudo yum install ssh<br>
+ssh-keygen -t rsa<br>
+cp ~/.ssh/id_rsa.pub ~/.ssh/authorized_keys</p>
+</li>
+<li>
+<p>下载并解压hadoop<br>
+下载：直接去cdh网站下载<br>
+解压：tar -zxvf hadoop-2.6.0-cdh5.7.0.tar.gz -C ~/app</p>
+</li>
+<li>
+<p>hadoop配置文件的修改(hadoop_home/etc/hadoop)<br>
+<strong><a href="http://hadoop-env.sh" rel="nofollow">hadoop-env.sh</a></strong></p>
+</li>
+</ol>
+<pre><code class="prism language-shell"><span class="token function">export</span> JAVA_HOME<span class="token operator">=</span>/home/hadoop/app/jdk1.7.0_79
+</code></pre>
+<p><strong>core-site.xml</strong></p>
+<pre><code class="prism language-shell"><span class="token operator">&lt;</span>property<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span>name<span class="token operator">&gt;</span>fs.defaultFS<span class="token operator">&lt;</span>/name<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span>value<span class="token operator">&gt;</span>hdfs://hadoop000:8020<span class="token operator">&lt;</span>/value<span class="token operator">&gt;</span>
+<span class="token operator">&lt;</span>/property<span class="token operator">&gt;</span>
+
+<span class="token operator">&lt;</span>property<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span>name<span class="token operator">&gt;</span>hadoop.tmp.dir<span class="token operator">&lt;</span>/name<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span>value<span class="token operator">&gt;</span>/home/hadoop/app/tmp<span class="token operator">&lt;</span>/value<span class="token operator">&gt;</span>
+<span class="token operator">&lt;</span>/property<span class="token operator">&gt;</span>
+</code></pre>
+<p><strong>hdfs-site.xml</strong></p>
+<pre><code class="prism language-shell"><span class="token operator">&lt;</span>property<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span>name<span class="token operator">&gt;</span>dfs.replication<span class="token operator">&lt;</span>/name<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span>value<span class="token operator">&gt;</span>1<span class="token operator">&lt;</span>/value<span class="token operator">&gt;</span>
+<span class="token operator">&lt;</span>/property<span class="token operator">&gt;</span>
+</code></pre>
+<ol start="5">
+<li>启动hdfs<br>
+格式化文件系统（仅第一次执行即可，不要重复执行）：hdfs/hadoop namenode -format<br>
+启动hdfs: sbin/start-dfs.sh<br>
+验证是否启动成功：<br>
+jps<br>
+　DataNode<br>
+　SecondaryNameNode<br>
+　NameNode<br>
+浏览器访问方式 <a href="http://hadoop000:50070" rel="nofollow">http://hadoop000:50070</a><br>
+<img src="https://img-blog.csdnimg.cn/20181117115545336.png" alt="在这里插入图片描述"></li>
+<li>停止hdfs<br>
+sbin/stop-dfs.sh</li>
+</ol>
+<h1><a id="HDFS_shell_116"></a>HDFS shell</h1>
+<h2><a id="HDFS_shell_117"></a>HDFS shell常用命令的使用</h2>
+<p>官网文档参考<br>
+<a href="http://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HDFSCommands.html#dfs" rel="nofollow">http://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HDFSCommands.html#dfs</a><br>
+<strong>hdfs dfs等于hadoop fs</strong></p>
+<h3><a id="Is_121"></a>Is</h3>
+<pre><code class="prism language-java"><span class="token punctuation">[</span>root<span class="token annotation punctuation">@hadoop</span> data<span class="token punctuation">]</span># hdfs dfs <span class="token operator">-</span>ls <span class="token operator">/</span>
+<span class="token number">18</span><span class="token operator">/</span><span class="token number">11</span><span class="token operator">/</span><span class="token number">09</span> <span class="token number">21</span><span class="token operator">:</span><span class="token number">40</span><span class="token operator">:</span><span class="token number">49</span> WARN util<span class="token punctuation">.</span>NativeCodeLoader<span class="token operator">:</span> Unable to load <span class="token keyword">native</span><span class="token operator">-</span>hadoop library <span class="token keyword">for</span> your platform<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span> using builtin<span class="token operator">-</span>java classes where applicable
+Found <span class="token number">1</span> items
+drwxr<span class="token operator">-</span>xr<span class="token operator">-</span>x   <span class="token operator">-</span> root supergroup          <span class="token number">0</span> <span class="token number">2018</span><span class="token operator">-</span><span class="token number">09</span><span class="token operator">-</span><span class="token number">02</span> <span class="token number">08</span><span class="token operator">:</span><span class="token number">37</span> <span class="token operator">/</span>hbase
+</code></pre>
+<h3><a id="get_130"></a>get</h3>
+<pre><code class="prism language-java"><span class="token punctuation">[</span>root<span class="token annotation punctuation">@hadoop</span> data<span class="token punctuation">]</span># hdfs dfs <span class="token operator">-</span>get <span class="token operator">/</span>hell<span class="token punctuation">.</span>txt
+</code></pre>
+<h3><a id="mkdir_136"></a>mkdir</h3>
+<pre><code class="prism language-java"><span class="token punctuation">[</span>root<span class="token annotation punctuation">@hadoop</span> data<span class="token punctuation">]</span># hdfs dfs <span class="token operator">-</span>mkdir <span class="token operator">-</span>p <span class="token operator">/</span>text<span class="token operator">/</span>a<span class="token operator">/</span>b
+<span class="token number">18</span><span class="token operator">/</span><span class="token number">11</span><span class="token operator">/</span><span class="token number">09</span> <span class="token number">21</span><span class="token operator">:</span><span class="token number">44</span><span class="token operator">:</span><span class="token number">57</span> WARN util<span class="token punctuation">.</span>NativeCodeLoader<span class="token operator">:</span> Unable to load <span class="token keyword">native</span><span class="token operator">-</span>hadoop library <span class="token keyword">for</span> your platform<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span> using builtin<span class="token operator">-</span>java classes where applicable
+<span class="token punctuation">[</span>root<span class="token annotation punctuation">@hadoop</span> data<span class="token punctuation">]</span># hdfs dfs <span class="token operator">-</span>ls <span class="token operator">-</span>R <span class="token operator">/</span>text
+<span class="token number">18</span><span class="token operator">/</span><span class="token number">11</span><span class="token operator">/</span><span class="token number">09</span> <span class="token number">21</span><span class="token operator">:</span><span class="token number">46</span><span class="token operator">:</span><span class="token number">25</span> WARN util<span class="token punctuation">.</span>NativeCodeLoader<span class="token operator">:</span> Unable to load <span class="token keyword">native</span><span class="token operator">-</span>hadoop library <span class="token keyword">for</span> your platform<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span> using builtin<span class="token operator">-</span>java classes where applicable
+drwxr<span class="token operator">-</span>xr<span class="token operator">-</span>x   <span class="token operator">-</span> root supergroup          <span class="token number">0</span> <span class="token number">2018</span><span class="token operator">-</span><span class="token number">11</span><span class="token operator">-</span><span class="token number">09</span> <span class="token number">21</span><span class="token operator">:</span><span class="token number">44</span> <span class="token operator">/</span>text<span class="token operator">/</span>a
+drwxr<span class="token operator">-</span>xr<span class="token operator">-</span>x   <span class="token operator">-</span> root supergroup          <span class="token number">0</span> <span class="token number">2018</span><span class="token operator">-</span><span class="token number">11</span><span class="token operator">-</span><span class="token number">09</span> <span class="token number">21</span><span class="token operator">:</span><span class="token number">44</span> <span class="token operator">/</span>text<span class="token operator">/</span>a<span class="token operator">/</span>b
+</code></pre>
+<h3><a id="rm_147"></a>rm</h3>
+<pre><code class="prism language-java"><span class="token punctuation">[</span>root<span class="token annotation punctuation">@hadoop</span> data<span class="token punctuation">]</span># hdfs dfs <span class="token operator">-</span>rm <span class="token operator">-</span>R  <span class="token operator">/</span>text<span class="token operator">/</span>a<span class="token operator">/</span>b
+</code></pre>
+<h3><a id="put_153"></a>put</h3>
+<pre><code class="prism language-java"><span class="token punctuation">[</span>root<span class="token annotation punctuation">@hadoop</span> data<span class="token punctuation">]</span># hdfs dfs <span class="token operator">-</span>put hell<span class="token punctuation">.</span>txt <span class="token operator">/</span>
+<span class="token number">18</span><span class="token operator">/</span><span class="token number">11</span><span class="token operator">/</span><span class="token number">09</span> <span class="token number">21</span><span class="token operator">:</span><span class="token number">43</span><span class="token operator">:</span><span class="token number">16</span> WARN util<span class="token punctuation">.</span>NativeCodeLoader<span class="token operator">:</span> Unable to load <span class="token keyword">native</span><span class="token operator">-</span>hadoop library <span class="token keyword">for</span> your platform<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span> using builtin<span class="token operator">-</span>java classes where applicable
+<span class="token punctuation">[</span>root<span class="token annotation punctuation">@hadoop</span> data<span class="token punctuation">]</span># hdfs dfs <span class="token operator">-</span>ls <span class="token operator">/</span>
+<span class="token number">18</span><span class="token operator">/</span><span class="token number">11</span><span class="token operator">/</span><span class="token number">09</span> <span class="token number">21</span><span class="token operator">:</span><span class="token number">43</span><span class="token operator">:</span><span class="token number">25</span> WARN util<span class="token punctuation">.</span>NativeCodeLoader<span class="token operator">:</span> Unable to load <span class="token keyword">native</span><span class="token operator">-</span>hadoop library <span class="token keyword">for</span> your platform<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span> using builtin<span class="token operator">-</span>java classes where applicable
+Found <span class="token number">2</span> items
+drwxr<span class="token operator">-</span>xr<span class="token operator">-</span>x   <span class="token operator">-</span> root supergroup          <span class="token number">0</span> <span class="token number">2018</span><span class="token operator">-</span><span class="token number">09</span><span class="token operator">-</span><span class="token number">02</span> <span class="token number">08</span><span class="token operator">:</span><span class="token number">37</span> <span class="token operator">/</span>hbase
+<span class="token operator">-</span>rw<span class="token operator">-</span>r<span class="token operator">--</span>r<span class="token operator">--</span>   <span class="token number">1</span> root supergroup         <span class="token number">13</span> <span class="token number">2018</span><span class="token operator">-</span><span class="token number">11</span><span class="token operator">-</span><span class="token number">09</span> <span class="token number">21</span><span class="token operator">:</span><span class="token number">43</span> <span class="token operator">/</span>hell<span class="token punctuation">.</span>txt
+</code></pre>
+<h1><a id="Java_API_165"></a>Java API操作</h1>
+<ul>
+<li>IDEA+Maven创建Java工程<br>
+<img src="https://img-blog.csdnimg.cn/20181114210908291.png" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdnimg.cn/2018111421095394.png" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdnimg.cn/20181114211014774.png" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdnimg.cn/20181114211100175.png" alt="在这里插入图片描述"></li>
+<li>添加HDFS相关依赖</li>
+</ul>
+<pre><code class="prism language-java"><span class="token generics function"><span class="token punctuation">&lt;</span>properties<span class="token punctuation">&gt;</span></span>
+        <span class="token operator">&lt;</span>project<span class="token punctuation">.</span>build<span class="token punctuation">.</span>sourceEncoding<span class="token operator">&gt;</span>UTF<span class="token operator">-</span><span class="token number">8</span><span class="token operator">&lt;</span><span class="token operator">/</span>project<span class="token punctuation">.</span>build<span class="token punctuation">.</span>sourceEncoding<span class="token operator">&gt;</span>
+        <span class="token generics function"><span class="token punctuation">&lt;</span>hadoop<span class="token punctuation">.</span>version<span class="token punctuation">&gt;</span></span><span class="token number">2.6</span><span class="token number">.0</span><span class="token operator">-</span>cdh5<span class="token punctuation">.</span><span class="token number">7.0</span><span class="token operator">&lt;</span><span class="token operator">/</span>hadoop<span class="token punctuation">.</span>version<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span><span class="token operator">/</span>properties<span class="token operator">&gt;</span>
+
+    <span class="token generics function"><span class="token punctuation">&lt;</span>repositories<span class="token punctuation">&gt;</span></span>
+        <span class="token generics function"><span class="token punctuation">&lt;</span>repository<span class="token punctuation">&gt;</span></span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>id<span class="token punctuation">&gt;</span></span>cloudera<span class="token operator">&lt;</span><span class="token operator">/</span>id<span class="token operator">&gt;</span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>url<span class="token punctuation">&gt;</span></span>https<span class="token operator">:</span><span class="token operator">/</span><span class="token operator">/</span>repository<span class="token punctuation">.</span>cloudera<span class="token punctuation">.</span>com<span class="token operator">/</span>artifactory<span class="token operator">/</span>cloudera<span class="token operator">-</span>repos<span class="token operator">/</span><span class="token operator">&lt;</span><span class="token operator">/</span>url<span class="token operator">&gt;</span>
+        <span class="token operator">&lt;</span><span class="token operator">/</span>repository<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span><span class="token operator">/</span>repositories<span class="token operator">&gt;</span>
+
+    <span class="token generics function"><span class="token punctuation">&lt;</span>dependencies<span class="token punctuation">&gt;</span></span>
+        <span class="token operator">&lt;</span><span class="token operator">!</span><span class="token operator">--</span>添加hadoop依赖<span class="token operator">--</span><span class="token operator">&gt;</span>
+        <span class="token generics function"><span class="token punctuation">&lt;</span>dependency<span class="token punctuation">&gt;</span></span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>groupId<span class="token punctuation">&gt;</span></span>org<span class="token punctuation">.</span>apache<span class="token punctuation">.</span>hadoop<span class="token operator">&lt;</span><span class="token operator">/</span>groupId<span class="token operator">&gt;</span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>artifactId<span class="token punctuation">&gt;</span></span>hadoop<span class="token operator">-</span>client<span class="token operator">&lt;</span><span class="token operator">/</span>artifactId<span class="token operator">&gt;</span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>version<span class="token punctuation">&gt;</span></span>$<span class="token punctuation">{</span>hadoop<span class="token punctuation">.</span>version<span class="token punctuation">}</span><span class="token operator">&lt;</span><span class="token operator">/</span>version<span class="token operator">&gt;</span>
+        <span class="token operator">&lt;</span><span class="token operator">/</span>dependency<span class="token operator">&gt;</span>
+
+
+        <span class="token operator">&lt;</span><span class="token operator">!</span><span class="token operator">--</span>添加单元测试的依赖<span class="token operator">--</span><span class="token operator">&gt;</span>
+        <span class="token generics function"><span class="token punctuation">&lt;</span>dependency<span class="token punctuation">&gt;</span></span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>groupId<span class="token punctuation">&gt;</span></span>junit<span class="token operator">&lt;</span><span class="token operator">/</span>groupId<span class="token operator">&gt;</span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>artifactId<span class="token punctuation">&gt;</span></span>junit<span class="token operator">&lt;</span><span class="token operator">/</span>artifactId<span class="token operator">&gt;</span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>version<span class="token punctuation">&gt;</span></span><span class="token number">4.10</span><span class="token operator">&lt;</span><span class="token operator">/</span>version<span class="token operator">&gt;</span>
+            <span class="token generics function"><span class="token punctuation">&lt;</span>scope<span class="token punctuation">&gt;</span></span>test<span class="token operator">&lt;</span><span class="token operator">/</span>scope<span class="token operator">&gt;</span>
+        <span class="token operator">&lt;</span><span class="token operator">/</span>dependency<span class="token operator">&gt;</span>
+    <span class="token operator">&lt;</span><span class="token operator">/</span>dependencies<span class="token operator">&gt;</span>
+</code></pre>
+<ul>
+<li>开发Java API操作HDFS文件<br>
+注意两点：</li>
+</ul>
+<ol>
+<li>hdfs://hadoop000:8020更改访问ip和端口（在hadoop_home/etc/hadoop/core-site.xml）</li>
+<li>FileSystem.get(new URI(HDFS_PATH), configuration, “hadoop”)的用户hadoop需要更改为具有读写权限的用户</li>
+</ol>
+<pre><code class="prism language-java"><span class="token keyword">package</span> com<span class="token punctuation">.</span>imooc<span class="token punctuation">.</span>hadoop<span class="token punctuation">.</span>hdfs<span class="token punctuation">;</span>
+
+<span class="token keyword">import</span> org<span class="token punctuation">.</span>apache<span class="token punctuation">.</span>hadoop<span class="token punctuation">.</span>conf<span class="token punctuation">.</span>Configuration<span class="token punctuation">;</span>
+<span class="token keyword">import</span> org<span class="token punctuation">.</span>apache<span class="token punctuation">.</span>hadoop<span class="token punctuation">.</span>fs<span class="token punctuation">.</span>*<span class="token punctuation">;</span>
+<span class="token keyword">import</span> org<span class="token punctuation">.</span>apache<span class="token punctuation">.</span>hadoop<span class="token punctuation">.</span>io<span class="token punctuation">.</span>IOUtils<span class="token punctuation">;</span>
+<span class="token keyword">import</span> org<span class="token punctuation">.</span>apache<span class="token punctuation">.</span>hadoop<span class="token punctuation">.</span>util<span class="token punctuation">.</span>Progressable<span class="token punctuation">;</span>
+<span class="token keyword">import</span> org<span class="token punctuation">.</span>junit<span class="token punctuation">.</span>After<span class="token punctuation">;</span>
+<span class="token keyword">import</span> org<span class="token punctuation">.</span>junit<span class="token punctuation">.</span>Before<span class="token punctuation">;</span>
+<span class="token keyword">import</span> org<span class="token punctuation">.</span>junit<span class="token punctuation">.</span>Test<span class="token punctuation">;</span>
+
+<span class="token keyword">import</span> java<span class="token punctuation">.</span>io<span class="token punctuation">.</span>BufferedInputStream<span class="token punctuation">;</span>
+<span class="token keyword">import</span> java<span class="token punctuation">.</span>io<span class="token punctuation">.</span>File<span class="token punctuation">;</span>
+<span class="token keyword">import</span> java<span class="token punctuation">.</span>io<span class="token punctuation">.</span>FileInputStream<span class="token punctuation">;</span>
+<span class="token keyword">import</span> java<span class="token punctuation">.</span>io<span class="token punctuation">.</span>InputStream<span class="token punctuation">;</span>
+<span class="token keyword">import</span> java<span class="token punctuation">.</span>net<span class="token punctuation">.</span>URI<span class="token punctuation">;</span>
+
+<span class="token comment">/**
+ * Hadoop HDFS Java API 操作
+ */</span>
+<span class="token keyword">public</span> <span class="token keyword">class</span> <span class="token class-name">HDFSApp</span> <span class="token punctuation">{</span>
+
+    <span class="token keyword">public</span> <span class="token keyword">static</span> <span class="token keyword">final</span> String HDFS_PATH <span class="token operator">=</span> <span class="token string">"hdfs://hadoop000:8020"</span><span class="token punctuation">;</span>
+
+    FileSystem fileSystem <span class="token operator">=</span> null<span class="token punctuation">;</span>
+    Configuration configuration <span class="token operator">=</span> null<span class="token punctuation">;</span>
+
+
+    <span class="token comment">/**
+     * 创建HDFS目录
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">mkdir</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        fileSystem<span class="token punctuation">.</span><span class="token function">mkdirs</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/hdfsapi/test"</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">/**
+     * 创建文件
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">create</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        FSDataOutputStream output <span class="token operator">=</span> fileSystem<span class="token punctuation">.</span><span class="token function">create</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/hdfsapi/test/a.txt"</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        output<span class="token punctuation">.</span><span class="token function">write</span><span class="token punctuation">(</span><span class="token string">"hello hadoop"</span><span class="token punctuation">.</span><span class="token function">getBytes</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        output<span class="token punctuation">.</span><span class="token function">flush</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        output<span class="token punctuation">.</span><span class="token function">close</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">/**
+     * 查看HDFS文件的内容
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">cat</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        FSDataInputStream in <span class="token operator">=</span> fileSystem<span class="token punctuation">.</span><span class="token function">open</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/hdfsapi/test/a.txt"</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        IOUtils<span class="token punctuation">.</span><span class="token function">copyBytes</span><span class="token punctuation">(</span>in<span class="token punctuation">,</span> System<span class="token punctuation">.</span>out<span class="token punctuation">,</span> <span class="token number">1024</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        in<span class="token punctuation">.</span><span class="token function">close</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+
+    <span class="token comment">/**
+     * 重命名
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">rename</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        Path oldPath <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/hdfsapi/test/a.txt"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        Path newPath <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/hdfsapi/test/b.txt"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        fileSystem<span class="token punctuation">.</span><span class="token function">rename</span><span class="token punctuation">(</span>oldPath<span class="token punctuation">,</span> newPath<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">/**
+     * 上传文件到HDFS
+     *
+     * @throws Exception
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">copyFromLocalFile</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        Path localPath <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/Users/rocky/data/hello.txt"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        Path hdfsPath <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/hdfsapi/test"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        fileSystem<span class="token punctuation">.</span><span class="token function">copyFromLocalFile</span><span class="token punctuation">(</span>localPath<span class="token punctuation">,</span> hdfsPath<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">/**
+     * 上传文件到HDFS
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">copyFromLocalFileWithProgress</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        InputStream in <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">BufferedInputStream</span><span class="token punctuation">(</span>
+                <span class="token keyword">new</span> <span class="token class-name">FileInputStream</span><span class="token punctuation">(</span>
+                        <span class="token keyword">new</span> <span class="token class-name">File</span><span class="token punctuation">(</span><span class="token string">"/Users/rocky/source/spark-1.6.1/spark-1.6.1-bin-2.6.0-cdh5.5.0.tgz"</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+        FSDataOutputStream output <span class="token operator">=</span> fileSystem<span class="token punctuation">.</span><span class="token function">create</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/hdfsapi/test/spark-1.6.1.tgz"</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+                <span class="token keyword">new</span> <span class="token class-name">Progressable</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+                    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">progress</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+                        System<span class="token punctuation">.</span>out<span class="token punctuation">.</span><span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"."</span><span class="token punctuation">)</span><span class="token punctuation">;</span>  <span class="token comment">//带进度提醒信息</span>
+                    <span class="token punctuation">}</span>
+                <span class="token punctuation">}</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+
+        IOUtils<span class="token punctuation">.</span><span class="token function">copyBytes</span><span class="token punctuation">(</span>in<span class="token punctuation">,</span> output<span class="token punctuation">,</span> <span class="token number">4096</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+
+    <span class="token comment">/**
+     * 下载HDFS文件
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">copyToLocalFile</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        Path localPath <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/Users/rocky/tmp/h.txt"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        Path hdfsPath <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/hdfsapi/test/hello.txt"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        fileSystem<span class="token punctuation">.</span><span class="token function">copyToLocalFile</span><span class="token punctuation">(</span>hdfsPath<span class="token punctuation">,</span> localPath<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">/**
+     * 查看某个目录下的所有文件
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">listFiles</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        FileStatus<span class="token punctuation">[</span><span class="token punctuation">]</span> fileStatuses <span class="token operator">=</span> fileSystem<span class="token punctuation">.</span><span class="token function">listStatus</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/"</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+        <span class="token keyword">for</span><span class="token punctuation">(</span>FileStatus fileStatus <span class="token operator">:</span> fileStatuses<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+            String isDir <span class="token operator">=</span> fileStatus<span class="token punctuation">.</span><span class="token function">isDirectory</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token operator">?</span> <span class="token string">"文件夹"</span> <span class="token operator">:</span> <span class="token string">"文件"</span><span class="token punctuation">;</span>
+            <span class="token keyword">short</span> replication <span class="token operator">=</span> fileStatus<span class="token punctuation">.</span><span class="token function">getReplication</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+            <span class="token keyword">long</span> len <span class="token operator">=</span> fileStatus<span class="token punctuation">.</span><span class="token function">getLen</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+            String path <span class="token operator">=</span> fileStatus<span class="token punctuation">.</span><span class="token function">getPath</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">.</span><span class="token function">toString</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+            System<span class="token punctuation">.</span>out<span class="token punctuation">.</span><span class="token function">println</span><span class="token punctuation">(</span>isDir <span class="token operator">+</span> <span class="token string">"\t"</span> <span class="token operator">+</span> replication <span class="token operator">+</span> <span class="token string">"\t"</span> <span class="token operator">+</span> len <span class="token operator">+</span> <span class="token string">"\t"</span> <span class="token operator">+</span> path<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">/**
+     * 删除
+     */</span>
+    <span class="token annotation punctuation">@Test</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">delete</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception<span class="token punctuation">{</span>
+        fileSystem<span class="token punctuation">.</span><span class="token function">delete</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">Path</span><span class="token punctuation">(</span><span class="token string">"/"</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token boolean">true</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+
+    <span class="token annotation punctuation">@Before</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">setUp</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        System<span class="token punctuation">.</span>out<span class="token punctuation">.</span><span class="token function">println</span><span class="token punctuation">(</span><span class="token string">"HDFSApp.setUp"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        configuration <span class="token operator">=</span> <span class="token keyword">new</span> <span class="token class-name">Configuration</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        fileSystem <span class="token operator">=</span> FileSystem<span class="token punctuation">.</span><span class="token function">get</span><span class="token punctuation">(</span><span class="token keyword">new</span> <span class="token class-name">URI</span><span class="token punctuation">(</span>HDFS_PATH<span class="token punctuation">)</span><span class="token punctuation">,</span> configuration<span class="token punctuation">,</span> <span class="token string">"hadoop"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token annotation punctuation">@After</span>
+    <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">tearDown</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">throws</span> Exception <span class="token punctuation">{</span>
+        configuration <span class="token operator">=</span> null<span class="token punctuation">;</span>
+        fileSystem <span class="token operator">=</span> null<span class="token punctuation">;</span>
+
+        System<span class="token punctuation">.</span>out<span class="token punctuation">.</span><span class="token function">println</span><span class="token punctuation">(</span><span class="token string">"HDFSApp.tearDown"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+<span class="token punctuation">}</span>
+
+</code></pre>
+<h1><a id="HDFS_366"></a>HDFS文件读写流程</h1>
+<p><img src="https://img-blog.csdnimg.cn/20181110110459199.png" alt="在这里插入图片描述"><br>
+首先看看出场的角色，第一个是client客户端，用来发起读写请求，读取HDFS上的文件或往HDFS中写文件；第二个是Namenode，唯一的一个，会协调所有客户端发起的请求；第三个是DataNode，负责数据存储，跟Namenode不一样，DataNode有很多个，有时候能达到数以千计。</p>
+<h2><a id="_369"></a>文件写流程图解</h2>
+<p><img src="https://img-blog.csdnimg.cn/20181110110543498.png" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdnimg.cn/20181110110838905.png" alt="在这里插入图片描述"><br>
+往HDFS中写数据的流程如下：</p>
+<ul>
+<li>第1幅图：我们跟客户端说，你帮我写一个200M的数据吧，客户端说没问题啊，但是…</li>
+<li>第2幅图：客户端不知道我们对数据有没有其他的要求啊，问我们是不是忘了什么东西呢？我们想起来我们还是有要求的，第一我们要把数据分成若干块，并且每块的大小是128M，第二，每个数据块应该复制3份。其实这就是我们说的HDFS的文件分块和多副本，如果你不说的话客户端怎么知道到底怎么分，复制多少份呢？</li>
+<li>第3幅图：由上面的对话我们发现，如果对于每个文件客户端都要这么问一下，是不是太麻烦了？所以说一个好的客户端应该是，用户就算不说你也要知道有这两个属性：块的大小，一个文件应该按照怎样的大小切分（通常是64M或128M）；复制因子，每个块应该复制多少份（通常是3份），也就是说如果用户不主动提供这些属性，那么就按照默认的来。</li>
+<li>第4幅图：现在客户端已经知道了每个块的大小了，那么把200M的文件分成128M和72M两个块，一个长一个短。</li>
+<li>第5幅图：切分后客户端就开始工作了，既然有两个块，那先上传第一个块，于是客户端请求Namenode帮它写一个128M的块，并且要复制3份。</li>
+<li>第6幅图：Namenode接受到客户端的请求后，既然需要3个副本，那么就需要找到3个DataNode，Namenode就会想怎么去找到这3个DataNode呢？我该告诉客户端哪些信息呢？于是它就去它管理的DataNode中找一些满足要求的空闲节点。</li>
+<li>第7幅图：Namenode找到了3个节点，现在把找到的节点发给客户端，表示：兄弟，你不是要我帮你写数据嘛，我给你找到了这3个合适的DataNode，并且已经按距离远近给你排过序了，第一个是最近的，你把数据给他们让他们帮你写吧。</li>
+<li>第8幅图：客户端收到3个DataNode地址后，直接把数据发送到第一个节点(DataNode1)上，然后DataNode1开始把数据写到他的硬盘中。</li>
+<li>第9、10、11幅图：DataNode1在接受数据的同时，会把刚刚收到的数据发送到第二个DataNode2上，同理DataNode2也是，接收的同时把数据立马发给DataNode3，到了DataNode3已经是最后一个DataNode了。整个过程跟流水线一样，接收一点就发一点。（个人感觉跟计算机网络中令牌环网的工作原理有些类似）<br>
+第12幅图：Namenode是所有DataNode的老大，所以DataNode在存完数据后要跟老大汇报，告诉他说，我第一个块的数据已经写完了。</li>
+<li>第13幅图：3个DataNode都报告完成后，好，这样第一个数据块就写完了，下面对第二个块重复这个步骤。</li>
+<li>第14幅图：所有的块都写完了之后，客户端关闭跟Namenode的连接。这时Namenode已经存储了文件的元数据，也就是文件被拆成了几块，复制了几份，每块分别存储在哪个DataNode上。</li>
+<li>最后一幅图说明了每个角色在写数据过程中的作用:<br>
+Client：切分文件成数据块。<br>
+Namenode：对于每个数据块，找到存储的DataNode地址。<br>
+DataNode：多副本方式存储数据。</li>
+</ul>
+<h2><a id="_389"></a>文件读流程图解</h2>
+<p><img src="https://img-blog.csdnimg.cn/20181110111428605.png" alt="在这里插入图片描述"></p>
+<ul>
+<li>第1幅图：写文件已经搞定了，那么怎么读文件呢？我们先跟客户端说，嘿兄弟！帮我读个文件呗！</li>
+<li>第2幅图：客户端跟Namenode发了个请求，把文件名发送给Namenode，表示我想要这个这个文件的信息。</li>
+<li>第3幅图：Namenode找了找，然后找到了一个结果，结果包含这个文件被拆成了多少块，每个块存储在哪些DataNode上的信息，并且DataNode同样是按照距离排序的。然后把这个结果发送给客户端，说，嘿兄弟！你要的文件在这些DataNode上，你去找吧。</li>
+<li>第4幅图：现在客户端知道了文件的存储情况，所以就一个个去DataNode上访问就好了。</li>
+<li>最后提出了一个问题：如果这个过程中DataNode挂了，或者数据在传输中出了问题怎么办？事实上HDFS对于这些问题都是能够完美解决的。</li>
+</ul>
+<h1><a id="HDFS_396"></a>HDFS错误处理机制</h1>
+<p><img src="https://img-blog.csdnimg.cn/20181110111614295.png" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdnimg.cn/20181110111633451.png" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdnimg.cn/20181110111646916.png" alt="在这里插入图片描述"></p>
+<h1><a id="HDFS_400"></a>HDFS优缺点</h1>
+<p>优点：</p>
+<ul>
+<li>数据冗余、硬件容错</li>
+<li>处理流式的数据访问</li>
+<li>适合存储大文件</li>
+<li>可构建在廉价机器上</li>
+</ul>
+<p>缺点：</p>
+<ul>
+<li>低延迟的数据访问</li>
+<li>不适合小文件存储</li>
+</ul>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

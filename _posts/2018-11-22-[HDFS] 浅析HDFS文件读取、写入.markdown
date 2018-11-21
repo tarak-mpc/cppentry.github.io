@@ -1,0 +1,62 @@
+---
+layout:     post
+title:      [HDFS] 浅析HDFS文件读取、写入
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/yangjjuan/article/details/72875990				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hdfs-浅析hdfs文件读取写入">[HDFS] 浅析HDFS文件读取、写入</h1>
+
+<p><strong>一，初始化</strong> <br>
+在使用HDFS的API进行读写操作前都会对FileSystem进行初始化。并且让客户端创建namenode的通信代理代理用于进行RPC通信。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cs">fs= FileSystem.<span class="hljs-keyword">get</span>(<span class="hljs-keyword">new</span> URI(<span class="hljs-string">"hdfs://172.28.94.25:9000"</span>), conf, <span class="hljs-string">"yang"</span>);</code></pre>
+
+<p>具体过程如下图的时序图 <br>
+<img src="https://img-blog.csdn.net/20170606095436188?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWFuZ2pqdWFu/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>关于Hadoop 的RPC通信可以参考<a href="http://www.cnblogs.com/edisonchou/p/4285817.html" rel="nofollow">http://www.cnblogs.com/edisonchou/p/4285817.html</a>，里面讲得挺详细的。</p>
+
+<p><strong>二，文件读取</strong> <br>
+主要的过程如图 <br>
+<img src="https://img-blog.csdn.net/20170606095945368?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWFuZ2pqdWFu/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+在对文件系统进行初始化后 <br>
+1，.首先客户端调用FileSystem对象的open方法，其实是一个DistributedFileSystem的实例。 <br>
+2，DistributedFileSystem通过使用rpc来调用NameNode，以确定文件的起始块位置，对于每一个块，NameNode返回存有该块副本的所有DataNode地址，此外，这些DataNode根据它们与客户端的距离进行排序，如果客户端本身就是一个DataNode，并且存有副本，就会从本地DataNode读取数据。 <br>
+为了更好理解，画了两个过程时序图， <br>
+<img src="https://img-blog.csdn.net/20170606101417066?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWFuZ2pqdWFu/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>3，前两个过程返回一个FSDataInputStream对象，该对象会被封装DFSInputStream对象，DFSInputStream可以方便的管理datanode和namenode数据流。客户端调用read方法，DFSInputStream会找出离客户端最近的datanode并连接。 <br>
+4，通过对数据流反复调用read()方法，可以将数据从DataNode传输到客户端。 <br>
+5，如果第一块的数据读完了，就会关闭指向第一块的datanode连接，接着读取下一块。这些操作对客户端来说是透明的，客户端的角度看来只是读一个持续不断的流。 <br>
+6，如果第一批block都读完了， DFSInputStream就会去namenode拿下一批block的locations，然后继续读，如果所有的块都读完，这时就会关闭掉所有的流。 </p>
+
+<p>如果在读数据的时候， DFSInputStream和datanode的通讯发生异常，就会尝试正在读最近的datanode,并且会记录哪个datanode发生错误，以保证不会反复读取该节点上的数据。 DFSInputStream也会检查校验和确认数据是否完整，如果发现一个坏的块,就会先报告到namenode节点，然后DFSInputStream在其他的datanode上读该block的数据。</p>
+
+<p>该设计就是客户端直接连接datanode来检索数据并且namenode来负责为每一个block提供最优的datanode， namenode仅仅处理块位置的请求，无需相应请求，这些信息都加载在namenode的内存中，hdfs通过datanode集群可以承受大量客户端的并发访问。</p>
+
+<p><strong>三，文件写入</strong> <br>
+主要的过程如图 <br>
+<img src="https://img-blog.csdn.net/20170606103112934?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWFuZ2pqdWFu/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>1，客户端通过调用DistributedFileSystem的create方法创建新文件。 <br>
+2，DistributedFileSystem通过RPC调用namenode去创建一个没有blocks关联的新文件，创建前， namenode会做各种校验，比如文件是否存在，客户端有无权限去创建等。如果校验通过， namenode就会记录下新文件，否则就会抛出IO异常。 <br>
+3，前两个过程会返回FSDataOutputStream的对象，与读文件的时候相似， FSDataOutputStream被封装成DFSOutputStream。DFSOutputStream可以协调namenode和datanode。客户端开始写数据到DFSOutputStream，DFSOutputStream会把数据切成一个个小的packet（数据包），然后排成队列data quene（数据队列）。 <br>
+4，data queue由Data Streamer读取，并通知元数据节点分配数据节点，用来存储数据块(每块默认复制3块)。分配的数据节点放在一个pipeline（管线）里。Data Streamer将数据块写入pipeline中的第一个数据节点。第一个数据节点将数据块发送给第二个数据节点。第二个数据节点将数据发送给第三个数据节点。 <br>
+5，DFSOutputStream也维护着一个内部数据包队列来等待DataNode的收到确认回执，称为ack queue（确认队列）。收到管道中所有DataNode确认信息后，该数据包才会从确认队列中删除。 <br>
+6，客户端完成数据的写入后，对数据流调用close()，该操作将剩下的所有数据包写入DataNode管线， <br>
+7，DataStreamer把剩余得包都刷到pipeline里，然后等待ack信息，收到最后一个ack后，通知datanode把文件标视为已完成。NameNode已经知道文件由哪些块组成。</p>
+
+<p>如果在数据写入期间DataNode发生故障，则会执行以下操作： <br>
+1 ，pipeline被关闭掉。 <br>
+2，把ack quene里的packet会添加到data quene的最前端，以确保故障节点下游的DataNode不会漏掉任何一个数据包。 <br>
+3，当前的block在已经写入的DataNode中被NameNode赋予新的标示，则错误节点重启后能够察觉其block是过时的，会被删除。失败的数据节点从pipeline中移除。 <br>
+4，block剩下的部分被写到剩下的两个正常的DataNode中。  <br>
+5，NameNode找到另外的DataNode去创建这个块的复制。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

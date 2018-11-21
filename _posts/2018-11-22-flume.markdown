@@ -1,0 +1,231 @@
+---
+layout:     post
+title:      flume
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>官方地址:<a href="http://flume.apache.org/FlumeUserGuide.html#spooling-directory-source" rel="nofollow">http://flume.apache.org/FlumeUserGuide.html#spooling-directory-source</a></p>
+
+<h3>监控文件夹,把数据写到hdfs上</h3>
+
+<pre class="has">
+<code>采集到hdfs中, 文件中的目录不用自己建的
+
+检查下hdfs式否是salf模式:
+	hdfs dfsadmin -report
+
+bin/flume-ng agent -c conf -f conf/tail-hdfs.conf -n a1
+
+前端页面查看下, master:50070, 文件目录: /flum/events/16-04-20/
+
+
+启动命令：
+bin/flume-ng agent -c conf -f conf/tail-hdfs.conf -n a1
+################################################################
+
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+
+a1.sources.r1.type = spooldir
+a1.sources.r1.spoolDir = /root/log
+a1.sources.r1.deletePolicy= immediate
+a1.sources.r1.ignorePattern = text.log
+a1.sources.r1.fileHeader = true
+# Describe the sink
+#下沉目标
+a1.sinks.k1.type = hdfs
+#指定目录, flum帮做目的替换
+a1.sinks.k1.hdfs.path = /flume/events/%y-%m-%d/%H%M/
+#文件的命名, 前缀
+a1.sinks.k1.hdfs.filePrefix = events-
+
+#10 分钟就改目录
+a1.sinks.k1.hdfs.round = true
+a1.sinks.k1.hdfs.roundValue = 10
+a1.sinks.k1.hdfs.roundUnit = minute
+# 满足任意一条就会滚动
+#文件滚动之前的等待时间(秒)
+a1.sinks.k1.hdfs.rollInterval = 60
+
+#文件滚动的大小限制(bytes)    128M
+a1.sinks.k1.hdfs.rollSize = 1000000
+
+#写入多少个event数据后滚动文件(事件个数)
+a1.sinks.k1.hdfs.rollCount = 1000000
+
+#5个事件就往里面写入（写的缓冲  多少事件flush一次）
+a1.sinks.k1.hdfs.batchSize = 50
+
+#用本地时间格式化目录
+a1.sinks.k1.hdfs.useLocalTimeStamp = true
+
+#下沉后, 生成的文件类型，默认是Sequencefile，可用DataStream，则为普通文本
+a1.sinks.k1.hdfs.fileType = DataStream
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1</code></pre>
+
+<p>在此之前需要用java写个log4j 打成jar包</p>
+
+<p>java -cp log4j.jar 全类名</p>
+
+<h3>实时监控文件</h3>
+
+<pre class="has">
+<code>启动命令：
+bin/flume-ng agent -c conf -f conf/tail-hdfs.conf -n a1
+################################################################
+
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+#exec 指的是命令
+# Describe/configure the source
+a1.sources.r1.type = exec
+#F根据文件名追中, f根据文件的nodeid追中
+a1.sources.r1.command = tail -F /root/log/test.log
+
+# Describe the sink
+#下沉目标
+a1.sinks.k1.type = hdfs
+a1.sinks.k1.channel = c1
+#指定目录, flum帮做目的替换
+a1.sinks.k1.hdfs.path = /flume/events/%y-%m-%d/%H%M/
+#文件的命名, 前缀
+a1.sinks.k1.hdfs.filePrefix = events-
+
+#10 分钟就改目录
+a1.sinks.k1.hdfs.round = true
+a1.sinks.k1.hdfs.roundValue = 10
+a1.sinks.k1.hdfs.roundUnit = minute
+
+#文件滚动之前的等待时间(秒)
+a1.sinks.k1.hdfs.rollInterval = 3
+
+#文件滚动的大小限制(bytes)
+a1.sinks.k1.hdfs.rollSize = 500
+
+#写入多少个event数据后滚动文件(事件个数)
+a1.sinks.k1.hdfs.rollCount = 20
+
+#5个事件就往里面写入
+a1.sinks.k1.hdfs.batchSize = 5
+
+#用本地时间格式化目录
+a1.sinks.k1.hdfs.useLocalTimeStamp = true
+
+#下沉后, 生成的文件类型，默认是Sequencefile，可用DataStream，则为普通文本
+a1.sinks.k1.hdfs.fileType = DataStream
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1</code></pre>
+
+<h3>二级联动</h3>
+
+<p>第一个配置 tail-avro.conf</p>
+
+<pre class="has">
+<code>从tail命令获取数据发送到avro端口
+另一个节点可配置一个avro源来中继数据，发送外部存储
+第一级
+
+##################
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+#读取的地址
+# Describe/configure the source
+a1.sources.r1.type = exec
+a1.sources.r1.command = tail -F /root/app
+a1.sources.r1.channels = c1
+
+#下沉到下一个主机地址
+# Describe the sink
+a1.sinks.k1.type = avro
+a1.sinks.k1.channel = c1
+a1.sinks.k1.hostname = hadoop002
+a1.sinks.k1.port = 4141
+a1.sinks.k1.batch-size = 2
+
+
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1</code></pre>
+
+<p>第二个配置avro-hdfs.conf</p>
+
+<pre class="has">
+<code>从avro端口接收数据，下沉到hdfs
+#####
+bin/flume-ng agent -c conf -f conf/avro-m-log.conf -n a1 -Dflume.root.logger=INFO,console
+
+
+采集配置文件，avro-hdfs.conf
+
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+##source中的avro组件是一个接收者服务
+a1.sources.r1.type = avro
+a1.sources.r1.bind = hadoop002
+a1.sources.r1.port = 4141
+
+
+# Describe the sink
+a1.sinks.k1.type = hdfs
+a1.sinks.k1.hdfs.path = hdfs://hadoop001:9000/app_log/%y-%m-%d/
+a1.sinks.k1.hdfs.filePrefix = weichat_log
+a1.sinks.k1.hdfs.round = true
+a1.sinks.k1.hdfs.roundValue = 24
+a1.sinks.k1.hdfs.roundUnit = hour
+a1.sinks.k1.hdfs.rollInterval = 60
+a1.sinks.k1.hdfs.rollSize = 100
+a1.sinks.k1.hdfs.rollCount = 500000
+a1.sinks.k1.hdfs.batchSize = 10
+a1.sinks.k1.hdfs.useLocalTimeStamp = true
+#生成的文件类型，默认是Sequencefile，可用DataStream，则为普通文本
+a1.sinks.k1.hdfs.fileType = DataStream
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+</code></pre>
+
+<p>先启动第二级:bin/flume-ng agent -c conf -f avro-hdfs.conf -n a1</p>
+
+<p>后启动第一级:bin/flume-ng agent -c conf -f tail-avro.conf -n a1</p>            </div>
+                </div>

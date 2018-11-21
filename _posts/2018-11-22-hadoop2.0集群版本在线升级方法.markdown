@@ -1,0 +1,182 @@
+---
+layout:     post
+title:      hadoop2.0集群版本在线升级方法
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/leone911/article/details/51395874				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hadoop20集群版本在线升级方法">hadoop2.0集群版本在线升级方法</h1>
+
+<blockquote>
+  <p>HDFS Rolling Upgrade</p>
+</blockquote>
+
+
+
+<h2 id="介绍">介绍</h2>
+
+<p>HDFS 滚动升级允许单个的hdfs节点（守护进程）进行升级。例如，datanodes 节点可以单独升级不影响namenodes。反之亦然。</p>
+
+
+
+<h2 id="升级">升级</h2>
+
+<p>在hadoop2.0版本，hdfs 支持 name services的ha功能，并且是强一致性的。这两个特性可以让我们有机会实现升级hdfs集群而不需要关闭hdfs服务。只有做了HA的集群才可以滚动升级。 <br>
+如果在新的版本中有新的功能，并且这个功能不能在旧版本中使用，这种情况请遵循以下步骤：</p>
+
+<ul>
+<li>关闭新功能</li>
+<li>升级集群</li>
+<li>开启新功能</li>
+</ul>
+
+<blockquote>
+  <p>ps：Rolling update 仅在2.4.0版本以上支持</p>
+</blockquote>
+
+<hr>
+
+<p>一个ha集群有，两到多个nn和多个dn，jn，zkns。 因为jns 相对稳定并且在 绝大多数都不需要被升级当升级hdfs时。滚动升级仅仅是升级nn，dn。 <br>
+升级非联邦集群 <br>
+假如有两个主节点nn1 nn2，并且分别是active 和 standby 状态。升级步骤如下：</p>
+
+
+
+<h3 id="准备升级">准备升级</h3>
+
+<p>运行 <br>
+<code>hdfs dfsadmin -rollingUpgrade prepare</code> <br>
+创建fsimage 用于rollback。 <br>
+代码如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java">        RollingUpgradeInfo startRollingUpgrade() <span class="hljs-keyword">throws</span> IOException {
+            checkSuperuserPrivilege(); <span class="hljs-comment">//检查权限</span>
+            checkOperation(OperationCategory.WRITE);
+            writeLock();
+            <span class="hljs-keyword">try</span> {
+              checkOperation(OperationCategory.WRITE);
+              <span class="hljs-keyword">long</span> startTime = now();
+              <span class="hljs-keyword">if</span> (!haEnabled) { <span class="hljs-comment">// for non-HA, we require NN to be in safemode</span>
+                startRollingUpgradeInternalForNonHA(startTime);
+              } <span class="hljs-keyword">else</span> { <span class="hljs-comment">// for HA, NN cannot be in safemode</span>
+                checkNameNodeSafeMode(<span class="hljs-string">"Failed to start rolling upgrade"</span>);
+                startRollingUpgradeInternal(startTime);
+              }getEditLog().logStartRollingUpgrade(rollingUpgradeInfo.getStartTime());
+              <span class="hljs-keyword">if</span> (haEnabled) {
+                <span class="hljs-comment">// roll the edit log to make sure the standby NameNode can tail</span>
+                getFSImage().rollEditLog();
+              }
+            } <span class="hljs-keyword">finally</span> {
+              writeUnlock();
+            }
+
+            getEditLog().logSync();<span class="hljs-comment">// 同步jn节点 并且flush jn内存数据</span>
+            <span class="hljs-keyword">if</span> (auditLog.isInfoEnabled() &amp;&amp; isExternalInvocation()) {
+              logAuditEvent(<span class="hljs-keyword">true</span>, <span class="hljs-string">"startRollingUpgrade"</span>, <span class="hljs-keyword">null</span>, <span class="hljs-keyword">null</span>, <span class="hljs-keyword">null</span>);
+            }
+            <span class="hljs-keyword">return</span> rollingUpgradeInfo;
+          }</code></pre>
+
+<p>运行 <br>
+<code>hdfs dfsadmin -rollingUpgrade query</code> <br>
+ 检查rollback images的 状态，直到”Proceed with rolling upgrade” 出现。表示准备好了。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java">  RollingUpgradeInfo queryRollingUpgrade() <span class="hljs-keyword">throws</span> IOException {
+    checkSuperuserPrivilege();
+    checkOperation(OperationCategory.READ);
+    readLock();
+    <span class="hljs-keyword">try</span> {
+      <span class="hljs-keyword">if</span> (rollingUpgradeInfo != <span class="hljs-keyword">null</span>) {
+        <span class="hljs-keyword">boolean</span> hasRollbackImage = <span class="hljs-keyword">this</span>.getFSImage().hasRollbackFSImage();<span class="hljs-comment">// 有可以回滚的images就返回true</span>
+        rollingUpgradeInfo.setCreatedRollbackImages(hasRollbackImage);
+      }
+      <span class="hljs-keyword">return</span> rollingUpgradeInfo;
+    } <span class="hljs-keyword">finally</span> {
+      readUnlock();
+    }
+  }</code></pre>
+
+
+
+<h3 id="升级active-and-stanby-nns">升级Active and Stanby NNs</h3>
+
+<ol>
+<li>关闭NN2的服务，升级NN2(如果是tar包安装 升级就是换目录。把hadoop目录软连成高版本目录)</li>
+<li><p>开启 NN2 as standby with the <code>hdfs namenode -rollingUpgrade started</code> .</p>
+
+<blockquote>
+  <p>ps：看了代码 这个hdfs name -rollingUpgrade started 和 hdfs name  一样 (CDH 5.3.3)除了日志处理部分，而且启动的时候 建议添加 nohup &amp; 后台执行</p>
+</blockquote></li>
+<li><p>Failover 切换，NN2:active NN1：standby (hdfs  haadmin -failover nn1 nn2)</p></li>
+<li>关闭NN1上 namenode 服务 ：<code>hadoop-daemon.sh stop namenode</code></li>
+<li>升级namenode节点 hadoop tar</li>
+<li>开启 NN1 as standby with the <code>hdfs namenode -rollingUpgrade started</code> option.</li>
+</ol>
+
+<h3 id="升级datanode-节点">升级Datanode 节点</h3>
+
+<p>选择一些指定的datanode节点（同一机架的） <br>
+1. 运行 <code>hdfs dfsadmin -shutdownDatanode &lt;DATANODE_HOST:IPC_PORT&gt; upgrade</code>   关闭datanode <br>
+2. 运行<code>hdfs dfsadmin -getDatanodeInfo &lt;DATANODE_HOST:IPC_PORT&gt;</code> 查看状态 <br>
+3.  升级并且重启datanode <br>
+4. 在所有的datanode上执行123步骤 全部更新完毕</p>
+
+
+
+<h3 id="结束rolling-update">结束rolling update</h3>
+
+<p>在主节点 运行 <br>
+<code>hdfs dfsadmin -rollingUpgrade finalize</code></p>
+
+
+
+<h3 id="注意事项">注意事项</h3>
+
+<p>1：jn和nn和dn最好是分离没有交集，不在同一台机器上运行 <br>
+2：备份好namenode.dir 下面的所有editslog和fsimages 以备后患 <br>
+3：执行回滚或者降级参考一下流程：</p>
+
+<p><a href="https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HdfsRollingUpgrade.html#namenode_-rollingUpgrade" rel="nofollow">https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HdfsRollingUpgrade.html#namenode_-rollingUpgrade</a></p>
+
+
+
+<h3 id="downgrade-without-downtime">Downgrade without Downtime</h3>
+
+<p>In a HA cluster, when a rolling upgrade from an old software release to a new software release is in progress, it is possible to downgrade, in a rolling fashion, the upgraded machines back to the old software release. Same as before, suppose NN1 and NN2 are respectively in active and standby states. Below are the steps for rolling downgrade:</p>
+
+<p>Downgrade DNs <br>
+Choose a small subset of datanodes (e.g. all datanodes under a particular rack). <br>
+Run “hdfs dfsadmin -shutdownDatanode  upgrade” to shutdown one of the chosen datanodes. <br>
+Run “hdfs dfsadmin -getDatanodeInfo ” to check and wait for the datanode to shutdown. <br>
+Downgrade and restart the datanode. <br>
+Perform the above steps for all the chosen datanodes in the subset in parallel. <br>
+Repeat the above steps until all upgraded datanodes in the cluster are downgraded. <br>
+Downgrade Active and Standby NNs <br>
+Shutdown and downgrade NN2. <br>
+Start NN2 as standby normally. (Note that it is incorrect to use the “-rollingUpgrade downgrade” option here.) <br>
+Failover from NN1 to NN2 so that NN2 becomes active and NN1 becomes standby. <br>
+Shutdown and upgrade NN1. <br>
+Start NN1 as standby normally. (Note that it is incorrect to use the “-rollingUpgrade downgrade” option here.) <br>
+Finalize Rolling Downgrade <br>
+Run “hdfs dfsadmin -rollingUpgrade finalize” to finalize the rolling downgrade. <br>
+Note that the datanodes must be downgraded before downgrading the namenodes since protocols may be changed in a backward compatible manner but not forward compatible, i.e. old datanodes can talk to the new namenodes but not vice versa.</p>
+
+
+
+<h3 id="downgrade-with-downtime">Downgrade with Downtime</h3>
+
+<p>Administrator may choose to first shutdown the cluster and then downgrade it. The following are the steps:</p>
+
+<p>Shutdown all NNs and DNs. <br>
+Restore the pre-upgrade release in all machines. <br>
+Start NNs with the “-rollingUpgrade downgrade” option. <br>
+Start DNs normally.</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

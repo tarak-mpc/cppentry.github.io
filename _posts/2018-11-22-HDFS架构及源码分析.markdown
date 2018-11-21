@@ -1,0 +1,305 @@
+---
+layout:     post
+title:      HDFS架构及源码分析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/xuyouchang/article/details/83309850				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1><a id="HDFS_0"></a>HDFS</h1>
+<blockquote>
+<p>本文主要介绍hadoop2.x版本，分析代码主要位于hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server下namenode、datanode与protocol。</p>
+</blockquote>
+<p>目录：</p>
+<ol>
+<li>HDFS介绍</li>
+<li>HDFS架构</li>
+<li>HDFS读写过程</li>
+<li>HDFS读写源码解析</li>
+</ol>
+<h2><a id="HDFS_9"></a>HDFS介绍</h2>
+<blockquote>
+<p>参考：<a href="https://hadoop.apache.org/docs/r1.0.4/cn/hdfs_design.html" rel="nofollow">https://hadoop.apache.org/docs/r1.0.4/cn/hdfs_design.html</a></p>
+</blockquote>
+<p>hdfs是适用于通用硬件上的分布式文件系统，具有高容错性与高吞吐量等特点，其设计理念如下：</p>
+<ol>
+<li><strong>硬件错误</strong>：硬件错误是常态而不是异常。HDFS可能由成百上千的服务器所构成，每个服务器上存储着文件系统的部分数据。我们面对的现实是构成系统的组件数目是巨大的，而且任一组件都有可能失效，这意味着总是有一部分HDFS的组件是不工作的。因此错误检测和快速、自动的恢复是HDFS最核心的架构目标。</li>
+<li><strong>流式数据访问</strong>：运行在HDFS上的应用和普通的应用不同，需要流式访问它们的数据集。HDFS的设计中更多的考虑到了数据批处理，而不是用户交互处理。比之数据访问的低延迟问题，更关键的在于数据访问的高吞吐量。POSIX标准设置的很多硬性约束对HDFS应用系统不是必需的。为了提高数据的吞吐量，在一些关键方面对POSIX的语义做了一些修改。</li>
+<li><strong>大规模数据集</strong>：运行在HDFS上展到数百个节点。一个单一的HDFS实例应该能支撑数以千万计的文件。</li>
+<li><strong>简单的一致性模型</strong>：HDFS应用需要一个“一次写入多次读取”的文件访问模型。一个文件经过创建、写入和关闭之后就不需要改变。这一假设简化了数据一致性问题，并且使高吞吐量的数据访问成为可能。Map/Reduce应用或者网络爬虫应用都非常适合这个模型。目前还有计划在将来扩充这个模型，使之支持文件的附加写操作。</li>
+<li><strong>移动计算比移动数据更划算</strong>:一个应用请求的计算，离它操作的数据越近就越高效，在数据达到海量级别的时候更是如此。因为这样就能降低网络阻塞的影响，提高系统数据的吞吐量。将计算移动到数据附近，比之将数据移动到应用所在显然更好。HDFS为应用提供了将它们自己移动到数据附近的接口。</li>
+<li><strong>异构软硬件平台间的可移植性</strong>:HDFS在设计的时候就考虑到平台的可移植性。这种特性方便了HDFS作为大规模数据应用平台的推广。</li>
+</ol>
+<h2><a id="HDFS_20"></a>HDFS架构</h2>
+<blockquote>
+<p>来源：<a href="https://juejin.im/post/5a656c346fb9a01cb3164b44" rel="nofollow">https://juejin.im/post/5a656c346fb9a01cb3164b44</a><br>
+<img src="https://user-gold-cdn.xitu.io/2018/1/22/1611c2ea93d19916?imageView2/0/w/1280/h/960/format/webp/ignore-error/1" alt="HDFS"></p>
+</blockquote>
+<p>hdfs集群包含两类角色，一种称作namenode，一种称作datanode，namenode用于记录数据的元数据，元数据主要包含两类文件fsimage与editlog;</p>
+<ul>
+<li>fsimage ：保存了最新的元数据检查点，包含了整个HDFS文件系统的所有目录和文件的信息。对于文件来说包括了数据块描述信息、修改时间、访问时间等；对于目录来说包括修改时间、访问权限控制信息(目录所属用户，所在组)等。简单的说，Fsimage就是在某一时刻，整个hdfs 的快照，就是这个时刻hdfs上所有的文件块和目录，分别的状态，位于哪些个datanode，各自的权限，各自的副本个数等。注意：Block的位置信息不会保存到fsimage，Block保存在哪个DataNode（由DataNode启动时上报）。</li>
+<li>editlog ：主要是在NameNode已经启动情况下对HDFS进行的各种更新操作进行记录，HDFS客户端执行所有的写操作都会被记录到editlog中。</li>
+</ul>
+<p>datanode保存了实际数据，数据分为两类,一类为block文件是数据本身，另一类为block.meta文件包含CRC校验和等block元信息。<br>
+相比与hadoop1.x版本2.x版本多了HA与Federation概念，主要用于解决1.x版本时namenode单点故障问题，原来的namenode以namespace服务的形式对外服务，包含active namenode与standby namenode，active namenode为正在作用的namenode，standby namenode为备用。Federation则将多个集群的视图合并为一个，方便用户的使用。</p>
+<h2><a id="HDFS_30"></a>HDFS读写过程</h2>
+<blockquote>
+<p>参考：<a href="https://blog.csdn.net/gaijianwei/article/details/45918337" rel="nofollow">https://blog.csdn.net/gaijianwei/article/details/45918337</a><br>
+<a href="https://www.cnblogs.com/andy6/p/7353092.html" rel="nofollow">https://www.cnblogs.com/andy6/p/7353092.html</a></p>
+</blockquote>
+<p><strong>读取过程</strong><br>
+<img src="https://user-images.githubusercontent.com/18415138/45750074-541e4980-bc40-11e8-83a2-092daff1bfd0.png" alt="read"><br>
+HDFS Client通过请求namenode获得数据的元数据，如文件位置、文件大小、修改时间、访问权限等，再根据数据块所在数据节点的距离进行读取，从近到远依次读取。</p>
+<p><strong>写入过程</strong><br>
+<img src="https://user-images.githubusercontent.com/18415138/45750121-7d3eda00-bc40-11e8-9632-a22d51c2ad2e.png" alt="write"></p>
+<p>HDFS Client向namenode发出写入请求，namenode经过权限等检查后为写入创建位置等元数据并返回给Client，Client根据信息向datanode写入数据，数据经过分块后同时向不同的datanode写入，相同数据块的复制则是在不同的datanode建进行。</p>
+<h2><a id="HDFS_43"></a>HDFS写入源码解析</h2>
+<blockquote>
+<p>源码版本为2.7.3</p>
+</blockquote>
+<p>由HDFS的写入过程可知，写入过程分为：1.client向namenode发出写请求，namenode创建目录并将相关信息返回给client；2.client携带信息向datanode写入数据；3.datanode之间进行备份。下面依次分析这一过程：</p>
+<h3><a id="namenode_48"></a>namenode创建目录</h3>
+<blockquote>
+<p>参考：<a href="https://juejin.im/post/5aa5dc9df265da239147beff" rel="nofollow">https://juejin.im/post/5aa5dc9df265da239147beff</a> ,版本上略有差异。</p>
+</blockquote>
+<p>namenode创建目录的流程：1.客户端通过ClientProtocol协议向RpcServer发起创建目录的RPC请求；2.RpcServer调用FSNamesystem进行相关检查；3.FSNamesystem调用FSDirMkdirOp中的相关方法在目录树中创建目标目录，并通过日志系统备份文件系统的修改；4.RpcServer将RPC响应返回给客户端。</p>
+<p><strong>RpcServer</strong></p>
+<pre><code class="prism language-java"><span class="token comment">//ClientProtocol.mkdirs();</span>
+  <span class="token annotation punctuation">@Idempotent</span>
+  <span class="token keyword">boolean</span> <span class="token function">mkdirs</span><span class="token punctuation">(</span>String src<span class="token punctuation">,</span> FsPermission masked<span class="token punctuation">,</span> <span class="token keyword">boolean</span> createParent<span class="token punctuation">)</span>
+      <span class="token keyword">throws</span> IOException<span class="token punctuation">;</span>
+
+<span class="token comment">//NamenodeProtocols extends ClientProtocol</span>
+<span class="token comment">//NameNodeRpcServer implements NamenodeProtocols</span>
+<span class="token comment">//NameNodeRpcServer.mkdirs()</span>
+ <span class="token keyword">protected</span> <span class="token keyword">final</span> FSNamesystem namesystem<span class="token punctuation">;</span>
+
+ <span class="token annotation punctuation">@Override</span> 
+  <span class="token keyword">public</span> <span class="token keyword">boolean</span> <span class="token function">mkdirs</span><span class="token punctuation">(</span>String src<span class="token punctuation">,</span> FsPermission masked<span class="token punctuation">,</span> <span class="token keyword">boolean</span> createParent<span class="token punctuation">)</span>
+      <span class="token keyword">throws</span> IOException <span class="token punctuation">{</span>
+    <span class="token function">checkNNStartup</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token keyword">if</span><span class="token punctuation">(</span>stateChangeLog<span class="token punctuation">.</span><span class="token function">isDebugEnabled</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      stateChangeLog<span class="token punctuation">.</span><span class="token function">debug</span><span class="token punctuation">(</span><span class="token string">"*DIR* NameNode.mkdirs: "</span> <span class="token operator">+</span> src<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+    <span class="token comment">//NameNodeRpcServer仅做一些路径的简单检查</span>
+    <span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span><span class="token function">checkPathLength</span><span class="token punctuation">(</span>src<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">IOException</span><span class="token punctuation">(</span><span class="token string">"mkdirs: Pathname too long.  Limit "</span> 
+                            <span class="token operator">+</span> MAX_PATH_LENGTH <span class="token operator">+</span> <span class="token string">" characters, "</span> <span class="token operator">+</span> MAX_PATH_DEPTH <span class="token operator">+</span> <span class="token string">" levels."</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+    <span class="token keyword">return</span> namesystem<span class="token punctuation">.</span><span class="token function">mkdirs</span><span class="token punctuation">(</span>src<span class="token punctuation">,</span>
+        <span class="token keyword">new</span> <span class="token class-name">PermissionStatus</span><span class="token punctuation">(</span><span class="token function">getRemoteUser</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">.</span><span class="token function">getShortUserName</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+            null<span class="token punctuation">,</span> masked<span class="token punctuation">)</span><span class="token punctuation">,</span> createParent<span class="token punctuation">)</span><span class="token punctuation">;</span>
+  <span class="token punctuation">}</span>
+</code></pre>
+<p><strong>FSNamesystem</strong></p>
+<pre><code class="prism language-java"><span class="token comment">//FSNamesystem.mkdirs()进行了更细致的权限检查，并调用FSDirMkdirOp.mkdirs进行目录创建</span>
+<span class="token comment">/**
+   * Create all the necessary directories
+   */</span>
+  <span class="token keyword">boolean</span> <span class="token function">mkdirs</span><span class="token punctuation">(</span>String src<span class="token punctuation">,</span> PermissionStatus permissions<span class="token punctuation">,</span>
+      <span class="token keyword">boolean</span> createParent<span class="token punctuation">)</span> <span class="token keyword">throws</span> IOException <span class="token punctuation">{</span>
+    <span class="token keyword">final</span> String operationName <span class="token operator">=</span> <span class="token string">"mkdirs"</span><span class="token punctuation">;</span>
+    FileStatus auditStat <span class="token operator">=</span> null<span class="token punctuation">;</span>
+    <span class="token function">checkOperation</span><span class="token punctuation">(</span>OperationCategory<span class="token punctuation">.</span>WRITE<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token keyword">final</span> FSPermissionChecker pc <span class="token operator">=</span> <span class="token function">getPermissionChecker</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token function">writeLock</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token keyword">try</span> <span class="token punctuation">{</span>
+      <span class="token function">checkOperation</span><span class="token punctuation">(</span>OperationCategory<span class="token punctuation">.</span>WRITE<span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token function">checkNameNodeSafeMode</span><span class="token punctuation">(</span><span class="token string">"Cannot create directory "</span> <span class="token operator">+</span> src<span class="token punctuation">)</span><span class="token punctuation">;</span>
+      auditStat <span class="token operator">=</span> FSDirMkdirOp<span class="token punctuation">.</span><span class="token function">mkdirs</span><span class="token punctuation">(</span><span class="token keyword">this</span><span class="token punctuation">,</span> pc<span class="token punctuation">,</span> src<span class="token punctuation">,</span> permissions<span class="token punctuation">,</span>
+          createParent<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">AccessControlException</span> e<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token function">logAuditEvent</span><span class="token punctuation">(</span><span class="token boolean">false</span><span class="token punctuation">,</span> operationName<span class="token punctuation">,</span> src<span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword">throw</span> e<span class="token punctuation">;</span>
+    <span class="token punctuation">}</span> <span class="token keyword">finally</span> <span class="token punctuation">{</span>
+      <span class="token function">writeUnlock</span><span class="token punctuation">(</span>operationName<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+    <span class="token function">getEditLog</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">.</span><span class="token function">logSync</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token function">logAuditEvent</span><span class="token punctuation">(</span><span class="token boolean">true</span><span class="token punctuation">,</span> operationName<span class="token punctuation">,</span> src<span class="token punctuation">,</span> null<span class="token punctuation">,</span> auditStat<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token keyword">return</span> <span class="token boolean">true</span><span class="token punctuation">;</span>
+  <span class="token punctuation">}</span>
+
+</code></pre>
+<p><strong>FSDirMkdirOp</strong></p>
+<pre><code class="prism language-java"><span class="token keyword">static</span> FileStatus <span class="token function">mkdirs</span><span class="token punctuation">(</span>FSNamesystem fsn<span class="token punctuation">,</span> FSPermissionChecker pc<span class="token punctuation">,</span> String src<span class="token punctuation">,</span>
+      PermissionStatus permissions<span class="token punctuation">,</span> <span class="token keyword">boolean</span> createParent<span class="token punctuation">)</span> <span class="token keyword">throws</span> IOException <span class="token punctuation">{</span>
+    FSDirectory fsd <span class="token operator">=</span> fsn<span class="token punctuation">.</span><span class="token function">getFSDirectory</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token keyword">if</span><span class="token punctuation">(</span>NameNode<span class="token punctuation">.</span>stateChangeLog<span class="token punctuation">.</span><span class="token function">isDebugEnabled</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      NameNode<span class="token punctuation">.</span>stateChangeLog<span class="token punctuation">.</span><span class="token function">debug</span><span class="token punctuation">(</span><span class="token string">"DIR* NameSystem.mkdirs: "</span> <span class="token operator">+</span> src<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+    fsd<span class="token punctuation">.</span><span class="token function">writeLock</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token keyword">try</span> <span class="token punctuation">{</span>
+      INodesInPath iip <span class="token operator">=</span> fsd<span class="token punctuation">.</span><span class="token function">resolvePath</span><span class="token punctuation">(</span>pc<span class="token punctuation">,</span> src<span class="token punctuation">,</span> DirOp<span class="token punctuation">.</span>CREATE<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+      <span class="token keyword">final</span> INode lastINode <span class="token operator">=</span> iip<span class="token punctuation">.</span><span class="token function">getLastINode</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword">if</span> <span class="token punctuation">(</span>lastINode <span class="token operator">!=</span> null <span class="token operator">&amp;&amp;</span> lastINode<span class="token punctuation">.</span><span class="token function">isFile</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">FileAlreadyExistsException</span><span class="token punctuation">(</span><span class="token string">"Path is not a directory: "</span> <span class="token operator">+</span> src<span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span>
+
+      <span class="token keyword">if</span> <span class="token punctuation">(</span>lastINode <span class="token operator">==</span> null<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>fsd<span class="token punctuation">.</span><span class="token function">isPermissionEnabled</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          fsd<span class="token punctuation">.</span><span class="token function">checkAncestorAccess</span><span class="token punctuation">(</span>pc<span class="token punctuation">,</span> iip<span class="token punctuation">,</span> FsAction<span class="token punctuation">.</span>WRITE<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+
+        <span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>createParent<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          fsd<span class="token punctuation">.</span><span class="token function">verifyParentDir</span><span class="token punctuation">(</span>iip<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+
+        <span class="token comment">// validate that we have enough inodes. This is, at best, a</span>
+        <span class="token comment">// heuristic because the mkdirs() operation might need to</span>
+        <span class="token comment">// create multiple inodes.</span>
+        fsn<span class="token punctuation">.</span><span class="token function">checkFsObjectLimit</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+        <span class="token comment">// Ensure that the user can traversal the path by adding implicit</span>
+        <span class="token comment">// u+wx permission to all ancestor directories.</span>
+        INodesInPath existing <span class="token operator">=</span>
+            <span class="token function">createParentDirectories</span><span class="token punctuation">(</span>fsd<span class="token punctuation">,</span> iip<span class="token punctuation">,</span> permissions<span class="token punctuation">,</span> <span class="token boolean">false</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>existing <span class="token operator">!=</span> null<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          existing <span class="token operator">=</span> <span class="token function">createSingleDirectory</span><span class="token punctuation">(</span>
+              fsd<span class="token punctuation">,</span> existing<span class="token punctuation">,</span> iip<span class="token punctuation">.</span><span class="token function">getLastLocalName</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span> permissions<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>existing <span class="token operator">==</span> null<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          <span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">IOException</span><span class="token punctuation">(</span><span class="token string">"Failed to create directory: "</span> <span class="token operator">+</span> src<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+        iip <span class="token operator">=</span> existing<span class="token punctuation">;</span>
+      <span class="token punctuation">}</span>
+      <span class="token keyword">return</span> fsd<span class="token punctuation">.</span><span class="token function">getAuditFileInfo</span><span class="token punctuation">(</span>iip<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span> <span class="token keyword">finally</span> <span class="token punctuation">{</span>
+      fsd<span class="token punctuation">.</span><span class="token function">writeUnlock</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+  <span class="token punctuation">}</span>
+</code></pre>
+<h3><a id="datanode_164"></a>datanode数据写入</h3>
+<blockquote>
+<p>参考：<a href="https://juejin.im/post/5a77b948518825365226d992#heading-12" rel="nofollow">https://juejin.im/post/5a77b948518825365226d992#heading-12</a></p>
+</blockquote>
+<p><em>DataTransferProtocol</em>用于整个管道中的客户端、数据节点间的流式通信，其中，<em>DataTransferProtocol.writeBlock()<em>负责完成写数据块的工作,datanode中用于存储的主要有线程</em>DataXceiverServer</em>、<em>DataXceiver</em>与<em>BPServiceActor</em>,DataXceiver主要用于数据的接收。</p>
+<p><strong>DataTransferProtocol.writeBlock()</strong></p>
+<pre><code class="prism language-java"><span class="token keyword">void</span> <span class="token function">writeBlock</span><span class="token punctuation">(</span><span class="token keyword">final</span> ExtendedBlock blk<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> StorageType storageType<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> Token<span class="token generics function"><span class="token punctuation">&lt;</span>BlockTokenIdentifier<span class="token punctuation">&gt;</span></span> blockToken<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> String clientName<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> DatanodeInfo<span class="token punctuation">[</span><span class="token punctuation">]</span> targets<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> StorageType<span class="token punctuation">[</span><span class="token punctuation">]</span> targetStorageTypes<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> DatanodeInfo source<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> BlockConstructionStage stage<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">int</span> pipelineSize<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">long</span> minBytesRcvd<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">long</span> maxBytesRcvd<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">long</span> latestGenerationStamp<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> DataChecksum requestedChecksum<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> CachingStrategy cachingStrategy<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">boolean</span> allowLazyPersist<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">boolean</span> pinning<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">boolean</span><span class="token punctuation">[</span><span class="token punctuation">]</span> targetPinnings<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> String storageID<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> String<span class="token punctuation">[</span><span class="token punctuation">]</span> targetStorageIDs<span class="token punctuation">)</span> <span class="token keyword">throws</span> IOException<span class="token punctuation">;</span>
+</code></pre>
+<p><strong>DataXceiverServer</strong><br>
+<em>DataTransferProtocol.writeBlock()<em>由</em>DataXceiver</em>实现，而DataXceiver线程由DataXceiverServer线程创建。</p>
+<pre><code class="prism language-java"> <span class="token annotation punctuation">@Override</span>
+  <span class="token keyword">public</span> <span class="token keyword">void</span> <span class="token function">run</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+    Peer peer <span class="token operator">=</span> null<span class="token punctuation">;</span>
+    <span class="token keyword">while</span> <span class="token punctuation">(</span>datanode<span class="token punctuation">.</span>shouldRun <span class="token operator">&amp;&amp;</span> <span class="token operator">!</span>datanode<span class="token punctuation">.</span>shutdownForUpgrade<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">try</span> <span class="token punctuation">{</span>
+        peer <span class="token operator">=</span> peerServer<span class="token punctuation">.</span><span class="token function">accept</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+        <span class="token comment">// Make sure the xceiver count is not exceeded</span>
+        <span class="token keyword">int</span> curXceiverCount <span class="token operator">=</span> datanode<span class="token punctuation">.</span><span class="token function">getXceiverCount</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>curXceiverCount <span class="token operator">&gt;</span> maxXceiverCount<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          <span class="token keyword">throw</span> <span class="token keyword">new</span> <span class="token class-name">IOException</span><span class="token punctuation">(</span><span class="token string">"Xceiver count "</span> <span class="token operator">+</span> curXceiverCount
+              <span class="token operator">+</span> <span class="token string">" exceeds the limit of concurrent xcievers: "</span>
+              <span class="token operator">+</span> maxXceiverCount<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+        <span class="token comment">//创建DataXceiver进程</span>
+        <span class="token keyword">new</span> <span class="token class-name">Daemon</span><span class="token punctuation">(</span>datanode<span class="token punctuation">.</span>threadGroup<span class="token punctuation">,</span>
+            DataXceiver<span class="token punctuation">.</span><span class="token function">create</span><span class="token punctuation">(</span>peer<span class="token punctuation">,</span> datanode<span class="token punctuation">,</span> <span class="token keyword">this</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+            <span class="token punctuation">.</span><span class="token function">start</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">SocketTimeoutException</span> ignored<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token comment">// wake up to see if should continue to run</span>
+      <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">AsynchronousCloseException</span> ace<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token comment">// another thread closed our listener socket - that's expected during shutdown,</span>
+        <span class="token comment">// but not in other circumstances</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>datanode<span class="token punctuation">.</span>shouldRun <span class="token operator">&amp;&amp;</span> <span class="token operator">!</span>datanode<span class="token punctuation">.</span>shutdownForUpgrade<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          LOG<span class="token punctuation">.</span><span class="token function">warn</span><span class="token punctuation">(</span>datanode<span class="token punctuation">.</span><span class="token function">getDisplayName</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token operator">+</span> <span class="token string">":DataXceiverServer: "</span><span class="token punctuation">,</span> ace<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+      <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">IOException</span> ie<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        IOUtils<span class="token punctuation">.</span><span class="token function">cleanup</span><span class="token punctuation">(</span>null<span class="token punctuation">,</span> peer<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        LOG<span class="token punctuation">.</span><span class="token function">warn</span><span class="token punctuation">(</span>datanode<span class="token punctuation">.</span><span class="token function">getDisplayName</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token operator">+</span> <span class="token string">":DataXceiverServer: "</span><span class="token punctuation">,</span> ie<span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">OutOfMemoryError</span> ie<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        IOUtils<span class="token punctuation">.</span><span class="token function">cleanup</span><span class="token punctuation">(</span>null<span class="token punctuation">,</span> peer<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token comment">// DataNode can run out of memory if there is too many transfers.</span>
+        <span class="token comment">// Log the event, Sleep for 30 seconds, other transfers may complete by</span>
+        <span class="token comment">// then.</span>
+        LOG<span class="token punctuation">.</span><span class="token function">error</span><span class="token punctuation">(</span><span class="token string">"DataNode is out of memory. Will retry in 30 seconds."</span><span class="token punctuation">,</span> ie<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">try</span> <span class="token punctuation">{</span>
+          Thread<span class="token punctuation">.</span><span class="token function">sleep</span><span class="token punctuation">(</span><span class="token number">30</span> <span class="token operator">*</span> <span class="token number">1000</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">InterruptedException</span> e<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          <span class="token comment">// ignore</span>
+        <span class="token punctuation">}</span>
+      <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">Throwable</span> te<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        LOG<span class="token punctuation">.</span><span class="token function">error</span><span class="token punctuation">(</span>datanode<span class="token punctuation">.</span><span class="token function">getDisplayName</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+            <span class="token operator">+</span> <span class="token string">":DataXceiverServer: Exiting due to: "</span><span class="token punctuation">,</span> te<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        datanode<span class="token punctuation">.</span>shouldRun <span class="token operator">=</span> <span class="token boolean">false</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">// Close the server to stop reception of more requests.</span>
+    <span class="token keyword">try</span> <span class="token punctuation">{</span>
+      peerServer<span class="token punctuation">.</span><span class="token function">close</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      closed <span class="token operator">=</span> <span class="token boolean">true</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">IOException</span> ie<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      LOG<span class="token punctuation">.</span><span class="token function">warn</span><span class="token punctuation">(</span>datanode<span class="token punctuation">.</span><span class="token function">getDisplayName</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+          <span class="token operator">+</span> <span class="token string">" :DataXceiverServer: close exception"</span><span class="token punctuation">,</span> ie<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">// if in restart prep stage, notify peers before closing them.</span>
+    <span class="token keyword">if</span> <span class="token punctuation">(</span>datanode<span class="token punctuation">.</span>shutdownForUpgrade<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token function">restartNotifyPeers</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token comment">// Each thread needs some time to process it. If a thread needs</span>
+      <span class="token comment">// to send an OOB message to the client, but blocked on network for</span>
+      <span class="token comment">// long time, we need to force its termination.</span>
+      LOG<span class="token punctuation">.</span><span class="token function">info</span><span class="token punctuation">(</span><span class="token string">"Shutting down DataXceiverServer before restart"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token comment">// Allow roughly up to 2 seconds.</span>
+      <span class="token keyword">for</span> <span class="token punctuation">(</span><span class="token keyword">int</span> i <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">;</span> <span class="token function">getNumPeers</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token operator">&gt;</span> <span class="token number">0</span> <span class="token operator">&amp;&amp;</span> i <span class="token operator">&lt;</span> <span class="token number">10</span><span class="token punctuation">;</span> i<span class="token operator">++</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">try</span> <span class="token punctuation">{</span>
+          Thread<span class="token punctuation">.</span><span class="token function">sleep</span><span class="token punctuation">(</span><span class="token number">200</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span> <span class="token keyword">catch</span> <span class="token punctuation">(</span><span class="token class-name">InterruptedException</span> e<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          <span class="token comment">// ignore</span>
+        <span class="token punctuation">}</span>
+      <span class="token punctuation">}</span>
+    <span class="token punctuation">}</span>
+    <span class="token comment">// Close all peers.</span>
+    <span class="token function">closeAllPeers</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+  <span class="token punctuation">}</span>
+</code></pre>
+<p><strong>DataXceiver</strong><br>
+DataXceiver.write主要分为两个过程，准备接收数据与接收数据。</p>
+<pre><code class="prism language-java"><span class="token comment">//准备数据接收由BlockReceiver的构造函数完成，主要进行参数检查与设置以及创建临时文件</span>
+ <span class="token function">BlockReceiver</span><span class="token punctuation">(</span><span class="token keyword">final</span> ExtendedBlock block<span class="token punctuation">,</span> <span class="token keyword">final</span> StorageType storageType<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> DataInputStream in<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> String inAddr<span class="token punctuation">,</span> <span class="token keyword">final</span> String myAddr<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> BlockConstructionStage stage<span class="token punctuation">,</span> 
+      <span class="token keyword">final</span> <span class="token keyword">long</span> newGs<span class="token punctuation">,</span> <span class="token keyword">final</span> <span class="token keyword">long</span> minBytesRcvd<span class="token punctuation">,</span> <span class="token keyword">final</span> <span class="token keyword">long</span> maxBytesRcvd<span class="token punctuation">,</span> 
+      <span class="token keyword">final</span> String clientname<span class="token punctuation">,</span> <span class="token keyword">final</span> DatanodeInfo srcDataNode<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> DataNode datanode<span class="token punctuation">,</span> DataChecksum requestedChecksum<span class="token punctuation">,</span>
+      CachingStrategy cachingStrategy<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">boolean</span> allowLazyPersist<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> <span class="token keyword">boolean</span> pinning<span class="token punctuation">,</span>
+      <span class="token keyword">final</span> String storageId<span class="token punctuation">)</span>
+
+<span class="token comment">//接收数据由BlockReceiver.receiveBlock()完成，主要完成同步接收packet，写block文件和meta文件，发送ack以及数据复制</span>
+<span class="token keyword">void</span> <span class="token function">receiveBlock</span><span class="token punctuation">(</span>
+      DataOutputStream mirrOut<span class="token punctuation">,</span> <span class="token comment">// output to next datanode</span>
+      DataInputStream mirrIn<span class="token punctuation">,</span>   <span class="token comment">// input from next datanode</span>
+      DataOutputStream replyOut<span class="token punctuation">,</span>  <span class="token comment">// output to previous datanode</span>
+      String mirrAddr<span class="token punctuation">,</span> DataTransferThrottler throttlerArg<span class="token punctuation">,</span>
+      DatanodeInfo<span class="token punctuation">[</span><span class="token punctuation">]</span> downstreams<span class="token punctuation">,</span>
+      <span class="token keyword">boolean</span> isReplaceBlock<span class="token punctuation">)</span>
+</code></pre>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

@@ -1,0 +1,234 @@
+---
+layout:     post
+title:      HDFS用户手册[官方整理]
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="iteye-blog-content-contain" style="font-size:14px;">
+<p><strong>【HDFS User Guide(2.2)】</strong></p>
+<p> </p>
+<p><strong>一、Overview</strong></p>
+<p>    HDFS是hadoop应用的核心存储引擎，其中HDFS集群包含2种节点，一种为管理文件系统metada的NameNode，另一种为存储实际数据的DataNodes。HDFS架构文档中会详细描述它们，这个用户手册主要介绍用户或者管理员如何操作HDFS；HDFS架构图中表名NameNode与DataNodes和Client交互，Client在创建、修改、读取文件之前与NameNode交互以获取文件的meatadata，此后Client直接与DataNodes交互进行实际数据操作。</p>
+<p>    1、 Hadoop，包括HDFS，可以在普通的商用硬件上良好的运行--存储数据和数据计算。它具有良好的容错能力，而且扩展简单。Mapreduce，作为hadoop的核心组成部分，它简单易用，适用与分布式应用中大数据的并行计算。</p>
+<p>    2、 HDFS高度可配置，同是hadoop(HDFS)默认配置即可适用于大部分场景，在超大集群环境中，通常需要一些调优(配置修改)。</p>
+<p>    3、 Hadoop本身基于java编写，它可以支持几乎所有的主流平台。</p>
+<p>    4、 Hadoop支持shell-like指令来与HDFS直接交互。例如通过“hdfs dfs -put”命令将本地文件发布到HDFS中。</p>
+<p>    5、 Namenode和Datanodes都内置了Web server，我们可以通过web UI来检测系统的状态。</p>
+<p>    6、 HDFS中增加了一些新的特性和改进点，例如：</p>
+<p>        A) 基于File的权限(permissions)和授权(authentication)</p>
+<p>        B) Rack-awareness，机架感知，通过将不同的DataNodes逻辑上按照机架归类，可以在数据存储更好的保证容错能力(replication策略)，已经在mapreduce任务调度时可以提供更好的本地性(data-locality)。</p>
+<p>        C) Safemode，安全模式，集群维护时的一种管理模式。</p>
+<p>        D) fsck：一个工具指令，可以很方便的查看集群中文件系统的健康状况，比如发现丢失的blocks或者文件等。"./hadoop fsck &lt;path&gt;"。</p>
+<p>        E) Rebalancer：如果DataNodes上数据分配不均衡(可能因为硬件设备调整，可能因为DataNode增减)，可以使用rebalancer工具重新让数据在多个DataNodes上分布均衡。</p>
+<p>        F) Upgrade：当软件需要升级时，可以使用内置升级工具来平滑升级软件系统(无数据丢失)，当升级失败时，也可以安全的rollback。</p>
+<p>        G) SecondaryNameNode(简称SNN)：辅助Namenode，避免Namenode单点；它间歇性的对namspace进行checkpoint，以确保Namenode上的Editlog文件个数和文件大小都处于一定的范围。[后期版本，将使用Checkpoint Node取代SNN，功能不变，集群中允许多个Checkpointer存在，它们可以并发的与NameNode通讯以及触发rollEditLog，不过任何时候只能有一个正在Checkpointing]（参见下文）</p>
+<p>        H) Backup node[HA模式下术语，即standy Namenode]：Checkpoint节点特性的扩展，它除了具有Checkpoint能力之外，还会把Namenode 的namespace备份在内存中，并实时的从Namenode节点上接受Edits流，并把它们应用在内存中，即它与Namenode中的namespace保持同步，我们可以认为这是真正意义上的“backup”。不过，目前一个Namenode只能有一个backup node注册，而且不能有额外的Checkpoint Node注册。（参见下文）</p>
+<p> </p>
+<p><strong>二、Web UI</strong></p>
+<p>    我们可以通过“http://name-node:50070”来查看集群的运行状况，以及查看HDFS文件系统存储情况，其配置信息可以在hdfs-site.xml中调整。</p>
+<p>    1、dfs.namenode.http-address：namenode的Web UI地址，当namenode进程启动后，会附带启动一个web server，默认端口为50070。这个Web，是最常用的，也可以通过此地址查看HDFS文件系统。</p>
+<p>    2、dfs.namenode.secondary.http-address：secondary namenode的Web UI地址，当secondaryNamenode启动时会附带启动一个web server，默认端口为50090；我们可以通过此地址查看其运行状况。</p>
+<p>    3、dfs.datanode.http.address：注意命名和前者不同，每个datanode在启动时都会附带启动一个web server，默认端口为50075，不常用。</p>
+<p> </p>
+<p><strong>三、Shell命令</strong></p>
+<p>    1、大部分有用的HDFS用户指令，都可以在“bin/hdfs dfs -help”中获得。</p>
+<p>    2、hadoop中dfsadmin指令，可以用来管理hdfs系统，“bin/hadoop dfsadmin -help”获得更多信息。如下为几个常用指令：</p>
+<p>         A) -report：输出hdfs文件系统中基础的统计信息，这个指令最终会展示集群中“live nodes列表”以及每个node上blocks个数、空间利用率等。</p>
+<p>        B) -safemode：管理员可以手动的让namenode进入、离开safemode，主要使用在系统维护、升级、故障解决的时候使用。</p>
+<p>        C) -finalizeUpgrade：升级结束后，移除上一版本的backup数据。</p>
+<p>        D) -refreshNodes：在修改hdfs-site.xml中“dfs.hosts”、“dfs.hosts.exclude”参数后，执行此命令，将会触发namenode重新加载上述两个配置，可以不用重启cluster即可使新的datanodes列表生效。</p>
+<p>        E) -printTopology：打印出rack Id与datanodes的关系列表。</p>
+<p> </p>
+<p><strong>四、Secondary NameNode</strong></p>
+<p>    Namenode将修改操作保存在本地的一个Edit log文件中，当Namenode启动时，它将从fsimage(即checkpoint文件)读取hdfs状态，然后读取Edit log并重放，把这些变更操作再次保存在内存中，然后将内存中数据再次写入新的fsimage文件，并创建一个空的新的Edits log，至此，namespace数据恢复工作结束。因为NameNode只会在启动时merge这些edits logs和fsimage，因此当cluster经过长时间的积累后，edit log可能非常庞大，将会导致namenode在下一次恢复时耗时较长。[如果多个Checkoint Node同时存在，只能有一个正在checkpointing，不过它们都可以出发rollEditLog操作，所以logs可能有多个]</p>
+<p> </p>
+<p>    SNN就是为了解决上述问题的，它间歇性的merge先前的fsimage和当前的edits log，并生成新的fsimage文件，以保持edits log的尺寸在一定的限制范围内。它通常和Namenode运行在不同的节点上，因为它和Namenode消耗同样的内存。</p>
+<p> </p>
+<p>    如下几个参数与Secondary NameNode有关：</p>
+<p>    1、dfs.namenode.checkpoint.period：Secondary Namenode进行Checkpoint操作的时间间隔，默认为1小时，单位：秒。写入操作频繁的集群，可以适当缩小此值。</p>
+<p>    2、dfs.namenode.checkpoint.txns：当namenode上uncheckpointed日志的条数达到此值时，将强制进行一次checkpoint，即使period时间没到；这是为了避免editlog日志文件过大。默认值为1亿。</p>
+<p>    3、dfs.namenode.checkpoint.check.period：检测时间间隔，上述1)、2)为触发Checkpoint的时机，那么Secondary Namenode将间歇性的检测Checkpoint是否满足了条件。默认为60，单位秒。</p>
+<p> </p>
+<p>    SNN将在“dfs.namenode.checkpoint.check.period”超时后，向Namenode发送一次RPC请求，获取到edits log的当前最大的txn id以及已经checkpointed 的txn id，通过这两个ID的差值，即可得知是否达到“dfs.namenode.checkpoint.txns”阀值，如果达到，则进行checkpoint。[参见NamenodeProtocol类]</p>
+<p> </p>
+<p>    1、当Checkpoint时机触发，SNN将会向Namenode发送RPC并要求其对edits log进行rolling，此时Namenode创建一个新的空的editlog文件，并将此后的修改操作的日志保存在新的editlog中。(#rollEditLog,#startCheckpoint)</p>
+<p>    2、SNN通过HTTP请求，从Namenode上“download” fsimage和edits log文件；此后再本地merge，生成新的fsimage文件。(dfs.namenode.http-address)</p>
+<p>    3、SNN通过HTTP请求，将fsimage文件“upload”到Namenode上。接收成功，则返回。</p>
+<p>    4、SNN向Namenode发送RPC请求，并告知“Checkpoint”结束，此后Namenode即可删除旧的fsimage和edits log文件。(endCheckpoint)</p>
+<p> </p>
+<p>    在SNN上生成的fsimage文件结构和Namenode上的一样，这样可以保证当Namenode在恢复数据时不会有任何障碍。</p>
+<p> </p>
+<p>    一个Namenode任何时刻只能有一个SNN注册，我们可以通过在hdfs-site.xml中配置“dfs.namenode.secondary.http-address”来指定SNN的地址和端口，默认端口为50090；如果没有指定地址，HDFS将会在Namenode节点上启动SNN进程；事实上HDFS总会启动一个SNN进程。</p>
+<p> </p>
+<pre><code class="language-java">&lt;!-- 需要配置文件中增加如下配置,实现SNN Checkpointing --&gt;
+&lt;property&gt;
+	&lt;name&gt;dfs.namenode.secondary.http-address&lt;/name&gt;
+	&lt;value&gt;secondary-namenode:50090&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+	&lt;name&gt;dfs.namenode.http-address&lt;/name&gt;
+	&lt;value&gt;namenode:50070&lt;/value&gt;
+&lt;/property&gt;</code></pre>
+<p> </p>
+<p>    可以通过sbin/start-dfs.sh来启动HDFS进程，在此命令中可以指定是否启动SNN；默认是启动一个SNN进程。当然你可以使用"hadoop-daemons.sh"来指定启动的节点(namenode,snn,datanode)，可以不启动SNN</p>
+<pre><code class="language-java">##启动snn
+$ $HADOOP_PREFIX/sbin/hadoop-daemon.sh --config $HADOOP_CONF_DIR --script hdfs start secondarynamenode
+
+##关闭snn
+$ $HADOOP_PREFIX/sbin/hadoop-daemon.sh --config $HADOOP_CONF_DIR --script hdfs stop secondarynamenode
+
+##如果使用默认配置文件，可以将"--config $HADOOP_CONF_DIR"省略
+##否则请指定目录</code></pre>
+<p>    也可以使用"bin/hdfs secondarynamenode"命令来启动SNN。</p>
+<p> </p>
+<p> </p>
+<p><strong>五、Backup Node(Standby Namenode)</strong></p>
+<p>    Backup Node具有SNN一样的Checkpoint功能，它可以完全实时备份namenode的状态，不过似乎它也不是严格意义上的Standby Namenode(无法自动切换)，我们可以看成是HDFS HA架构而且Backup节点通常被使用在HA架构中；Backup Node像Namenode一样，将namespace数据保存在内存中，并与Namenode的状态保持同步；Namenode接收到(持久化后)edit之后将会stream给backup Node，当然backup node也会持久化它，同时在内存中保存；由此可见Backup Node确实是Namespace的备份节点。</p>
+<p> </p>
+<p>    不过Backup Node不需要下载fsimage和edits log，因为它本身已经持有了和Namenode一样的数据，它只需要将内存中的namespace数据直接保存为fsimage即可，可见它相对于SNN而言，checkpoint是更加高效的。</p>
+<p> </p>
+<p>    Backup Node上，checkpoint的时机和配置项和SNN一样，当Checkpoint触发时，Namenode也需要对edits log进行rolling，只不过backup node不再发送HTTP下载fsimage和log文件，当checkpoint结束后，仍然会将fsimage发送给Namenode，此后它们都清除旧的文件。</p>
+<p> </p>
+<p>    不过需要注意，Namenode目前只能支持一个backup节点，此时SNN节点将无法注册。可以通过在hdfs-site.xml中配置“dfs.namenode.backup.address”、“dfs.namenode.backup.http-address”来设定backup节点；然后通过“bin/hdfs namenode -backup”启动backup节点。[默认backup节点不启动，启动前，请关闭SNN进程]。</p>
+<p>    Namenode失效恢复时，需要首先清空"dfs.namenode.edits.dir"和“dfs.name.checkpoint.dir”,并将Backup节点上对应目录下的文件，全部copy过来，然后在此Namenode上执行"bin/hadoop namenode -importCheckpoint"，然后才能启动Namenode。</p>
+<p> </p>
+<p>    到目前为止(2.2+)，在故障时，还不能做到Active NameNode与Backup能够自动角色切换，也不支持多个Backup节点，这些特性正在计划中。所以当Active Namenode失效后(主要是物理节点失效)，需要手动复制backup节点的数据到新的Namenode上。</p>
+<p> </p>
+<p>    Backup节点在启动前，需要像Namenode一样“hadoop namenode -format”,或者把namenode的"dfs.namenode.name.dir"下的数据copy到backup节点同等目录下；然后再backup节点中执行：</p>
+<pre><code class="language-java">&gt; bin/hadoop namenode -backup
+##脚本退出，将会停止backup，在HA架构中，无需使用此命令。standby Namenode将自动启动。</code></pre>
+<p>    此后backup 进程就运行起来了。集群中，需要额外的增加如下配置：</p>
+<pre><code class="language-java">&lt;property&gt;
+	&lt;name&gt;dfs.namenode.http-address&lt;/name&gt;
+	&lt;value&gt;namemode:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+	&lt;name&gt;dfs.namenode.backup.address&lt;/name&gt;
+	&lt;value&gt;backup-namenode:50100&lt;/value&gt;
+&lt;/property&gt;
+ &lt;property&gt;
+	&lt;name&gt;dfs.namenode.backup.http-address&lt;/name&gt;
+	&lt;value&gt;backup-namenode:50105&lt;/value&gt;
+&lt;/property&gt;</code></pre>
+<p> </p>
+<p>    Backup Namenode在HA中的其他特性，可以参见HDFS HA。</p>
+<p> </p>
+<p><strong>六、Import Checkpoint</strong></p>
+<p>    当Namenode物理故障，丢失了Checkpoint文件和edits log，如果有backup节点跟进，那么可以把backup节点的checkpoint和edits日志文件全部复制到Namenode同等目录下即可恢复(HA模式请参见其他文档)；如果没有backup节点，只有SNN(或者Checkpoint Node)，那么只能通过Checkpoint文件恢复最近的数据(缺失edits log，无法恢复Checkpoint之后的新数据)。目前而言(2.2+)，Namenode尚无法实现自动切换和namespace恢复(包括HA架构)。</p>
+<p>    1) 根据"dfs.namenode.name.dir"配置项，在Namenode上创建相应的空目录。</p>
+<p>    2) 根据"dfs.namenode.checkpoint.dir"配置项，把SNN上的最新的Checkpoint文件Copy过来--同等目录结构(选择txid最大的fsimage文件)；如果Namenode为新节点，还需要复制VERSION等其他文件(如果没有，则先进行namenode format)</p>
+<p>    3) 使用"hadoop namenode -importCheckpoint"命令恢复数据。</p>
+<p> </p>
+<p>    恢复过程，就是Namenode重放Checkpoint文件，然后生成namespace数据存储在“dfs.namenode.name.dir”中。</p>
+<p> </p>
+<p><strong>七、Rebalancer</strong></p>
+<p>    HDFS中数据或许分布并不是很均衡，比如集群中新增DataNodes，或者大量文件的删除。当需要放置新的blocks时，Namenode会考虑几个因素，来决定blocks最终放置在哪个Datanodes上。(参见Balancer类)</p>
+<p>    1) 正在进行writing操作的block所在的DataNode上，保留一个replicas。</p>
+<p>    2) 其中一个replicas分布在和1)不同的rack上的一个Datanode上。</p>
+<p>    3) 其中一个replicas分布在和1)相同rack的其他Datanode上。</p>
+<p>    4) 将HDFS 数据均匀的分布在集群中的所有Datanodes上。(rebalancer)</p>
+<p> </p>
+<p>    在符合replication个数的情况下，依次按照上述顺序分布replication。因为各种原因，block可能分布不均，这会带来很多潜在的问题，比如集群中nodes负载不均衡，mapreduce本地性降低等。</p>
+<p>    目前版本中，rebalance操作改为了手动，管理员手动触发可以通过如下命令reblance：</p>
+<p>    1) “bin/hdfs balancer”。</p>
+<p>    2) "bin/hadoop balancer [-threshod &lt;num&gt;] [-policy &lt;policy&gt;]"，指定threshod，值为1~100的数字，此值将会覆盖默认的threshold，默认值为10。</p>
+<p>    3) 上述两个指令为手动触发一次balancer，如果希望启动balancer特性，需要使用"sbin/start-balancer.sh"脚本。</p>
+<pre><code class="language-java">./start-balancer.sh [-policy &lt;policy&gt;] [-threshold &lt;num&gt;]</code></pre>
+<p>    其中policy合法值为"datanode"、"blockpool"，默认值为datanode，threshold默认值为10。通过此指令可以启动“reblancer”守护进程，此后集群将会自动reblancer。</p>
+<p>    同理，也可以使用hdfs的服务启动方式，来启动reblancer服务：</p>
+<pre><code class="language-java">./hdfs start balancer [-threashold &lt;num&gt;]</code></pre>
+<p> </p>
+<p>    threshold参数默认值为10，当集群中有些datanode上的空间利用率低于“under-capacity”或者高于“over-capacity”时，将会触发rebalancing；其中“under-capacity”为集群磁盘利用率平均值 - threshold，over-capacity为集群磁盘利用率平均值 + threshold；由此可见，当集群中datanodes磁盘利用率过低或者过高，都会导致blocks迁移。较小的threshold值会导致频繁的rebalancer，同时较小的磁盘容量和较大的block尺寸，不利于balancer；balancer时不会导致Namenode处于safemode模式，不过balancer过程将是很短暂的。</p>
+<p> </p>
+<p>    balancer只会对datanode上的blocks有效，而不会对namespace数据有效。在balancer结束后，namenode上的blocks位置信息将会被修改。</p>
+<p> </p>
+<p>    balancer过程就是直接将blocks文件在两个datanodes迁移，这是带宽消耗型操作。我们可以控制传输速率(重启生效)，对于大集群而言，我们可以适当调高此值(10m/s)：</p>
+<pre><code class="language-java">&lt;property&gt;
+	&lt;name&gt;dfs.datanode.balance.bandwidthPerSec&lt;/name&gt;
+	&lt;value&gt;1048576&lt;/value&gt;
+	&lt;description&gt;默认为1M/s,值越大传输效率越高&lt;/description&gt;
+&lt;/property&gt;</code></pre>
+<p>    blocks在两个节点间复制并移动，当新的节点接受成功后，更新Namenode中blocks状态，当这些balance的blocks在新的node上正常运行1.5个小时之后，旧节点即可删除旧的blocks文件。</p>
+<p> </p>
+<p><strong>八、Rack Awareness</strong></p>
+<p>    大规模集群中，通常有数个节点组成(10+)，为了提高集群容错能力，它们将部署在不同的rack上，尽管同一rack上的节点传输速率要优于跨rack传输。归结于hdfs replicas放置的策略，我们尽可能的对nodes进行跨rack部署，包括物理上，以及逻辑上的。</p>
+<p>    物理上跨rack，即将多个nodes分别部署在不同的机架上，它们连接在多个交换机上，这是提高容错能力的根本，尽管可能会偶尔导致mapreduce本地性不佳。逻辑上跨rack，就是在hadoop中人为的限定Datanodes所属的rack id，以辅助HDFS分布blocks；其中逻辑上区分rack，管理员总是需要提供的。</p>
+<p> </p>
+<p>    可以通过如下指令查看Datanodes的topology：</p>
+<pre><code class="language-java">&gt;./hadoop dfsadmin -printTopology
+...
+Rack: /default-rack
+   121.11.66.146:50010 
+   121.11.66.145:50010 </code></pre>
+<p>    默认所有的Datanodes均属于“/default-rack”；我们需要使用如下2个配置项，来实现自定义的rack分区：</p>
+<pre><code class="language-java">&lt;property&gt;
+	&lt;name&gt;net.topology.node.switch.mapping.impl&lt;/name&gt;
+	&lt;value&gt;org.apache.hadoop.net.ScriptBasedMapping&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+	&lt;name&gt;net.topology.script.file.name&lt;/name&gt;
+	&lt;value&gt;${$HADOOP_CONF_DIR}/rack-script.sh&lt;/value&gt;
+&lt;/property&gt;</code></pre>
+<p>    其中"net.topology.node.switch.mapping.impl"默认为ScriptBasedMapping，即会根据"net.topology.script.file.name"指定的脚本位置，将Datanodes的hostname列表传递给脚本文件，脚本负责解析参数并返回它们依次对应的rack id，rack id结构为树层结构，例如"/datacenter1/rack1"。</p>
+<p> </p>
+<p>    管理员也可以自己实现脚本解析类，参考ScriptBasedMapping实现，只需要继承DNSToSwitchMapping接口即可。</p>
+<p> </p>
+<p>    脚本实现，可以参考：http://wiki.apache.org/hadoop/topology_rack_awareness_scripts</p>
+<p> </p>
+<p><strong>九、Safemode</strong></p>
+<p>    安全模式，当Namenode启动时将会加载fsimage和edtis logs文件以恢复集群状态数据，然后等待Datanodes报告其持有的blocks列表，直到足够的Datanodes跟进，以及足够个数的blocks激活；在此期间Namenode不会replication任何blocks，也不会向Client提供writting服务，我们称这种状态为safemode。</p>
+<p> </p>
+<p>    当满足条件后，Namenode离开safemode，否则将一直处于等待状态。管理员也可以在软件升级、namespace备份、故障解决时，手动让Namenode进入safemode：</p>
+<pre><code class="language-java">./hadoop dfsadmin -safemode &lt;enter | leave | get&gt;</code></pre>
+<p> </p>
+<p>   如下四个配置项会影响safemode的行为：</p>
+<p>    1) dfs.namenode.replication.min：block最小replicas的个数，默认为1,；当block写入数据时，写入成功的最少副本数目(最小副本级别)。集群中block的replicas不得小于此值，否则Namenode 认为此block具有丢失的风险。</p>
+<p>    2) dfs.namenode.safemode.threshold-pct：集群中满足1)中最小副本基本的blocks的占比，默认为0.999f；如果集群中满足条件的blocks占比小于此值，Namenode将不会退出safemode(wait)；大于1的值，将导致Namenode无法自动退出safemode，&lt;=0的值将导致Namenode不会进入safemode。</p>
+<p>    3) dfs.namenode.safemode.min.datanodes：集群中存活的datanodes的最小值，默认为0；在存活的datanodes的个数&gt;=此值后，Namenode才有可能退出safemode(还需要参考2)条件)。如果运行时，大面积datannodes离群，也会导致namenode进入safemode；这是一个集群稳定性保证参数。</p>
+<p>    4) dfs.namenode.safemode.extension：当namenoede满足退出safemode模式之前，需要等待的时间，默认值为 30000，单位毫秒，可以设置为0。设置此值的原因，是为了避免集群在启动初期，各种不稳定因素，导致namenode反复进入safemode。</p>
+<p> </p>
+<p><strong>十、fsck</strong></p>
+<p>    fsck指令能够帮助我们查看HDFS系统的状况，比如missing blocks、under-replicated blocks、corrupt blocks(或者files)等情况，可以辅助诊断HDFS的故障情况。</p>
+<p>    使用方式：./hadoop fsck &lt;path&gt; [-move | -delete | -openforwrite] [-files [-blocks [-locations | -racks]]]</p>
+<p>    在新版中"hadoop fsck"指令被"hdfs fsck"替换，使用方式一样。</p>
+<pre><code class="language-java">&gt; ./hdfs fsck /
+................................Status: HEALTHY
+ Total size:    25458781 B
+ Total dirs:    55
+ Total files:   32
+ Total symlinks:                0 (Files currently being written: 2)
+ Total blocks (validated):      32 (avg. block size 795586 B) 
+ Minimally replicated blocks:   32 (100.0 %)
+ Over-replicated blocks:        0 (0.0 %)
+ Under-replicated blocks:       0 (0.0 %)
+ Mis-replicated blocks:         0 (0.0 %)
+ Default replication factor:    2
+ Average block replication:     2.0
+ Corrupt blocks:                0
+ Missing replicas:              0 (0.0 %)
+ Number of data-nodes:          2
+ Number of racks:               1
+FSCK ended at Sat Aug 09 17:03:32 CST 2014 in 21 milliseconds</code></pre>
+<p> </p>
+<p>    over-replicated即备份个数大于"dfs.replication"的block个数，可能因为balancer或者调整replication个数导致；通常HDFS会自动删除多余的文件。</p>
+<p>    under-replicated即备份个数小于"dfs.replication"的blocks个数，namenode将会择机为它们创建新的备份；不过此时管理员应该清楚，出现此问题的原因，请查看集群中是否有datanode离群或者硬件故障。</p>
+<p>    mis-replicated即备份错误的blocks个数，即违反hdfs blocks放置策略；可能因为管理员随意调整replication因子导致，也可能因为rack整体故障后引起。目前HDFS尚不能自动解决这一问题，如果集群中有大量mis-replicated块，建议首先通过"hdfs dfs -setrep"指定手动调大整个集群(或者某个文件、路径)的replications，等重新replication结束后，再手动调小此值，此后HDFS将会根据blocks放置策略，删除那些多余的blocks备份。</p>
+<p> </p>
+<p>    corrupt blocks表示损坏的blocks，指此block的所有副本都已损坏(无法使用)；这种问题很少出现，一旦出现，几乎是致命的；极有可能是人为违反操作导致。一旦有损坏的文件或者blocks，可能会导致Namenode无法正常启动(处于safemode)，我们只能清理这些损坏的文件：“hdfs fsck &lt;path&gt; -move”可以把损坏的文件或blocks移动到lost+found目录下，或者使用"-delete"移除那些损坏的数据。</p>
+<p>    missing blocks即没有任何replication的block，通常是因为集群大规模物理故障导致。</p>
+<p> </p>
+<p><strong>十一、Upgrade</strong></p>
+<p>    当hadoop软件更新时，我们可以评估是否可以升级；升级的过程，请具体参见各个版本的相关手册。</p>
+<p>    1) 在升级之前，先执行"hadoop dfsadmin -finalizeUpgrade"，确保集群中所有nodes删除上一次升级的过程文件，并让当前版本作为稳定版。</p>
+<p>    2) 关闭集群，不过为了安全起见，你可以备份一下metada；"hadoop dfsadmin -metasave &lt;filename&gt;"。通常，升级过程会在一个单独的测试环境中预演，以避免一些不可预测的问题。</p>
+<p>    3) 启动更新：bin/start-dfs.sh -upgrade。这将会导致集群中所有的节点以“更新模式”启动。</p>
+<p>    4) 大部分情况下，更新是顺利的。在更新结束后，我们可以启动集群，并测试运行一段时间，如果没有问题，则执行"hadoop dfsadmin -finalizeUpgrade"。</p>
+<p>    5) 如果更新过程失败，或者测试运行期间异常，我们仍然可以回滚到上一版本(时间数据并不丢失)；首先关闭集群，然后运行"bin/start-dfs.sh -rollback"。</p>
+<p>    6) 其中“hadoop namenode -rollback” 和“hadoop datanode -rollback”为分别回滚namenode和datannodes。</p>
+<p> </p>
+<p><strong>十二、其他</strong></p>
+<p>    如果集群中，需要新增datanodes，只需要在namenode的slaves文件中增加datanodes的地址即可，如果有rack脚本，需要增加其rack id映射。</p>
+<p>    如果当前集群足够大，namenode内存不足支撑，请参看其他文档。</p>
+</div>            </div>
+                </div>

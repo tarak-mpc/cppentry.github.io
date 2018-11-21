@@ -1,0 +1,225 @@
+---
+layout:     post
+title:      高可用HDFS集群原理笔记及搭建过程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1><a id="HDFS_1"></a>HDFS高可用集群原理及搭建</h1>
+<h2><a id="HDFS_3"></a>如何实现HDFS高可用？</h2>
+<p>HDFS的高可用是HDFS持续对客户端提供读、写服务的能力，因为客户端对HDFS的读写操作之前要访问namenode服务器，客户端需要从namenode端获取元数据之后才能继续进行读、写。HDFS的高可用的关键在于nodename元数据持续可用，之前的完全分布式中的secondaryNamenode是把namenode的fsimage和edit log做定期融合，融合后传给namenode, 以确保备份到的元数据是最新的，这一点类似于做了一个元数据的快照。在高可用中存在两个namenode，高可用完全分布主要包括下图所示部分：<br>
+<img src="https://img-blog.csdn.net/20181013144423437?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQwMjYyNjkw/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<h2><a id="Namenode_7"></a>Namenode节点</h2>
+<p>集群中存在2个namenode，二者之中只能有一个namenode处于活跃状态（active），另一个是待命状态（standby），只有active的NN节点才能对外提供读写HDFS服务，也只有active态的namenode才能向JN写入编辑日志；standby状态的namenode负责从JN小集群中拷贝数据到本地。另外，各个datanode也要同时向两个名称节点报告状态(心跳信息、块信息)。</p>
+<h2><a id="Journal_NodeJN_10"></a>Journal Node集群（简称JN）</h2>
+<p>同时在高可用完全分布式配置下，edit log不再存放在名称节点，而是存放在一个共享存储的地方，这个共享存储由奇数个J4组成，一般是3个节点(JN小集群)， 每个JN专门用于存放来自namenode的编辑日志，编辑日志由活跃状态的名称节点写入JN小集群。2个namenode与3个JN构成的组保持通信，活跃的名称节点负责往JN集群写入编辑日志，待命的名称节点负责观察JN集群中的编辑日志,并且把日志拉取到待命节点，再加上两个namenode各自的fsimage镜像文件，这样一来就能确保两个namenode的元数据保持同步。</p>
+<h2><a id="_ZKFailoverController_ZKFC_14"></a>主备切换控制器 (ZKFailoverController 简称ZKFC)</h2>
+<p>ZKFC作为独立的进程运行，对 NameNode 的主备切换进行总体控制。ZKFC 能及时检测到 NameNode 的健康状况，在主 NameNode 故障时借助 Zookeeper 实现自动的主备选举和切换，当然 NameNode 目前也支持不依赖于 Zookeeper 的手动主备切换。一旦active nodename不可用，提前配置的zookeeper会把standby节点自动变为active状态,继续对外提供读写服务。</p>
+<h2><a id="Zookeeper_ZK_17"></a>Zookeeper 集群（简称ZK）</h2>
+<p>ZK：为主备切换控制器提供主备选举支持。<br>
+共享存储系统：共享存储系统是实现 NameNode 的高可用最为关键的部分，共享存储系统保存了 NameNode 在运行过程中所产生的 HDFS 的元数据。主 NameNode 和<br>
+NameNode 通过共享存储系统实现元数据同步。在进行主备切换的时候，新的主 NameNode 在确认元数据完全同步之后才能继续对外提供服务。</p>
+<h2><a id="_22"></a>高可用完全分布式环境的搭建</h2>
+<h3><a id="_23"></a>分布式集群规划图</h3>
+<table>
+	<tbody><tr>
+		<td>主机名</td>
+		<td>IP地址</td>
+		<td>NN-1</td>
+		<td>NN-2</td>
+		<td>DN</td>
+		<td>ZK</td>
+		<td>ZKFC</td>
+		<td>JNN</td>	
+	</tr>
+	<tr>
+		<td>node01</td>
+		<td>192.168.23.128</td>
+		<td>√</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>√</td>
+		<td>√</td>
+	</tr>
+	<tr>
+		<td>node02</td>
+		<td>192.168.23.129</td>
+		<td></td>
+		<td>√</td>
+		<td>√</td>
+		<td>√</td>
+		<td>√</td>	
+		<td>√</td>
+	</tr>
+		<tr>
+		<td>node03</td>
+		<td>192.168.23.130</td>
+		<td></td>
+		<td></td>
+		<td>√</td>
+		<td>√</td>
+		<td></td>	
+		<td>√</td>
+	</tr>
+		<tr>
+		<td>node04</td>
+		<td>192.168.23.131</td>
+		<td></td>
+		<td></td>
+		<td>√</td>
+		<td>√</td>
+		<td></td>	
+		<td></td>
+	</tr>
+</tbody></table><table>
+</table><h2><a id="_78"></a>搭建高可用完全分布式</h2>
+<h3><a id="1_79"></a>1、配置免密登录</h3>
+<p>在完全分布式的基础上需要再配置node02–&gt;到node01上的免密<br>
+在node02节点执行，将node01的公钥加入到其他节点的白名单中<br>
+ssh-copy-id -i ~/.ssh/id_rsa.pub root@node01</p>
+<h3><a id="2_84"></a>2、关闭防火墙</h3>
+<p>sudo service iptables stop      # 关闭防火墙服务。<br>
+sudo chkconfig iptables off     # 禁止防火墙开机自启。</p>
+<h3><a id="3JDK_89"></a>3、所有节点配置JDK</h3>
+<p>（1）解压JDK安装包<br>
+（2）通过下面代码配置环境变量</p>
+<pre><code>#先删除系统自带的1.7版本的JDK
+yum remove *openjdk*
+#进入用户环境变量配置
+vim ~/.bashrc
+# 接着需要配置JAVA环境变量.
+# 在文件最后添加(注：环境变量要与JDK存放位置对应)
+export JAVA_HOME=/opt/software/jdk/jdk1.8.0_151
+export PATH=$JAVA_HOME/bin:$PATH
+# 接下来需要使用source命令是环境变量生效.
+source ~/.bashrc
+#验证是否生效
+java -version.
+</code></pre>
+<h3><a id="4Hadoop_107"></a>4、安装Hadoop</h3>
+<p>安装Hadoop以及配置环境变量可参考HDFS伪分布式的环境搭建，这里也不再细说。</p>
+<h3><a id="5_110"></a>5、时间同步</h3>
+<pre><code>#各个节点安装ntp 
+yum install ntp
+#安装完成后每个节点都执行如下命令从而达到时间同步
+#ntp1.aliyun.com为阿里的时间服务器
+ntpdate ntp1.aliyun.com
+</code></pre>
+<h3><a id="6hosts_119"></a>6、配置hosts文件</h3>
+<pre><code>vi /etc/hosts
+
+// 实现主机名映射
+192.168.23.128 node01
+192.168.23.129 node02
+192.168.23.130 node03
+192.168.23.131 node04
+</code></pre>
+<h3><a id="7hdfssitexml_129"></a>7、修改hdfs-site.xml配置文件</h3>
+<pre><code>&lt;property&gt;
+  &lt;name&gt;dfs.nameservices&lt;/name&gt;
+  &lt;value&gt;mycluster&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.ha.namenodes.mycluster&lt;/name&gt;
+  &lt;value&gt;nn1,nn2&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.rpc-address.mycluster.nn1&lt;/name&gt;
+  &lt;value&gt;node01:8020&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.rpc-address.mycluster.nn2&lt;/name&gt;
+  &lt;value&gt;node02:8020&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.http-address.mycluster.nn1&lt;/name&gt;
+  &lt;value&gt;node01:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.http-address.mycluster.nn2&lt;/name&gt;
+  &lt;value&gt;node02:50070&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.namenode.shared.edits.dir&lt;/name&gt;
+  &lt;value&gt;qjournal://node01:8485;node02:8485;node03:8485/mycluster&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.journalnode.edits.dir&lt;/name&gt;
+  &lt;value&gt;/var/sxt/hadoop/ha/jn&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.client.failover.proxy.provider.mycluster&lt;/name&gt;  	&lt;value&gt;org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.ha.fencing.methods&lt;/name&gt;
+  &lt;value&gt;sshfence&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+  &lt;name&gt;dfs.ha.fencing.ssh.private-key-files&lt;/name&gt;
+  &lt;value&gt;/root/.ssh/id_rsa&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;dfs.ha.automatic-failover.enabled&lt;/name&gt;
+   &lt;value&gt;true&lt;/value&gt;
+&lt;/property&gt;
+</code></pre>
+<h3><a id="8coresitexml_181"></a>8、配置core-site.xml</h3>
+<pre><code>&lt;property&gt;
+   &lt;name&gt;fs.defaultFS&lt;/name&gt;
+   &lt;value&gt;hdfs://mycluster&lt;/value&gt;
+&lt;/property&gt;
+&lt;property&gt;
+   &lt;name&gt;ha.zookeeper.quorum&lt;/name&gt;
+   &lt;value&gt;node02:2181,node03:2181,node04:2181&lt;/value&gt;
+&lt;/property&gt;
+</code></pre>
+<h3><a id="9slaves_192"></a>9、修改slaves配置文件</h3>
+<pre><code>修改为(注：之间用换行，且不能有空格)
+node02
+node03
+node04
+</code></pre>
+<h3><a id="10HDFSnode02_node03_node04_198"></a>10、将配置好的HDFS安装包拷贝到node02 node03 node04</h3>
+<h3><a id="11zookeeper_200"></a>11、搭建zookeeper</h3>
+<pre><code>将zookeeper解压在自定义目录下
+修改conf下的zoo_sample.cfg的名称，改为zoo.cf（方便修改）
+</code></pre>
+<pre><code>mv zoo_sample.cfg zoo.cfg
+#修改zo.cfg
+vi zoo.cfg
+#配置文件信息
+dataDir=/var/zfg/zookeeper
+server.1=node02:2888:3888
+server.2=node03:2888:3888
+server.3=node04:2888:3888
+</code></pre>
+<p>在dataDir的目录下创建myid文件，在这个文件中写上当前节点id 与server后数字对应（需自己将上面的目录结构创建出来，路径可以自己自定义）。<br>
+将配置好的zookeeper安装包拷贝到node03、node04，并且各节点创建myid号，与上面各节点的数字对应。<br>
+启动zookeeper<br>
+到zookeeper/bin 目录下<br>
+分别在三个节点上启动 ./zkServer.sh start<br>
+(注：zookeeper要在集群启动前启动)</p>
+<h3><a id="12NameNode_219"></a>12、格式化NameNode</h3>
+<pre><code>#在node01、node02、node03分别执行如下命令
+hadoop-daemon.sh start journalnode
+#	随机选择一台NameNode执行：
+hdfs namenode -format
+hadoop-daemon.sh start namenode
+#另外一台NameNode节点执行：
+hdfs namenode  -bootstrapStandby
+#格式化ZKFC
+hdfs zkfc -formatZK
+</code></pre>
+<h3><a id="13_232"></a>13、关闭所有节点，并重新启动</h3>
+<pre><code>#关闭所有节点上的进程 
+ stop-dfs.sh
+#启动HDFS  
+ start-dfs.sh
+</code></pre>
+<p>以上就是高可用环境搭建的全部过程</p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

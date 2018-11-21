@@ -1,0 +1,257 @@
+---
+layout:     post
+title:      HDFS文件常用操作
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/vtopqx/article/details/8608878				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p><span style="font-size:18px;"></span></p><p><span style="font-size:18px;"><span style="font-family:'KaiTi_GB2312';">弄了段时间hadoop的HDFS，用了些常用的HDFS文件操作，Java实现记录如下，以作Demo：</span></span></p><pre><code class="language-java">/**
+* @Title: uploadLocalFileToHDFS
+* @Description: 单个本地文件拷贝到HDFS
+* @param @param localPath 本地文件路径
+* @param @param hdfsPath HDFS文件路径
+* @param @throws IOException 设定文件
+* @return void 返回类型
+* @throws
+*/
+public static void uploadLocalFileToHDFS(String localPath, String hdfsPath)
+throws IOException {
+InputStream in = new BufferedInputStream(new FileInputStream(localPath));
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(URI.create(hdfsPath), conf);
+OutputStream out = fs.create(new Path(hdfsPath), new Progressable() {
+public void progress() {
+System.out.print(".");
+}
+});
+IOUtils.copyBytes(in, out, 4096, true);
+}
+
+
+/**
+* @Title: bathUploadLocalFileToHDFS
+* @Description:本地文件批量拷贝到HDFS
+* @param localPath
+*            本地文件目录
+* @param hdfsPath
+*            HDFS文件目录
+* @param localFileName
+*            本地文件名称
+* @param date
+*            日期
+* @return void 返回类型
+* @throws
+*/
+public static boolean batchUploadLocalFileToHDFS(String localPath,
+String localFileName, String hdfsPath, String date) {
+boolean bln = false;
+try {
+// 读取本地文件
+File[] files = getFiles(localPath, localFileName);
+if (files != null &amp;&amp; files.length &gt; 0) {
+for (File file : files) {
+String fileName = file.getName();
+uploadLocalFileToHDFS(localPath + "/" + fileName, hdfsPath
++ "/" + date + "/" + fileName);
+}
+bln = true;
+}
+} catch (Exception e) {
+e.printStackTrace();
+}
+return bln;
+}
+
+
+/**
+* @Title: hdfsFileReName
+* @Description:重命名HDFS文件
+* @param @param oldHdfsPath 旧的文件名
+* @param @param newHdfsPath 新的文件名
+* @return void 返回类型
+* @throws
+*/
+public static boolean hdfsFileReName(String oldHdfsPath, String newHdfsPath) {
+boolean isRename = false;
+try {
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(URI.create(oldHdfsPath), conf);
+Path frpaht = new Path(oldHdfsPath);
+Path topath = new Path(newHdfsPath);
+isRename = fs.rename(frpaht, topath);
+} catch (Exception e) {
+e.printStackTrace();
+}
+return isRename;
+}
+
+
+/**
+* @Title: hdfsFileReName
+* @Description:HDFS文件删除
+* @param @param oldHdfsPath 旧的文件名
+* @param @param newHdfsPath 新的文件名
+* @return void 返回类型
+* @throws
+*/
+public static boolean hdfsFileDelete(String hedfFilePath) {
+boolean isDeleted = false;
+try {
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(URI.create(hedfFilePath), conf);
+Path frpaht = new Path(hedfFilePath);
+// 递归删除
+isDeleted = fs.delete(frpaht, true);
+} catch (Exception e) {
+e.printStackTrace();
+}
+return isDeleted;
+}
+
+//HDFS文件目录创建
+public static void hdfsDirectoryCreate(String hedfDirPath) {
+try {
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(URI.create(hedfDirPath), conf);
+Path frpaht = new Path(hedfDirPath);
+fs.mkdirs(frpaht);
+} catch (Exception e) {
+e.printStackTrace();
+}
+}
+
+
+// HDFS文件拷贝到本地
+public static void downLoadHDFSFileToLocal(String hdfsPath, String localPath)
+throws IOException {
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(URI.create(hdfsPath), conf);
+InputStream in = fs.open(new Path(hdfsPath));
+OutputStream out = new BufferedOutputStream(new FileOutputStream(
+localPath));
+IOUtils.copyBytes(in, out, 4096, false);
+IOUtils.closeStream(in);
+}
+
+
+// HDFS文件重命名
+public static void hDFSFileReName(String hdfsPath, String localPath)
+throws IOException {
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(URI.create(hdfsPath), conf);
+InputStream in = fs.open(new Path(hdfsPath));
+OutputStream out = new BufferedOutputStream(new FileOutputStream(
+localPath));
+IOUtils.copyBytes(in, out, 4096, false);
+IOUtils.closeStream(in);
+}
+
+
+/**
+* @Title: mergeLocalFileToHDFS
+* @Description: 多个本地文件合并拷贝到HDFS
+* @param @param localPath 本地文件路径
+* @param @param hdfsPath HDFS文件路径
+* @param @throws IOException 设定文件
+* @return void 返回类型
+* @throws
+*/
+public static void mergeLocalFileToHDFS(String localPath, String hdfsPath)
+throws IOException {
+// InputStream in = new BufferedInputStream(new
+// FileInputStream(localPath));
+Configuration conf = new Configuration();
+FileSystem local = FileSystem.getLocal(conf);
+FileSystem hdfs = FileSystem.get(conf);
+Path inputDir = new Path(localPath);
+Path hdfsFile = new Path(hdfsPath);
+try {
+FileStatus[] inputFiles = local.listStatus(inputDir);
+FSDataOutputStream out = hdfs.create(hdfsFile);
+for (int i = 0; i &lt; inputFiles.length; i++) {
+FSDataInputStream in = local.open(inputFiles[i].getPath());
+byte buffer[] = new byte[256];
+int bytesRead = 0;
+while ((bytesRead = in.read(buffer)) &gt; 0) {
+out.write(buffer, 0, bytesRead);
+}
+in.close();
+// 不同文件合并要换行
+out.write("\n".getBytes(), 0, "\n".length());
+}
+out.close();
+
+
+} catch (IOException e) {
+e.printStackTrace();
+}
+
+
+} 
+
+
+
+//检查HDFS中文件是否存在
+public static List&lt;String&gt; checkFileExists(String[] hdfsFilePaths) throws IOException {
+List&lt;String&gt; pathList = new ArrayList&lt;String&gt;();
+Configuration conf = new Configuration();
+for (String item : hdfsFilePaths) {
+Path path = new Path(item);
+FileSystem fs = FileSystem.get(URI.create(item), conf);
+if (fs.exists(path) == true){
+pathList.add(item);
+}
+}
+return pathList;
+}
+
+//HDFS生成后，处理
+public static void hdfsFileHandle(Object[] Paths){
+String oldFileName = Paths[1].toString();
+String newFileName = Paths[2].toString();
+String delFileName = Paths[3].toString();
+// 重命名、
+FileUtil.hdfsFileReName(oldFileName, newFileName);
+// 删掉重复的文件夹
+FileUtil.hdfsFileDelete(delFileName);
+}
+
+
+//读取HDFS文件
+@SuppressWarnings("deprecation")
+public static void hdfsFileRead(String filePath) throws IOException {
+try {
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(URI.create(filePath), conf);
+Path pathq = new Path(filePath);
+FSDataInputStream fsr = fs.open(pathq);
+String line = "";
+while (line!=null) {
+line = fsr.readLine();
+if (line!=null) {
+System.out.println(line);
+}
+}
+} catch (Exception e) {
+e.printStackTrace();
+}
+}
+
+//写入HDFS文件
+public static void hdfsFileWrite(String filePath,String context){
+try {
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(URI.create(filePath), conf);
+Path pathq = new Path(filePath);
+FSDataOutputStream fsr = fs.create(pathq);
+fsr.writeBytes(context);
+fsr.close();
+} catch (Exception e) {
+e.printStackTrace();
+}
+}
+
+</code></pre><br>            </div>
+                </div>

@@ -1,0 +1,139 @@
+---
+layout:     post
+title:      大数据离线--HDFS读写原理介绍
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>本次介绍HDFS,分为上，中，下，三篇</p>
+<ul>
+<li>上篇入HDFS门介绍，常用操作</li>
+<li>中篇为HDFS的读写原理介绍</li>
+<li>下篇为HDFS的测试Demo，常用API</li>
+</ul>
+<hr>
+<h2><a id="1_NameNode_7"></a>1. NameNode概述</h2>
+<ul>
+<li>
+<p>HDFS 的核心，也称为 Master。</p>
+</li>
+<li>
+<p><strong>存储内容:</strong> 存储 HDFS 的元数据： 存储并跟踪目录树结构文件，Block信息及位置</p>
+</li>
+<li>
+<p><strong>存储方式:</strong> 不持久化存储DataNode的信息，这些信息会在系统启动时从数据节点重建。</p>
+</li>
+<li>
+<p><strong>性能要求:</strong> NameNode 所在机器通常会配置有大量内存（RAM）。 NameNode 是 Hadoop 集群中的单点故障。</p>
+</li>
+</ul>
+<hr>
+<h2><a id="2_DataNode_18"></a>2. DataNode概述</h2>
+<ul>
+<li>
+<p>负责将实际数据存储在 HDFS 中。称为 Slave。</p>
+</li>
+<li>
+<p><strong>定期心跳：</strong> 和NameNode 保持不断通信。启动时，它将自己发布到 NameNode 并汇报自己负责持有的块列表。定期（dfs.heartbeat.interval 配置项配置，默认是 3 秒）向NameNode 发送心跳</p>
+</li>
+<li>
+<p><strong>失效判定：</strong> 如果 NameNode 长时间没有接受到 DataNode 发送的心跳， NameNode 就会认为该 DataNode 失效。</p>
+</li>
+<li>
+<p><strong>单节点故障处理方式：</strong> 当某个 DataNode 关闭时，它不会影响数据或群集的可用性。 NameNode 将安排由其他 DataNode 管理的块进行副本复制。</p>
+</li>
+<li>
+<p><strong>性能要求：</strong> 所在机器通常配置有大量的硬盘空间。因为实际数据存储在DataNode 中。</p>
+</li>
+<li>
+<p>block 汇报时间间隔取参数 dfs.blockreport.intervalMsec,参数未配置的<br>
+话默认为 6 小时.</p>
+</li>
+</ul>
+<hr>
+<h2><a id="3_HDFS_32"></a>3. HDFS存储数据原理</h2>
+<p>首先介绍HDFS的工作机制</p>
+<ul>
+<li>NameNode 负责管理整个文件系统元数据；</li>
+<li>DataNode 负责管理具体文件数据块存储；</li>
+<li>Secondary NameNode 协助 NameNode 进行元数据的备份。</li>
+</ul>
+<p>HDFS 的内部工作机制对客户端保持透明，客户端请求访问HDFS都是通过向NameNode 申请来进行。</p>
+<h2><a id="4HDFS_42"></a>4.HDFS读取数据原理</h2>
+<ul>
+<li>
+<p><strong>读取数据原理图</strong><br>
+<img src="https://img-blog.csdn.net/20181006152057631?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+</li>
+<li>
+<p><strong>读取数据步骤</strong></p>
+</li>
+</ul>
+<ol>
+<li><strong>客户端通过调用fileSystem对象的open方法</strong>，打开希望读取的文件。实际对应HDFS来说是一个分布式文件系统的实例。</li>
+<li>DistributedFileSystem通过使用RPC来调用NameNode，确定文件的起始位置，<strong>返回每一个副本的dataNode地址信息</strong>。这些dataNode会根据于客户端的距离来排序。DistributedFileSystem返回一个FSDataInputStream类给客户端并读取数据，FSDataInputStream类封装了一个<strong>FSDataInputStream对象</strong>，该对象管理dataNode和nameNode的IO。</li>
+<li>**客户端对FSDataInputStream对象输入流调用read方法，**FSDataInputStream就会连接距离最近的datanode，反复调用read方法将数据传送到客户端，到达末端是FSDataInputStream会关闭于该dataNode的连接，寻找下一个dataNode。当dataNode的location信息读完，会询问nameNode来检索下一批Block的位置信息。</li>
+<li>FSDataInputStream持续读取Block文件数据。</li>
+<li>FSDataInputStream持续读取Block文件数据。</li>
+<li>客户端读取完成，就对FSDataInputStream调用close的方法。</li>
+</ol>
+<ul>
+<li>读取文件中断或者错误的情况
+<ul>
+<li>在FSDataInputStream读取的过程中，如果于DataNode出现通信错误，便会尝试从临近的另外一个dataNode中读取。同时记录该dataNode的信息，以后不会反复读取该节点的块数据。</li>
+<li>FSDataInputStream也会校验读取数据的完整性，如果损坏就会在读取下一个副本之前通知nameNode。</li>
+</ul>
+</li>
+</ul>
+<h2><a id="Hadoop_60"></a>网络拓扑图与Hadoop</h2>
+<p>在海量数据处理中，主要的限制因素是节点之间的数据传输速率，这里的想法是将两个节点之间的带宽作为距离的衡量标准。带宽递减的等级如下：</p>
+<ul>
+<li>同一节点中的进程</li>
+<li>同一机架上的不同节点</li>
+<li>同一数据中心的不同机架</li>
+<li>不同数据中心的节点<br>
+用图片展示如下:<br>
+<img src="https://img-blog.csdn.net/20181006154101730?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></li>
+</ul>
+<h2><a id="HDFS_69"></a>HDFS的文件读取流程</h2>
+<p><img src="https://img-blog.csdn.net/20181006155411321?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<h4><a id="_71"></a>写入文件流程</h4>
+<ol>
+<li>
+<p>DistributedFileSystem对象调用create方法创建文件</p>
+</li>
+<li>
+<p>DistributedFileSystem对nameNode创建一个RPC调用，nameNode创建一个新的文件，nameNode执行各种检测文件是否存在，判断用户权限。为新的文件创建一条记录；否则判处IO异常。返回DFSOutputStream,负责处理dataNode与NameNode之间的通信。</p>
+</li>
+<li>
+<p>客户端写入数据时，DFSOutputStream将文件文臣一个个数据包，并写入内部队列，称为数据队列。<br>
+<img src="https://img-blog.csdn.net/20181006165341160?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+</li>
+<li>
+<p>这一组datanode构成一个管线，DataStreamer将数据包流式的传送到管线中的一个datanode,该数据包存储数据并且流式的往下发送，直到设置备份数的最后一个节点。</p>
+</li>
+<li>
+<p>DFSOutputStream也维护者一个内部数据包队列来等待datanode收到消息确认回执，也成为确认队列（ack queue）,确认后数据才会被从队列中删除。</p>
+</li>
+<li>
+<p>客户端完成写入后，会对数据流调用close()方法。该操作将剩余的所有数据包写入datanode的管线中，并在联系nameNode发送文件完成之前等待确认，nameNode已经知道了文件由那些块组成（通过DataStream）,所以在返回成功之前只需要等到数块进行最小量的复制。</p>
+</li>
+</ol>
+<h4><a id="dataNode_81"></a>数据写入期间，dataNode节点发生故障。</h4>
+<p>如果在数据写入期间，dataNode节点发生故障，会执行一下操作（对客户端透明）</p>
+<ol>
+<li>dataNode2节点故障</li>
+<li>关闭管线（Pipeline of dataNodes）确认把队列中的任何数据包都添加到数据队列的最前端，以确保故障节点下游不会漏掉任何数据包。</li>
+<li>为存储在另一正常dataNode的当前数据块指定一个新的标识。并将标识发送给nameNode以便故障dataNode在恢复后可以删除存储的部分数据块。</li>
+<li>为存储完全的数据在下次启动的时候会自动被删除。</li>
+<li>从管线中删除故障数据节点</li>
+<li>并且把余下的数据块写入管线中的两个正常的datanode.</li>
+<li>nameNode注意到副本数量不足时候，会在另一个节点上新建副本，后续的数据块继续正常接收处理。<br>
+<img src="https://img-blog.csdn.net/20181006230611563?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80MjIyOTA1Ng==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></li>
+</ol>
+<hr>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

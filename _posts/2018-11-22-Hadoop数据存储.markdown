@@ -1,0 +1,351 @@
+---
+layout:     post
+title:      Hadoop数据存储
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/yangzhiyouvl/article/details/51494294				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hadoop数据存储">Hadoop数据存储</h1>
+
+<p>Hadoop能高效处理数据的基础是有其数据存储模型做支撑，典型的是Hadoop的分布式文件系统HDFS和HBase。</p>
+
+<h2 id="一hdfs文件系统">一、HDFS文件系统</h2>
+
+<h3 id="10-hdfs简介">1.0、 HDFS简介</h3>
+
+<p>HDFS是Hadoop的分布式文件系统的实现，它设计的目的是存储海量的数据，并为分布式在网络中的大量客户端提供数据访问。想成功的使用HDFS，就要其实现方式及工作原理。</p>
+
+<h3 id="11hdfs架构">1.1、HDFS架构</h3>
+
+<p>HDFS的设计思想基于Google File System。它的出现具有以下优势： </p>
+
+<p>1、可以存储相比于nfs能存储的文件的量更大；</p>
+
+<p>2、为在大量机器和文件系统之间传输数据而设计；</p>
+
+<p>3、具有可靠的数据存储能力，并通过数据副本的方式处理集群中某台机器宕机或数据丢失的情况；</p>
+
+<p> 4、HDFS与Hadoop的MapReduce模型易于集成,因此,允许数据从本地读取和处理 。</p>
+
+<p>但是HDFS为获得可扩展性和高性能而进行的设计也是有代价的，它的不足之处有： 1、HDFS 并非一个通用的应用程序,而是局限于某些特定的场景； </p>
+
+<p> 2、HDFS 优化了高速流数据读取性能,代价则是在随机读取性能上的削弱，因此要避免数据的随机读取，访问 HDFS 文件最好采取顺序读取的方式；</p>
+
+<p> 3、HDFS 只支持在文件上做少数的操作,但不包括任何更新操作；</p>
+
+<p> 4、HDFS 不提供数据的本地缓存机制。</p>
+
+<p>HDFS被实现为一种块结构的文件系统。如图所示，在Hadoop中，单个文件被拆分为固定大小的块存储在Hadoop集群上。对于每个块保存在哪个DataNode上是随机的，其结果是，访问某个文件需要访问多个DataNode，也就是HDFS能存储的文件大小可以远超出单机的磁盘容量。</p>
+
+<p></p><figure><img src="https://img-blog.csdn.net/20160524224112006" alt="这里写图片描述" title=""></figure><p></p>
+
+<p>此图展示了HDFS的整体架构，HDFS 采用 master/slave 主从结构，NameNode节点存储了整个集群的文件系统的元数据信息，它管理着文件系统的的命名空间和客户端访问文件的过程，NameNode节点确保HDFS中的元数据在各个节点间保持一致。</p>
+
+<h3 id="12secondarynamenode">1.2、SecondaryNameNode</h3>
+
+<p>HDFS的实现基于master/slave 主从架构。一方面极大的简化了HDFS的整体架构，但另一方面，这也变成了HDFS的一个弱点，即NameNode失效就意味着HDFS的失效。为缓解这个问题，Hadoop实现了SecondaryNameNode，但SecondaryNameNode不是一个“热备的NameNode”。它不能在NameNode失效后取代其功能，它为主NameNode提供检查点机制。除保存HDFS NameNode 的状态外，它还在磁盘上维护用于持久化存储当前文件系统状态的两个数据结构；这两个数据结构分别是一个镜像文件和一个编辑日志。镜像文件代表 HDFS 元数据在某个时间点的状态，在一个名为FsImage的文件中；而编辑日志是一个事务日志（与数据库体系结构中的日志相比），纪录了自镜像文件创建之后文件系统元数据的每一次更改，该日志保存在NameNode本地文件系统上的EditLog文件中。当主NameNode失效后，有部分元数据（以及对应的内容数据）会丢失，因为保存在编辑日志中的最新状态是不可用的，所有当主NameNode失效后是不能从SecondaryNameNode完全恢复主NameNode失效前的状态。</p>
+
+<h3 id="13机架感知策略">1.3、机架感知策略</h3>
+
+<p>机架是存储在单一位置的节点的实体集合.，一个大型的HDFS 实例在计算机集群上运行时,通常需要跨越多个机架，同一个机架上的机器节点之间的网络带宽比不同机架上的机器节点之间的网络带宽大，NameNode节点通过Hadoop的机架感知过程决定了每一个DataNode 所属的机架的ID，机架感知策略的一个优化方案就是减轻机架之间的写操作负载，为了最小化整体的带宽消耗和数据读取延迟，HDFS尝试让有读请求的客户端从最近的地方读取复制块。每一个DataNode节点会周期性的发送心跳信息给NameNode节点（如上图），如果DataNode节点失效， NameNode 将会通过不正常的心跳信息检测到。 NameNode如果规定时间内没有收到 DataNodes的心跳信息，就认为该DataNode节点已经失效，并不再发送任何的I/O请求给它们，和现在已有大部分的文件系统类似，HDFS 也支持传统分层的文件组织方式。 </p>
+
+<h3 id="14hdfs-federation-及高可用">1.4、HDFS Federation 及高可用 </h3>
+
+<p>为克服单个NameNode内存的限制，HDFS Federation是为了缓解HDFS的单点故障问题而提出的NameNode水平扩展方案，HDFS Federation 基于多个独立的NameNodes/Namespace。<br>● HDFS Federation的优势: </p>
+
+<p>1、命名空间的可扩展性: HDFS 集群的存储空间可以横向扩展,但Namespace不可以；</p>
+
+<p>2、性能: 文件操作的性能局限于单个Namenode的吞吐量；<br>3、隔离性: 单个 NameNode 节点不提供多个环境配置之间的隔离性。</p>
+
+<p>HDFS Federation是基于独立的NameNode节点集合设计的，因此各NameNode节点之间不需相互协调. </p>
+
+<p></p><figure><img src="https://img-blog.csdn.net/20160524224302397" alt="这里写图片描述" title=""></figure><p></p>
+
+<p>该图展示了HDFS Federation的实现结构，namespace 作为数据块池，可以对数据块集合操作，每一个数据块池都各自独立，这就允许命名空间在为一个新的数据块分配ID时，不需要与其它命名空间进行协调。单个 NameNode节点的失效不会对集群中为其它NameNode服务的Datanode节点产生影响，当某个NameNode/namespace被删除，那对应的DataNode节点上的数据块池也会被删除，HDFS Federation 配置是后向兼容的，允许已经存在的单个NameNode节点不做任何改变继续工作。</p>
+
+<p></p><figure><img src="https://img-blog.csdn.net/20160524224346913" alt="这里写图片描述" title=""></figure><p></p>
+
+<p>如图所示展示了新的HDFS高可用架构，其中包含2台独立的配置为NameNodes的机器，其中一台必须时刻处于激活状态，活动状态的NameNode节点负责集群中所有的客户端操作，为了保证这两台机器的状态同步，需要两个节点对共同的存储设备享有同样的目录访问权利 。</p>
+
+<h3 id="15hdfs的fs-shell操作命令">1.5、HDFS的fs shell操作命令</h3>
+
+<p>HDFS作为一个分布式文件系统和Linux的文件系统一样，也具有类似的命令行接口，所有的命令都由 bin/hadoop 脚本引发，若不指定参数运行 Hadoop 脚本会打印所有命令的描述。</p>
+
+<p>通用语法：</p>
+
+<p>hadoop <a href="" rel="nofollow"> [–config confidir] </a> COMMAND</p>
+
+<p>–config confidir 覆盖默认配置目录，</p>
+
+<p>默认使用的配置是 $HADOOP<em>HOME</em><em>/conf 。</em></p>
+
+<p>查看帮助信息命令：$HADOOP<em>HOME/bin/hadoop fs –help</em></p>
+
+<p>HDFS资源URI格式：scheme://authority/path</p>
+
+<p>scheme：协议名，file或hdfs</p>
+
+<p>authority：namenode主机名</p>
+
+<p>path：路径</p>
+
+<p>示例：hdfs://master:9000/user/chunk/input.txt</p>
+
+<p>前提是已经在core-site.xml里配置了fs.default.name=hdfs://master:9000，则仅使用/user/chunk/input.txt即可。</p>
+
+<p>hdfs默认工作目录为/user/<span class="MathJax_Preview"></span><span class="MathJax" id="MathJax-Element-27-Frame" role="textbox" aria-readonly="true"><nobr><span class="math" id="MathJax-Span-260" style="width: 3.657em; display: inline-block;"><span style="display: inline-block; position: relative; width: 3.529em; height: 0px; font-size: 104%;"><span style="position: absolute; clip: rect(1.542em 1000em 2.888em -0.446em); top: -2.497em; left: 0.003em;"><span class="mrow" id="MathJax-Span-261"><span class="mi" id="MathJax-Span-262" style="font-family: STIXGeneral-Italic;">U<span style="display: inline-block; overflow: hidden; height: 1px; width: 0.067em;"></span></span><span class="mi" id="MathJax-Span-263" style="font-family: STIXGeneral-Italic;">S<span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="mi" id="MathJax-Span-264" style="font-family: STIXGeneral-Italic;">E<span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="mi" id="MathJax-Span-265" style="font-family: STIXGeneral-Italic;">R</span><span class="texatom" id="MathJax-Span-266"><span class="mrow" id="MathJax-Span-267"><span class="mo" id="MathJax-Span-268"><span style="font-family: STIXGeneral, 'Arial Unicode MS', serif; font-size: 96%; font-style: normal; font-weight: normal;">，</span></span></span></span></span><span style="display: inline-block; width: 0px; height: 2.503em;"></span></span></span><span style="border-left-width: 0.003em; border-left-style: solid; display: inline-block; overflow: hidden; width: 0px; height: 1.203em; vertical-align: -0.263em;"></span></span></nobr></span><script type="math/tex" id="MathJax-Element-27">USER，</script>USER是当前的登录用户名。</p>
+
+<p>具体的 HDFS fs shell 常用命令：</p>
+
+<p>1、cat </p>
+
+<p>命令格式：hadoop fs -cat URI <a href="" rel="nofollow">URI …</a>  将路径指定文件的内容输出到stdout。</p>
+
+<p>例如：hadoop fs -cat hdfs://master:port/file1</p>
+
+<p> hadoop fs -cat file:///data/port-00000</p>
+
+<p>成功返回0，失败返回－1。</p>
+
+<p>2、ls<br>命令格式：hadoop fs -ls &lt;args&gt;<br>如果是文件，则按照如下格式返回文件信息：文件名 &lt;副本数&gt; 文件大小 修改日期 修改时间 权限 用户ID 组ID <br>如果是目录，则返回它直接子文件的一个列表，就像在Unix中一样。目录返回列表的信息：目录名 &lt;dir&gt; 修改日期 修改时间 权限 用户ID 组ID </p>
+
+<p>3、chgrp<br>命令格式：hadoop fs -chgrp <a href="" rel="nofollow">-R</a> GROUP URI <a href="" rel="nofollow">URI …</a> </p>
+
+<p>改变文件所属的组。使用-R将使改变在目录结构下递归进行。命令的使用者必须是文件的所有者或者超级用户。</p>
+
+<p>4、chmod<br>命令格式：hadoop fs -chmod <a href="" rel="nofollow">-R</a> &lt;MODE<a href="" rel="nofollow">,MODE</a>… | OCTALMODE&gt; URI <a href="" rel="nofollow">URI …</a><br>改变文件的权限。使用-R将使改变在目录结构下递归进行。命令的使用者必须是文件的所有者或者超级用户。</p>
+
+<p>5、chown<br>命令格式：hadoop fs -chown <a href="" rel="nofollow">-R</a> <a href="" rel="nofollow">OWNER</a><a href="" rel="nofollow">:[GROUP</a>] URI <a href="" rel="nofollow">URI </a><br>改变文件的拥有者。使用-R将使改变在目录结构下递归进行。命令的使用者必须是超级用户。</p>
+
+<p>6、copyFromLocal<br>命令格式：hadoop fs -copyFromLocal &lt;localsrc&gt; URI<br>除了限定源路径是一个本地文件外，和put命令相似。<br>7、copyToLocal<br>命令格式：hadoop fs -copyToLocal <a href="" rel="nofollow">-ignorecrc</a> <a href="" rel="nofollow">-crc</a> URI &lt;localdst&gt;<br>除了限定目标路径是一个本地文件外，和get命令类似。<br>8、cp<br>命令格式：hadoop fs -cp URI <a href="" rel="nofollow">URI …</a> &lt;dest&gt;<br>将文件从源路径复制到目标路径。这个命令允许有多个源路径，此时目标路径必须是一个目录。</p>
+
+<p>例如：hadoop fs -cp /user/hadoop/file1 /user/hadoop/file2<br> hadoop fs -cp /user/hadoop/file1 /user/hadoop/file2 /user/hadoop/dir<br>返回值：成功返回0，失败返回-1。</p>
+
+<p>9、du<br>命令格式：hadoop fs -du URI <a href="" rel="nofollow">URI …</a><br>显示目录中所有文件的大小，或者当只指定一个文件时，显示此文件的大小。</p>
+
+<p>返回值：成功返回0，失败返回-1。</p>
+
+<p>10、expunge<br>命令格式：hadoop fs -expunge<br>清空回收站。</p>
+
+<p>11、get<br>命令格式：hadoop fs -get <a href="" rel="nofollow">-ignorecrc</a> <a href="" rel="nofollow">-crc</a> &lt;src&gt; &lt;localdst&gt; <br>复制文件到本地文件系统。可用-ignorecrc选项复制CRC校验失败的文件。使用-crc选项复制文件以及CRC信息。</p>
+
+<p>12、put<br>使用方法：hadoop fs -put &lt;localsrc&gt; … &lt;dst&gt;<br>从本地文件系统中复制单个或多个源路径到目标文件系统。也支持从标准输入中读取输入写入目标文件系统。</p>
+
+<p>13、getmerge（合并多个文件下载到本地）<br>命令格式：hadoop fs -getmerge &lt;src&gt; &lt;localdst&gt; <a href="" rel="nofollow">addnl</a><br>接受一个源目录和一个目标文件作为输入，并且将源目录中所有的文件连接成本地目标文件。addnl是可选的，用于指定在每个文件结尾添加一个换行符。</p>
+
+<p>14、mkdir<br>命令格式：hadoop fs -mkdir &lt;paths&gt; <br>接受路径指定的uri作为参数，创建这些目录。其行为类似于Unix的mkdir -p，它会创建路径中的各级父目录。</p>
+
+<p>15、mv<br>命令格式：hadoop fs -mv URI <a href="" rel="nofollow">URI …</a> &lt;dest&gt;<br>将文件从源路径移动到目标路径。这个命令允许有多个源路径，此时目标路径必须是一个目录。不允许在不同的文件系统间移动文件。</p>
+
+<p>16、rm<br>命令格式：hadoop fs -rm URI <a href="" rel="nofollow">URI …</a><br>删除指定的文件。只删除非空目录和文件。请参考rmr命令了解递归删除。</p>
+
+<p>rmr<br>命令格式：hadoop fs -rmr URI <a href="" rel="nofollow">URI …</a><br>delete的递归版本。<br>17、touchz<br>命令格式：hadoop fs -touchz URI <a href="" rel="nofollow">URI …</a> <br>创建一个0字节的空文件。</p>
+
+<h2 id="二hbase">二、HBase</h2>
+
+<p>为了克服诸多局限，Hadoop以HBase的形式引入了一个更加灵活的数据存储和访问模型。HBase是一个分布式的、版 本化的、面向列的、多维度 的存储系统，在设计上具备高性能和高可用性。</p>
+
+<h3 id="21hbase架构">2.1、HBase架构</h3>
+
+<p>HBase是Google BigTable架构的开源实现。与传统的关系型数据库管理系统类似，Hbase中也是以表的形式组织数据。HBase 支持非常松散的结构定义，但不支持任何表连接joins、查询语言或 SQL操作，HBase主要是在大稀疏表上做Create, Read, Update, and Delete (CRUD) 操作。大多数基于HBase的实现都在使用高度非结构化数据，与HDFS相似，HBase 也是以 master-slave 结构实现。HBase 利用 HDFS 来持久化数据存储，这意味着 HBase 具有 HDFS 提供的很多优势，包括校验,数据复制,和容错。</p>
+
+<p>HBase数据管理由分布式的域服务器(region Server)实现,域服务器由HBase主控服务器 (HMaster)进行管理，该图是HBase的架构图。</p>
+
+<p></p><figure><img src="https://img-blog.csdn.net/20160524224449823" alt='&lt;img src="Screen%20Shot%202016-05-23%20at%208.14.47%20AM.png"/&gt;' title=""></figure><p></p>
+
+<p>region server的实现主要包含以下组件: </p>
+
+<p>memstore 是 HBase内存中数据的缓存实现,它通过直接从内存提供尽可能多的数据来提升HBase的整体性能；HFile是HBase专用的HDFS文件格式，域服务器中的HFile的实现主要负责从HDFS读取 HFile,以及将HFile写入HDFS。 • 为了保存任意长度的表, HBase 将表格划分成域(regions), 每个域中包含已排序(根据主键)的,范 围连续的行。regions 的切分方式不取决于key space, 而是取决于数据量，当向表中插入一条新纪录时, HBase 决定(基于键值)该记录应该分配到哪个 region server 并在该域插入那条记录，如果 region的大小超出了预先定义的值,那么它会自动分裂，当一条记录(或一个记录集合) 被读取/更新, HBase 会决定哪个regions 应该存储该记录,并指引 客户端去访问合适的那个region。</p>
+
+<p>下图展示了HBase 利用特殊的表设计来解决region server中特殊的key-table pair的存储问题。</p>
+
+<p></p><figure><img src="https://img-blog.csdn.net/20160524224517257" alt='&lt;img src="Screen%20Shot%202016-05-23%20at%208.21.27%20AM.png"/&gt;' title=""></figure><p></p>
+
+<h3 id="22hbase结构设计">2.2、HBase结构设计</h3>
+
+<p>设计 HBase 的表结构时, 应该考虑如下几个方面: </p>
+
+<p>• Get 或 Scan操作是基于行键(row key)的；<br>• 列族名会显式地与每个列名保存在一起；<br>• 在高而窄和扁而宽的设计之间进行选择时,推荐使用前者；<br>• 设计的主要优势之一是在多台域服务器之间分布式地执行请求；</p>
+
+<p>以下是一些特殊的行键设计模式: <br> •键“盐化(salting)”—这意味着为顺序键添加一个随机值前缀,允许将顺序键“分桶”到多个域中；<br> •键字段的交换/提升(例如“反转域名”) ；<br> •键的完全随机化 。</p>
+
+<h3 id="23hbase的shell常用命令">2.3、HBase的shell常用命令</h3>
+
+<p>1、whoami</p>
+
+<p>这个不多说，都懂。</p>
+
+<p>2、对表的管理</p>
+
+<p>1）list</p>
+
+<p>查看都有哪些表存在；</p>
+
+<p>2）创建表</p>
+
+<p>语法：create &lt;table&gt;, NAME =&gt; &lt;family&gt;, VERSIONS =&gt; &lt;VERSIONS&gt;</p>
+
+<p>例如：创建表t1，有两个family name：f1，f2，且版本数均为3</p>
+
+<p>create 't1',NAME =&gt; 'f1', VERSIONS =&gt; 2,NAME =&gt; 'f2', VERSIONS =&gt; 2</p>
+
+<p>3）删除表</p>
+
+<p>两步走，首先disable，再drop掉；</p>
+
+<p>4）查看表的结构</p>
+
+<p>语法：describe &lt;table&gt;</p>
+
+<p>5）修改表结构</p>
+
+<p>修改表结构必须先disable，修改后再enable回来就OK了；</p>
+
+<p>语法：alter 't1', NAME =&gt; 'f1', NAME =&gt; 'f2', METHOD =&gt; 'delete'</p>
+
+<p>3、权限管理</p>
+
+<p>1）查看权限</p>
+
+<p>语法：user<em>permission &lt;table&gt; </em></p>
+
+<p>2）分配权限</p>
+
+<p>语法 : grant &lt;user&gt; &lt;permissions&gt; &lt;table&gt; &lt;column family&gt; &lt;column qualifier&gt; 参数后使用逗号分隔</p>
+
+<p>权限用五个字母表示： "RWXCA”，READ('R'), WRITE('W'), EXEC('X'), CREATE('C'), ADMIN('A')</p>
+
+<p>例如，给用户‘test'分配对表t1有读写的权限，grant 'test','RW','t1'</p>
+
+<p>3）回收权限</p>
+
+<p>语法：revoke &lt;user&gt; &lt;table&gt; &lt;column family&gt; &lt;column qualifier&gt;</p>
+
+<p>例如，收回test用户在表t1上的权限，hbase(main)&gt; revoke 'test','t1'</p>
+
+<p>4、表数据的增删改查</p>
+
+<p>1）添加数据</p>
+
+<p> 语法：put &lt;table&gt;,&lt;rowkey&gt;,&lt;family:column&gt;,&lt;value&gt;,&lt;timestamp&gt;</p>
+
+<p> 例如：给表t1的添加一行记录：rowkey是rowkey001，family name：f1，column name：col1，value：value01，timestamp：系统默认</p>
+
+<p>put 't1','rowkey001','f1:col1','value01'</p>
+
+<p>2）查询数据<br>a）查询某行记录</p>
+
+<p> 语法：get &lt;table&gt;,&lt;rowkey&gt;,<a href="" rel="nofollow">&lt;family:column&gt;,….</a></p>
+
+<p> 例如：查询表t1，rowkey001中的f1下的col1的值</p>
+
+<p> get 't1','rowkey001', 'f1:col1'</p>
+
+<p> 或者：</p>
+
+<p> get 't1','rowkey001', COLUMN=&gt;'f1:col1'</p>
+
+<p> 查询表t1，rowke002中的f1下的所有列值</p>
+
+<p> get 't1','rowkey001'</p>
+
+<p>b）扫描表</p>
+
+<p>语法：scan &lt;table&gt;, COLUMNS =&gt; <a href="" rel="nofollow"> &lt;family:column&gt;,…. </a>, LIMIT =&gt; num</p>
+
+<p>例如：扫描表t1的前5条数据</p>
+
+<p>hbase(main)&gt; scan 't1',LIMIT=&gt;5</p>
+
+<p>c）查询表中的数据行数</p>
+
+<p>语法：count &lt;table&gt;, INTERVAL =&gt; intervalNum, CACHE =&gt; cacheNum</p>
+
+<p> INTERVAL设置多少行显示一次及对应的rowkey，默认1000；CACHE每次去取的缓存区大小，默认是10，调整该参数可提高查询速度</p>
+
+<p>例如，查询表t1中的行数，每100条显示一次，缓存区为500</p>
+
+<p>count 't1', INTERVAL =&gt; 100, CACHE =&gt; 500</p>
+
+<p>3）删除数据<br>a )删除行中的某个列值</p>
+
+<p>语法：delete &lt;table&gt;, &lt;rowkey&gt;,  &lt;family:column&gt; , &lt;timestamp&gt;,必须指定列名</p>
+
+<p>例如：删除表t1，rowkey001中的f1:col1的数据</p>
+
+<p>delete 't1','rowkey001','f1:col1'</p>
+
+<p>注：将删除改行f1:col1列所有版本的数据<br>b )删除行</p>
+
+<p>语法：deleteall &lt;table&gt;, &lt;rowkey&gt;,  &lt;family:column&gt; , &lt;timestamp&gt;，可以不指定列名，删除整行数据</p>
+
+<p>例如：删除表t1，rowk001的数据</p>
+
+<p>deleteall 't1','rowkey001'</p>
+
+<p>c）删除表中的所有数据</p>
+
+<p>语法： truncate &lt;table&gt;</p>
+
+<p>其具体过程是：disable table -&gt; drop table -&gt; create table</p>
+
+<p>例如：删除表t1的所有数据</p>
+
+<p>truncate 't1'</p>
+
+<h2 id="三hdfs-和-hbase-的结合">三、HDFS 和 HBase 的结合</h2>
+
+<p>HDFS 采用顺序读取方式访问数据，并具有海量数据的存储能力，然而Hbase则以数据的快速随机访问能力见长，HBase 并不适用于非常大的数据量。HDFS 通过MapFiles文件类型提供了快速访问特殊文件类型的机制，然而并不能随着key的数 <br>量增长得到比较好的扩展。结合HDFS和Hbase各种的优势可以解决这些类型的问题，解决的方法是创建一个包含大量数据条目的SequenceFile，HDFS 和 HBase 都将数据视为二进制流， 这意味着借助于这些存储机制实现的大部分应用程序必须使用某种形式的二进制封装，一种这样的封装机制是 Apache Avro。</p>
+
+<h2 id="四选择合适的hadoop数据组织方式">四、选择合适的Hadoop数据组织方式 </h2>
+
+<p>在Hadoop中，所有应用程序设计的重要一环是选择合适的数据存储方式，我们来讨论一些情境:<br>数据只被 MapReduce模型访问时: </p>
+
+<p>•如果数据只被MapReduce模型实现的应用程序访问, HDFS 是最佳方案；</p>
+
+<p>•至于文件格式, SequenceFiles 是采用MapReduce 模型处理的最佳选项；</p>
+
+<p>• 应用程序的实际分区模式取决于数据的使用模式；<br>• 通用的方法是评估数据计算请求的数量设计合适的分区模式。</p>
+
+<p>当新数据产生时: </p>
+
+<p>•如果数据的计算结果需要更新时,那么应该考虑一种新的数据存储设计方案；</p>
+
+<p>•Hadoop唯一支持更新存储机制的组件是Hbase；</p>
+
+<p>•所以，如果MapReduce 计算结果需要更新数据，HBase就是你数据存储的最好方案。</p>
+
+<p>当数据量超级大时: </p>
+
+<p>•当数据量超级大时,HBase 并不是最好的选择；
+<br>•这种情况下, 典型的解决方案是 HBase/HDFS 结合使用；
+<br>•HDFS 存储实际的数据, HBase 负责存储数据的索引文件。</p>
+
+<p>实时访问数据时: </p>
+
+<p>如果要对数据进行实时访问, 根据数据量的大小, Hadoop 提供了几种解决方案；如果数据的 key space 相对较小而且数据不经常改变, SequenceFiles 是一个非常不错的选择。对于较大 key spaces 和有数据更新需求的情况, HBase 或者 HBase/HDFS 联合使用是很合适的解决方案，选择合适的数据存储方案时,安全性也是必须要考虑的方面。不管是 HDFS 还是 HBase 都需要应用级或特定的企业级解决方案来确保数据的安全性。</p>
+
+<p>例如,下面这些方法可能会被经常用到: </p>
+
+<p> • 数据加密；</p>
+
+<p> • 定制防火墙 ；</p>
+
+<p> • 定制服务层 。</p>
+
+<p>注：版权归作者所有，转载请标明来源。</p>
+
+<p>参考资料：《Hadoop高级编程》</p>
+
+<p>  网易云课堂大数据微专业</p>
+
+<p>《Hadoop核心技术》</p>
+
+<p>《Hadoop权威指南》</p>
+
+<p>HBase shell操作参考链接：<a href="http://www.cnblogs.com/nexiyi/p/hbase_shell.html" rel="nofollow">http://www.cnblogs.com/nexiyi/p/hbase_shell.html</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

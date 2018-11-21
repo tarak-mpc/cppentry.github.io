@@ -1,0 +1,209 @@
+---
+layout:     post
+title:      HDFS集群使用效果演示
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：个人原创，转载请标注！					https://blog.csdn.net/Z_Date/article/details/83823110				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h3>1 HDFS的基本使用</h3>
+
+<p><strong>查看集群状态 </strong></p>
+
+<p>1、打开web控制台查看HDFS集群信息，在浏览器打开<a href="http://192.168.18.64:50070" rel="nofollow">http://192.168.18.64:50070</a>/</p>
+
+<h3><img alt="" class="has" src="https://img-blog.csdnimg.cn/20181107142034534.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L1pfRGF0ZQ==,size_16,color_FFFFFF,t_70"></h3>
+
+<p>2、使用命令查看：hdfs dfsadmin -report</p>
+
+<p><strong>使用shell命令操作hdfs </strong></p>
+
+<p>从HDFS下载文件</p>
+
+<pre class="has">
+<code>hadoop fs -get /wordcount/input/wordcount_content.txt   #下载wordcount_content.txt到本地当前路径</code></pre>
+
+<p>使用java api操作hdfs</p>
+
+<pre class="has">
+<code>public void testUpload() throws Exception {
+		Configuration conf = new Configuration();
+		//可以直接传入 uri和用户身份
+		FileSystem fs = FileSystem.get(new URI("hdfs://192.168.18.64:9000"),conf,"hadoop"); //最后一个参数为用户名
+		Thread.sleep(2000);
+		fs.copyFromLocalFile(new Path("d:/cc.txt"), new Path("/access.log"));
+		fs.close();
+	}</code></pre>
+
+<h3>2、 MAPREDUCE基本使用</h3>
+
+<p>上面演示mapreduce的demo是hadoop提供的，下面演示一个使用代码编写一个wordcount的例子</p>
+
+<p><strong>1、需求 </strong></p>
+
+<pre>
+从大量文本文件中，统计出每一个单词出现的总次数
+</pre>
+
+<p><strong>2、思路</strong></p>
+
+<pre class="has">
+<code>Map阶段：
+
+1. 从HDFS的源数据文件中逐行读取数据
+2. 将每一行数据切分出单词
+3. 为每一个单词构造一个键值对  如(单词，1)
+4. 将键值对发送给reduce
+
+Reduce阶段：
+
+1. 接收map阶段输出的单词键值对
+2. 将相同单词的键值对汇聚成一组
+3. 对每一组，遍历组中的所有“值”，累加求和，即得到每一个单词的总次数
+4. 将(单词，总次数)输出到HDFS的文件中</code></pre>
+
+<p><strong>3、代码实现 </strong></p>
+
+<p>编写mapper类</p>
+
+<pre class="has">
+<code class="language-java">package edu.mr.wordcount;
+
+  import java.io.IOException;
+
+  import org.apache.hadoop.io.LongWritable;
+  import org.apache.hadoop.io.Text;
+  import org.apache.hadoop.mapreduce.Mapper;
+
+  public class MyMapper extends Mapper&lt;LongWritable, Text, Text, Text&gt;{
+  	Text word = new Text();
+  	Text one = new Text("1");
+  	@Override
+  	protected void map(LongWritable key, Text value,Context context)
+  			throws IOException, InterruptedException {
+  		//获取行数据
+  		String line = value.toString();
+  		//对数据进行拆分   [hello,qianfeng,hi,qianfeng] [hello,1603] [hi,hadoop,hi,spark]
+  		String []  words = line.split(" ");
+  		//循环数组
+  		for (String s : words) {
+  			word.set(s);
+  			context.write(word, one);
+  		}
+  	}
+  }
+</code></pre>
+
+<p>编写reducer类</p>
+
+<pre class="has">
+<code class="language-java"> package edu.mr.wordcount;
+
+  import java.io.IOException;
+
+  import org.apache.hadoop.io.Text;
+  import org.apache.hadoop.mapreduce.Reducer;
+
+  public class MyReducer extends Reducer&lt;Text, Text, Text, Text&gt;{
+  	Text sum = new Text();
+  	@Override
+  	protected void reduce(Text key, Iterable&lt;Text&gt; value,Context context)
+  			throws IOException, InterruptedException {
+  		//定义一个计数器
+  		int counter = 0;
+  		//循环奇数
+  		for (Text i : value) {
+  			counter += Integer.parseInt(i.toString());
+  		}
+  		sum.set(counter+"");
+  		//reduce阶段的最终输出
+  		context.write(key, sum);
+  	}
+
+  }</code></pre>
+
+<p>编写主类，来描述job并提交job</p>
+
+<pre class="has">
+<code class="language-java"> package edu.mr.wordcount;
+
+  import java.io.IOException;
+  import org.apache.hadoop.conf.Configuration;
+  import org.apache.hadoop.fs.Path;
+  import org.apache.hadoop.io.Text;
+  import org.apache.hadoop.mapreduce.Job;
+  import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+  import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+  public class WordCount {
+
+  	public static void main(String[] args) {
+  		try {
+  			//获取配置对象
+  			Configuration conf = new Configuration();
+  			//创建job
+  			Job job = new Job(conf, "wordcount");
+  			//为job设置运行主类
+  			job.setJarByClass(WordCount.class);
+  			
+  			//设置map阶段的属性
+  			job.setMapperClass(MyMapper.class);
+  			job.setMapOutputKeyClass(Text.class);
+  			job.setMapOutputValueClass(Text.class);
+  			FileInputFormat.addInputPath(job, new Path(args[0]));
+  			
+  			
+  			//设置reduce阶段的属性
+  			job.setReducerClass(MyReducer.class);
+  			job.setOutputKeyClass(Text.class);
+  			job.setOutputValueClass(Text.class);
+  			FileOutputFormat.setOutputPath(job, new Path(args[1]));
+  			
+  			//提交运行作业job 并打印信息
+  			int isok = job.waitForCompletion(true)?0:1;
+  			//退出job
+  			System.exit(isok);
+  			
+  		} catch (IOException | ClassNotFoundException | InterruptedException e) {
+  			e.printStackTrace();
+  		}
+  	}
+  }</code></pre>
+
+<h3>4、程序打包</h3>
+
+<p><strong>第一步 </strong></p>
+
+<p><img alt="" class="has" src="https://img-blog.csdnimg.cn/20181107142842120.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L1pfRGF0ZQ==,size_16,color_FFFFFF,t_70"></p>
+
+<p><strong>第二步 </strong></p>
+
+<p><img alt="" class="has" src="https://img-blog.csdnimg.cn/20181107142921784.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L1pfRGF0ZQ==,size_16,color_FFFFFF,t_70"></p>
+
+<p><strong>第三步 </strong></p>
+
+<p><strong><img alt="" class="has" src="https://img-blog.csdnimg.cn/20181107142948354.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L1pfRGF0ZQ==,size_16,color_FFFFFF,t_70"></strong></p>
+
+<h3>5、准备测试数据</h3>
+
+<p><img alt="" class="has" height="182" src="https://img-blog.csdnimg.cn/20181107143029648.png" width="759"></p>
+
+<p><strong>将wordcount_content.txt文件上传到hdfs </strong><br>
+ </p>
+
+<pre class="has">
+<code class="language-sql">hadoop  fs  mkdir  -p  /wordcount/input	#在hdfs上创建输入数据文件夹
+hadoop  fs  –put  /wordcount_content.txt  /wordcount/input   #wordcount_content.txt上传到hdfs上</code></pre>
+
+<h3>6、将程序jar包上传到集群的任意一台服务器上</h3>
+
+<h3>7、使用命令执行wordcount程序</h3>
+
+<pre class="has">
+<code class="language-sql">hadoop jar wordcount.jar edu.qianfeng.mr.day05.wordcount.WordCount /wordcount/input /wordcount/output</code></pre>
+
+<h3>8、查看处理结果</h3>
+
+<p><img alt="" class="has" src="https://img-blog.csdnimg.cn/2018110714321967.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L1pfRGF0ZQ==,size_16,color_FFFFFF,t_70"></p>            </div>
+                </div>

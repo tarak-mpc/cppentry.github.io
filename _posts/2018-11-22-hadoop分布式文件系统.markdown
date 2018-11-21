@@ -1,0 +1,272 @@
+---
+layout:     post
+title:      hadoop分布式文件系统
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h4>1,hdfs命令行接口 hadoop fs：</h4>
+<ol><li>从本地文件系统拷贝到hdfs命令：hadoop fs -copyFromLocal 本地路径 hdfs路径</li><li>从hdfs复制回本地 hadoop fs -copyToLocal hdfs路径 本地路径</li><li>创建hdfs文件夹：hadoop fs -mkdir 文件夹路径，如果不存在父目录，会自动创建。</li><li>删除文件夹 hadoop fs -rmr 文件夹</li><li>拷贝hadoop fs -cp 拷贝文件夹或文件</li><li>设置文件访问权限 hadoop fs -chmod 给文件设置权限</li><li>查看文件hadoop fs -ls</li></ol><h4>2.hdfs的Java接口：</h4>
+<ol><li>直接从hadoop url里获取数据：通过设置URL.setURLStreamHandlerFactory(new FsUrlStreamHandlerFactory());
+<pre><code class="language-java">package com.yipneg.all.hdfs;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.MalformedURLException;
+import java.net.URL;
+
+import org.apache.hadoop.fs.FsUrlStreamHandlerFactory;
+import org.apache.hadoop.io.IOUtils;
+
+public class UrlCat {
+	
+	static{
+		URL.setURLStreamHandlerFactory(new FsUrlStreamHandlerFactory());
+	}
+	public static void main(String[] args) {
+		String uri = "hdfs://192.168.130.106:9000/user/out/out4/part-r-00000";
+		InputStream in = null;
+		try {
+			in = new URL(uri).openStream();
+			int len = 0;
+			byte[] inByte = new byte[4096];
+			while((len=in.read(inByte))&gt;0){
+				String str = new String(inByte, "utf8");
+				System.out.println(str);
+			}
+			IOUtils.copyBytes(in, System.out, 4096);
+		} catch (MalformedURLException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}finally{
+			IOUtils.closeStream(in);
+		}
+	}
+}
+</code></pre>
+</li><li>通过FileSystem API读取数据
+<pre><code class="language-java">package com.yipneg.all.hdfs;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IOUtils;
+
+import com.yipeng.hdfs.util.ConfUtil;
+
+public class FileSystemCat {
+	public static void main(String[] args) {
+		Configuration conf = ConfUtil.getConfiguration();
+		FSDataInputStream in = null;
+		try {
+			FileSystem fs = FileSystem.get(conf);
+			Path input = new Path("/user/out/out4/part-r-00000");
+			in = fs.open(input);
+			BufferedReader reader = new BufferedReader(new InputStreamReader(in,"utf8"));
+			String line = reader.readLine();
+			while(line != null){
+				System.out.println(line);
+				line = reader.readLine();
+			}
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}finally{
+			IOUtils.closeStream(in);
+		}
+	}
+}</code></pre>
+</li></ol><ol><li>由于FSDataInputStream支持随机读，通过接口Seekable
+<pre><code class="language-java">/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.hadoop.fs;
+
+import java.io.*;
+
+/** Stream that permits seeking. */
+public interface Seekable {
+  /**
+   * Seek to the given offset from the start of the file.
+   * The next read() will be from that location.  Can't
+   * seek past the end of the file.
+   */
+  void seek(long pos) throws IOException;
+  
+  /**
+   * Return the current offset from the start of the file
+   */
+  long getPos() throws IOException;
+
+  /**
+   * Seeks a different copy of the data.  Returns true if 
+   * found a new source, false otherwise.
+   */
+  boolean seekToNewSource(long targetPos) throws IOException;
+}</code></pre>
+<br>
+通过设置FSDataInputStream的seek()方法读取两遍
+<pre><code class="language-java">package com.yipneg.all.hdfs;
+
+import java.io.IOException;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IOUtils;
+
+import com.yipeng.hdfs.util.ConfUtil;
+
+public class FileSystemDoubleCat {
+	public static void main(String[] args) {
+		Configuration conf = ConfUtil.getConfiguration();
+		FSDataInputStream in = null ;
+		Path input = new Path("/user/out/out4/part-r-00000");
+		try {
+			FileSystem fs = FileSystem.get(conf);
+			in = fs.open(input);
+			IOUtils.copyBytes(in, System.out, 4096);
+			in.seek(0);
+			IOUtils.copyBytes(in, System.out, 4096);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+}
+</code></pre>
+</li></ol><ol><li>写入数据，通过FSDataOutputStream类
+<pre><code class="language-java">package com.yipneg.all.hdfs;
+
+import java.io.IOException;
+import java.io.InputStream;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IOUtils;
+import org.apache.hadoop.util.Progressable;
+
+import com.yipeng.hdfs.util.ConfUtil;
+
+public class FilecopyWithProgress {
+	public static void main(String[] args) {
+		String localInput = "/var/www/data/a.txt";
+		String input = "/user/yipeng/a.txt";
+		Configuration conf = ConfUtil.getConfiguration();
+		InputStream localIn = null;
+		FSDataOutputStream out = null;
+		try {
+			FileSystem fs = FileSystem.get(conf);
+			FileSystem local = FileSystem.getLocal(conf);
+			localIn = local.open(new Path(localInput));
+			/**
+			 * progress()方法可以查看状态
+			 */
+			out = fs.create(new Path(input),new Progressable() {
+				@Override
+				public void progress() {
+					System.out.println(".");
+				}
+			});
+			IOUtils.copyBytes(localIn, out, 4096,true);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}finally{
+			IOUtils.closeStream(localIn);
+			IOUtils.closeStream(out);
+		}
+		
+	}
+}</code></pre>
+</li></ol><ol><li>显示文件状态信息，FileStatus类
+<pre><code class="language-java">package com.yipneg.all.hdfs;
+
+import java.io.IOException;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+
+import com.yipeng.hdfs.util.ConfUtil;
+
+public class ShowFileStatusTest {
+	public static void main(String[] args) {
+		Configuration conf = ConfUtil.getConfiguration();
+		try {
+			FileSystem fs = FileSystem.get(conf);
+			Path file = new Path("/user/yipeng/word.txt");
+			FileStatus stat = fs.getFileStatus(file);
+			System.out.println(stat.getBlockSize());
+			System.out.println(stat.getPath());
+			System.out.println(stat.getReplication());
+			System.out.println(stat.getOwner());
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+}
+</code></pre>
+</li></ol><ol><li>PathFilter对象
+<pre><code class="language-java">package com.yipneg.all.hdfs;
+
+import java.io.IOException;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.PathFilter;
+
+import com.yipeng.hdfs.util.ConfUtil;
+
+public class RegexExcludePathFilter implements PathFilter{
+	private final String regex;
+	public RegexExcludePathFilter(String regex) {
+		this.regex = regex;
+	}
+	@Override
+	public boolean accept(Path path) {
+		return !path.toString().matches(regex);
+	}
+	
+	
+	public static void main(String[] args) {
+		Configuration conf = ConfUtil.getConfiguration();
+		try {
+			FileSystem fs = FileSystem.get(conf);
+			FileStatus[] status = fs.globStatus(new Path("/user/yipeng/*"),new RegexExcludePathFilter(".*.seq"));
+			for (int i = 0; i &lt; status.length; i++) {
+				System.out.println(status[i].getPath());
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
+}</code></pre>
+<br><br></li></ol>            </div>
+                </div>
