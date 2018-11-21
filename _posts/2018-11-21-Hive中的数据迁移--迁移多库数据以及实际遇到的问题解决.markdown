@@ -1,0 +1,261 @@
+---
+layout:     post
+title:      Hive中的数据迁移--迁移多库数据以及实际遇到的问题解决
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p style="margin-left:0cm;">Hive的数据迁移其实就是对Hive的数据进行导入导出的操作。如果数据表不是很多，我们可以直接使用Hive SQL来处理，一张一张表的导出，然后在进行导入。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">对Hive的数据进行操作，常用的是登陆Hive客户端命令，常用的方式一般有两种，①hive，直接进入；②通过Beeline，在shell中输入<span style="color:#008000;">beeline</span>，然后连接我们的Hive，输入beeline&gt;<span style="color:#008000;"> !connection jdbc:hive2://chd6:10000</span>，提示我们输入用户名和密码，然后就可以在Beeline对Hive数据进行操作。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;"><strong>为什么没有采用直接将Hive在HDFS上的仓库中的库目录文件使用hadoop命令直接get到本地？</strong></p>
+
+<p style="margin-left:0cm;">因为Hive数据库中的表有可能存在外表，如果采用这种备份方式，外表的数据将会丢失。如果确定了库中的数据均采用内表的方式，则可以用hadoop命令直接get到本地进行<strong>数据上的备份</strong>(表结构需要另外备份)。考虑到后期数据恢复，最好采用<strong><span style="color:#008000;">Hive</span><span style="color:#008000;">提供的export/import工具实现</span></strong>进行备份，后期恢复时直接执行脚本即可。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<h3 style="margin-left:0cm;">一、使用Hive SQL进行数据的导入导出</h3>
+
+<ol><li>1 将数据导出到本地</li>
+</ol><pre class="has">
+<code class="language-sql">INSERT OVERWRITE LOCAL DIRECTORY "路径"
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+SELECT 字段1,字段2,... FROM 表名;</code></pre>
+
+<p style="margin-left:0cm;">其中路径可以写完整路径<span style="color:#008000;">file:///root/my/data.txt</span><span style="color:#008000;">，</span>也可以简写为：<span style="color:#008000;">/root/my/data.txt</span></p>
+
+<ol><li>2 将数据导出到HDFS</li>
+</ol><pre class="has">
+<code class="language-sql">INSERT OVERWRITE DIRECTORY "路径"
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+SELECT 字段1,字段2,... FROM 表名;</code></pre>
+
+<p style="margin-left:0cm;">  其中路径可以写完整路径<span style="color:#008000;"> hdfs://namenode:8020/root/my/data.txt，</span>也可以简写为：<span style="color:#008000;">/root/my/data.txt</span></p>
+
+<ol><li>3 将导入的数据导出到表中</li>
+</ol><pre class="has">
+<code class="language-sql">LOAD DATA LOCAL INPATH '/root/my/bookstore.txt' OVERWRITE INTO TABLE 表名;</code></pre>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">       从上面的过程我们也可以看到，当我们导入数据时表结构事先要建好存在的，需要我们用“<span style="color:#008000;">desc </span><span style="color:#008000;">表名</span>”命令查看表信息，用“<span style="color:#008000;"> show partitions </span><span style="color:#008000;">分区表名</span>”查看分区信息，然后将表在新环境中创建出来，比较麻烦，这种方式适合表比较少，表结构不是很复杂的表的迁移。</p>
+
+<p style="margin-left:0cm;">如果我们的表比较多，表结构有比较复杂时，可以使用Hive提供的<span style="color:#008000;">export/import</span>来进行数据的导入导出迁移我们的数据。</p>
+
+<p style="margin-left:0cm;"> </p>
+
+<h3>二、使用Hive提供的export/import进行数据的迁移</h3>
+
+<p style="margin-left:0cm;">操作之前先要对我们的数据信息进行查询，方便我们对数据进行操作和验证。</p>
+
+<p style="margin-left:0cm;">2.1 备份前需要关注的信息查询</p>
+
+<p style="margin-left:0cm;">目的是查看需要备份数据的大概大小，保证在导入和导出时有足够的空间。便于指定迁移计划和步骤（空间不够时可能某些步骤需要拆分，分批次执行）</p>
+
+<p style="margin-left:0cm;">2.1.1 查看HDFS集群使用情况</p>
+
+<pre class="has">
+<code class="language-bash">hadoop dfsadmin -report</code></pre>
+
+<p style="margin-left:0cm;">2.1.2 查看本地空间使用情况</p>
+
+<pre class="has">
+<code class="language-bash">df -lh</code></pre>
+
+<p style="margin-left:0cm;">2.1.3 查找Hive在HDFS上仓库的位置</p>
+
+<pre class="has">
+<code class="language-bash">hadoop fs -find / -name warehouse</code></pre>
+
+<p style="text-align:center;"><img alt="" class="has" height="47" src="https://img-blog.csdn.net/20180904211412677?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2dpdGh1Yl8zOTU3NzI1Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="421"></p>
+
+<p style="margin-left:0cm;">2.1.4 查看Hive仓库中各个库占用的大小</p>
+
+<pre class="has">
+<code class="language-bash">hadoop fs -du -h /user/hive/warehouse</code></pre>
+
+<p style="text-align:center;"><img alt="" class="has" height="60" src="https://img-blog.csdn.net/20180904211412697?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2dpdGh1Yl8zOTU3NzI1Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="412"></p>
+
+<p style="margin-left:0cm;">2.1.4 查看Hive中的库和表</p>
+
+<pre class="has">
+<code class="language-bash"># 查询Hive库有，
+show databases;
+
+# 使用某个库
+use 库名
+
+# 查询某个库下的表，便于后期查看导出的数据表文件个数和表的个数是否能对应上
+show tables;
+
+
+# 如果这条命令报权限问题，那么需要先解决权限认证的问题，可查看下面的第三点解决
+SELECT * FROM 表名 LIMIT 条数;</code></pre>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">2.2 设置默认需要导出的hive库</p>
+
+<pre class="has">
+<code class="language-bash">vi ~/.hiverc
+use 库名;
+</code></pre>
+
+<p style="text-indent:50px;">Esc键，:wq退出</p>
+
+<p style="margin-left:0cm;">2.3 在hdfs上创建数据临时目录</p>
+
+<pre class="has">
+<code class="language-bash">hadoop fs -mkdir /tmp/ds10</code></pre>
+
+<p style="margin-left:0cm;">2.4 生成导出数据脚本</p>
+
+<pre class="has">
+<code class="language-bash">hive -e "show tables " | awk '{printf "export table %s to |/tmp/ds10/%s|;\n",$1,$1}' | sed "s/|/'/g" &gt; ~/export.hql</code></pre>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">2.5 导出数据到HDFS</p>
+
+<pre class="has">
+<code class="language-bash">hive -f ~/export.hql</code></pre>
+
+<p style="margin-left:0cm;"><img alt="" class="has" height="395" src="https://img-blog.csdn.net/20180904211412792?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2dpdGh1Yl8zOTU3NzI1Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1022"></p>
+
+<p style="margin-left:0cm;"> </p>
+
+<p style="margin-left:0cm;">2.6 下载HDFS数据到本地并传送到目标hadoop集群的/data/input_ds10 目录</p>
+
+<p style="margin-left:0cm;">       先get到本地</p>
+
+<pre class="has">
+<code class="language-bash"> hdfs dfs -get /tmp/ds10 /data/ds10/</code></pre>
+
+<p style="text-indent:0;">    将本地的/data/ds10的数据上传到新的大数据环境中，比如先拷贝到新环境本地的/data/input_ds10目录下。</p>
+
+<p style="margin-left:0cm;">    将拷贝到本地/data/input_ds10目录下的数据上传好新环境的HDFS上</p>
+
+<pre class="has">
+<code class="language-bash">hdfs dfs -put /data/ds10 /tmp/ds10</code></pre>
+
+<p style="margin-left:0cm;">2.7 构造导入语句</p>
+
+<p style="margin-left:0cm;">       这一步在生成导出脚本的同样的目录下执行</p>
+
+<pre class="has">
+<code class="language-bash">cp export.hql import.hql
+sed -i 's/export table/import table/g' import.hql
+sed -i 's/ to / from /g' import.hql</code></pre>
+
+<p style="text-align:center;"><img alt="" class="has" height="48" src="https://img-blog.csdn.net/20180904211412725?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2dpdGh1Yl8zOTU3NzI1Nw==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="549"></p>
+
+<p style="margin-left:0cm;">2.8 设置导入到新换进下的默认库</p>
+
+<p style="margin-left:0cm;">       方法同2.3步</p>
+
+<p style="margin-left:0cm;">2.9 导入数据</p>
+
+<pre class="has">
+<code class="language-bash">hive -f import.sql</code></pre>
+
+<p style="margin-left:0cm;"> </p>
+
+<h2 style="margin-left:0cm;"><span style="color:#f33b45;">三、真实环境下数据迁移注意的问题</span></h2>
+
+<p>真实环境下比测试环境要复杂的多，比如真实环境下对权限认证比较严格、数据量比较大、两个环境下的端口访问权限问题、scp在传输大文件时网络不稳定时的问题等。</p>
+
+<h3>1、权限认证的问题</h3>
+
+<p>生产环境下对权限管理比较严格，Hive表数据操作有时只能通过安全性更高的beeline使用给定的用户名和密码才能登入进行操作。Hive Cli模式下进入默认以当前用户为Hive的用户，一般没有权限查看表数据，只能查看表名和库名。这是执行2.5命令时就会报权限问题而不能导出数据的异常。</p>
+
+<p>因此在Hive Cli模式下对于当前的用户必须要有读取表数据的权限才能将数据导出到HDFS上的临时文件，注意<span style="color:#f33b45;">这里只能是HDFS上的路径，不能直接导出到本地</span>。如果有管理员用户，直接将当前用户赋予SELECT权限即可，但是如果不知道超级管理员角色该怎么办？</p>
+
+<p>这里可以用临时的方法解决，只需要在命令中加上一个参数，<em><strong><span style="color:#86ca5e;">--hivevar hive.security.authorization.enabled=false</span></strong></em>可以在本次执行命令时临时关闭权限认证，完整的命令如下(-f后面跟的是导出的脚本文件)：</p>
+
+<pre class="has">
+<code class="language-bash">hive --hivevar hive.security.authorization.enabled=false -f ~/export_ds10.hql</code></pre>
+
+<p> </p>
+
+<h3>2、本地发送数据到目标节点</h3>
+
+<p>一般会使用scp直接发送到目标节点。因为发送的数据文件可能会很多，为防止频繁的输入密码，可以先临时配置下SSH免密，等数据迁移完毕之后可以再删除ssh免密配置，最好两个机器的用户名相同，先切换到相同的用户名下，比如都是hadoop用户，</p>
+
+<pre class="has">
+<code># 1查看家目录下.ssh文件, 如果有id_rsa.pub可以跳过2
+ls -a
+
+# 2生产密钥
+ssh-keygen -t rsa
+
+
+# 3如果是初次可以直接执行ssh-copy-id -i ~/.ssh/id_rsa.pub hadoop@id,
+# 但如果有已经有配置或SSH，又不想破坏，最好一步一步执行下面的步骤
+
+# 3.1将id_rsa.pub发送到目标节点
+scp -P端口号 ~/.ssh/id_rsa.pub hadoop@ip:~/
+
+# 3.2SSH登陆目标节点,将公钥追加到.ssh/authorized_keys文件中
+ssh -p端口号 hadoop@ip
+cat ~/id_rsa.pub &gt;&gt; ~/.ssh/authorized_keys
+</code></pre>
+
+<p>如果迁移完毕后，恢复，删除上一步对这个用户的SSH</p>
+
+<pre class="has">
+<code class="language-bash"># 1 SSH登陆目标节点
+ssh -p端口号 hadoop@ip
+
+# 2 查看前面导入的公钥
+cat ~/id_rsa.pub
+
+# 3 在~/.ssh/authorized_keys中删除上面的一行的密钥
+vim ~/.ssh/authorized_keys
+dd删除2中相同字符的一行，Esc  : wq 退出保存
+如果不确定是不是一行，可以 :set number显示行号，在确定删除</code></pre>
+
+<p> </p>
+
+<h3>3、数据量很大</h3>
+
+<p>数据量很大时，一个命令或者脚本可能要执行长时间，如果直接执行命令时中间断开那么就很悲催了，可能又要重新执行一遍，因此数据量很大时，可以将命令或者脚本后台执行，因此上面的命令可以修改为如下：</p>
+
+<pre class="has">
+<code>## 将hives仓库中的数据统一导出到HDFS上的临时目录
+nohup hive --hivevar hive.security.authorization.enabled=false -f ~/export.hql&gt;~/export.log 2&gt;&amp;1 &amp;
+
+
+## 将HDFS临时文件下的数据get到本地
+nohup hdfs dfs -get /tmp/hive_export /data/ds10/&gt;~/hdfs_get.log 2&gt;&amp;1 &amp;
+
+## 如果本地空间不够，可以分批次将数据get到本地（中间用空格分隔，最后一个是本次导出的本地位置，一定是个目录）
+nohup hdfs dfs -get /tmp/hive_export/表目录1 /tmp/hive_export/表目录2 /tmp/hive_export/表目录3 /data/ds10/&gt;~/hdfs_get.log 2&gt;&amp;1 &amp;
+
+
+## 将本地数据发送到目标节点
+nohup scp -P端口号 -r /data/ds10/* 用户@ip:/data/ds10.db/ &gt;scp_ds10.log 2&gt;&amp;1 &amp;
+</code></pre>
+
+<p>每次后台执行一个命令时，会返回一个进程号，可以记下这个进程号，后面用 <em><strong><span style="color:#86ca5e;">ps aux | grep 进程号</span></strong></em> 如果不存在可以确定后台进程已经执行完毕。</p>
+
+<p> </p>
+
+<h3>4、<strong>关于数据的导出迁移以及打包安全</strong></h3>
+
+<p>如果数据安全性比较高，可以对导出的数据加密压缩打包</p>
+
+<pre class="has">
+<code class="language-bash">tar -czvf - /data/ds10|openssl des3 -salt -k 密码 -out /data/input_ds10.tar.gz</code></pre>
+
+<p style="margin-left:0cm;">解密(执行如下命令会提示输入密码)</p>
+
+<pre class="has">
+<code class="language-bash">openssl des3 -d -salt -in /data/input_ds10.tar.gz|tar xzf –</code></pre>
+
+<p> </p>            </div>
+                </div>

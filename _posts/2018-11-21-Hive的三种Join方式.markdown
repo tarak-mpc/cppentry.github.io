@@ -1,0 +1,179 @@
+---
+layout:     post
+title:      Hive的三种Join方式
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1 class="postTitle" style="line-height:1.5;clear:both;font-size:14px;font-family:Verdana, Arial, Helvetica, sans-serif;background-color:rgb(254,254,242);">
+<a id="cb_post_title_url" class="postTitle2" href="http://www.cnblogs.com/raymoc/p/5323824.html" rel="nofollow" style="color:rgb(7,93,179);text-decoration:none;">Hive的三种Join方式</a></h1>
+<div class="clear" style="clear:both;font-family:Verdana, Arial, Helvetica, sans-serif;background-color:rgb(254,254,242);">
+</div>
+<div class="postBody" style="line-height:1.5;font-size:13px;font-family:Verdana, Arial, Helvetica, sans-serif;background-color:rgb(254,254,242);">
+<div id="cnblogs_post_body">
+<div style="font-family:'Helvetica Neue', Helvetica, Tahoma, Arial, 'Hiragino Sans GB', STHeiti, 'Microsoft YaHei', '微软雅黑', 'WenQuanYi Micro Hei', STXihei, '华文细黑', Heiti, '黑体', SimSun, '宋体', Song, sans-serif;font-size:1.15em;color:rgb(47,47,47);">
+<div class="preview">
+<h1 class="story_title" style="font-size:38.5px;font-weight:500;line-height:1.6;font-family:inherit;color:inherit;">
+Hive的三种Join方式</h1>
+<div class="story_tags">
+<div class="tag blue label" style="display:inline-block;vertical-align:baseline;line-height:1;background-color:rgb(232,232,232);border-color:rgb(232,232,232);font-weight:bold;">
+hive</div>
+</div>
+<hr style="border-right:none;border-left:none;border-top:2px dashed rgb(221,221,221);border-bottom-style:solid;border-bottom-color:rgb(255,255,255);"><p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+Hive中就是把Map，Reduce的Join拿过来，通过SQL来表示。<br>
+参考链接：<a href="https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Joins" rel="nofollow" style="color:rgb(0,136,204);text-decoration:none;">https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Joins</a></p>
+<h3 id="commonshufflereduce20join" style="font-size:24.5px;font-weight:500;line-height:1.1;font-family:inherit;color:inherit;">
+Common/Shuffle/Reduce Join</h3>
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+Reduce Join在Hive中也叫Common Join或Shuffle Join<br>
+如果两边数据量都很大，它会进行把相同key的value合在一起，正好符合我们在sql中的join，然后再去组合，如图所示。</p>
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+<img src="http://images2015.cnblogs.com/blog/918187/201603/918187-20160327102809979-2020025708.png" alt="Reduce Join" style="border:0px;vertical-align:middle;"></p>
+<h3 id="map20join" style="font-size:24.5px;font-weight:500;line-height:1.1;font-family:inherit;color:inherit;">
+Map Join</h3>
+<dl><dt style="line-height:1.35em;font-weight:bold;">
+1） 大小表连接：</dt><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+如果一张表的数据很大，另外一张表很少(&lt;1000行)，那么我们可以将数据量少的那张表放到内存里面，在map端做join。<br>
+Hive支持Map Join，用法如下</p>
+</dd></dl><pre class="xiaoshujiang_code_container"><code class="language-sql hljs" style="border:0px;font-size:13.455px;color:rgb(79,66,76);display:block;background:rgb(231,233,219);"><span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> <span class="hljs-comment" style="color:rgb(119,110,113);line-height:1.5;">/*+ MAPJOIN(time_dim) */</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">count</span>(<span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">1</span>) <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span>
+store_sales <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span> time_dim <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">on</span> (ss_sold_time_sk = t_time_sk)
+</span></code></pre>
+<br><dl><dt style="line-height:1.35em;font-weight:bold;">
+2） 需要做不等值join操作（a.x &lt; b.y 或者 a.x like b.y等）</dt><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+这种操作如果直接使用join的话语法不支持不等于操作，hive语法解析会直接抛出错误<br>
+如果把不等于写到where里会造成笛卡尔积，数据异常增大，速度会很慢。甚至会任务无法跑成功~<br>
+根据mapjoin的计算原理，MapJoin会把小表全部读入内存中，在map阶段直接拿另外一个表的数据和内存中表数据做匹配。这种情况下即使笛卡尔积也不会对任务运行速度造成太大的效率影响。<br>
+而且hive的where条件本身就是在map阶段进行的操作，所以在where里写入不等值比对的话，也不会造成额外负担。</p>
+</dd></dl><pre class="xiaoshujiang_code_container"><code class="language-sql hljs" style="border:0px;font-size:13.455px;color:rgb(79,66,76);display:block;background:rgb(231,233,219);"><span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> <span class="hljs-comment" style="color:rgb(119,110,113);line-height:1.5;">/*+ MAPJOIN(a) */</span>
+a.start_level, b.*
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span> dim_level a
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span> (<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> * <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span> test) b
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">where</span> b.xx&gt;=a.start_level <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">and</span> b.xx&lt;end_level;</span>
+</code></pre>
+<br><p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+<span>3） MAPJOIN 结合 UNIONALL</span><br>
+原始sql：</p>
+<pre class="xiaoshujiang_code_container"><code class="language-sql hljs" style="border:0px;font-size:13.455px;color:rgb(79,66,76);display:block;background:rgb(231,233,219);"><span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> a.*,<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">coalesce</span>(c.categoryid,’NA’) <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">as</span> app_category
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span> (<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> * <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span> t_aa_pvid_ctr_hour_js_mes1
+) a
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">left</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">outer</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span>
+(<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> * fromt_qd_cmfu_book_info_mes
+) c
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">on</span> a.app_id=c.book_id;</span>
+</code></pre>
+<br><p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+速度很慢，老办法，先查下数据分布:</p>
+<pre class="xiaoshujiang_code_container"><code class="language-sql hljs" style="border:0px;font-size:13.455px;color:rgb(79,66,76);display:block;background:rgb(231,233,219);"><span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> *
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span>
+(selectapp_id,<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">count</span>(<span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">1</span>) cnt
+fromt_aa_pvid_ctr_hour_js_mes1
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">group</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">by</span> app_id) t
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">order</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">by</span> cnt <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">DESC</span>
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">limit</span> <span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">50</span>;</span>
+</code></pre>
+<br><p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+数据分布如下：</p>
+<pre class="xiaoshujiang_code_container"><code class="nohighlight hljs" style="border:0px;font-size:13.455px;color:rgb(79,66,76);display:block;background:rgb(231,233,219);">NA      617370129
+2       118293314
+1       40673814
+d       20151236
+b       1846306
+s       1124246
+5       675240
+8       642231
+6       611104
+t       596973
+4       579473
+3       489516
+7       475999
+9       373395
+107580  10508
+</code></pre>
+<br><p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+我们可以看到除了NA是有问题的异常值，还有appid=1~9的数据也很多，而这些数据是可以关联到的，所以这里不能简单的随机函数了。而t_qd_cmfu_book_info_mes这张app库表，又有几百万数据，太大以致不能放入内存使用mapjoin。</p>
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+解决方：首先将appid=NA和1到9的数据存入一组，并使用mapjoin与维表（维表也限定appid=1~9，这样内存就放得下了）关联，而除此之外的数据存入另一组，使用普通的join，最后使用union all 放到一起。</p>
+<pre class="xiaoshujiang_code_container"><code class="language-sql hljs" style="border:0px;font-size:13.455px;color:rgb(79,66,76);display:block;background:rgb(231,233,219);"><span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> a.*,<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">coalesce</span>(c.categoryid,’NA’) <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">as</span> app_category
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span> <span class="hljs-comment" style="color:rgb(119,110,113);line-height:1.5;">--if app_id isnot number value or &lt;=9,then not join</span>
+(<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> * fromt_aa_pvid_ctr_hour_js_mes1
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">where</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">cast</span>(app_id asint)&gt;<span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">9</span>
+) a
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">left</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">outer</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span>
+(<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> * fromt_qd_cmfu_book_info_mes
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">where</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">cast</span>(book_id asint)&gt;<span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">9</span>) c
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">on</span> a.app_id=c.book_id
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">union</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">all</span>
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> <span class="hljs-comment" style="color:rgb(119,110,113);line-height:1.5;">/*+ MAPJOIN(c)*/</span>
+a.*,<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">coalesce</span>(c.categoryid,’NA’) <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">as</span> app_category
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span> –<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">if</span> app_id&lt;=<span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">9</span>,<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">use</span> map <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span>
+(<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> * fromt_aa_pvid_ctr_hour_js_mes1
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">where</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">coalesce</span>(<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">cast</span>(app_id <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">as</span> <span class="hljs-built_in" style="color:rgb(249,155,21);line-height:1.5;">int</span>),-<span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">999</span>)&lt;=<span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">9</span>) a
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">left</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">outer</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span>
+(<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> * fromt_qd_cmfu_book_info_mes
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">where</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">cast</span>(book_id asint)&lt;=<span class="hljs-number" style="line-height:1.5;color:rgb(249,155,21);">9</span>) c
+<span class="hljs-comment" style="color:rgb(119,110,113);line-height:1.5;">--if app_id is notnumber value,then not join</span>
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">on</span> a.app_id=c.book_id
+</span></code></pre>
+<br><dl><dt style="line-height:1.35em;font-weight:bold;">
+设置：</dt><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+当然也可以让hive自动识别，把join变成合适的Map Join如下所示<br>
+注：当设置为true的时候，hive会自动获取两张表的数据，判定哪个是小表，然后放在内存中</p>
+</dd></dl><pre class="xiaoshujiang_code_container"><code class="language-sql hljs" style="border:0px;font-size:13.455px;color:rgb(79,66,76);display:block;background:rgb(231,233,219);"><span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">set</span> hive.auto.<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">convert</span>.<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span>=<span class="hljs-literal" style="color:rgb(249,155,21);line-height:1.5;">true</span>;</span>
+<span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">select</span> <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">count</span>(*) <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">from</span> store_sales <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span> time_dim <span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">on</span> (ss_sold_time_sk = t_time_sk)
+</span></code></pre>
+<h3 id="smbsort-merge-buket20join" style="font-size:24.5px;font-weight:500;line-height:1.1;font-family:inherit;color:inherit;">
+SMB(Sort-Merge-Buket) Join</h3>
+<dl><dt style="line-height:1.35em;font-weight:bold;">
+场景：</dt><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+大表对小表应该使用MapJoin，但是如果是大表对大表，如果进行shuffle，那就要人命了啊，第一个慢不用说，第二个容易出异常，既然是两个表进行join，肯定有相同的字段吧。</p>
+</dd><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+tb_a - 5亿（按排序分成五份，每份1亿放在指定的数值范围内,类似于分区表）<br>
+a_id<br>
+100001 ~ 110000 - bucket-01-a -1亿<br>
+110001 ~ 120000<br>
+120001 ~ 130000<br>
+130001 ~ 140000<br>
+140001 ~ 150000</p>
+</dd><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+tb_b - 5亿（同上，同一个桶只能和对应的桶内数据做join）<br>
+b_id<br>
+100001 ~ 110000 - bucket-01-b -1亿<br>
+110001 ~ 120000<br>
+120001 ~ 130000<br>
+130001 ~ 140000<br>
+140001 ~ 150000</p>
+</dd><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+<span>注：实际生产环境中，一天的数据可能有50G（举例子可以把数据弄大点，比如说10亿分成1000个bucket）。</span></p>
+</dd><dt style="line-height:1.35em;font-weight:bold;">原理：</dt><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+在运行SMB Join的时候会重新创建两张表，当然这是在后台默认做的，不需要用户主动去创建，如下所示：</p>
+</dd><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+<img src="http://images2015.cnblogs.com/blog/918187/201603/918187-20160327102810667-1098918349.png" alt="SMB Join" style="border:0px;vertical-align:middle;"></p>
+</dd></dl><p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+<span>设置（默认是false）：</span></p>
+<pre class="xiaoshujiang_code_container"><code class="language-sql hljs" style="border:0px;font-size:13.455px;color:rgb(79,66,76);display:block;background:rgb(231,233,219);"><span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">set</span> hive.auto.<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">convert</span>.sortmerge.<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">join</span>=<span class="hljs-literal" style="color:rgb(249,155,21);line-height:1.5;">true</span>
+<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">set</span> hive.<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">optimize</span>.bucketmapjoin=<span class="hljs-literal" style="color:rgb(249,155,21);line-height:1.5;">true</span>;</span>
+<span class="hljs-operator" style="line-height:1.5;"><span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">set</span> hive.<span class="hljs-keyword" style="color:rgb(129,91,164);line-height:1.5;">optimize</span>.bucketmapjoin.sortedmerge=<span class="hljs-literal" style="color:rgb(249,155,21);line-height:1.5;">true</span>;</span>
+</code></pre>
+<br><dl><dt style="line-height:1.35em;font-weight:bold;">
+总结：</dt><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+其实在写程序的时候，我们就可以知道哪些是大表哪些是小表，注意调优。</p>
+</dd><dd style="line-height:1.35em;">
+<p style="line-height:1.6;color:rgb(0,0,0);font-size:13px;">
+原文地址：http://www.cnblogs.com/raymoc/p/5323824.html</p>
+</dd></dl></div>
+</div>
+</div>
+</div>
+            </div>
+                </div>

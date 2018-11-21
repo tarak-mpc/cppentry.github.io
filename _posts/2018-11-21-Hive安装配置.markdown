@@ -1,0 +1,221 @@
+---
+layout:     post
+title:      Hive安装配置
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/IbeleveIcan/article/details/81022475				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h4 id="环境介绍hadoop-291hive-120">环境介绍：hadoop-2.9.1、hive-1.2.0</h4>
+
+<hr>
+
+<p>节点规划： <br>
+    mini0   hadoop  hive(server)    metastore  <br>
+    mini1   hadoop  hive(client)     mysql <br>
+    mini2   hadoop  hive(client)</p>
+
+<hr>
+
+<p><strong>1、安装MYSQL</strong> <br>
+    CentOS7 64位下MySQL5.7安装与配置:<a href="http://www.linuxidc.com/Linux/2016-09/135288.htm" rel="nofollow">http://www.linuxidc.com/Linux/2016-09/135288.htm</a> <br>
+    mysql-connector-java.jar下载：<a href="https://www.cnblogs.com/jizuiku/p/7637125.html" rel="nofollow">https://www.cnblogs.com/jizuiku/p/7637125.html</a></p>
+
+<hr>
+
+<p><strong>2、配置MYSQL Service and Connector</strong> <br>
+    说明：因为使用MySQL作为存储元数据的数据库，所以需要把连接MySQL的jar包放入或链接到$HIVE_HOME/lib目录下。</p>
+
+<hr>
+
+<p><strong>3、</strong> <br>
+    <strong>3.1、mysql配置</strong> <br>
+        启动MySQL服务：<code>systemctl start mysqld</code> <br>
+        查看MySQL状态：<code>systemctl status mysqld</code> <br>
+        开机启动：<code>systemctl enable mysqld</code>;<code>systemctl daemon-reload</code> <br>
+        重启Mysql服务：<code>service mysqld restart</code>   或者       <code>systemctl restart  mysqld.service</code> <br>
+        默认只允许root帐户在本地登录，如果要在其它机器上连接mysql，必须修改root允许远程连接；或者添加一个允许远程连接的帐户，为了安全起见，我添加一个新的帐户：</p>
+
+<pre class="prettyprint"><code class=" hljs sql">        创建数据库
+        <span class="hljs-operator"><span class="hljs-keyword">drop</span> <span class="hljs-keyword">database</span> metastore;</span>
+        <span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">DATABASE</span> metastore;</span>
+        USE metastore;
+        SOURCE /home/hadoop/apps/hive/scripts/metastore/upgrade/mysql/hive-schema-0.9.0.mysql.sql;
+
+        创建用户
+        <span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">USER</span> <span class="hljs-string">'hive'</span>@<span class="hljs-string">'mini0'</span> IDENTIFIED <span class="hljs-keyword">BY</span> <span class="hljs-string">'zys123'</span>;</span>
+        REVOKE ALL PRIVILEGES, <span class="hljs-operator"><span class="hljs-keyword">GRANT</span> <span class="hljs-keyword">OPTION</span> <span class="hljs-keyword">FROM</span> <span class="hljs-string">'hive'</span>@<span class="hljs-string">'mini0'</span>;</span>
+        <span class="hljs-operator"><span class="hljs-keyword">GRANT</span> <span class="hljs-keyword">ALL</span> <span class="hljs-keyword">ON</span> metastore.* <span class="hljs-keyword">TO</span> <span class="hljs-string">'hive'</span>@<span class="hljs-string">'mini0'</span> IDENTIFIED <span class="hljs-keyword">BY</span> <span class="hljs-string">'zys123'</span>;</span>
+        <span class="hljs-operator"><span class="hljs-keyword">GRANT</span> <span class="hljs-keyword">ALL</span> <span class="hljs-keyword">ON</span> metastore.* <span class="hljs-keyword">TO</span> <span class="hljs-string">'hive'</span>@<span class="hljs-string">'%'</span> IDENTIFIED <span class="hljs-keyword">BY</span> <span class="hljs-string">'zys123'</span>;</span>
+        FLUSH PRIVILEGES;
+        <span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">DATABASE</span> metastore <span class="hljs-keyword">CHARACTER</span> <span class="hljs-keyword">SET</span> latin1;</span>
+        <span class="hljs-operator"><span class="hljs-keyword">select</span> <span class="hljs-keyword">user</span>,host <span class="hljs-keyword">from</span> mysql.<span class="hljs-keyword">user</span>;</span>
+        flush privileges;
+        quit;       
+
+        删除用户
+        <span class="hljs-operator"><span class="hljs-keyword">select</span> <span class="hljs-keyword">user</span>,host <span class="hljs-keyword">from</span> mysql.<span class="hljs-keyword">user</span>;</span>
+        <span class="hljs-operator"><span class="hljs-keyword">delete</span> <span class="hljs-keyword">from</span> mysql.<span class="hljs-keyword">user</span> <span class="hljs-keyword">where</span> <span class="hljs-keyword">user</span>=<span class="hljs-string">'hive'</span> <span class="hljs-keyword">and</span> host=<span class="hljs-string">'%'</span>;</span>
+        <span class="hljs-operator"><span class="hljs-keyword">delete</span> <span class="hljs-keyword">from</span> mysql.<span class="hljs-keyword">user</span> <span class="hljs-keyword">where</span> <span class="hljs-keyword">user</span>=<span class="hljs-string">'hive'</span> <span class="hljs-keyword">and</span> host=<span class="hljs-string">'mini0'</span>;</span>
+        <span class="hljs-operator"><span class="hljs-keyword">drop</span> <span class="hljs-keyword">user</span> <span class="hljs-string">'hive'</span>@<span class="hljs-string">'%'</span>;</span>
+        <span class="hljs-operator"><span class="hljs-keyword">drop</span> <span class="hljs-keyword">user</span> <span class="hljs-string">'hive'</span>@<span class="hljs-string">'mini0'</span>;</span>
+        flush privileges;</code></pre>
+
+<hr>
+
+<p><strong>4.配置hive</strong> <br>
+    <strong>4.1、HDFS存储位置配置（Hive配置文件里要用到HDFS的一些路径，需要先手动创建。）</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">        hdfs dfs <span class="hljs-attribute">-mkdir</span> <span class="hljs-attribute">-p</span> /usr/hive/warehouse
+        hdfs dfs <span class="hljs-attribute">-mkdir</span> <span class="hljs-attribute">-p</span> /usr/hive/tmp
+        hdfs dfs <span class="hljs-attribute">-mkdir</span> <span class="hljs-attribute">-p</span> /usr/hive/<span class="hljs-keyword">log</span>
+        hdfs dfs <span class="hljs-attribute">-chmod</span> <span class="hljs-number">777</span> /usr/hive/warehouse
+        hdfs dfs <span class="hljs-attribute">-chmod</span> <span class="hljs-number">777</span> /usr/hive/tmp 
+        hdfs dfs <span class="hljs-attribute">-chmod</span> <span class="hljs-number">777</span> /usr/hive/<span class="hljs-keyword">log</span></code></pre>
+
+<p>上述语句涉及hive-site.xml hive.metastore.warehouse.dir等，表示数据在hdfs中的存储位置 <br>
+<strong>4.2 配置hive-env.sh</strong>   </p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">        <span class="hljs-keyword">export</span> HIVE_CONF_DIR=/home/hadoop/apps/hive/conf
+        <span class="hljs-keyword">export</span> HADOOP_HOME=/home/hadoop/apps/hadoop-<span class="hljs-number">2.9</span>.<span class="hljs-number">1</span>
+        <span class="hljs-keyword">export</span> HIVE_HOME=/home/hadoop/apps/hive </code></pre>
+
+<pre><code>    然后配置hive-log4j.properties
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">        hive.log.dir=<span class="hljs-regexp">/usr/lib</span><span class="hljs-regexp">/hive/logs</span></code></pre>
+
+<p><strong>4.3、服务端hive-site.xml（mini0）</strong> <br>
+        （服务端指的是Metastore服务所在的机器，即安装metastore的机器）</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionURL<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>jdbc:mysql://mini1:3306/metastore?createDatabaseIfNotExist=true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>JDBC connect string for a JDBC metastore<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionDriverName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>com.mysql.jdbc.Driver<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>Driver class name for a JDBC metastore<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionUserName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hive<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>username to use against metastore database<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionPassword<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>zys123<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>password to use against metastore database<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.metastore.warehouse.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/usr/hive/warehouse<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.exec.scratchdir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/usr/hive/tmp<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.querylog.location<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/usr/hive/log<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p><strong>1、客户端hive-site.xml（mini1、mini2）</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span> 
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.metastore.uris<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>thrift://mini0:9083<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>IP address (or fully-qualified domain name) and port of the metastore host<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.metastore.warehouse.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/usr/hive/warehouse<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.exec.scratchdir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/usr/hive/tmp<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.querylog.location<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/usr/hive/log<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<p><strong>6、Jline包版本不一致的问题</strong>，需要拷贝hive的lib目录中jline.2.12.jar的jar包替换掉hadoop中的  <br>
+/home/hadoop/app/hadoop-2.9.1/share/hadoop/yarn/lib/jline-0.9.94.jar</p>
+
+<p><strong>7、metastore初始化（必须要初始化，否则后边hiveserver2无法启动）</strong>：     </p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">schematool <span class="hljs-attribute">-dbType</span> mysql <span class="hljs-attribute">-initSchema</span></code></pre>
+
+<p><strong>8、启动Hive</strong> <br>
+        1、**本地方式启动**hive:<code>hive</code> <br>
+        2、 <br>
+        <strong>服务端启动：</strong>通过Hive thrift服务（远程） <br>
+            启动为前台：<code>hiveserver2</code> <br>
+            启动为后台：<code>nohup hiveserver2 &amp;</code> <br>
+            <strong>客户端启动：</strong> <br>
+            方式一：beeline回车,进入beeline的命令界面 <br>
+                    输入命令连接：<code>!connect jdbc:hive2//mini0:10000 -n hadoop</code> <br>
+                    （mini0是hiveserver2所启动的那台主机名，端口默认是10000） <br>
+            方式二：直接启动：<code>beeline -u jdbc:hive2://mini0:10000 -n hadoop</code></p>
+
+<p>查看hiveserver2服务端状态：netstat -nltp | grep 10000</p>
+
+<hr>
+
+<p><strong>Hive基本操作：</strong> <br>
+    1、hive命令： <br>
+        清空表：<code>truncate table person;</code> <br>
+        创建数据库：<code>create database test_db</code> <br>
+        删除数据库：<code>drop database test_db;</code> <br>
+        删除表：<code>drop table ****;</code></p>
+
+<hr>
+
+<p><strong>6.建表(默认是内部表)</strong></p>
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">table</span> person(name string,id <span class="hljs-keyword">int</span>) <span class="hljs-keyword">row</span> format delimited fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">'\t'</span>;</span></code></pre>
+
+<pre><code>建分区表
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">table</span> td_part(id bigint, account string, income <span class="hljs-keyword">double</span>, expenses <span class="hljs-keyword">double</span>, <span class="hljs-keyword">time</span> string) partitioned <span class="hljs-keyword">by</span> (logdate string) <span class="hljs-keyword">row</span> format delimited fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">'\t'</span>;</span></code></pre>
+
+<pre><code>建外部表
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">create</span> <span class="hljs-keyword">external</span> <span class="hljs-keyword">table</span> td_ext(id bigint, account string, income <span class="hljs-keyword">double</span>, expenses <span class="hljs-keyword">double</span>, <span class="hljs-keyword">time</span> string) <span class="hljs-keyword">row</span> format delimited fields terminated <span class="hljs-keyword">by</span> <span class="hljs-string">'\t'</span> location <span class="hljs-string">'/td_ext'</span>;</span></code></pre>
+
+<hr>
+
+<blockquote>
+  <p>参考网站：         Hive安装配置指北（含Hive <br>
+  Metastore详解）：<a href="https://www.cnblogs.com/linbingdong/p/5829369.html" rel="nofollow">https://www.cnblogs.com/linbingdong/p/5829369.html</a></p>
+</blockquote>
+
+<hr>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

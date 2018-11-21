@@ -1,0 +1,545 @@
+---
+layout:     post
+title:      hadoop文件操作工具类
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/dreamsigel/article/details/53924405				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>本工具类可以直接使用，不需要任何其他文件配置。</p>
+<p>tips:</p>
+<p>1、由于hadoop访问的限制，windows开发时访问远程hadoop,需要下载hadoop环境，在本地配置hadoop环境变量HADOOP_HOME。且设置hadoop连接用户HADOOP_USER。hadoop用户的设置需要看具体hdfs访问的用户权限设置。如果是root,就用root;如果是hadoop，使用hadoop;其他用户则配置其他用户。</p>
+<p>2、hadoop本身带的上传（copyFromLocalFile）下载(downloadToLocal)经个人测试，远程访问和页面上传下载不太好使，所以建议使用输入输出流方法。</p>
+<p><br></p>
+<p>贴代码：</p>
+<p></p><pre><code class="language-java">public class FileUtils {
+
+	private static final String DFS = "hdfs://192.168.1.2:9000";
+
+	public static final int FOLDER = 0;
+
+	public static final int FILE = 1;
+
+	private static Configuration conf = new Configuration();
+
+	static {
+		conf.set("fs.default.name", DFS);
+		conf.set("hadoop.user", "root");
+		conf.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
+	}
+
+	/**
+	 * 创建文件
+	 * 
+	 * @param fileName
+	 * @throws IOException
+	 */
+	public static void create(String fileName) throws IOException {
+		create(fileName, FILE);
+	}
+	
+	public static Configuration getConf(){
+		return conf;
+	}
+	/**
+	 * 创建文件/文件夹
+	 * 
+	 * @param fileName
+	 * @throws IOException
+	 */
+	public static void create(String fileName, int type) throws IOException {
+		FileSystem fs = FileSystem.get(conf);
+		Path path = new Path(fileName);
+		if (!fs.exists(path)) {
+			if (type == FOLDER) {
+				fs.mkdirs(path);
+			} else {
+				fs.create(path);
+			}
+		}
+		fs.close();
+	}
+
+	/**
+	 * 删除文件/文件夹
+	 * 
+	 * @param fileName
+	 * @throws IOException
+	 */
+	public static void delete(String fileName) throws IOException {
+		FileSystem fs = FileSystem.get(conf);
+		Path path = new Path(fileName);
+		if (fs.exists(path)) {
+			fs.delete(path, true);
+		}
+		fs.close();
+	}
+
+	/**
+	 * 重命名文件
+	 * 
+	 * @param srcFile
+	 * @param dstName
+	 * @throws IOException
+	 */
+	public static void rename(CloudFile file, String dstName) throws IOException {
+		dstName = file.getPath() + "/" + dstName;
+		Path srcPath = new Path(getFilePath(file));
+		Path dstPath = new Path(dstName);
+		FileSystem fs = FileSystem.get(conf);
+		if (fs.exists(srcPath)) {
+			fs.rename(srcPath, dstPath);
+		}
+		fs.close();
+	}
+
+	/**
+	 * 移动文件
+	 * 
+	 * @param srcFile
+	 * @param dstFile
+	 * @throws IOException
+	 */
+	public static void move(String srcFile, String dstFile) throws IOException {
+		Path srcPath = new Path(srcFile);
+		Path dstPath = new Path(dstFile);
+		// 目标文件的文件夹
+		String dstFolder = dstFile.substring(0, dstFile.lastIndexOf("/"));
+		Path dstFolderPath = new Path(dstFolder);
+
+		FileSystem fs = FileSystem.get(conf);
+		if (fs.exists(srcPath)) {
+			// 如果目标文件的文件夹不存在，先创建文件夹
+			if (!fs.exists(dstFolderPath)) {
+				fs.mkdirs(dstFolderPath);
+			}
+			fs.rename(srcPath, dstPath);
+		}
+		fs.close();
+	}
+
+	/**
+	 * 写文件--字符串
+	 * 
+	 * @param fileName
+	 * @param contentStr
+	 * @throws IOException
+	 */
+	public static void writeFile(String fileName, String content) throws IOException {
+		FileSystem fs = FileSystem.get(conf);
+		Path path = new Path(fileName);
+		FSDataOutputStream out = fs.create(path);
+		out.writeUTF(content);
+		out.close();
+		fs.close();
+	}
+
+	/**
+	 * 写文件--输入流
+	 * 
+	 * @param fileName
+	 * @param inputStream
+	 * @throws IOException
+	 */
+	public static void write(String fileName, InputStream in) throws IOException {
+		FileSystem fs = FileSystem.get(conf);
+		Path path = new Path(fileName);
+		OutputStream out = fs.create(path);
+		IOUtils.copyBytes(in, out, 4096, true);
+
+		IOUtils.closeStream(in);
+		IOUtils.closeStream(out);
+		fs.close();
+	}
+
+	/**
+	 * 写文件（压缩）--输入流
+	 * 
+	 * @param fileName
+	 * @param inputStream
+	 * @throws IOException
+	 * @throws ClassNotFoundException
+	 */
+	public static void writeZip(String fileName, InputStream in) throws IOException, ClassNotFoundException {
+		FileSystem fs = FileSystem.get(conf);
+		Class&lt;?&gt; codecClass = Class.forName("org.apache.hadoop.io.compress.GzipCodec");
+		CompressionCodec codec = (CompressionCodec) ReflectionUtils.newInstance(codecClass, conf);
+		FSDataOutputStream outputStream = fs.create(new Path(fileName + ".zip"));
+		CompressionOutputStream out = codec.createOutputStream(outputStream);
+		IOUtils.copyBytes(in, out, 4096, true);
+		
+		IOUtils.closeStream(in);
+		IOUtils.closeStream(out);
+		fs.close();
+	}
+
+	/**
+	 * 写文件（追加）--文件到文件
+	 * 
+	 * @param srcFile
+	 * @param targetFile
+	 * @throws IOException
+	 */
+	public static void writeAppend(String srcFile, String targetFile) throws IOException {
+		conf.setBoolean("dfs.support.append", true);
+		FileSystem fs = FileSystem.get(conf);
+		Path path = new Path(targetFile);
+		InputStream in = new BufferedInputStream(new FileInputStream(srcFile));
+		OutputStream out = fs.append(path);
+		IOUtils.copyBytes(in, out, 4096, true);
+
+		out.flush();
+		in.close();
+		out.close();
+		fs.close();
+	}
+
+	/**
+	 * 写文件（追加）--输入流到文件
+	 * 
+	 * @param srcFile
+	 * @param targetFile
+	 * @throws IOException
+	 */
+	public static void writeAppend(String fileName, InputStream in) throws IOException {
+		conf.setBoolean("dfs.support.append", true);
+		FileSystem fs = FileSystem.get(conf);
+		Path path = new Path(fileName);
+		OutputStream out = fs.append(path);
+		IOUtils.copyBytes(in, out, 4096, true);
+
+		out.flush();
+		in.close();
+		out.close();
+		fs.close();
+	}
+
+	/**
+	 * 读文件
+	 * 
+	 * @param fileName
+	 * @throws IOException
+	 */
+	public static String readFile(String fileName) throws IOException {
+		FileSystem fs = FileSystem.get(conf);
+		Path path = new Path(fileName);
+		if (!fs.exists(path)) {
+			fs.close();
+			return null;
+		}
+
+		FSDataInputStream is = null;
+		OutputStream os = new ByteArrayOutputStream();
+		String str = null;
+		try {
+			is = fs.open(path);
+			IOUtils.copyBytes(is, os, 4096, false);
+			str = os.toString();
+		} finally {
+			IOUtils.closeStream(is);
+			fs.close();
+		}
+		return str;
+	}
+
+	/**
+	 * 读文件--输出流
+	 * 
+	 * @param fileName
+	 * @throws IOException
+	 * @throws ClassNotFoundException 
+	 */
+	public static OutputStream readFileToStream(String fileName) throws IOException, ClassNotFoundException {
+		FileSystem fs = FileSystem.get(conf);
+		Path path = new Path(fileName);
+		if (!fs.exists(path)) {
+			fs.close();
+			return null;
+		}
+
+		FSDataInputStream is = null;
+		OutputStream os = new ByteArrayOutputStream();
+		try {
+			is = fs.open(path);
+			if(fileName.endsWith(".zip")){
+				Class&lt;?&gt; codecClass = Class.forName("org.apache.hadoop.io.compress.GzipCodec");
+				CompressionCodec codec = (CompressionCodec) ReflectionUtils.newInstance(codecClass, conf);
+				InputStream in = codec.createInputStream(is); 
+				IOUtils.copyBytes(in, os, 4096, false);
+			}else{
+				IOUtils.copyBytes(is, os, 4096, false);
+			}
+		} finally {
+			IOUtils.closeStream(is);
+			fs.close();
+		}
+		return os;
+	}
+
+	/**
+	 * 上传文件
+	 * 
+	 * @param fileName
+	 * @throws IOException
+	 */
+	public static void uploadFile(String srcFileName, String dstFileName) throws IOException {
+
+		FileSystem fs = FileSystem.get(conf);
+
+		Path srcPath = new Path(srcFileName);
+		Path dstPath = new Path(dstFileName);
+
+		fs.copyFromLocalFile(srcPath, dstPath);
+		fs.close();
+	}
+
+	/**
+	 * 下载 文件
+	 * 
+	 * @param uri
+	 * @param remote
+	 * @param local
+	 * @throws IOException
+	 * @throws ClassNotFoundException 
+	 */
+	public static void download1(CloudFile file, HttpServletRequest request, HttpServletResponse response)
+			throws IOException, ClassNotFoundException {
+		//获取文件的全路径
+		String fullName = file.getPath() + (StringUtils.isBlank(file.getFileName()) ? "" : ("/" + file.getFileName()));
+		ByteArrayOutputStream out = (ByteArrayOutputStream) readFileToStream(fullName);
+		//分浏览器设置返回头，防止乱码
+		String fileName = file.getFileName().replace(".zip", "");
+		response.reset();
+		response.setContentType("application/octet-stream; charset=utf-8");
+		String userAgent = request.getHeader("USER-AGENT").toLowerCase();
+		if (StringUtils.isNotBlank(userAgent) &amp;&amp; userAgent.indexOf("firefox") != -1) {
+			fileName = new String(fileName.getBytes("UTF-8"), "iso-8859-1");
+			response.setHeader("Content-Disposition", "attachment; filename=" + fileName);
+		} else {
+			response.setHeader("Content-Disposition", "attachment; filename=" + Encodes.urlEncode(fileName));
+		}
+		//输出
+		response.getOutputStream().write(out.toByteArray());
+		
+	}
+	
+	/**
+	 * 下载文件/文件夹 批量下载
+	 * @param file
+	 * @param request
+	 * @param response
+	 * @throws IOException
+	 */
+	public static void download(List&lt;CloudFile&gt; list,HttpServletRequest request,
+			HttpServletResponse response) throws  IOException {
+		CloudFile file=null;
+		if(null!=list&amp;&amp;list.size()&gt;0){
+			file=list.get(0);
+		}
+		//获取文件打包后的根路径
+		String root=file.getPath().substring(file.getPath().lastIndexOf('/')+1)+'/';
+		FileSystem fs=FileSystem.get(conf);
+		//获取文件打包的名称
+		String fileName = file.getFileName()+".zip";
+		if(list.size()&gt;1){
+			fileName=file.getFileName()+"等"+list.size()+"个文件"+".zip";
+		}
+		//设置response
+		response.reset();
+		response.setContentType("application/octet-stream; charset=utf-8");
+		String userAgent = request.getHeader("USER-AGENT").toLowerCase();
+		if (StringUtils.isNotBlank(userAgent) &amp;&amp; userAgent.indexOf("firefox") != -1) {
+			fileName = new String(fileName.getBytes("UTF-8"), "iso-8859-1");
+			response.setHeader("Content-Disposition", "attachment; filename=" + fileName);
+		} else {
+			response.setHeader("Content-Disposition", "attachment; filename=" + Encodes.urlEncode(fileName));
+		}
+		//获取response中的输出流,并用输出流建立zip输出流
+		ZipOutputStream zos = new ZipOutputStream(response.getOutputStream());
+		//调用打包下载方法
+		for(CloudFile f:list){
+			//获取要下载文件的全路径
+			String fullName = f.getPath() + (StringUtils.isBlank(f.getFileName()) ? "" : ("/" + f.getFileName()));
+			doZip(new Path(fullName), zos,root);		
+		}
+		//关闭zip输出流
+		zos.close();
+	}
+	/**
+	 * 打包为zip
+	 * @param path	hadoop文件路径
+	 * @param zos	zip输出流
+	 * @param root	打包为zip后的跟路径
+	 * @throws IOException
+	 */
+	public static void doZip(Path path, ZipOutputStream zos,String root)
+			throws IOException {
+		FileSystem fs=FileSystem.get(conf);
+		//判断文件是否存在
+		if(fs.exists(path)) {
+			//判断文件是否为一个标准文件
+			if (fs.isFile(path)) {
+				//如果文件是一个标准文件,新建一个zip实体类并将它放入zip输出六中
+				root =root +path.getName();
+				zos.putNextEntry(new ZipEntry(root));
+				//创建读取hadoop的输入流
+				FSDataInputStream inputStream = null;
+				//打开输入流
+				inputStream=fs.open(path);
+				byte[] buffer = new byte[1024];
+				int r = 0;
+				//如果读取到的数据不为空,输出---
+				while ((r = inputStream.read(buffer)) != -1) {
+					zos.write(buffer, 0, r);
+				}
+				//刷新输出流
+				zos.flush();
+				//关闭输入流
+				inputStream.close();
+			} else {
+				//如果为文件夹,递归查询
+				root =root+path.getName()+'/';
+				zos.putNextEntry(new ZipEntry(root));
+				FileStatus contents[] = fs.listStatus(path); ;
+				for (FileStatus f : contents) {
+					doZip(f.getPath(), zos,root);
+				}
+			}
+		}
+	}
+	/**
+	 * 获取文件目录json
+	 * @param path
+	 * @param pMap
+	 * @return
+	 * @throws IOException
+	 */
+	public static JSONObject getZtreeJson(CloudFile file,JSONObject jObj) throws IOException{
+		FileSystem fs=FileSystem.get(conf);
+		Path path=new Path(file.getPath()+'/'+file.getFileName());
+		if(fs.exists(path)){
+			if(fs.isDirectory(path)){
+				List&lt;CloudFile&gt; list=getFiles(path.toString());
+				JSONArray array=new JSONArray();
+				for (CloudFile c : list) {
+					if (fs.isDirectory(new Path(getFilePath(c)))) {
+						JSONObject j = new JSONObject();
+						j.put("name", c.getFileName());
+						j.put("path", c.getPath());
+						array.add(j);
+						getZtreeJson(c, j);
+					}
+				}
+				jObj.put("children", array);
+			}
+		}
+		return jObj;
+		
+	}
+	/**
+	 * 下载 文件
+	 * 
+	 * @param uri
+	 * @param remote
+	 * @param local
+	 * @throws IOException
+	 */
+	public static void downloadToLocal(String remote, String local) throws IOException {
+		Path path = new Path(remote);
+		FileSystem fs = FileSystem.get(conf);
+		fs.copyToLocalFile(path, new Path(local));
+		fs.close();
+	}
+
+	/**
+	 * 获取文件/文件夹 下的文件
+	 * 
+	 * @param fileName
+	 * @throws IOException
+	 */
+	public static List&lt;CloudFile&gt; getFiles(String fileName) throws IOException {
+
+		List&lt;CloudFile&gt; result = Lists.newArrayList();
+
+		FileSystem fs = FileSystem.get(conf);
+
+		Path path = new Path(fileName);
+	
+		FileStatus[] fileStatus = fs.listStatus(path);
+
+		for (int i = 0; i &lt; fileStatus.length; i++) {
+			FileStatus f = fileStatus[i];
+			double size = f.getLen() / 1024;
+			String fullPath = f.getPath().toString();
+			String simplename = fullPath.substring(fullPath.lastIndexOf("/") + 1);
+			CloudFile file = new CloudFile(simplename, fileName, size, f.getModificationTime());
+			if (f.isDirectory()) {
+				file.setFolder(true);
+			}
+			result.add(file);
+		}
+
+		fs.close();
+		return result;
+
+	}
+
+	/**
+	 * 获取文件/文件夹 下的所有文件
+	 * 
+	 * @param fileName
+	 * @throws IOException
+	 */
+	public static List&lt;CloudFile&gt; getAllFiles(String fileName) throws IOException {
+
+		FileSystem fs = FileSystem.get(conf);
+
+		Path path = new Path(fileName);
+
+		return getAllFiles(path, fs);
+
+	}
+
+	/**
+	 * 获取文件/文件夹 下的所有文件
+	 * 
+	 * @param fileName
+	 */
+	public static List&lt;CloudFile&gt; getAllFiles(Path path, FileSystem fs) throws IOException {
+
+		List&lt;CloudFile&gt; result = Lists.newArrayList();
+		FileStatus[] fileStatus = fs.listStatus(path);
+		for (int i = 0; i &lt; fileStatus.length; i++) {
+			if (fileStatus[i].isDirectory()) {
+				Path p = new Path(fileStatus[i].getPath().toString());
+				result.addAll(getAllFiles(p, fs));
+			} else {
+				FileStatus f = fileStatus[i];
+				double size = f.getLen() / 1024;
+				String fullPath = f.getPath().toString();
+				String simplename = fullPath.substring(fullPath.lastIndexOf("/") + 1);
+				String filePath = fullPath.substring(0, fullPath.lastIndexOf("/"));
+				CloudFile file = new CloudFile(simplename, filePath, size, f.getModificationTime());
+				if (f.isDirectory()) {
+					file.setFolder(true);
+				}
+				result.add(file);
+			}
+		}
+		fs.close();
+		return result;
+	}
+
+	/**
+	 * 获取文件的全路径
+	 * 
+	 * @param file
+	 * @return
+	 */
+	public static String getFilePath(CloudFile file) {
+		return file.getPath() + (StringUtils.isBlank(file.getFileName()) ? "" : "/" + file.getFileName());
+	}
+}</code></pre><br><br>            </div>
+                </div>

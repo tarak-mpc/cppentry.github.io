@@ -1,0 +1,494 @@
+---
+layout:     post
+title:      3.sparkSQL整合Hive
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>　　spark SQL经常需要访问Hive metastore，<strong>Spark SQL可以通过Hive metastore获取Hive表的元数据</strong>。从Spark 1.4.0开始，Spark SQL只需简单的配置，就支持各版本Hive metastore的访问。注意，涉及到metastore时Spar SQL忽略了Hive的版本。Spark SQL内部将Hive反编译至Hive 1.2.1版本，Spark SQL的内部操作(serdes, UDFs, UDAFs, etc)都调用Hive 1.2.1版本的class。</p>
+
+<p>原文和作者一起讨论:<a href="http://www.cnblogs.com/intsmaze/p/6618841.html" rel="nofollow" id="Editor_Edit_hlEntryLink">http://www.cnblogs.com/intsmaze/p/6618841.html</a></p>
+
+<p><img alt="" class="has" height="258" src="https://images2015.cnblogs.com/blog/758427/201703/758427-20170313180042620-2143885542.png" width="225"></p>
+
+<h3>　　Spark SQL和hive共用一套元数据库</h3>
+
+<p>　　Spark SQL自己也可创建元数据库，并不一定要依赖hive创建元数据库，所以不需要一定启动hive，只要有元数据库，Spark SQL就可以使用。但是<strong>如果要像hive一样持久化文件与表的关系就要使用hive</strong>，当然可以不启动hive程序使用spark提供的HiveContext类即可。</p>
+
+<p> </p>
+
+<p>　　1.<strong>将hive的hive-site.xml拷贝到放入$SPARK-HOME/conf目录下,</strong>里面配置的是Hive metastore元数据存放在数据库的位置，当然如果数据库不存在，我们可以定义一个数据库，然后程序在spark集群运行的时候就会自动创建对应的元数据库。</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+
+			<p>2</p>
+
+			<p>3</p>
+
+			<p>4</p>
+
+			<p>5</p>
+
+			<p>6</p>
+
+			<p>7</p>
+
+			<p>8</p>
+
+			<p>9</p>
+
+			<p>10</p>
+
+			<p>11</p>
+
+			<p>12</p>
+
+			<p>13</p>
+
+			<p>14</p>
+
+			<p>15</p>
+
+			<p>16</p>
+
+			<p>17</p>
+
+			<p>18</p>
+			</td>
+			<td>
+			<p><code>&lt;</code><code>configuration</code><code>&gt;</code></p>
+
+			<p><code>        </code><code>&lt;</code><code>property</code><code>&gt;</code></p>
+
+			<p><code>                </code><code>&lt;</code><code>name</code><code>&gt;javax.jdo.option.ConnectionURL&lt;/</code><code>name</code><code>&gt;</code></p>
+
+			<p><code>                </code><code>&lt;</code><code>value</code><code>&gt;jdbc:mysql://192.168.19.131:3306/hivedb?createDatabaseIfNotExist=true&lt;/</code><code>value</code><code>&gt;</code></p>
+
+			<p><code>        </code><code>&lt;/</code><code>property</code><code>&gt;</code></p>
+
+			<p><code>        </code><code>&lt;</code><code>property</code><code>&gt;</code></p>
+
+			<p><code>                </code><code>&lt;</code><code>name</code><code>&gt;javax.jdo.option.ConnectionDriverName&lt;/</code><code>name</code><code>&gt;</code></p>
+
+			<p><code>                </code><code>&lt;</code><code>value</code><code>&gt;com.mysql.jdbc.Driver&lt;/</code><code>value</code><code>&gt;</code></p>
+
+			<p><code>        </code><code>&lt;/</code><code>property</code><code>&gt;</code></p>
+
+			<p><code>        </code><code>&lt;</code><code>property</code><code>&gt;</code></p>
+
+			<p><code>                </code><code>&lt;</code><code>name</code><code>&gt;javax.jdo.option.ConnectionUserName&lt;/</code><code>name</code><code>&gt;</code></p>
+
+			<p><code>                </code><code>&lt;</code><code>value</code><code>&gt;root&lt;/</code><code>value</code><code>&gt;</code></p>
+
+			<p><code>        </code><code>&lt;/</code><code>property</code><code>&gt;</code></p>
+
+			<p><code>        </code><code>&lt;</code><code>property</code><code>&gt;</code></p>
+
+			<p><code>                </code><code>&lt;</code><code>name</code><code>&gt;javax.jdo.option.ConnectionPassword&lt;/</code><code>name</code><code>&gt;</code></p>
+
+			<p><code>                </code><code>&lt;</code><code>value</code><code>&gt;hadoop&lt;/</code><code>value</code><code>&gt;</code></p>
+
+			<p><code>        </code><code>&lt;/</code><code>property</code><code>&gt;</code></p>
+
+			<p><code>&lt;/</code><code>configuration</code><code>&gt;</code></p>
+			</td>
+		</tr></tbody></table><p> </p>
+
+<p>2.如果hdfs配置了高可用，则还要把hadoop集群中的hdfs-site.xml和core-site.xml文件拷贝到spark/conf文件夹下面。</p>
+
+<p> </p>
+
+<p>3.<strong>启动spark-shell</strong>时指定mysql连接驱动位置</p>
+
+<p> </p>
+
+<p>spark集群模式</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+
+			<p>2</p>
+
+			<p>3</p>
+
+			<p>4</p>
+
+			<p>5</p>
+			</td>
+			<td>
+			<p><code>bin/spark-shell \</code></p>
+
+			<p><code> </code><code>--master spark://intsmaze:7077 \</code></p>
+
+			<p><code> </code><code>--executor-memory 512m \</code></p>
+
+			<p><code> </code><code>--total-executor-cores 2\</code></p>
+
+			<p><code> </code><code>--driver-class-path /home/intsmaze/mysql-connector-java-5.1.35-bin.jar</code></p>
+			</td>
+		</tr></tbody></table><p> </p>
+
+<p>sprk on yarn模式</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+
+			<p>2</p>
+
+			<p>3</p>
+
+			<p>4</p>
+
+			<p>5</p>
+			</td>
+			<td>
+			<p><code>bin/spark-shell \</code></p>
+
+			<p><code> </code><code>--master yarn \</code></p>
+
+			<p><code> </code><code>--executor-memory 512m \</code></p>
+
+			<p><code> </code><code>--total-executor-cores 2\</code></p>
+
+			<p><code> </code><code>--driver-class-path /home/intsmaze/mysql-connector-java-5.1.35-bin.jar</code></p>
+			</td>
+		</tr></tbody></table><p> </p>
+
+<p>4.执行sql语句</p>
+
+<p> </p>
+
+<p>　 使用sqlContext.sql调用HQL</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+
+			<p>2</p>
+			</td>
+			<td>
+			<p><code>val rdd=sqlContext.sql(</code><code>"select * from default.person limit 2"</code><code>)</code><code>//现在就可以直接使用sql语句了，只是要指定查询哪个库的哪张表。</code></p>
+
+			<p><code>rdd.write.json(</code><code>"hdfs://192.168.19.131:9000/personresult"</code><code>)</code></p>
+			</td>
+		</tr></tbody></table><p> </p>
+
+<p>　　使用org.apache.spark.sql.hive.HiveContext</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+
+			<p>2</p>
+
+			<p>3</p>
+			</td>
+			<td>
+			<p><code>import</code> <code>org.apache.spark.sql.hive.HiveContext</code></p>
+
+			<p><code>val hiveContext = </code><code>new</code> <code>HiveContext(sc)</code></p>
+
+			<p><code>hiveContext.sql(</code><code>"select * from default.person "</code><code>)</code></p>
+			</td>
+		</tr></tbody></table><p> </p>
+
+<p>5.使用sprk-sql命令启动shell模式</p>
+
+<p>　　<code>启动spark-sql时指定mysql连接驱动位置(启动spark-sql那么就和hive的操作一样，里面可以直接写sql语句进行操作)</code></p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+
+			<p>2</p>
+
+			<p>3</p>
+
+			<p>4</p>
+
+			<p>5</p>
+			</td>
+			<td>
+			<p><code>bin/spark-sql\</code></p>
+
+			<p><code>--master spark://intsmaze:7077 \</code></p>
+
+			<p><code>--executor-memory 512m \</code></p>
+
+			<p><code>--total-executor-cores 3 \</code></p>
+
+			<p><code>--driver-class-path /home/intsmaze/mysql-connector-java-5.1.35-bin.jar</code></p>
+			</td>
+		</tr></tbody></table><table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+			</td>
+			<td>
+			<p><code>&lt;</code><code>span</code> <code>style="font-size: 16px; font-family: 宋体;"&gt;里面直接写sql语句。&lt;</code><code>br</code><code>&gt;&lt;/</code><code>span</code><code>&gt;</code></p>
+			</td>
+		</tr></tbody></table><table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+			</td>
+			<td>
+			<p><code>select</code> <code>* </code><code>from</code> <code>default</code><code>.person limit 2</code></p>
+			</td>
+		</tr></tbody></table><p>　　</p>
+
+<p>　　spark sql如何向元数据中添加数据？因为元数据库中只是存放表对应数据在hdfs的地址，并没有存放表的数据信息,spark sql可以创建表，但是无法向表中添加数据比如insert语句。注意与把DF数据存储到数据库不是一个概念。</p>
+
+<p> </p>
+
+<p>6.Thrift JDBC/ODBC server</p>
+
+<p> </p>
+
+<p>　　 Spark SQL实现Thrift JDBC/ODBC server,这就意味着我们可以像HIVE那样通过JDBC远程连接Spark SQL发送SQL语句并执行。在这之前需要先将${HIVE_HOME}/conf/hive-site.xml 拷贝到${SPARK_HOME}/conf目录下，由于我的hive配置了元数据信息存储在MySQL中，所以Spark在访问这些元数据信息时需要mysql连接驱动的支持。</p>
+
+<p> </p>
+
+<p>添加驱动的方式有三种：</p>
+
+<p>　　第一种是在${SPARK_HOME}/conf目录下的spark-defaults.conf中添加：spark.jars /intsmaze/lib/mysql-connector-java-5.1.26-bin.jar。</p>
+
+<p>　　第二种是通过添加 ：spark.driver.extraClassPath /intsmaze/lib2/mysql-connector-java-5.1.26-bin.jar这种方式也可以实现添加多个依赖jar，比较方便。</p>
+
+<p>　　第三种是在运行时添加 --jars /intsmaze/lib2/mysql-connector-java-5.1.26-bin.jar。</p>
+
+<h3><strong>启动thrift</strong></h3>
+
+<p>　　在spark根目录下执行：./sbin/start-thriftserver.sh 开启thrift服务器。</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+			</td>
+			<td>
+			<p><code>./start-thriftserver.sh --jars /home/hadoop/mysql-connector-java-5.1.35-bin.jar --master yarn</code></p>
+			</td>
+		</tr></tbody></table><p><strong>　　start-thriftserver.sh 和spark-submit的用法类似，可以接受所有spark-submit的参数，并且还可以接受--hiveconf 参数。</strong>不添加任何参数表示以local方式运行,默认的监听端口为10000</p>
+
+<p> </p>
+
+<h3><strong>用beeline测试</strong></h3>
+
+<p>在spark根目录下执行：</p>
+
+<p>./bin/beeline</p>
+
+<p>连接 JDBC/ODBC server</p>
+
+<p>beeline&gt; !connect jdbc:hive2://localhost:10000</p>
+
+<p>连接后会提示输入用户名和密码，用户名可以填当前登陆的linux用户名，密码为空即可。</p>
+
+<p> </p>
+
+<p><img alt="" class="has" height="223" src="https://images2015.cnblogs.com/blog/758427/201703/758427-20170326151225440-939930520.png" width="585"></p>
+
+<h3><strong>在java代码中用jdbc连接</strong></h3>
+
+<p>接下来打开eclipse用jdbc连接hiveserver2，连接hive的步骤同样如此。</p>
+
+<p>在pom.xml添加以下依赖：</p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+
+			<p>2</p>
+
+			<p>3</p>
+
+			<p>4</p>
+
+			<p>5</p>
+
+			<p>6</p>
+
+			<p>7</p>
+
+			<p>8</p>
+
+			<p>9</p>
+
+			<p>10</p>
+
+			<p>11</p>
+
+			<p>12</p>
+
+			<p>13</p>
+
+			<p>14</p>
+
+			<p>15</p>
+
+			<p>16</p>
+
+			<p>17</p>
+
+			<p>18</p>
+
+			<p>19</p>
+			</td>
+			<td>
+			<p><code>&lt;</code><code>dependency</code><code>&gt; </code></p>
+
+			<p><code>        </code><code>&lt;</code><code>groupId</code><code>&gt;org.apache.hive&lt;/</code><code>groupId</code><code>&gt; </code></p>
+
+			<p><code>        </code><code>&lt;</code><code>artifactId</code><code>&gt;hive-jdbc&lt;/</code><code>artifactId</code><code>&gt; </code></p>
+
+			<p><code>        </code><code>&lt;</code><code>version</code><code>&gt;1.2.1&lt;/</code><code>version</code><code>&gt; </code></p>
+
+			<p><code>&lt;/</code><code>dependency</code><code>&gt; </code></p>
+
+			<p><code>   </code> </p>
+
+			<p><code>&lt;</code><code>dependency</code><code>&gt; </code></p>
+
+			<p><code>        </code><code>&lt;</code><code>groupId</code><code>&gt;org.apache.hadoop&lt;/</code><code>groupId</code><code>&gt; </code></p>
+
+			<p><code>        </code><code>&lt;</code><code>artifactId</code><code>&gt;hadoop-common&lt;/</code><code>artifactId</code><code>&gt; </code></p>
+
+			<p><code>       </code><code>&lt;</code><code>version</code><code>&gt;2.4.1&lt;/</code><code>version</code><code>&gt; </code></p>
+
+			<p><code>&lt;/</code><code>dependency</code><code>&gt; </code></p>
+
+			<p><code>  </code> </p>
+
+			<p><code>&lt;</code><code>dependency</code><code>&gt; </code></p>
+
+			<p><code>       </code><code>&lt;</code><code>groupId</code><code>&gt;jdk.tools&lt;/</code><code>groupId</code><code>&gt; </code></p>
+
+			<p><code>       </code><code>&lt;</code><code>artifactId</code><code>&gt;jdk.tools&lt;/</code><code>artifactId</code><code>&gt; </code></p>
+
+			<p><code>       </code><code>&lt;</code><code>version</code><code>&gt;1.6&lt;/</code><code>version</code><code>&gt; </code></p>
+
+			<p><code>       </code><code>&lt;</code><code>scope</code><code>&gt;system&lt;/</code><code>scope</code><code>&gt; </code></p>
+
+			<p><code>       </code><code>&lt;</code><code>systemPath</code><code>&gt;${JAVA_HOME}/lib/tools.jar&lt;/</code><code>systemPath</code><code>&gt; </code></p>
+
+			<p><code>   </code><code>&lt;/</code><code>dependency</code><code>&gt; </code></p>
+			</td>
+		</tr></tbody></table><p> </p>
+
+<p>驱动：org.apache.hive.jdbc.HiveDriver</p>
+
+<p>url：jdbc:hive2://192.168.19.131:10000/default</p>
+
+<p>用户名：hadoop (启动thriftserver的linux用户名)</p>
+
+<p>密码：“”（默认密码为空）</p>
+
+<p> </p>
+
+<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>
+			<p>1</p>
+
+			<p>2</p>
+
+			<p>3</p>
+
+			<p>4</p>
+
+			<p>5</p>
+
+			<p>6</p>
+
+			<p>7</p>
+
+			<p>8</p>
+
+			<p>9</p>
+
+			<p>10</p>
+
+			<p>11</p>
+
+			<p>12</p>
+
+			<p>13</p>
+
+			<p>14</p>
+
+			<p>15</p>
+
+			<p>16</p>
+
+			<p>17</p>
+
+			<p>18</p>
+
+			<p>19</p>
+
+			<p>20</p>
+
+			<p>21</p>
+
+			<p>22</p>
+			</td>
+			<td>
+			<p><code>import</code> <code>java.sql.Connection; </code></p>
+
+			<p><code>import</code> <code>java.sql.DriverManager; </code></p>
+
+			<p><code>import</code> <code>java.sql.ResultSet; </code></p>
+
+			<p><code>import</code> <code>java.sql.SQLException; </code></p>
+
+			<p><code>import</code> <code>java.sql.Statement; </code></p>
+
+			<p><code>public</code> <code>class</code> <code>Test1 { </code></p>
+
+			<p><code>    </code><code>public</code> <code>static</code> <code>void</code> <code>main(String[] args) </code><code>throws</code> <code>SQLException { </code></p>
+
+			<p><code>        </code><code>String url = </code><code>"jdbc:hive2://192.168.19.131:10000/default"</code><code>; </code></p>
+
+			<p><code>        </code><code>try</code> <code>{ </code></p>
+
+			<p><code>            </code><code>Class.forName(</code><code>"org.apache.hive.jdbc.HiveDriver"</code><code>); </code></p>
+
+			<p><code>        </code><code>} </code><code>catch</code> <code>(ClassNotFoundException e) { </code></p>
+
+			<p><code>            </code><code>e.printStackTrace(); </code></p>
+
+			<p><code>        </code><code>} </code></p>
+
+			<p><code>        </code><code>Connection conn = DriverManager.getConnection(url,</code><code>"hadoop"</code><code>,</code><code>""</code><code>); </code></p>
+
+			<p><code>        </code><code>Statement stmt = conn.createStatement(); </code></p>
+
+			<p><code>        </code><code>String sql = </code><code>"SELECT * FROM personlimit 10"</code><code>; </code></p>
+
+			<p><code>        </code><code>ResultSet res = stmt.executeQuery(sql); </code></p>
+
+			<p><code>        </code><code>while</code><code>(res.next()){ </code></p>
+
+			<p><code>            </code><code>System.out.println(</code><code>"id: "</code><code>+res.getInt(</code><code>1</code><code>)+</code><code>"\tname: "</code><code>+res.getString(</code><code>2</code><code>)+</code><code>"\tage:"</code> <code>+ res.getInt(</code><code>3</code><code>)); </code></p>
+
+			<p><code>        </code><code>} </code></p>
+
+			<p><code>    </code><code>} </code></p>
+
+			<p><code>}</code></p>
+			</td>
+		</tr></tbody></table><p>这种方式，可以在yarn的管理界面看到，会长起一个任务，该任务负责跑sql语句，但是不能并行跑sql语句，就是同时为两个用户输入的查询语句同时跑，必须等一个跑完了再跑第二个。</p>
+
+<p> </p>
+
+<h3>spark sql可视化</h3>
+
+<p>第一种方案:<br>
+将spark sql代码打包，sql语句和结果存储位置作为参数，java代码收集这些参数后，组装为命令，调用脚本来向集群提交jar包。<br><br>
+第二种方案：<br>
+根据Spark官网所述，Spark SQL实现了Thrift JDBC/ODBC server<br><br><strong>最后，这篇文章很久了，一直编辑没有发布，我现在已经一年不搞spark了，专注java核心技术的研究。</strong></p>
+
+<p> </p>
+
+<p>作者：<a href="http://www.cnblogs.com/intsmaze/" rel="nofollow">intsmaze(刘洋)</a></p>
+
+<p>出处：<a href="http://www.cnblogs.com/intsmaze/" rel="nofollow">http://www.cnblogs.com/intsmaze/</a></p>
+
+<p><a href="http://mobile.zztjfk.com/" rel="nofollow"><span style="color:#ffffff;">郑州男科医院</span> </a></p>
+
+<p><a href="http://mobile.zztongjiyiyuan.com/" rel="nofollow"><span style="color:#ffffff;">郑州专业男科医院</span> </a></p>
+
+<p><a href="http://mobile.zztj120.com/" rel="nofollow"><span style="color:#ffffff;">郑州妇科在线咨询</span> </a></p>
+
+<p><a href="http://mobile.tjyy120.com/" rel="nofollow"><span style="color:#ffffff;">郑州妇科医院哪好</span></a></p>            </div>
+                </div>

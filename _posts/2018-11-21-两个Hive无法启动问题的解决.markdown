@@ -1,0 +1,92 @@
+---
+layout:     post
+title:      两个Hive无法启动问题的解决
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>最近在一台旧linux服务器上部署hadoop+hive的测试环境。</p>
+<p>Hadoop版本:0.20.2</p>
+<p>Hive版本:0.6.0</p>
+<p> </p>
+<p><strong>问题一,Bash版本不对</strong></p>
+<p>Hadoop使用假分布式启动，很容易的就跑起来了。</p>
+<p>但Hive却总是报如下的异常：</p>
+<p>#hive</p>
+/opt/hive/bin/hive: /opt/hive/bin/ext/hiveserver.sh: line 19: conditional binary operator expected<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/hiveserver.sh: line 19: syntax error near `=~'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/hiveserver.sh: line 19: `  if [[ "$version" =~ $version_re ]]; then'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/hwi.sh: line 32: conditional binary operator expected<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/hwi.sh: line 32: syntax error near `=~'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/hwi.sh: line 32: `  if [[ "$version" =~ $version_re ]]; then'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/jar.sh: line 36: conditional binary operator expected<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/jar.sh: line 36: syntax error near `=~'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/jar.sh: line 36: `  if [[ "$version" =~ $version_re ]]; then'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/metastore.sh: line 18: conditional binary operator expected<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/metastore.sh: line 18: syntax error near `=~'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/metastore.sh: line 18: `  if [[ "$version" =~ $version_re ]]; then'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/util/execHiveCmd.sh: line 21: conditional binary operator expected<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/util/execHiveCmd.sh: line 21: syntax error near `=~'<br>
+/opt/hive/bin/hive: /opt/hive/bin/ext/util/execHiveCmd.sh: line 21: `  if [[ "$version" =~ $version_re ]]; then'<br>
+/opt/hive/bin/hive: line 6: execHiveCmd: command not found
+<p> </p>
+<p>Google,Baidu，都没有查到原因，没办法，只有自己看代码了，</p>
+<p># cat $HIVE_HOME/bin/ext/hiveserver.sh</p>
+<p>第十四行，写着</p>
+<p>  # Save the regex to a var to workaround quoting incompatabilities<br>
+  # between Bash 3.1 and 3.2<br>
+hive的脚本必须在bash 3.1，3.2上面运行。</p>
+<p> </p>
+<p>查看一下自己机器的版本，</p>
+<p>#bash --version<br>
+#GNU bash, version 2.5b(1)-release (i386-redhat-linux-gnu)</p>
+<p> </p>
+<p>难怪出问题。找到了root cause。</p>
+<p>解决的方法很简单——安装bash 3.1</p>
+<p>从 <a href="http://ftp.gnu.org/gnu/bash/" rel="nofollow"><span style="color:#013b87;">http://ftp.gnu.org/gnu/bash/</span></a> 下载bash3.1</p>
+<p>开始安装：</p>
+<p>    #mv bash-3.1.tar.gz /usr/local/src<br>
+    #tar zxvf bash-3.1.tar.gz<br>
+    #cd bash-3.1<br>
+    #./configure<br>
+    #make<br>
+    #make install</p>
+<p> </p>
+<p>重新登录一下linux服务器，bash已经变为3.1版本。</p>
+<p> </p>
+<p><strong>问题二，内存不够</strong></p>
+<p>Bash 3.1装上后，启动hive时又抛出新的异常。</p>
+<p>#hive<br>
+Invalid maximum heap size: -Xmx4096m<br>
+The specified size exceeds the maximum representable size.<br>
+Could not create the Java virtual machine.<br></p>
+<p>检查一下虚拟机使用的内存，</p>
+<p>#ps -ef | grep java<br>
+root     15542     1  0 10:58 pts/1    00:00:02 /opt/jdk1.6.0_23/bin/java -Xmx1000m -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote -Dhadoop.log.dir=/opt/hadoop-0.20.2/bin/../logs -Dhadoop.log.file=hadoop-root-namenode-lmschina-web1.log
+ -Dhadoop.home.dir=/opt/hadoop-0.20.2/bin/.. -Dhadoop.id.str=root -Dha<br>
+root     15646     1  0 10:58 ?        00:00:02 /opt/jdk1.6.0_23/bin/java -Xmx1000m -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote -Dhadoop.log.dir=/opt/hadoop-0.20.2/bin/../logs
+ -Dhadoop.log.file=hadoop-root-datanode-lmschina-web1.log -Dhadoop.home.dir=/opt/hadoop-0.20.2/bin/.. -Dhadoop.id.str=root -Dha<br>
+root     15744     1  0 10:58 ?        00:00:02 /opt/jdk1.6.0_23/bin/java -Xmx1000m -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote -Dhadoop.log.dir=/opt/hadoop-0.20.2/bin/../logs
+ -Dhadoop.log.file=hadoop-root-secondarynamenode-lmschina-web1.log -Dhadoop.home.dir=/opt/hadoop-0.20.2/bin/.. -Dhadoop.id.str=<br>
+root     15819     1  0 10:58 pts/1    00:00:02 /opt/jdk1.6.0_23/bin/java -Xmx1000m -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote -Dhadoop.log.dir=/opt/hadoop-0.20.2/bin/../logs -Dhadoop.log.file=hadoop-root-jobtracker-lmschina-web1.log
+ -Dhadoop.home.dir=/opt/hadoop-0.20.2/bin/.. -Dhadoop.id.str=root -D<br>
+root     15923     1  0 10:58 ?        00:00:02 /opt/jdk1.6.0_23/bin/java -Xmx1000m -Dhadoop.log.dir=/opt/hadoop-0.20.2/bin/../logs -Dhadoop.log.file=hadoop-root-tasktracker-lmschina-web1.log
+ -Dhadoop.home.dir=/opt/hadoop-0.20.2/bin/.. -Dhadoop.id.str=root -Dhadoop.root.logger=INFO,DRFA -Djava.library.path=/opt/hadoop-</p>
+<p> </p>
+<p>好家伙，Hadoop的5个服务，每个都是1000M内存，难怪不够。</p>
+<p>其实这也不能怪Hadoop的默认配置不好。正常情况下，使用分布式部署，每个服务器最多也就2000M，现在我们使用假分布式，所有节点都在一台服务器，因此。。。。</p>
+<p>不啰嗦了，改配置，修改 conf/hadoop-env.sh，</p>
+<p># The maximum amount of heap to use, in MB. Default is 1000.<br>
+export HADOOP_HEAPSIZE=256<br>
+将每个服务改为256M。</p>
+<p> </p>
+<p>重启hadoop</p>
+<p>#start-all.sh</p>
+<p>启动hive</p>
+<p># hive<br>
+Hive history file=/opt/hive/querylog/hive_job_log_root_201102151118_693842029.txt<br>
+hive&gt;<br></p>
+<p>Great, it works fine. :)</p>
+            </div>
+                </div>

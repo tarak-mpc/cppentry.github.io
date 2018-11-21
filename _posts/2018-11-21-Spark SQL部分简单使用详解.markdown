@@ -1,0 +1,168 @@
+---
+layout:     post
+title:      Spark SQL部分简单使用详解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：此博客为个人维护，内容均来自原创及互连网转载，若需转载需注明出处。					https://blog.csdn.net/weixin_37677769/article/details/83591722				</div>
+								            <div id="content_views" class="markdown_views prism-atelier-sulphurpool-light">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2><a id="Spark_SQL_0"></a>Spark SQL简介</h2>
+<p>Spark SQL是Spark处理数据的一个模块，跟基本的Spark RDD的API不同，Spark SQL中提供的接口将会提供给Spark更多关于结构化数据和计算的信息。</p>
+<p>Spark SQL is not about SQL<br>
+Spark SQL is about more than SQL<br>
+从严格意义上来说sparkSQL不仅仅是SQL，更加准确的来说，他是超乎SQL的作用。<br>
+Spark SQL is Apache Spark’s module for working with structured data.<br>
+Spice SQL是Apache Spark的用于处理结构化数据的模块</p>
+<h2><a id="RDDDataFrameDataset_8"></a>RDD、DataFrame和Dataset区别</h2>
+<p>RDD和Dataset、DataFrame的主要区别是Dataset和DataFrame带有数据的schema。<br>
+Dataset和DataFrame的区别是：</p>
+<pre><code>DataFrame = Dataset[Row]
+</code></pre>
+<h2><a id="SparkSession_13"></a>从SparkSession开始</h2>
+<p>SparkSession是Spark中所有功能的入口类。<br>
+import org.apache.spark.sql.SparkSession</p>
+<pre><code>val spark = SparkSession
+  .builder()
+  .appName("Spark SQL basic example")
+  .config("spark.some.config.option", "some-value")
+  .getOrCreate()
+</code></pre>
+<h2><a id="DataFrame_23"></a>创建DataFrame</h2>
+<p>要想创建DataFrame，需要先导入隐式转换，然后可以从现有的RDD，Hive表或Spark数据源创建DataFrame 。</p>
+<h4><a id="RDDDataFrame_25"></a>现有的RDD转换成DataFrame</h4>
+<p>用RDD转成DataFrame，有两种转换方式：</p>
+<h6><a id="_27"></a>使用反射推断机制</h6>
+<pre><code>import spark.implicits._
+case class Person(name: String, age: Long)
+val peopleDF = spark.sparkContext
+  .textFile("examples/src/main/resources/people.txt")
+  .map(_.split(","))
+  .map(attributes =&gt; Person(attributes(0), attributes(1).trim.toInt))
+  .toDF()
+  
+//查看schema
+personDF.printSchema()
+</code></pre>
+<h6><a id="_39"></a>以编程方式指定架构</h6>
+<pre><code>import org.apache.spark.sql.types._
+
+val peopleRDD = spark.sparkContext.textFile("examples/src/main/resources/people.txt")
+val schemaString = "name age"
+val fields = schemaString.split(" ")
+  .map(fieldName =&gt; StructField(fieldName, StringType, nullable = true))
+val schema = StructType(fields)
+
+val rowRDD = peopleRDD
+  .map(_.split(","))
+  .map(attributes =&gt; Row(attributes(0), attributes(1).trim))
+  
+val peopleDF = spark.createDataFrame(rowRDD, schema)
+</code></pre>
+<h4><a id="_53"></a>数据源方式</h4>
+<p>Spark支持多种数据源，并可以从json或parquet等可以推断出schema的文件中直接得到schema。</p>
+<pre><code>val df = spark.read.format("json").load("file://./examples/src/main/resources/people.json")
+
+df.show()
+</code></pre>
+<h4><a id="SQL_59"></a>在代码中使用SQL</h4>
+<p>只需要把DataFrame创建一个别名：</p>
+<pre><code>df.createOrReplaceTempView("people")
+spark.sql("SELECT * FROM global_temp.people").show()
+</code></pre>
+<p>就可以使用SQL了。</p>
+<h4><a id="_65"></a>在代码中使用算子</h4>
+<pre><code>df.printSchema()
+
+df.select("name").show()
+//还可以使用带$的方式，这种方式可以对结果进行修改
+df.select($"name", $"age" + 1).show()
+
+df.filter($"age" &gt; 21).show()
+df.groupBy("age").count().show()
+
+//想在结果中加东西还可以这样（按字段名）
+df.map(x =&gt; "name" + x.getAs[String]("name")).show()
+//按下标取单个值（对于单列来说）
+df.map(x =&gt; "name" + x(0)).show()
+
+//把DataFrame写入本地
+df.write.format("json").save("file://./examples/src/main/resources/writePeople.json")
+
+//对于已经处在的路径，save需要设定模式（默认ErrorIfExists），使用时是SaveMode.Append或者"append"（加一个新文件）
+//另外还有overwrite（覆盖（所有））和ignore（存在就跳过）
+df.write.format("json").mode("ignore").save("file://./examples/src/main/resources/writePeople.json")
+
+df.show(false)//不会把长的数据变成带...的隐藏显示
+df.head(10).foreach(println)
+df.filter("age &gt; 10")
+df.filter("name = '' or name = 'null'")
+df.filter("substring(name, 0, 1) = 'M'")
+    
+//DataFrame里面orderBy和sort是同一个，orderBy是sort的别名
+df.sort("age").show()//得到的是字典顺序（如：1,10,11,2,20,21...）
+df.sort(students.col("age").desc).show()
+df.sort(students.col("name"), students.col("age")).show()
+df.sort(students.col("name"), students.col("age") as "my_age").show()
+</code></pre>
+<h2><a id="Dataset_98"></a>使用Dataset</h2>
+<pre><code>case class Sales(transactionId:String)
+//读取csv格式的文件
+val df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load("")
+val ds = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load("").as[Sales]
+
+//其中，前面一部分是定义DataFrame的语句所以可以直接是
+val ds = df.as[Sales]
+//也可以这样：val ds = spark.sparkContext.parallelize(List("1","2")).toDS()
+
+//取值方式
+df.select("transactionId").show
+//Dataset可以使用DataFrame的方式，也可以这样
+ds.map(_.transactionId).show
+</code></pre>
+<h2><a id="catalog_112"></a>使用catalog查看数据库</h2>
+<pre><code>val catalog = spark.catalog
+
+catalog.listDatabases().show(false)//显示数据库信息
+catalog.listDatabases().map(x=&gt;x.locationUri).show(false)//取某列字段（这里的是locationUri）
+catalog.listTables().show(false)
+//取出表明带有page_views的表
+catalog.listTables().filter(x=&gt;x.name.contains("page_views")).show(false)
+
+catalog.listColumns("page_views").show(false)
+catalog.listFunctions().show(false)
+
+catalog.isCached("page_views")
+catalog.cacheTable("page_views")
+catalog.uncacheTable("page_views")
+</code></pre>
+<h2><a id="_128"></a>分区操作</h2>
+<p>自动推导分区：</p>
+<pre><code>比如：定义一个hdfs文件路径：hadoop fs -mkdir -p /parquet_table/gender=male/country=US
+放进去一个文件：hadoop fs -put users.parquet /parquet_table/gender=male/country=US/
+然后读取（默认是hdfs）：val df = spark.read.format("parquet").load("/parquet_table")
+df.prientSchema
+就可以看到最后两个是gender和country，他们是分区。
+如果指定的目录是/parquet_table/gender=male，那么只有country是分区字段
+</code></pre>
+<h2><a id="UDF_137"></a>自定义UDF函数</h2>
+<pre><code>val people = Array("zhangsan", "lisi", "wangwu")
+
+val rdd = spark.sparkContext.parallelize(people)
+//rdd.collect().foreach(println)
+import spark.implicits._
+rdd.toDF("name").createOrReplaceTempView("test")
+
+//注册udf函数（可以是匿名函数）
+spark.udf.register("strLen", (str:String) =&gt; str.length)
+
+spark.sql("select name, strLen(name) from test").show
+</code></pre>
+<h2><a id="_150"></a>注意</h2>
+<pre><code>spark.stop()
+</code></pre>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

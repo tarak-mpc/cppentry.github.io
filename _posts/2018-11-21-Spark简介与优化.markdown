@@ -1,0 +1,63 @@
+---
+layout:     post
+title:      Spark简介与优化
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>针对前面对spark的学习与调优的经验，总结了一下spark的简介和任务优化PPT，主要分为四个部分：1. spark简介；2. spark运行原理；3. spark任务优化；4. spark小结。</p>
+
+
+
+<h2 id="spark-简介">spark 简介</h2>
+
+<ol>
+<li><p>Apache spark是一个围绕速度、易用性和复杂分析构建的大数据计算框架。 <br>
+<img src="https://i.imgur.com/VcON91S.png" alt="" title=""> <br>
+Scala是函数式语言，适合数据处理编程，并且其运行在 JVM 之上，可利用java生态资源。Akka基于Actor模型，提供了一个用于构建可扩展的（Scalable）、弹性的（Resilient）、快速响应的（Responsive）应用程序的平台。spark在1.6.0之后使用Netty替代了Akka，Netty基于Reactor线程模型，具有无锁化的串行设计，高效的序列化，零拷贝，内存池等特性。DAG执行引擎，数据复用，迭代计算。</p></li>
+<li><p>架构充分展现了spark的灵活性。 <br>
+<img src="https://i.imgur.com/WddvV2u.jpg" alt="" title=""> <br>
+Spark Core：包含Spark的基本功能，尤其是定义RDD的API、操作以及这两者上的动作。其他Spark的库都是构建在RDD和Spark Core之上的。Spark SQL：提供通过Apache Hive的SQL变体Hive查询语言（HiveQL）与Spark进行交互的API。每个数据库表被当做一个RDD，Spark SQL查询被转换为Spark操作。Spark Streaming：对实时数据流进行处理和控制。Spark Streaming允许程序能够像普通RDD一样处理实时数据。MLlib：一个常用机器学习算法库，算法被实现为对RDD的Spark操作。这个库包含可扩展的学习算法，比如分类、回归等需要对大量数据集进行迭代的操作。GraphX：控制图、并行图操作和计算的一组算法和工具的集合。GraphX扩展了RDD API，包含控制图、创建子图、访问路径上所有顶点的操作。</p></li>
+<li><p>RDD是Spark最基本，也是最根本的数据抽象。 <br>
+<img src="https://i.imgur.com/dY2M7a3.png" alt="" title=""></p></li>
+<li><p>spark vs hadoop <br>
+<img src="https://i.imgur.com/G4px6sJ.png" alt="" title=""></p></li>
+</ol>
+
+<h2 id="spark-运行原理">spark 运行原理</h2>
+
+<ol>
+<li><p>spark在yarn上的任务执行过程。 <br>
+<img src="https://i.imgur.com/6uIiuUf.png" alt="" title=""> <br>
+1) Spark Yarn Client向YARN中提交应用程序，包括ApplicationMaster程序、启动ApplicationMaster的命令、需要在Executor中运行的程序等；2) ResourceManager收到请求后，在集群中选择一个NodeManager，为该应用程序分配第一个Container，要求它在这个Container中启动应用程序的ApplicationMaster，其中ApplicationMaster进行SparkContext等的初始化；3) ApplicationMaster向ResourceManager注册，这样用户可以直接通过ResourceManage查看应用程序的运行状态，然后它将采用轮询的方式通过RPC协议为各个任务申请资源，并监控它们的运行状态直到运行结束；4) 一旦ApplicationMaster申请到资源（也就是Container）后，便与对应的NodeManager通信，要求它在获得的Container中启动CoarseGrainedExecutorBackend，CoarseGrainedExecutorBackend启动后会向ApplicationMaster中的SparkContext注册并申请Task。5) ApplicationMaster中的SparkContext分配Task给CoarseGrainedExecutorBackend执行，CoarseGrainedExecutorBackend运行Task并向ApplicationMaster汇报运行的状态和进度，以让ApplicationMaster随时掌握各个任务的运行状态，从而可以在任务失败时重新启动任务 <br>
+应用程序运行完成后，ApplicationMaster向ResourceManager申请注销并关闭自己。</p></li>
+<li><p>Scheduler模块作为Spark最核心的模块之一，主要包括两个部分，DAGScheduler和TaskScheduler。 <br>
+<img src="https://i.imgur.com/K1dJmez.png" alt="" title=""> <br>
+创建RDD，经过一系列Transformation，最后Action会触发sparkcontext的runjob方法，交给DAGScheduler处理；DAGScheduler将DAG生成stage；将Stage交给TaskScheduler；然后task分发给本地或者集群的Exector上运行。</p></li>
+<li><p>Spark利用RDD间的依赖关系的DAG图来进行stage的划分，调度器从DAG图末端出发，逆向遍历整个依赖关系链，遇到ShuffleDependency（宽依赖关系的一种叫法）就断开，遇到NarrowDependency就将其加入到当前stage。stage中task数目由stage末端的RDD分区个数来决定，RDD转换是基于分区的一种粗粒度计算，一个stage执行的结果就是这几个分区构成的RDD。 <br>
+<img src="https://i.imgur.com/FFhp5X1.png" alt="" title=""> <br>
+Spark中RDD的粗粒度操作，每一次transformation都会生成一个新的RDD，这样就会建立RDD之间的前后依赖关系，在Spark中，依赖关系被定义为两种类型，分别是窄依赖和宽依赖。窄依赖是指父RDD的每一个分区最多被一个子RDD的一个分区所用。不存在父RDD的一个分区对应子RDD的多个分区。宽依赖是指父RDD的每一个分区可以被一个子RDD的多个分区所用。就是多对多关系。</p></li>
+</ol>
+
+
+
+<h2 id="spark-任务优化">spark 任务优化</h2>
+
+<ol>
+<li><p><a href="https://blog.csdn.net/qq_27639777/article/details/81069893" rel="nofollow">spark Web UI</a>是学习调试spark任务的入口，查看spark任务日志也是一项必备技能。</p></li>
+<li><p>基础优化 <br>
+<img src="https://i.imgur.com/z8nHeTo.png" alt="" title=""></p></li>
+<li><p>高级优化 <br>
+<img src="https://i.imgur.com/lrNlwYX.png" alt="" title=""></p></li>
+<li><p>总结 <br>
+<img src="https://i.imgur.com/ku3PMkF.png" alt="" title=""></p></li>
+</ol>
+
+
+
+<h2 id="spark-小结">spark 小结</h2>
+
+<p><img src="https://i.imgur.com/tPz1Xeb.png" alt="" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

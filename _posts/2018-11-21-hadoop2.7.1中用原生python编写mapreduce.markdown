@@ -1,0 +1,115 @@
+---
+layout:     post
+title:      hadoop2.7.1中用原生python编写mapreduce
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/zhaohansk/article/details/49509801				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>这是从《python自动化运维》上看来的，因版本不同做了点修改。</p>
+<p>目的是统计文件words.txt中单词出现的词频，步骤如下：1、上传words.txt到HDFS；2、执行MapReduce任务；3、查看输出结果</p>
+<p>我们在hadoop上操作之前现在本地测试一下：</p>
+<p>一、本地测试</p>
+<p>要处理的文件words.txt，因为hadoop会自动排序，我测试时候就模拟自动排序了一下，实际上传的文件单词胡乱分开就可以了：</p>
+<p></p>
+<pre><code class="language-plain">&lt;p&gt;hehe lala&lt;/p&gt;&lt;p&gt;pig hehe nihao&lt;/p&gt;&lt;p&gt;nihao&lt;/p&gt;&lt;p&gt;hehe hehe hehe&lt;/p&gt;&lt;p&gt;hehe pig pig&lt;/p&gt;&lt;p&gt;hehe &lt;/p&gt;&lt;p&gt;zhu nihao pig&lt;/p&gt;&lt;p&gt;pig nihao zhu&lt;/p&gt;&lt;p&gt;cat&lt;/p&gt;&lt;p&gt;zhu&lt;/p&gt;&lt;p&gt;pig pig pig pig  zhu zhu zhu zhu&lt;/p&gt;&lt;p&gt;zhu tian tian tain&lt;/p&gt;</code></pre><br>
+hadoop除了用java编写mapreduce任务，还提供了其他语言操作的API——Hadoop Streaming，他通过标准的输入和输出来实现map与reduce之间传递数据，映射到Python中便是sys.stdin输入数据、sys.stdout输出数据。其他业务逻辑也直接在Python中编写。
+<p></p>
+<p>mapper.py代码：</p>
+<p></p>
+<pre><code class="language-python">#!/usr/bin/env python
+import sys
+
+for line in sys.stdin:
+    line = line.strip()
+    words = line.split()
+    for word in words:
+        print '%s\t%s' % (word,1)
+</code></pre>reducer.py
+<p></p>
+<p></p>
+<pre><code class="language-python">#!/usr/bin/env python
+from operator import itemgetter
+import sys
+
+current_word = None
+current_count = 0
+word = None
+
+for line in sys.stdin:
+    line = line.strip()
+    word,count = line.split('\t',1)
+    try:
+        count = int(count)
+    except ValueError:
+        continue
+    
+    if current_word == word:
+        current_count += count
+    else:
+        if current_word:
+            print '%s\t%s' % (current_word,current_count)
+        current_count = count
+        current_word = word
+
+if current_word == word:
+    print '%s\t%s' % (current_word,current_count)
+</code></pre><br>
+编写好后用 catwords.txt | python mapper.py | sort | python reducer.py测试一下结果是否正确，再去hadoop上进行处理。
+<p></p>
+<p>二、hadoop测试<span> </span></p>
+<p>先新建一个word目录存放words.txt：</p>
+<p></p>
+<pre><code class="language-plain">hadoop fs -mkdir /word/</code></pre>
+<p></p>
+<p>把words.txt上传到HDFS：</p>
+<p></p>
+<pre><code class="language-plain">hadoop fs -put words.txt /word/words.txt</code></pre>
+<p></p>
+<p>列出上传的文件：</p>
+<p></p>
+<pre><code class="language-plain">hadoop fs -ls /word/</code></pre>
+<p></p>
+<p><br></p>
+<p><br></p>
+下面是关键的执行MapReduce任务了，数据结果文件指定输出到/hehe/
+<p></p>
+<pre><code class="language-plain">&lt;p&gt;hadoop &lt;span style="color:red;"&gt;jar&lt;/span&gt;hadoop-streaming-2.7.1.jar &lt;span style="color:red;"&gt;-mapper&lt;/span&gt; ./mapper.py &lt;span style="color:red;"&gt;-reducer&lt;/span&gt; ./reducer.py &lt;span style="color:red;"&gt;-input &lt;/span&gt;/word/words.txt &lt;span style="color:red;"&gt;-output&lt;/span&gt; /hehe/&lt;/p&gt;</code></pre>这里的mapper.py和reducer.py都放在hadoop主目录下<br>
+hadoop-streaming-2.7.1.jar这个文件在hadoop目录下的/share/hadoop/tools/lib/中，我把他cp到hadoop的主目录下去了，方便执行
+<p></p>
+<p>任务结束后去/hehe/查看结果，其中/hehepart-00000为分析结果文件。</p>
+<p><br></p>
+<p>目前用到的命令总结：</p>
+<p></p>
+<p>格式化HDFS：<span style="color:#00B050;">hadoop namenode –format</span>；</p>
+<p>启动Hadoop：<span style="color:#00B050;">sbin/start-all.sh  </span>（简单粗暴，但是系统推荐一个一个启动）；</p>
+<p>关闭Hadoop：<span style="color:#00B050;">sbin/stop-all.sh </span>（同样系统推荐一个一个关闭）；</p>
+<p>关闭safe mode：<span style="color:#00B050;">hadoop dfsadmin -safemode leave</span></p>
+<p><span style="color:#FF0000;"> </span></p>
+<p><span style="color:#FF0000;">fs</span><span style="color:#FF0000;">命令</span>，操作文件和目录：</p>
+<p>创建目录：<span style="color:#00B050;">hadoop fs -mkdir [-p]   &lt;paths&gt;</span></p>
+<p>         -p：连同父目录一起创建</p>
+<p>列出目录：<span style="color:#00B050;">hadoop fs -ls [-d] [-h] [-R]  [&lt;path&gt; ...]</span></p>
+<p>         -d:Directories are listed as plain files.</p>
+<p>-h: Format filesizes in a human-readable fashion (eg 64.0m instead of 67108864).</p>
+<p>-R: Recursivelylist subdirectories encountered.</p>
+<p>删除文件或目录：<span style="color:#00B050;">hadoop fs -rmr [-skipTrash]  &lt;args&gt;</span></p>
+<p>         官方推荐：<span style="color:#00B050;">hadoop fs -rm –r</span></p>
+<p>         Skiptrash是，跳过回收站完全删除？</p>
+<p>上传文件：<span style="color:#00B050;">hadoop fs –put  &lt;localsrc&gt; ... &lt;dst&gt;</span></p>
+<p>查看文件内容：<span style="color:#00B050;">hadoop fs -cat filename </span>和 <span style="color:#00B050;">
+hadoop fs -text filename </span>   (-text还有其他功能)</p>
+<p><span style="color:#FF0000;"> </span></p>
+<p><span style="color:#FF0000;">jar</span><span style="color:#FF0000;">命令</span>，运行jar文件：</p>
+<pre style="background:#FFFFFF;">主要用Hadoop Streaming进行，即hadoop jar hadoop-streaming-2.7.1.jar，举个例子，照这个运行就行：</pre>
+<pre style="background:#FFFFFF;">---------------------------------------------------------</pre>
+<pre style="background:#FFFFFF;">hadoop jar hadoop-streaming-2.7.1.jar \</pre>
+<pre style="background:#FFFFFF;">  -input myInputDirs \</pre>
+<pre style="background:#FFFFFF;">  -output myOutputDir \</pre>
+<pre style="background:#FFFFFF;">  -mapper /bin/cat \</pre>
+<pre style="background:#FFFFFF;">  -reducer /usr/bin/wc</pre>
+<pre style="background:#FFFFFF;">--------------------------------------</pre>
+<br>            </div>
+                </div>

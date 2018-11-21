@@ -1,0 +1,116 @@
+---
+layout:     post
+title:      hadoop性能测试
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<br>
+一、hadoop自带的性能基准评测工具<br><br>
+（一）TestDFSIO<br><br>
+1、测试写性能<br>
+（1）若有必要，先删除历史数据 <br>
+$hadoop jar /home/hadoop/hadoop/share/hadoop/mapreduce2/hadoop-mapreduce-client-jobclient-2.3.0-cdh5.1.2-tests.jar TestDFSIO -clean<br>
+（2）执行测试<br>
+$hadoop jar /home/hadoop/hadoop/share/hadoop/mapreduce2/hadoop-mapreduce-client-jobclient-2.3.0-cdh5.1.2-tests.jar TestDFSIO -write -nrFiles 5 -fileSize 20<br>
+（3）查看结果：每一次测试生成一个结果，并以附加的形式添加到TestDFSIO_results.log中<br>
+$cat TestDFSIO_results.log<br>
+----- TestDFSIO ----- : write<br>
+           Date &amp; time: Mon May 11 09:41:34 HKT 2015<br>
+       Number of files:<br>
+Total MBytes processed: 100.0<br>
+     Throughput mb/sec: 21.468441391155004<br>
+Average IO rate mb/sec: 25.366744995117188<br>
+ IO rate std deviation: 12.744636924030177<br>
+    Test exec time sec: 27.585<br><br>
+----- TestDFSIO ----- : write<br>
+           Date &amp; time: Mon May 11 09:42:28 HKT 2015<br>
+       Number of files: 5<br>
+Total MBytes processed: 100.0<br>
+     Throughput mb/sec: 22.779043280182233<br>
+Average IO rate mb/sec: 25.440486907958984<br>
+ IO rate std deviation: 9.930490103638768<br>
+    Test exec time sec: 26.67<br><br>
+（4）结果说明<br>
+Total MBytes processed ： 总共需要写入的数据量 100MB<br>
+Throughput mb/sec ：总共需要写入的数据量/（每个map任务实际写入数据的执行时间之和（这个时间会远小于Test exec time sec））＝＝》100/(map1写时间+map2写时间+...)<br>
+Average IO rate mb/sec ：（每个map需要写入的数据量/每个map任务实际写入数据的执行时间）之和/任务数＝＝》(20/map1写时间＋20/map2写时间+...)/1000，所以这个值跟上面一个值总是存在差异。<br>
+IO rate std deviation ：上一个值的标准差<br>
+Test exec time sec ：整个job的执行时间<br><br>
+2、测试读性能<br>
+（1）执行测试<br>
+$ hadoop jar /home/hadoop/hadoop/share/hadoop/mapreduce2/hadoop-mapreduce-client-jobclient-2.3.0-cdh5.1.2-tests.jar TestDFSIO -read -nrFiles 5 -fileSize 20
+<br>
+（2）查看测试结果<br>
+$ cat TestDFSIO_results.log<br><br>
+----- TestDFSIO ----- : read<br>
+           Date &amp; time: Mon May 11 09:53:27 HKT 2015<br>
+       Number of files: 5<br>
+Total MBytes processed: 100.0<br>
+     Throughput mb/sec: 534.75935828877<br>
+Average IO rate mb/sec: 540.4888916015625<br>
+ IO rate std deviation: 53.93029580221512<br>
+    Test exec time sec: 26.704<br>
+（3）结果说明<br>
+结果各项意思与write相同，但其读速率比写速率快很多，而总执行时间非常接近。真正测试时，应该用较大的数据量来执行，才可体现出二者的差异。<br><br><br>
+（二）排序测试<br><br>
+在api文档中搜索terasort，可查询相关信息。<br>
+排序测试的三个基本步骤：<br>
+生成随机数据——&gt;排序——&gt;验证排序结果<br>
+关于terasort更详细的原理，见http://blog.csdn.net/yuesichiu/article/details/17298563<br><br>
+1、生成随机数据<br>
+$ hadoop jar /home/hadoop/hadoop/share/hadoop/mapreduce2/hadoop-mapreduce-examples-2.3.0-cdh5.1.2.jar  teragen -Dmapreduce.job.maps=5 10000000 /tmp/hadoop/terasort<br>
+此步骤将在hdfs中的 /tmp/hadoop/terasort  中生成数据，<br>
+$  hadoop fs -ls /tmp/hadoop/terasort<br>
+Found 6 items<br>
+-rw-r-----   3 hadoop supergroup          0 2015-05-11 11:32 /tmp/hadoop/terasort/_SUCCESS<br>
+-rw-r-----   3 hadoop supergroup  200000000 2015-05-11 11:32 /tmp/hadoop/terasort/part-m-00000<br>
+-rw-r-----   3 hadoop supergroup  200000000 2015-05-11 11:32 /tmp/hadoop/terasort/part-m-00001<br>
+-rw-r-----   3 hadoop supergroup  200000000 2015-05-11 11:32 /tmp/hadoop/terasort/part-m-00002<br>
+-rw-r-----   3 hadoop supergroup  200000000 2015-05-11 11:32 /tmp/hadoop/terasort/part-m-00003<br>
+-rw-r-----   3 hadoop supergroup  200000000 2015-05-11 11:32 /tmp/hadoop/terasort/part-m-00004<br>
+$ hadoop fs -du -s -h /tmp/hadoop/terasort<br>
+953.7 M  /tmp/hadoop/terasort <br>
+生成的5个数据竟然是每个200M，未解，为什么不是10M？？？<br><br>
+2、运行测试<br>
+$hadoop jar /home/hadoop/hadoop/share/hadoop/mapreduce2/hadoop-mapreduce-examples-2.3.0-cdh5.1.2.jar  terasort -Dmapreduce.job.maps=5 /tmp/hadoop/terasort /tmp/hadoop/terasort_out<br>
+Spent 354ms computing base-splits.<br>
+Spent 8ms computing TeraScheduler splits.<br>
+Computing input splits took 365ms<br>
+Sampling 10 splits of 10<br>
+Making 1 from 100000 sampled records<br>
+Computing parititions took 6659ms<br>
+Spent 7034ms computing partitions.<br><br>
+3、验证结果 <br>
+ $ hadoop jar /home/hadoop/hadoop/share/hadoop/mapreduce2/hadoop-mapreduce-examples-2.3.0-cdh5.1.2.jar teravalidate  /tmp/hadoop/terasort_out /tmp/hadoop/terasort_report<br><br>
+Spent 44ms computing base-splits.<br><br>
+Spent 7ms computing TeraScheduler splits.<br><br><br><br><br>
+二、hibench<br>
+hibench4.0测试不成功，使用3.0代替<br><br>
+1、下载并解压<br><br>
+wget https://codeload.github.com/intel-hadoop/HiBench/zip/HiBench-3.0.0<br><br>
+unzip HiBench-3.0.0<br><br>
+2、修改文件  bin/hibench-config.sh，主要是这几个<br><br>
+export JAVA_HOME=/home/hadoop/jdk1.7.0_67<br><br>
+export HADOOP_HOME=/home/hadoop/hadoop<br><br>
+export HADOOP_EXECUTABLE=/home/hadoop/hadoop//bin/hadoop<br><br>
+export HADOOP_CONF_DIR=/home/hadoop/conf<br><br>
+export HADOOP_EXAMPLES_JAR=/home/hadoop/hadoop/share/hadoop/mapreduce2/hadoop-mapreduce-examples-2.3.0-cdh5.1.2.jar<br><br>
+export MAPRED_EXECUTABLE=/home/hadoop/hadoop/bin/mapred<br><br>
+#Set the varaible below only in YARN mode<br><br>
+export HADOOP_JOBCLIENT_TESTS_JAR=/home/hadoop/hadoop/share/hadoop/mapreduce2/hadoop-mapreduce-examples-2.3.0-cdh5.1.2.jar/hadoop-mapreduce-client-jobclient-2.3.0-cdh5.1.2-tests.jar<br><br><br><br>
+3、修改conf/benchmarks.lst，哪些不想运行的将之注释掉<br><br>
+4、运行<br><br>
+bin/run-all.sh<br><br>
+5、查看结果<br><br>
+在当前目录会生成hibench.report文件，内容如下<br><br>
+Type         Date       Time     Input_data_size      Duration(s)          Throughput(bytes/s)  Throughput/node<br><br>
+WORDCOUNT    2015-05-12 19:32:33 251.248<br><br>
+DFSIOE-READ  2015-05-12 19:54:29 54004092852          463.863              116422505            38807501<br><br>
+DFSIOE-WRITE 2015-05-12 20:02:57 27320849148          498.132              54846605             18282201<br><br>
+PAGERANK     2015-05-12 20:27:25 711.391<br><br>
+SORT         2015-05-12 20:33:21 243.603<br><br>
+TERASORT     2015-05-12 20:40:34 10000000000          266.796              37481821             12493940<br><br>
+SLEEP        2015-05-12 20:40:40 0                    .177                 0                    0<br><br>            </div>
+                </div>

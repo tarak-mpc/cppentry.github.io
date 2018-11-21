@@ -1,0 +1,471 @@
+---
+layout:     post
+title:      Hive原理详解
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p></p><div class="toc"><h3>文章目录</h3><ul><li><a href="#_1" rel="nofollow">背景</a></li><li><a href="#1_10" rel="nofollow">1.数据库的原理</a></li><li><a href="#2Hive_13" rel="nofollow">2.什么是Hive</a></li><li><a href="#3HQLSQL_26" rel="nofollow">3.HQL与传统SQL的区别</a></li><li><a href="#4_Hive_40" rel="nofollow">4. Hive的原理</a></li><ul><li><a href="#41_Hive_41" rel="nofollow">4.1 Hive简介</a></li></ul><li><a href="#5Hive_50" rel="nofollow">5.Hive体系架构</a></li><ul><li><a href="#51_Hive_53" rel="nofollow">5.1 Hive的基本组成</a></li><li><a href="#52__62" rel="nofollow">5.2 各组件的基本功能</a></li><li><a href="#53_HiveHadoop_69" rel="nofollow">5.3 Hive和Hadoop的关系</a></li><li><a href="#54_Hive_73" rel="nofollow">5.4 Hive的数据管理</a></li><ul><li><a href="#541_Hive_80" rel="nofollow">5.4.1 Hive中的内部表和外部表</a></li><li><a href="#542_Hive_131" rel="nofollow">5.4.2 Hive中的临时表</a></li><li><a href="#543_Hive_136" rel="nofollow">5.4.3 Hive中的分区表</a></li><li><a href="#544_Hive_202" rel="nofollow">5.4.4 Hive中的分桶表</a></li><li><a href="#545_Hive_232" rel="nofollow">5.4.5 Hive中的视图</a></li><li><a href="#546_Hive_250" rel="nofollow">5.4.6 Hive中的索引</a></li><ul><ul><li><a href="#_251" rel="nofollow">为什么要使用索引？</a></li></ul></ul><li><a href="#547_Hive_269" rel="nofollow">5.4.7 Hive数据类型</a></li><li><a href="#548__282" rel="nofollow">5.4.8 总结</a></li></ul><li><a href="#55_Hive_296" rel="nofollow">5.5 Hive的调优</a></li><ul><li><a href="#551_Hive_303" rel="nofollow">5.5.1 Hive的运行方式</a></li><li><a href="#552__314" rel="nofollow">5.5.2 并行计算</a></li><li><a href="#553__319" rel="nofollow">5.5.3 严格模式</a></li><li><a href="#554_Hive_join_326" rel="nofollow">5.5.4 Hive join</a></li><li><a href="#555_MapSide_333" rel="nofollow">5.5.5 Map-Side聚合</a></li><li><a href="#556_HiveMapReduce_343" rel="nofollow">5.5.6 控制Hive中Map以及Reduce的数量</a></li><li><a href="#557_HiveJVM_353" rel="nofollow">5.5.7 Hive-JVM重用</a></li><li><a href="#558_Hive_360" rel="nofollow">5.5.8 Hive优化---数据倾斜</a></li></ul></ul><li><a href="#6_Hive_379" rel="nofollow">6. Hive环境搭建和部署</a></li><ul><li><a href="#60_380" rel="nofollow">6.0搭建集群的模式有三种</a></li><li><a href="#61_derby_386" rel="nofollow">6.1 本地模式（derby）</a></li><li><a href="#62MySQL_389" rel="nofollow">6.2本地模式（MySQL）</a></li><li><a href="#63_MySQL_391" rel="nofollow">6.3 基于MySQL的远程连接模式</a></li></ul></ul></div><p></p>
+<h1><a id="_1"></a>背景</h1>
+<ul>
+<li>引入原因：<br>
+1.  – 对存在HDFS上的文件或HBase中的表进行查询时，是要手工写一堆MapReduce代码<br>
+2. 对于统计任务，只能由动MapReduce的程序员才能搞定<br>
+3. 耗时耗力，更多精力没有有效的释放出来</li>
+<li>Hive基于一个统一的查询分析层，通过SQL语句的方式对HDFS上的数据进行查询、统计和分析<br>
+<br></li>
+</ul>
+<h1><a id="1_10"></a>1.数据库的原理</h1>
+<p>       其实通常所说的将数据存储到数据库，并不是真的存储到数据库，数据库不过是在你和你的磁盘间弄了个软件层，其实你的数据还是被作为源数据存储到你本地的磁盘上了，但是只有源数据还不够，他还存储了元数据(数据库存储结构定义信息（库，表，列，定义信息)<br>
+<br></p>
+<h1><a id="2Hive_13"></a>2.什么是Hive</h1>
+<ul>
+<li>Hive是一个SQL解析引擎，将SQL语句转译成MR Job，然后再Hadoop平台上运行，达到快速开发的目的。</li>
+<li>Hive中的表是纯逻辑表，就只是表的定义等，即表的元数据。本质就是Hadoop的目录/文件，达到了元数据与数据存储分离的目的</li>
+<li>Hive本身不存储数据，它完全依赖HDFS和MapReduce。</li>
+<li>Hive的内容是读多写少，不支持对数据的更新</li>
+<li>Hive中没有定义专门的数据格式，由用户指定，需要指定三个属性：<br>
+1. 列分隔符<br>
+2. 行分隔符<br>
+3. 读取文件数据的方法</li>
+</ul>
+ <br>
+<h1><a id="3HQLSQL_26"></a>3.HQL与传统SQL的区别</h1>
+
+<table>
+<thead>
+<tr>
+<th></th>
+<th>HQL</th>
+<th>SQL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数据存储</td>
+<td>HDFS(源数据)、MySql或者Derby(元数据)</td>
+<td>local FS</td>
+</tr>
+<tr>
+<td>数据格式</td>
+<td>用户自定义</td>
+<td>系统决定</td>
+</tr>
+<tr>
+<td>数据更新</td>
+<td>不支持</td>
+<td>支持</td>
+</tr>
+<tr>
+<td>索引</td>
+<td>有</td>
+<td>有</td>
+</tr>
+<tr>
+<td>执行</td>
+<td>MapReduce</td>
+<td>Executor</td>
+</tr>
+<tr>
+<td>数据规模</td>
+<td>大</td>
+<td>小</td>
+</tr>
+<tr>
+<td>数据检查</td>
+<td>读时模式</td>
+<td>写时模式</td>
+</tr>
+</tbody>
+</table><p><mark>什么是读时模式？</mark><br>
+       很少情况下往hive中加载的数据是比较规整的，字段与字段之间都是分割好的，每一个字段都不是脏数据，并且每一个字段都是有意义的。<br>
+但是在真实场景中不见得这个尽人意，当你把不符合某个表规范的脏数据插入到这个表中，不会出错，但是当你读这个表的时候，脏数据读出的是NULL。<br>
+<br><br></p>
+<h1><a id="4_Hive_40"></a>4. Hive的原理</h1>
+<h2><a id="41_Hive_41"></a>4.1 Hive简介</h2>
+<p>        hive是基于Hadoop的一个数据仓库工具，可以将结构化的数据文件映射为一张数据库表，并提供sql查询功能，可以将sql语句转换为MapReduce任务进行运行。 其优点是学习成本低，可以通过类SQL语句快速实现简单的MapReduce统计，不必开发专门的MapReduce应用，十分适合数据仓库的统计分析。其本质还是在HDFS上执行MapReduce，虽然简化了操作，但是执行效率会相对减弱。<br>
+          Hive数据仓库中包含着解释器、编译器、优化器等，这些是其独有的部分，用于将sql语句变成MapReduce去执行，后续的工作就自动交给了Hadoop、Yarn和MapReduce，Hive在运行时，实际的源数据存在与HFDS上，而描述数据的元数据存放在关系型数据库中。<br>
+        有人说hive既能存储也能计算，这句话也对也不对，因为hive只是通过解释器、编译器、优化器来把<mark>SQL变为MR</mark>，它的<mark>存储也是交给了HDFS的</mark>。</p>
+<ol>
+<li>Hive数据仓库完成解析SQL、优化SQL、策略选择、模型消耗；客户端将sql语句交给Hive，Hive负责值使相对应的MapReduce执行。</li>
+<li>存在于关系型数据库中的元数据包含着行的分隔符、字段的分隔符、字段的类型、字段的名称等信息。<br>
+<br><br></li>
+</ol>
+<h1><a id="5Hive_50"></a>5.Hive体系架构</h1>
+<h2><a id="51_Hive_53"></a>5.1 Hive的基本组成</h2>
+<blockquote></blockquote>
+用户接口主要有三个：CLI，Client 和 WUI。
+<blockquote></blockquote>
+元数据存储：通常是存储在关系数据库如 mysql , derby中。
+语句转换：解释器、编译器、优化器、执行器。
+<p><img src="https://img-blog.csdn.net/20181025115953971?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM5MTMxNzc5/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+<h2><a id="52__62"></a>5.2 各组件的基本功能</h2>
+<p>        用户接口主要由三个：CLI、JDBC/Beeline和WebGUI。其中，CLI为shell命令行；JDBC/Beeline是Hive的JAVA实现，与传统数据库JDBC类似；WebGUI是通过浏览器访问Hive。<br>
+<br><br>
+元数据存储：Hive 将元数据存储在数据库中(<mark>MySql或者Derby</mark>)。Hive中的元数据包括表的名字，表的列和分区及其属性，表的属性（是否为外部表等），表的数据所在目录等。<br>
+<br><br>
+解释器、编译器、优化器完成 HQL 查询语句从词法分析、语法分析、编译、优化以及查询计划的生成。生成的查询计划存储在HDFS 中，并在随后有 MapReduce 调用执行。</p>
+<h2><a id="53_HiveHadoop_69"></a>5.3 Hive和Hadoop的关系</h2>
+<br>
+<p><img src="https://img-blog.csdn.net/20181025130548907?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM5MTMxNzc5/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="Hive和Hadoop的关系"></p>
+<h2><a id="54_Hive_73"></a>5.4 Hive的数据管理</h2>
+<ul>
+<li>hive的表本质就是<font color="red">Hadoop的目录/文件</font>,由配置文件设置目录。<br>
+-hive默认表存放路径一般都是在你工作目录的hive目录里面，按表名做文件夹分开，如果你有分区表的话，分区值是子文件夹，可以直接在其它的M/R job里直接应用这部分数据</li>
+</ul>
+<ol>
+<li>Hive中所有的数据都存储在 HDFS 中，没有专门的数据存储格式</li>
+<li>只需要在创建表的时候告诉 Hive 数据中的列分隔符和行分隔符，Hive 就可以解析数据。</li>
+</ol>
+<h3><a id="541_Hive_80"></a>5.4.1 Hive中的内部表和外部表</h3>
+<ul>
+<li>Hive的create创建表的时候，选择的创建方式：</li>
+</ul>
+<ol>
+<li>create table(内部)</li>
+</ol>
+<pre><code>建表：
+		CREATE TABLE zxjtb1(
+		id INT,
+		name STRING,
+  		age INT,
+  		gfs ARRAY&lt;STRING&gt;,
+  		address MAP&lt;STRING,STRING&gt;,
+	    info STRUCT&lt;country:String,province:String,shi:String&gt;
+		)
+			ROW FORMAT DELIMITED 				  -- 行格式分割
+			FIELDS TERMINATED BY ' '      		  -- 字段的分割符
+			COLLECTION ITEMS TERMINATED BY ','    -- 集合元素间的分割符
+			MAP KEYS TERMINATED BY ':' 			  -- Map中key-value的分隔符
+ 			LINES TERMINATED BY '\n';			  -- 行与行分隔符
+ 创建表的方式：
+ 		create table zxj1 like zxjtb1;         -- 只是创建表结构
+ 		create table zxj2 AS SELECT* from zxjtb1;--会创建相应的表结构，并且插入数据
+ 插入数据的方式： 
+ 		INSERT INTO zxjtb1 (列1, 列2,...) VALUES (值1, 值2,....);
+ 		load data local inpath '/root/gfs.txt' into table zxjtb1;  -- 实质上是把文件直接上传到HDFS
+ 		from zxj2 insert into table zxjtb1 select *;  			   -- 查询其他表数据 insert 到新表中
+ 				
+ 				
+</code></pre>
+<ol start="2">
+<li>create external table(外部)</li>
+</ol>
+<pre><code>建表：
+create external table wc_external 
+  		 (word1 STRING, 
+  		  word2 STRING
+  		  ) 
+ 	    ROW FORMAT DELIMITED 
+   		FIELDS TERMINATED BY ' ' 
+   		location '/test/external';
+创建表方式，插入数据方式和上面相同
+</code></pre>
+<ul>
+<li><mark>特点</mark>：<br>
+- 在导入数据到外部表，数据并没有移动到自己的数据仓库目录下，也就是说外部表中的数据并不是由它自己来管理的！而表则不一样；<br>
+- <font color="red">在删除内表的时候，Hive将会把属于表的元数据和数据全部删掉；而删除外部表的时候，Hive仅仅删除外部表的元数据，HDFS数据是不会删除的。</font></li>
+</ul>
+<h3><a id="542_Hive_131"></a>5.4.2 Hive中的临时表</h3>
+<ul>
+<li>Hive的create创建临时表:<code>create TEMPORARY table ttabc(id Int,name String)</code></li>
+<li>临时表不支持分区字段和创建索引</li>
+<li>每次退出Hive脚本时都会清空此次创建的临时表</li>
+</ul>
+<h3><a id="543_Hive_136"></a>5.4.3 Hive中的分区表</h3>
+<ul>
+<li>在 Hive 中，表中的一个 Partition 对应于表下的一个目录，所有的 Partition 的数据都存储在对应的目录中
+<ul>
+<li>例如：pvs 表中包含 ds 和 city 两个 Partition，则</li>
+<li>对应于 ds = 20090801, ctry = US 的 HDFS 子目录为：/wh/pvs/ds=20090801/ctry=US；</li>
+<li>对应于 ds = 20090801, ctry = CA 的 HDFS 子目录为；/wh/pvs/ds=20090801/ctry=CA；</li>
+</ul>
+</li>
+<li>partition是辅助查询，缩小查询范围，加快数据的检索速度和对数据按照一定的规格和条件进行管理。</li>
+<li>分区表(<mark>防止暴力扫描全表</mark>)又分为：静态分区表和动态分区表</li>
+</ul>
+<pre><code>创建静态单分区表:
+		create table day_table (
+		id int,
+		content string
+		) 
+			partitioned by (dt string)      -- 按照dt分区
+			ROW FORMAT DELIMITED 
+			FIELDS TERMINATED BY '\t' ;
+创建静态多分区表：
+		create table day_hour_table (
+		id int, 
+		content string
+		) 
+			partitioned by (dt int,hour int)   -- 按照dt,hour分区
+			ROW FORMAT DELIMITED 
+			FIELDS TERMINATED BY '\t' ;
+静态分区表加载数据必须指定分区：
+		insert into day_table partition (dt = "9-26") values(1,"anb");
+		insert into day_hour_table partition(dt=9,hour=1) values(1,"a2 bc");
+		load data local inpath "/root/ceshi" into table day_table partition (dt="9-27");
+		load data local inpath "/root/ceshi" into table day_table partition (dt=10,hour=10);
+删除分区：
+		ALTER TABLE day_table DROP PARTITION (dt="9-27");
+		ALTER TABLE day_table DROP PARTITION (dt=10,hour=10);
+查询表的分区：
+		SHOW PARTITIONS table_name;
+</code></pre>
+<p>创建动态分区表<br>
+       刚才分区表示静态分区表，一个文件数据只能导入到某一个分区中，并且分区是用户指定的;这种方式不够灵活，业务场景比较局限;动态分区可以根据数据本身的特征自动来划分分区，比如我们可以指定按照数据中的年龄、性别来动态分区会产出3个不同的分区   .</p>
+<pre><code>创建动态分区表之前的操作
+		开启支持动态分区
+		set hive.exec.dynamic.partition=true;
+		set hive.exec.dynamic.partition.mode=nonstrict;
+
+静态分区与动态分区创建表的语句是一模一样的
+		CREATE TABLE gfstbl_dynamic(
+  		id INT,
+ 		 name STRING,
+		  gfs ARRAY&lt;STRING&gt;,
+		  address MAP&lt;STRING,STRING&gt;,
+		  info STRUCT&lt;country:String,province:String,shi:String&gt;
+		)
+			partitioned by (sex string,age INT)
+			ROW FORMAT DELIMITED 
+			FIELDS TERMINATED BY ' ' 
+			COLLECTION ITEMS TERMINATED BY ','
+			MAP KEYS TERMINATED BY ':' 
+			LINES TERMINATED BY '\n';
+动态分区表加载数据：(不可以使用load,它只是将数据上传到HDFS指定目录中，而动态分区是自动分区的)
+		from gfstbl_pt
+		insert into gfstbl_dynamic partition(sex,age)
+		select id,name,gfs,address,info,sex,age;
+查看分区数：
+		show partitions gfstbl_dynamic;
+</code></pre>
+<h3><a id="544_Hive_202"></a>5.4.4 Hive中的分桶表</h3>
+<ul>
+<li>分桶表是对数据进行哈希取值，然后放到不同文件中存储。</li>
+<li>Bucket主要作用：<br>
+1. join<br>
+2. 随机抽样</li>
+</ul>
+<pre><code>之前要开启分桶表的支持：set hive.enforce.bucketing=true;
+创建分桶表
+		create table bucket_user (id int,name string)
+		clustered by (id) into 4 buckets
+		ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+插入数据：
+		insert into table bucket_user  partition(id) select id, name from original;
+抽样：
+		select * from bucket_user tablesample(bucket x out of y on id);
+		y必须是table总bucket数的倍数或者因子。
+		x表示从哪个bucket开始抽取。
+		分桶数/y 指的是抽取几个桶的数据。
+		例如，table总bucket数为32，tablesample(bucket 3 out of 16)，表示总共抽取（32/16=）2个bucket的数据，分别为第3个bucket和第（3+16=）19个bucket的数据。
+
+
+
+分桶+分区表
+		CREATE TABLE psnbucket_partition( id INT, name STRING, age INT) 
+		PARTITIONED BY(height DOUBLE) 
+		CLUSTERED BY (age) INTO 4 BUCKETS 
+		ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+</code></pre>
+<h3><a id="545_Hive_232"></a>5.4.5 Hive中的视图</h3>
+<p>   &amp;nbsp 为什么要使用视图？<br>
+视图中保存的是一推复杂的SQL语句，视图是一个懒执行，只有我们用到此视图的时候才会执行此复杂的SQL语句；可以将这么长的SQL（数据表）与视图对应映射，每次查询这个视图就是执行了长的SQL语句。</p>
+<ul>
+<li>特点：</li>
+<li>不支持物化视图（保存在磁盘上）</li>
+<li>只能查询，不能做加载数据操作  load data into</li>
+<li>视图的创建，只是保存一份元数据，查询视图时才执行对应的子查询</li>
+<li>view定义中若包含了ORDER BY/LIMIT语句，当查询视图时也进行ORDER BY/</li>
+<li>一旦创建成功，无法修改</li>
+</ul>
+<ol>
+<li>创建视图<code>CREATE VIEW IF NOT EXISTS view1 AS SELECT * FROM logtbl order by age;</code><br>
+-创建视图的时候不会启动MR任务</li>
+<li>
+<pre><code> 但是在查询视图的时候会启动MR任务`select * from view1;`
+</code></pre>
+</li>
+<li>show tables可以查看已经创建的视图</li>
+<li>drop view view1 删除视图</li>
+</ol>
+<h3><a id="546_Hive_250"></a>5.4.6 Hive中的索引</h3>
+<h5><a id="_251"></a>为什么要使用索引？</h5>
+<p><font color="red">Hive的索引目的是提高Hive表指定列的查询速度。索引就类似目录。</font><br>
+没有索引时，类似’WHERE tab1.col1 = 10’ 的查询，Hive<mark>会加载整张表或分区</mark>，然后处理<mark>所有的rows</mark>，<br>
+但是如果在字段col1上面存在索引时，那么只会加载和处理文件的一部分。<br>
+与其他传统数据库一样，增加索引在提升查询速度时，会<mark>消耗额外资源去创建索引表和需要更多的磁盘空间</mark>存储索引。<br>
+他会把索引列的每个数据都建立一个目录，说明它所在的位置。</p>
+<pre><code>创建索引库，用于存放索引
+		create index t2_index on table psnbucket_partition(age) 
+		as 'org.apache.hadoop.hive.ql.index.compact.CompactIndexHandler' with deferred rebuild 
+		in table t2_index_table;
+		
+上述是对 psnbucket_partition表的age字段设置索引 t2_index，索引的内容放入 t2_index_table;
+
+这一步是真正的创建索引信息，并且存储到索引库中，若数据库有新增数据，也可以使用以上语句重建索引
+		alter index t2_index on psnbucket_partition rebuild; 	
+</code></pre>
+<h3><a id="547_Hive_269"></a>5.4.7 Hive数据类型</h3>
+<ul>
+<li>数据类型<br>
+1. TINYINT			-128~127<br>
+2. SMALLINT     -32,768~32767<br>
+3. INT					-2,147,483,648~2147483647<br>
+4. FLOAT<br>
+5. DOUBLE<br>
+6. STRING			字符串<br>
+7. VARCHAR		可变长度字符串<br>
+8. CHAR				字符	<br>
+9. ARRAYS			数组类型<br>
+10. MAPS				键值对集合类型<br>
+11. STRUCTS  		结构化类型</li>
+</ul>
+<h3><a id="548__282"></a>5.4.8 总结</h3>
+<p><font color="red">索引和分区最大的区别就是索引不分割数据库，分区分割数据库。</font></p>
+<p><mark>索引其实就是拿额外的存储空间换查询时间</mark>，但分区已经将整个大数据库按照分区列拆分成多个小数据库了。</p>
+<p><font color="red">分区和分桶最大的区别就是分桶随机分割数据库，分区是非随机分割数据库</font></p>
+<p>因为分桶是按照列的哈希函数进行分割的，相对比较平均；而分区是按照列的值来进行分割的，容易造成数据倾斜。</p>
+<p>其次两者的另一个区别就是分桶是对应不同的文件（细粒度），分区是对应不同的文件夹（粗粒度）。</p>
+<p>注意：<font color="blue">普通表（外部表、内部表）、分区表这三个都是对应HDFS上的目录，桶表对应是目录里的<mark>文件</mark></font></p>
+<h2><a id="55_Hive_296"></a>5.5 Hive的调优</h2>
+<p>核心思想：<font color="red">把Hive SQL当作Map Reduce程序去优化</font><br>
+但是不是所有的SQL都会被转化为MapReduce来执行</p>
+<ol>
+<li>select仅查询本表字段</li>
+<li>where只对本表字段做条件过滤</li>
+</ol>
+<h3><a id="551_Hive_303"></a>5.5.1 Hive的运行方式</h3>
+<ul>
+<li>本地模式
+<ul>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled> 开启本地模式<code>set hive.exec.mode.local.auto=true;</code></li>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled>  当满足以下条件时才会真正的使用本地模式，否则使用集群模式(总体来说适用于少量数据时)<br>
+1. 输入数据大小必须小于参数<br>
+2. map数必须小于参数<br>
+3. reduce数必须==0|1</li>
+</ul>
+</li>
+<li>集群模式</li>
+</ul>
+<h3><a id="552__314"></a>5.5.2 并行计算</h3>
+<ul>
+<li>并行模式的开启<code>set hive.exec.parallel=true;</code></li>
+<li>一次SQL计算中所允许的最大的Map个数<code>hive.exec.parallel.thread.number;</code></li>
+</ul>
+<h3><a id="553__319"></a>5.5.3 严格模式</h3>
+<ul>
+<li>设置严格模式增加查询的效率<code>set hive.mapred.mode=strict;</code>（默认是非严格模式）</li>
+<li>严格模式要求<br>
+1. 对于分区表，必须添加where对于分区字段的条件过滤<br>
+2. order by语句必须包含limit限制<br>
+3. 限制笛卡尔积的查询(效率太低)</li>
+</ul>
+<h3><a id="554_Hive_join_326"></a>5.5.4 Hive join</h3>
+<ul>
+<li>join计算时，将小表（驱动表）放在join左边</li>
+<li>Map join:在Map端完成Join
+<ul>
+<li>实现方式：
+<ol>
+<li>SQl方式：在SQl语句中添加Map join标记<code>SELECT /*+ MAPJOIN(smallTable) */ 				smallTable.key, bigTable.value FROM smallTable JOIN bigTable ON smallTable.key = bigTable.key</code></li>
+<li>开启自动的Map join<code>set hive.auto.convert.join = true;</code></li>
+</ol>
+</li>
+</ul>
+</li>
+</ul>
+<h3><a id="555_MapSide_333"></a>5.5.5 Map-Side聚合</h3>
+<ul>
+<li>设置以下开启在Map端额聚合combiner<code>set hive.map.aggr=true；</code></li>
+<li>相关的配置参数<br>
+1. hive.groupby.mapaggr.checkinterval： 默认100000；map端group by执行聚合后产生的最大记录数（默认：100000）<br>
+2. hive.map.aggr.hash.min.reduction：默认0.5 ；进行聚合的最小比例<br>
+3. hive.map.aggr.hash.percentmemory： 默认0.5 ；map端聚合使用的内存占总内存的比例<br>
+4. hive.map.aggr.hash.force.flush.memory.threshold：默认0.9 ；<br>
+5. map端做聚合操作是hash表的最大可用内容，大于该值则会触发flush；map端做聚合操作是hash表的最大可用内容，大于该值则会触发flush<br>
+6. hive.groupby.skewindata；是否对GroupBy产生的数据倾斜做优化，默认为false</li>
+</ul>
+<h3><a id="556_HiveMapReduce_343"></a>5.5.6 控制Hive中Map以及Reduce的数量</h3>
+<ul>
+<li>Map数量相关的参数
+<ol>
+<li>mapred.max.split.size一个split的最大值，即每个map处理文件的最大值</li>
+<li>mapred.min.split.size.per.node一个节点上split的最小值</li>
+<li>mapred.min.split.size.per.rack；一个机架上split的最小值</li>
+</ol>
+</li>
+<li>Reduce数量相关的参数
+<ol>
+<li>mapred.reduce.tasks；强制指定reduce任务的数量</li>
+<li>hive.exec.reducers.bytes.per.reducer 默认 256M；每个reduce任务处理的数据量</li>
+<li>hive.exec.reducers.max 默认1009；每个任务最大的reduce数</li>
+</ol>
+</li>
+</ul>
+<h3><a id="557_HiveJVM_353"></a>5.5.7 Hive-JVM重用</h3>
+<ul>
+<li>适用场景：
+<ol>
+<li>小文件个数过多</li>
+<li>task个数过多</li>
+</ol>
+</li>
+<li>通过<code>set mapred.job.reuse.jvm.num.tasks=n;</code>来设置，n为task插槽个数</li>
+</ul>
+<h3><a id="558_Hive_360"></a>5.5.8 Hive优化—数据倾斜</h3>
+<ul>
+<li>操作
+<ul>
+<li>Join</li>
+<li>Group by</li>
+<li>Count Distinct</li>
+</ul>
+</li>
+<li>原因
+<ul>
+<li>key分布不均导致的</li>
+<li>人为的建表疏忽</li>
+<li>业务数据特点</li>
+</ul>
+</li>
+<li>症状
+<ul>
+<li>任务进度长时间维持在99%（或100%），查看任务监控页面，发现只有少量（1个或几个）reduce子任务未完成。</li>
+</ul>
+<ul>
+<li>查看未完成的子任务，可以看到本地读写数据量积累非常大，通常超过10GB可以认定为发生数据倾斜。</li>
+</ul>
+</li>
+<li>倾斜度
+<ul>
+<li>平均记录数超过50w且最大记录数是超过平均记录数的4倍。</li>
+<li>最长时长比平均时长超过4分钟，且最大时长超过平均时长的2倍。</li>
+</ul>
+</li>
+<li>万能方法
+<ul>
+<li>hive.groupby.skewindata=true<br>
+<br></li>
+</ul>
+</li>
+</ul>
+<h1><a id="6_Hive_379"></a>6. Hive环境搭建和部署</h1>
+<h2><a id="60_380"></a>6.0搭建集群的模式有三种</h2>
+<ol>
+<li><a href="https://blog.csdn.net/qq_39131779/article/details/83384253" rel="nofollow">本地模式（derby）</a></li>
+<li><a href="https://blog.csdn.net/qq_39131779/article/details/83384441" rel="nofollow">本地模式（mysql）</a></li>
+<li><a href="https://blog.csdn.net/qq_39131779/article/details/83384666" rel="nofollow"> 基于MySQL的远程连接模式</a></li>
+</ol>
+<h2><a id="61_derby_386"></a>6.1 本地模式（derby）</h2>
+<p><font color="red">不支持多用户操作<font color="red"><br>
+<img src="https://img-blog.csdnimg.cn/20181025193118234.PNG?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM5MTMxNzc5,size_27,color_FFFFFF,t_70" alt="在这里插入图片描述"></font></font></p>
+<h2><a id="62MySQL_389"></a>6.2本地模式（MySQL）</h2>
+<p><img src="https://img-blog.csdnimg.cn/20181025193315160.PNG?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM5MTMxNzc5,size_27,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<h2><a id="63_MySQL_391"></a>6.3 基于MySQL的远程连接模式</h2>
+<p><img src="https://img-blog.csdnimg.cn/20181025194030240.PNG?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzM5MTMxNzc5,size_27,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

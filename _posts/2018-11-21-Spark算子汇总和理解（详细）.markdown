@@ -1,0 +1,667 @@
+---
+layout:     post
+title:      Spark算子汇总和理解（详细）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-github-gist">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<blockquote>
+  <p>Spark之所以比Hadoop灵活和强大，其中一个原因是Spark内置了许多有用的算子，也就是方法。通过对这些方法的组合，编程人员就可以写出自己想要的功能。说白了spark编程就是对spark算子的使用。所以熟悉spark算子是spark编程的必修课。这篇文章是本人对于spark算子的汇总和理解。欢迎批评指正 ：)</p>
+</blockquote>
+
+<hr>
+
+
+
+<h2 id="combinebykeycreatecombiner-mergevalue-mergecombiners-partitioner"><strong>combineByKey(createCombiner, mergeValue, mergeCombiners, partitioner)</strong></h2>
+
+<p>定义：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python"><span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">combineByKey</span>[<span class="hljs-title">C</span>]<span class="hljs-params">(
+      createCombiner: V =&gt; C,
+      mergeValue: <span class="hljs-params">(C, V)</span> =&gt; C,
+      mergeCombiners: <span class="hljs-params">(C, C)</span> =&gt; C,
+      partitioner: Partitioner,
+      mapSideCombine: Boolean = true,
+      serializer: Serializer = null)</span>:</span> RDD[(K, C)] = self.withScope {}
+</code></pre>
+
+<p>从定义中我们可以看出，该函数最终返回的类型是C，也就是reateCombiner所构造和返回的类型。下面是官方解释：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript">* Generic function <span class="hljs-keyword">to</span> combine <span class="hljs-keyword">the</span> elements <span class="hljs-keyword">for</span> each key using a custom <span class="hljs-keyword">set</span> <span class="hljs-keyword">of</span> aggregation
+   * functions. Turns an RDD[(K, V)] <span class="hljs-keyword">into</span> a <span class="hljs-constant">result</span> <span class="hljs-keyword">of</span> type RDD[(K, C)], <span class="hljs-keyword">for</span> a <span class="hljs-string">"combined type"</span> C
+   *
+   * Users provide three functions:
+   *
+   *  - `createCombiner`, which turns a V <span class="hljs-keyword">into</span> a C (e.g., creates a one-element <span class="hljs-type">list</span>)
+   *  - `mergeValue`, <span class="hljs-keyword">to</span> merge a V <span class="hljs-keyword">into</span> a C (e.g., adds <span class="hljs-keyword">it</span> <span class="hljs-keyword">to</span> <span class="hljs-keyword">the</span> <span class="hljs-keyword">end</span> <span class="hljs-keyword">of</span> a <span class="hljs-type">list</span>)
+   *  - `mergeCombiners`, <span class="hljs-keyword">to</span> combine two C's <span class="hljs-keyword">into</span> a single one.
+   *
+   * In addition, users can control <span class="hljs-keyword">the</span> partitioning <span class="hljs-keyword">of</span> <span class="hljs-keyword">the</span> output RDD, <span class="hljs-keyword">and</span> whether <span class="hljs-keyword">to</span> perform
+   * map-side aggregation (<span class="hljs-keyword">if</span> a mapper can produce multiple items <span class="hljs-keyword">with</span> <span class="hljs-keyword">the</span> same key).</code></pre>
+
+<p>通俗一点讲：</p>
+
+<p>combineByKey的作用是：Combine values with the same key using a different result type.  </p>
+
+<p>createCombiner函数是通过value构造并返回一个新的类型为C的值，这个类型也是combineByKey函数返回值中value的类型（key的类型不变）。</p>
+
+<p>mergeValue函数是把具有相同的key的value合并到C中。这时候C相当于一个累计器。（同一个partition内）</p>
+
+<p>mergeCombiners函数把两个C合并成一个C。（partitions之间）</p>
+
+<p>举一个例子（parseData是（String，String）类型的）</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;  val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-string">"A"</span>, <span class="hljs-string">"aa"</span>), (<span class="hljs-string">"B"</span>,<span class="hljs-string">"bb"</span>),(<span class="hljs-string">"C"</span>,<span class="hljs-string">"cc"</span>),(<span class="hljs-string">"C"</span>,<span class="hljs-string">"cc"</span>), (<span class="hljs-string">"D"</span>,<span class="hljs-string">"dd"</span>), (<span class="hljs-string">"D"</span>,<span class="hljs-string">"dd"</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(String, String)] = ParallelCollectionRDD[<span class="hljs-number">0</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val combinedRDD = textRDD<span class="hljs-preprocessor">.combineByKey</span>(
+     |       value =&gt; (<span class="hljs-number">1</span>, value),
+     |       (c:(Int, String), value) =&gt; (c._1+<span class="hljs-number">1</span>, c._2),
+     |       (c1:(Int, String), c2:(Int, String)) =&gt; (c1._1+c2._1, c1._2)
+     |     )
+<span class="hljs-label">combinedRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(String, (Int, String))] = ShuffledRDD[<span class="hljs-number">1</span>] at combineByKey at &lt;console&gt;:<span class="hljs-number">26</span>
+
+scala&gt; 
+
+scala&gt;     combinedRDD<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(<span class="hljs-built_in">x</span>=&gt;{
+     |       println(<span class="hljs-built_in">x</span>._1+<span class="hljs-string">","</span>+<span class="hljs-built_in">x</span>._2._1+<span class="hljs-string">","</span>+<span class="hljs-built_in">x</span>._2._2)
+     |     })
+
+D,<span class="hljs-number">2</span>,dd
+A,<span class="hljs-number">1</span>,aa
+B,<span class="hljs-number">1</span>,bb
+C,<span class="hljs-number">2</span>,cc
+
+scala&gt;</code></pre>
+
+<p>第二个例子：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;  val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-string">"A"</span>, <span class="hljs-string">"aa"</span>), (<span class="hljs-string">"B"</span>,<span class="hljs-string">"bb"</span>),(<span class="hljs-string">"C"</span>,<span class="hljs-string">"cc"</span>),(<span class="hljs-string">"C"</span>,<span class="hljs-string">"cc"</span>), (<span class="hljs-string">"D"</span>,<span class="hljs-string">"dd"</span>), (<span class="hljs-string">"D"</span>,<span class="hljs-string">"dd"</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(String, String)] = ParallelCollectionRDD[<span class="hljs-number">0</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; val combinedRDD2 = textRDD<span class="hljs-preprocessor">.combineByKey</span>(
+     |       value =&gt; <span class="hljs-number">1</span>,
+     |       (c:Int, String) =&gt; (c+<span class="hljs-number">1</span>),
+     |       (c1:Int, c2:Int) =&gt; (c1+c2)
+     |     )
+<span class="hljs-label">combinedRDD2:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(String, Int)] = ShuffledRDD[<span class="hljs-number">2</span>] at combineByKey at &lt;console&gt;:<span class="hljs-number">26</span>
+
+scala&gt; combinedRDD2<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(<span class="hljs-built_in">x</span>=&gt;{
+     |       println(<span class="hljs-built_in">x</span>._1+<span class="hljs-string">","</span>+<span class="hljs-built_in">x</span>._2)
+     |     })
+D,<span class="hljs-number">2</span>
+A,<span class="hljs-number">1</span>
+B,<span class="hljs-number">1</span>
+C,<span class="hljs-number">2</span>
+
+scala&gt;</code></pre>
+
+<p>上面两个函数的作用是相同的，返回类型不一样，目的是统计key的个数。第一个的类型是（String，（Int，String）），第二个的类型是（String，Int）。</p>
+
+<hr>
+
+
+
+<h2 id="aggregate">aggregate</h2>
+
+<p>aggregate用户聚合RDD中的元素，先使用seqOp将RDD中每个分区中的T类型元素聚合成U类型，再使用combOp将之前每个分区聚合后的U类型聚合成U类型，特别注意seqOp和combOp都会使用zeroValue的值，zeroValue的类型为U。这个方法的参数和combineByKey函数差不多。我们需要注意的是，aggregate函数是先计算每个partition中的数据，在计算partition之间的数据。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs fsharp">/**
+   * Aggregate the elements <span class="hljs-keyword">of</span> each partition, <span class="hljs-keyword">and</span> <span class="hljs-keyword">then</span> the results <span class="hljs-keyword">for</span> all the partitions, using
+   * given combine functions <span class="hljs-keyword">and</span> a neutral <span class="hljs-string">"zero value"</span>. This <span class="hljs-keyword">function</span> can <span class="hljs-keyword">return</span> a different result
+   * <span class="hljs-class"><span class="hljs-keyword">type</span>, <span class="hljs-title">U</span>, <span class="hljs-title">than</span> <span class="hljs-title">the</span> <span class="hljs-title">type</span> <span class="hljs-title">of</span> <span class="hljs-title">this</span> <span class="hljs-title">RDD</span>, <span class="hljs-title">T</span>. <span class="hljs-title">Thus</span>, <span class="hljs-title">we</span> <span class="hljs-title">need</span> <span class="hljs-title">one</span> <span class="hljs-title">operation</span> <span class="hljs-title">for</span> <span class="hljs-title">merging</span> <span class="hljs-title">a</span> <span class="hljs-title">T</span> <span class="hljs-title">into</span> <span class="hljs-title">an</span> <span class="hljs-title">U</span></span>
+   * <span class="hljs-keyword">and</span> one operation <span class="hljs-keyword">for</span> merging two U's, <span class="hljs-keyword">as</span> <span class="hljs-keyword">in</span> scala.TraversableOnce. Both <span class="hljs-keyword">of</span> these functions are
+   * allowed <span class="hljs-keyword">to</span> modify <span class="hljs-keyword">and</span> <span class="hljs-keyword">return</span> their first argument instead <span class="hljs-keyword">of</span> creating a <span class="hljs-keyword">new</span> U <span class="hljs-keyword">to</span> avoid memory
+   * allocation.
+   *
+   * @param zeroValue the initial value <span class="hljs-keyword">for</span> the accumulated result <span class="hljs-keyword">of</span> each partition <span class="hljs-keyword">for</span> the
+   *                  `seqOp` operator, <span class="hljs-keyword">and</span> also the initial value <span class="hljs-keyword">for</span> the combine results from
+   *                  different partitions <span class="hljs-keyword">for</span> the `combOp` operator - this will typically be the
+   *                  neutral element (e.g. `Nil` <span class="hljs-keyword">for</span> list concatenation <span class="hljs-keyword">or</span> `<span class="hljs-number">0</span>` <span class="hljs-keyword">for</span> summation)
+   * @param seqOp an operator used <span class="hljs-keyword">to</span> accumulate results within a partition
+   * @param combOp an associative operator used <span class="hljs-keyword">to</span> combine results from different partitions
+   */
+  def aggregate[U: ClassTag](zeroValue: U)(seqOp: (U, T) =&gt; U, combOp: (U, U) =&gt; U): U = withScope {
+    <span class="hljs-comment">// Clone the zero value since we will also be serializing it as part of tasks</span>
+    var jobResult = Utils.clone(zeroValue, sc.env.serializer.newInstance())
+    <span class="hljs-keyword">val</span> cleanSeqOp = sc.clean(seqOp)
+    <span class="hljs-keyword">val</span> cleanCombOp = sc.clean(combOp)
+    <span class="hljs-keyword">val</span> aggregatePartition = (it: Iterator[T]) =&gt; it.aggregate(zeroValue)(cleanSeqOp, cleanCombOp)
+    <span class="hljs-keyword">val</span> mergeResult = (index: Int, taskResult: U) =&gt; jobResult = combOp(jobResult, taskResult)
+    sc.runJob(this, aggregatePartition, mergeResult)
+    jobResult
+  }</code></pre>
+
+<p>例子：在spark shell中，输入下面代码。注意，本例子的初始值是一个元组，该类型也是aggregate函数的输出类型。这个函数的作用是统计字母的个数，同时拼接所有的字母。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs coffeescript">scala&gt; val textRDD = sc.parallelize(List(<span class="hljs-string">"A"</span>, <span class="hljs-string">"B"</span>, <span class="hljs-string">"C"</span>, <span class="hljs-string">"D"</span>, <span class="hljs-string">"D"</span>, <span class="hljs-string">"E"</span>))
+<span class="hljs-attribute">textRDD</span>: org.apache.spark.rdd.RDD[String] = ParallelCollectionRDD[<span class="hljs-number">3</span>] at parallelize at &lt;<span class="hljs-built_in">console</span>&gt;:<span class="hljs-number">24</span>
+
+scala&gt; val resultRDD = textRDD.aggregate<span class="hljs-function"><span class="hljs-params">((<span class="hljs-number">0</span>, <span class="hljs-string">""</span>))((acc, value)=&gt;{(acc._1+<span class="hljs-number">1</span>, acc._2+<span class="hljs-string">":"</span>+value)}, (acc1, acc2)=&gt; {(acc1._1+acc2._1, acc1._2+<span class="hljs-string">":"</span>+acc2._2)})</span>
+<span class="hljs-title">resultRDD</span>: <span class="hljs-params">(Int, String)</span> = <span class="hljs-params">(<span class="hljs-number">6</span>,::D:E::D::A::B:C)</span></span></code></pre>
+
+<p>第二个例子：初始值为20000，Int类型，所以该函数的输出类型也为Int，该函数的作用是在20000基础上叠加所有字母的ascall码的值</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List(<span class="hljs-string">'A'</span>, <span class="hljs-string">'B'</span>, <span class="hljs-string">'C'</span>, <span class="hljs-string">'D'</span>, <span class="hljs-string">'D'</span>, <span class="hljs-string">'E'</span>))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Char] = ParallelCollectionRDD[<span class="hljs-number">4</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; val resultRDD2 = textRDD<span class="hljs-preprocessor">.aggregate</span>[Int](<span class="hljs-number">20000</span>)((acc, cha) =&gt; {acc+cha}, (acc1, acc2)=&gt;{acc1+acc2})
+<span class="hljs-label">resultRDD2:</span> Int = <span class="hljs-number">100403</span>
+</code></pre>
+
+
+
+<h2 id="collect">collect()</h2>
+
+<p>返回RDD中所有的元素。需要注意的是，这个方法会返回所有的分区的数据，所以如果数据量比较大的话（大于一个节点能够承载的量），使用该方法可能会出现问题。</p>
+
+
+
+<h2 id="countbyvalue">countByValue()</h2>
+
+<p>该方法的定义为：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python"><span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">countByValue</span><span class="hljs-params">()</span><span class="hljs-params">(implicit ord: Ordering[T] = null)</span>:</span> Map[T, Long] = withScope {
+    map(value =&gt; (value, null)).countByKey()
+  }</code></pre>
+
+<p>调用它的RDD不是一个pair型的，它返回值为一个Map，这个map的的key表示某个元素，这个map的value是Long类型的，表示某一个元素重复出现的次数。</p>
+
+<p>看一个例子：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List(<span class="hljs-string">'A'</span>, <span class="hljs-string">'B'</span>, <span class="hljs-string">'C'</span>, <span class="hljs-string">'D'</span>, <span class="hljs-string">'D'</span>, <span class="hljs-string">'E'</span>))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Char] = ParallelCollectionRDD[<span class="hljs-number">4</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; textRDD<span class="hljs-preprocessor">.countByValue</span>()
+<span class="hljs-label">res7:</span> scala<span class="hljs-preprocessor">.collection</span><span class="hljs-preprocessor">.Map</span>[Char,Long] = Map(E -&gt; <span class="hljs-number">1</span>, A -&gt; <span class="hljs-number">1</span>, B -&gt; <span class="hljs-number">1</span>, C -&gt; <span class="hljs-number">1</span>, D -&gt; <span class="hljs-number">2</span>)
+</code></pre>
+
+
+
+<h2 id="mapvaluesfunc">mapValues(func)</h2>
+
+<p>描述：Apply a function to each value of a pair RDD without changing the key.    </p>
+
+<p>例子：rdd.mapValues(x =&gt; x+1) </p>
+
+<p>结果：{(1, 3), (3, 5), (3, 7)}    </p>
+
+<p><img src="C:%5CUsers%5Cliangyh%5CDesktop%5CmapValues.png" alt="mapValues" title=""></p>
+
+<hr>
+
+
+
+<h2 id="flatmapvaluesfunc">flatMapValues(func)</h2>
+
+<p>定义：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs markdown">/**
+<span class="hljs-bullet">* </span>Pass each value in the key-value pair RDD through a flatMap function without changing the
+<span class="hljs-bullet">* </span>keys; this also retains the original RDD's partitioning.
+*/
+def flatMapValues[<span class="hljs-link_label">U</span>](<span class="hljs-link_url">f: V =&gt; TraversableOnce[U]</span>): RDD[(K, U)] = self.withScope {}</code></pre>
+
+<p>从定义可以看出，flatMapValues函数的输入数据的类型和返回的数据类型是一样的。该函数的参数是一个方法(假设此方法叫method)。method方法的有一个参数，返回值的类型是TraversableOnce[U],TraversableOnce[U]是干什么的呢？下面这段话是官方的解释。通俗来讲，TraversableOnece是一个用于集合（collection）的接口，具有遍历迭代的能力。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs php">A template <span class="hljs-keyword">trait</span> <span class="hljs-keyword">for</span> collections which can be traversed either once only <span class="hljs-keyword">or</span> one <span class="hljs-keyword">or</span> more times.</code></pre>
+
+<p>flatMapValues的作用是把一个key-value型RDD的value传给一个TraversableOnece类型的方法，key保持不变，value便是TraversableOnece方法所迭代产生的值，这些值对应一个相同的key。</p>
+
+<p>例子：</p>
+
+<p>rdd 是{(1, 2), (3, 4), (3, 6)}</p>
+
+<p>rdd.flatMapValues(x =&gt; (x to 5)</p>
+
+<p>上面的x表示的是rdd的value，为2，4，6，结果：</p>
+
+<p>{(1, 2), (1, 3), (1, 4), (1, 5), (3, 4), (3, 5)}    </p>
+
+<p>再看一个例子：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">val a = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>,<span class="hljs-number">2</span>),(<span class="hljs-number">3</span>,<span class="hljs-number">4</span>),(<span class="hljs-number">5</span>,<span class="hljs-number">6</span>)))
+val b = a<span class="hljs-preprocessor">.flatMapValues</span>(<span class="hljs-built_in">x</span>=&gt;<span class="hljs-number">1</span> to <span class="hljs-built_in">x</span>)
+b<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(println(_))
+<span class="hljs-comment">/*
+(1,1)
+(1,2)
+(3,1)
+(3,2)
+(3,3)
+(3,4)
+(5,1)
+(5,2)
+(5,3)
+(5,4)
+(5,5)
+(5,6)
+*/</span></code></pre>
+
+<hr>
+
+
+
+<h2 id="foldzerofunc">fold(zero)(func)</h2>
+
+<p>该方法和reduce方法一样，但是，fold有一个“zero”值作为参数，数据存在多少个分区中就有多少个“zero”值。该函数现计算每一个分区中的数据，再计算分区之间中的数据。所以，有多少个分区就会有多少个“zero”值被包含进来。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List(<span class="hljs-string">"A"</span>, <span class="hljs-string">"B"</span>, <span class="hljs-string">"C"</span>, <span class="hljs-string">"D"</span>, <span class="hljs-string">"D"</span>, <span class="hljs-string">"E"</span>))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[String] = ParallelCollectionRDD[<span class="hljs-number">9</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     textRDD<span class="hljs-preprocessor">.reduce</span>((a, b)=&gt; (a+b))
+<span class="hljs-label">res11:</span> String = DBCADE
+
+scala&gt; textRDD<span class="hljs-preprocessor">.fold</span>(<span class="hljs-string">""</span>)((a, b)=&gt;(a+b))
+<span class="hljs-label">res12:</span> String = BCDEDA
+</code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; var rdd = sc<span class="hljs-preprocessor">.parallelize</span>(<span class="hljs-number">1</span> to <span class="hljs-number">10</span>, <span class="hljs-number">2</span>)
+<span class="hljs-label">rdd:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Int] = ParallelCollectionRDD[<span class="hljs-number">15</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; rdd<span class="hljs-preprocessor">.fold</span>(<span class="hljs-number">0</span>)((a,b)=&gt;(a+b))
+<span class="hljs-label">res36:</span> Int = <span class="hljs-number">55</span>
+
+scala&gt; rdd<span class="hljs-preprocessor">.partitions</span><span class="hljs-preprocessor">.length</span>
+<span class="hljs-label">res38:</span> Int = <span class="hljs-number">2</span>
+
+scala&gt; rdd<span class="hljs-preprocessor">.fold</span>(<span class="hljs-number">1</span>)((a,b)=&gt;(a+b))
+<span class="hljs-label">res37:</span> Int = <span class="hljs-number">58</span></code></pre>
+
+<p>上面第二个例子中总共有两个partition，为什么结果是58（55+3）而不是57呢？因为分区1和分区2分别有一个zero值，分区1和分区2相加的时候又包含了一次“zero”值。</p>
+
+
+
+<h2 id="mapvaluesfunc-1">mapValues(func)</h2>
+
+<p>该函数作用于key-value型RDD的value值，key不变。也就是说，改变该RDD的value值，key不变，返回值还是一个key-value的形式，只是这里的value和之前的value可能不一样。</p>
+
+<p>下面的例子是把RDD的value值都加1.</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;  val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>, <span class="hljs-number">3</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">5</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">7</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">10</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val mappedRDD = textRDD<span class="hljs-preprocessor">.mapValues</span>(value =&gt; {value+<span class="hljs-number">1</span>})
+<span class="hljs-label">mappedRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = MapPartitionsRDD[<span class="hljs-number">11</span>] at mapValues at &lt;console&gt;:<span class="hljs-number">26</span>
+
+scala&gt; mappedRDD<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(println)
+(<span class="hljs-number">1</span>,<span class="hljs-number">4</span>)
+(<span class="hljs-number">3</span>,<span class="hljs-number">6</span>)
+(<span class="hljs-number">3</span>,<span class="hljs-number">8</span>)
+
+scala&gt; </code></pre>
+
+
+
+<h2 id="keys">keys()</h2>
+
+<p>描述：Return an RDD of just the keys.    </p>
+
+<p>例子：</p>
+
+<p>rdd.keys()    </p>
+
+<p>结果：</p>
+
+<p>{1, 3, 3}    </p>
+
+<hr>
+
+
+
+<h2 id="values">values()</h2>
+
+<p>Return an RDD of just the values.     </p>
+
+<p>rdd.values()    </p>
+
+<p>{2, 4, 6}    </p>
+
+
+
+<h2 id="groupbykey">groupByKey()</h2>
+
+<p>描述： <br>
+ Group values with the same key. </p>
+
+<p>例子： <br>
+rdd.groupByKey()</p>
+
+<p>输入数据： <br>
+{(1, 2), (3, 4), (3, 6)} <br>
+结果： <br>
+{(1,[2]),(3, [4,6])}</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; val rdd = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>,<span class="hljs-number">2</span>),(<span class="hljs-number">3</span>,<span class="hljs-number">4</span>),(<span class="hljs-number">3</span>,<span class="hljs-number">6</span>)))
+<span class="hljs-label">rdd:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">3</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; val groupRDD = rdd<span class="hljs-preprocessor">.groupByKey</span>
+<span class="hljs-label">groupRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Iterable[Int])] = ShuffledRDD[<span class="hljs-number">4</span>] at groupByKey at &lt;console&gt;:<span class="hljs-number">26</span>
+
+scala&gt; groupRDD<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(print)
+(<span class="hljs-number">1</span>,CompactBuffer(<span class="hljs-number">2</span>))(<span class="hljs-number">3</span>,CompactBuffer(<span class="hljs-number">4</span>, <span class="hljs-number">6</span>))</code></pre>
+
+<p>上面的groupRDD的类型是（Int，Iterable[Int]）</p>
+
+<hr>
+
+
+
+<h2 id="reducebykeyfunc">reduceByKey(func)</h2>
+
+<p>作用：作用于key-value型的RDD，组合具有相同key的value值。</p>
+
+<p>看一个例子：把具有相同的key的value拼接在一起，用分号隔开。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs coffeescript">scala&gt; val textRDD = sc.parallelize(List((<span class="hljs-string">"A"</span>, <span class="hljs-string">"aa"</span>), (<span class="hljs-string">"B"</span>,<span class="hljs-string">"bb"</span>),(<span class="hljs-string">"C"</span>,<span class="hljs-string">"cc"</span>),(<span class="hljs-string">"C"</span>,<span class="hljs-string">"cc"</span>), (<span class="hljs-string">"D"</span>,<span class="hljs-string">"dd"</span>), (<span class="hljs-string">"D"</span>,<span class="hljs-string">"dd"</span>)))
+<span class="hljs-attribute">textRDD</span>: org.apache.spark.rdd.RDD[(String, String)] = ParallelCollectionRDD[<span class="hljs-number">7</span>] at parallelize at &lt;<span class="hljs-built_in">console</span>&gt;:<span class="hljs-number">24</span>
+
+scala&gt; val reducedRDD = textRDD.reduceByKey<span class="hljs-function"><span class="hljs-params">((value1,value2) =&gt; {value1+<span class="hljs-string">";"</span>+value2})</span>
+<span class="hljs-title">reducedRDD</span>: <span class="hljs-title">org</span>.<span class="hljs-title">apache</span>.<span class="hljs-title">spark</span>.<span class="hljs-title">rdd</span>.<span class="hljs-title">RDD</span>[<span class="hljs-params">(String, String)</span>] = <span class="hljs-title">ShuffledRDD</span>[9] <span class="hljs-title">at</span> <span class="hljs-title">reduceByKey</span> <span class="hljs-title">at</span> &lt;<span class="hljs-title">console</span>&gt;:26
+
+<span class="hljs-title">scala</span>&gt; <span class="hljs-title">reducedRDD</span>.<span class="hljs-title">collect</span>.<span class="hljs-title">foreach</span><span class="hljs-params">(println)</span>
+<span class="hljs-params">(D,dd;dd)</span>
+<span class="hljs-params">(A,aa)</span>
+<span class="hljs-params">(B,bb)</span>
+<span class="hljs-params">(C,cc;cc)</span>
+
+<span class="hljs-title">scala</span>&gt;</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>,<span class="hljs-number">2</span>),(<span class="hljs-number">3</span>,<span class="hljs-number">4</span>),(<span class="hljs-number">3</span>,<span class="hljs-number">6</span>)))
+<span class="hljs-label">res0:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">0</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">25</span>
+
+scala&gt; res0<span class="hljs-preprocessor">.reduceByKey</span>(_+_)
+<span class="hljs-label">res1:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ShuffledRDD[<span class="hljs-number">1</span>] at reduceByKey at &lt;console&gt;:<span class="hljs-number">27</span>
+
+scala&gt; res1<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(println)
+(<span class="hljs-number">1</span>,<span class="hljs-number">2</span>)
+(<span class="hljs-number">3</span>,<span class="hljs-number">10</span>)
+
+scala&gt;</code></pre>
+
+<hr>
+
+
+
+<h2 id="sortbykey">sortByKey()</h2>
+
+<p>Return an RDD sorted by the key.     </p>
+
+<p>rdd.sortByKey()   </p>
+
+<p>{(1, 2), (3, 4), (3, 6)}</p>
+
+<hr>
+
+
+
+<h2 id="reducefunc">reduce(func)</h2>
+
+<p>该函数的定义为：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python">/**
+   * Reduces the elements of this RDD using the specified commutative <span class="hljs-keyword">and</span>
+   * associative binary operator.
+   */
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">reduce</span><span class="hljs-params">(f: <span class="hljs-params">(T, T)</span> =&gt; T)</span>:</span> T = withScope {}</code></pre>
+
+<p>它的参数是一个函数（methodA），并且methodA的参数是两个类型相同的值，methodA的返回值为“一个”同类型的值，所以，从这里我们就可以看出reduce函数的作用是“reduce”。需要注意的是，reduce函数的返回值类型和methodA方法的参数的类型是一样的。</p>
+
+<p>运行一个例子瞧一瞧：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List(<span class="hljs-string">"A"</span>, <span class="hljs-string">"B"</span>, <span class="hljs-string">"C"</span>, <span class="hljs-string">"D"</span>, <span class="hljs-string">"D"</span>, <span class="hljs-string">"E"</span>))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[String] = ParallelCollectionRDD[<span class="hljs-number">9</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     textRDD<span class="hljs-preprocessor">.reduce</span>((a, b)=&gt; (a+b))
+<span class="hljs-label">res11:</span> String = DBCADE
+</code></pre>
+
+
+
+<h2 id="subtractbykey">subtractByKey</h2>
+
+<p>定义：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs markdown">def subtractByKey[<span class="hljs-link_label">W: ClassTag</span>](<span class="hljs-link_url">other: RDD[(K, W</span>)]): RDD[(K, V)] = self.withScope {}</code></pre>
+
+<p>作用：Return an RDD with the pairs from <code>this</code> whose keys are not in <code>other</code>.</p>
+
+<p>scala&gt;  val textRDD = sc.parallelize(List((1, 3), (3, 5), (3, 7))) <br>
+textRDD: org.apache.spark.rdd.RDD[(Int, Int)] = ParallelCollectionRDD[12] at parallelize at :24</p>
+
+<p>scala&gt;     val textRDD2 = sc.parallelize(List((3,9))) <br>
+textRDD2: org.apache.spark.rdd.RDD[(Int, Int)] = ParallelCollectionRDD[13] at parallelize at :24</p>
+
+<p>scala&gt; val subtractRDD = textRDD.subtractByKey(textRDD2) <br>
+subtractRDD: org.apache.spark.rdd.RDD[(Int, Int)] = SubtractedRDD[18] at subtractByKey at :28</p>
+
+<p>scala&gt; subtractRDD.collect.foreach(println) <br>
+(1,3)</p>
+
+<p>scala&gt; </p>
+
+
+
+<h2 id="join-inner-join">join – <em>inner join</em></h2>
+
+<p>定义:</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python">/**
+* Return an RDD containing all pairs of elements <span class="hljs-keyword">with</span> matching keys <span class="hljs-keyword">in</span> `this` <span class="hljs-keyword">and</span> `other`. Each
+* pair of elements will be returned <span class="hljs-keyword">as</span> a (k, (v1, v2)) tuple, where (k, v1) <span class="hljs-keyword">is</span> <span class="hljs-keyword">in</span> `this` <span class="hljs-keyword">and</span>
+* (k, v2) <span class="hljs-keyword">is</span> <span class="hljs-keyword">in</span> `other`. Uses the given Partitioner to partition the output RDD.
+*/
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">join</span>[<span class="hljs-title">W</span>]<span class="hljs-params">(other: RDD[<span class="hljs-params">(K, W)</span>], partitioner: Partitioner)</span>:</span> RDD[(K, (V, W))] = self.withScope {}</code></pre>
+
+<p>从上面的定义中可以看出，join函数的参数是一个RDD，返回值也是一个RDD。返回值RDD的类型是一个元组，该元组的key类型是两个RDD的key类型，value的类型又是一个元组。假设RDD1.join(RDD2),那么V类型表示RDD1的value的类型，W表示RDD2的value的类型。分析到这里我们大致就可以知道这个函数的作用了。</p>
+
+<p>看一个例子：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;    val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>, <span class="hljs-number">3</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">5</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">7</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">8</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">9</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">25</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val textRDD2 = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">3</span>,<span class="hljs-number">9</span>), (<span class="hljs-number">3</span>,<span class="hljs-number">4</span>)))
+<span class="hljs-label">textRDD2:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">30</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val joinRDD = textRDD<span class="hljs-preprocessor">.join</span>(textRDD2)
+<span class="hljs-label">joinRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, (Int, Int))] = MapPartitionsRDD[<span class="hljs-number">33</span>] at join at &lt;console&gt;:<span class="hljs-number">28</span>
+
+scala&gt; joinRDD<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(println)
+(<span class="hljs-number">3</span>,(<span class="hljs-number">5</span>,<span class="hljs-number">9</span>))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">5</span>,<span class="hljs-number">4</span>))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">7</span>,<span class="hljs-number">9</span>))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">7</span>,<span class="hljs-number">4</span>))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">8</span>,<span class="hljs-number">9</span>))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">8</span>,<span class="hljs-number">4</span>))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">9</span>,<span class="hljs-number">9</span>))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">9</span>,<span class="hljs-number">4</span>))</code></pre>
+
+
+
+<h2 id="leftouterjoin">leftOuterJoin</h2>
+
+<p>和join方法差不多，有一点区别，先看一个例子：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;    val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>, <span class="hljs-number">3</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">5</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">7</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">8</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">9</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">25</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val textRDD2 = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">3</span>,<span class="hljs-number">9</span>), (<span class="hljs-number">3</span>,<span class="hljs-number">4</span>)))
+<span class="hljs-label">textRDD2:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">30</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val joinRDD = textRDD<span class="hljs-preprocessor">.leftOuterJoin</span>(textRDD2)
+<span class="hljs-label">joinRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, (Int, Option[Int]))] = MapPartitionsRDD[<span class="hljs-number">36</span>] at leftOuterJoin at &lt;console&gt;:<span class="hljs-number">28</span>
+
+scala&gt; joinRDD<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(println)
+(<span class="hljs-number">1</span>,(<span class="hljs-number">3</span>,None))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">5</span>,Some(<span class="hljs-number">9</span>)))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">5</span>,Some(<span class="hljs-number">4</span>)))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">7</span>,Some(<span class="hljs-number">9</span>)))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">7</span>,Some(<span class="hljs-number">4</span>)))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">8</span>,Some(<span class="hljs-number">9</span>)))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">8</span>,Some(<span class="hljs-number">4</span>)))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">9</span>,Some(<span class="hljs-number">9</span>)))
+(<span class="hljs-number">3</span>,(<span class="hljs-number">9</span>,Some(<span class="hljs-number">4</span>)))
+</code></pre>
+
+<p>从上面这个例子看出，textRDD(左边)的key一定存在，textRDD2的key如果不存在于textRDD中，会以None代替。</p>
+
+
+
+<h2 id="rightouterjoin">rightOuterJoin</h2>
+
+<p>这个方法和leftOuterJoin相反。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;    val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>, <span class="hljs-number">3</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">5</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">7</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">8</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">9</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">25</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val textRDD2 = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">3</span>,<span class="hljs-number">9</span>), (<span class="hljs-number">3</span>,<span class="hljs-number">4</span>)))
+<span class="hljs-label">textRDD2:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">30</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val joinRDD = textRDD<span class="hljs-preprocessor">.rightOuterJoin</span>(textRDD2)
+<span class="hljs-label">joinRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, (Option[Int], Int))] = MapPartitionsRDD[<span class="hljs-number">39</span>] at rightOuterJoin at &lt;console&gt;:<span class="hljs-number">28</span>
+
+scala&gt; joinRDD<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(println)
+(<span class="hljs-number">3</span>,(Some(<span class="hljs-number">5</span>),<span class="hljs-number">9</span>))
+(<span class="hljs-number">3</span>,(Some(<span class="hljs-number">5</span>),<span class="hljs-number">4</span>))
+(<span class="hljs-number">3</span>,(Some(<span class="hljs-number">7</span>),<span class="hljs-number">9</span>))
+(<span class="hljs-number">3</span>,(Some(<span class="hljs-number">7</span>),<span class="hljs-number">4</span>))
+(<span class="hljs-number">3</span>,(Some(<span class="hljs-number">8</span>),<span class="hljs-number">9</span>))
+(<span class="hljs-number">3</span>,(Some(<span class="hljs-number">8</span>),<span class="hljs-number">4</span>))
+(<span class="hljs-number">3</span>,(Some(<span class="hljs-number">9</span>),<span class="hljs-number">9</span>))
+(<span class="hljs-number">3</span>,(Some(<span class="hljs-number">9</span>),<span class="hljs-number">4</span>))
+
+scala&gt; 
+</code></pre>
+
+
+
+<h2 id="cogroup">cogroup</h2>
+
+<p>现看一个例子：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;    val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>, <span class="hljs-number">3</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">5</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">7</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">8</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">9</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">25</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt;     val textRDD2 = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">3</span>,<span class="hljs-number">9</span>), (<span class="hljs-number">3</span>,<span class="hljs-number">4</span>)))
+<span class="hljs-label">textRDD2:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">30</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; val cogroupRDD = textRDD<span class="hljs-preprocessor">.cogroup</span>(textRDD2)
+<span class="hljs-label">cogroupRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, (Iterable[Int], Iterable[Int]))] = MapPartitionsRDD[<span class="hljs-number">41</span>] at cogroup at &lt;console&gt;:<span class="hljs-number">28</span>
+
+scala&gt; cogroupRDD<span class="hljs-preprocessor">.collect</span><span class="hljs-preprocessor">.foreach</span>(println)
+(<span class="hljs-number">1</span>,(CompactBuffer(<span class="hljs-number">3</span>),CompactBuffer()))
+(<span class="hljs-number">3</span>,(CompactBuffer(<span class="hljs-number">5</span>, <span class="hljs-number">7</span>, <span class="hljs-number">8</span>, <span class="hljs-number">9</span>),CompactBuffer(<span class="hljs-number">9</span>, <span class="hljs-number">4</span>)))
+
+scala&gt; </code></pre>
+
+<p>下面是该函数的定义：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs autohotkey">/**
+   * For each key k in <span class="hljs-escape">`t</span>his<span class="hljs-escape">` </span><span class="hljs-literal">or</span> <span class="hljs-escape">`o</span>ther1<span class="hljs-escape">` </span><span class="hljs-literal">or</span> <span class="hljs-escape">`o</span>ther2<span class="hljs-escape">` </span><span class="hljs-literal">or</span> <span class="hljs-escape">`o</span>ther3<span class="hljs-escape">`,</span>
+   * <span class="hljs-keyword">return</span> <span class="hljs-literal">a</span> resulting RDD that contains <span class="hljs-literal">a</span> tuple with the list of values
+   * for that key in <span class="hljs-escape">`t</span>his<span class="hljs-escape">`,</span> <span class="hljs-escape">`o</span>ther1<span class="hljs-escape">`,</span> <span class="hljs-escape">`o</span>ther2<span class="hljs-escape">` </span><span class="hljs-literal">and</span> <span class="hljs-escape">`o</span>ther3<span class="hljs-escape">`.</span>
+   */
+<span class="hljs-label">  def cogroup[W1, W2, W3](other1:</span> RDD[(K, W1)],
+<span class="hljs-label">      other2:</span> RDD[(K, W2)],
+<span class="hljs-label">      other3:</span> RDD[(K, W3)],
+<span class="hljs-label">      partitioner:</span> Partitioner)
+<span class="hljs-label">      :</span> RDD[(K, (Iterable[V], Iterable[W1], Iterable[W2], Iterable[W3]))] = self.withScope {}</code></pre>
+
+<p>看了上面的例子和定义，应该很好理解cogroup的作用了。</p>
+
+
+
+<h2 id="countbykey-action">countByKey() – action</h2>
+
+<p>对于key-value形式的RDD，统计相同的key出现的次数。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;    val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>, <span class="hljs-number">3</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">5</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">7</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">8</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">9</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">25</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; val countRDD = textRDD<span class="hljs-preprocessor">.countByKey</span>()
+<span class="hljs-label">countRDD:</span> scala<span class="hljs-preprocessor">.collection</span><span class="hljs-preprocessor">.Map</span>[Int,Long] = Map(<span class="hljs-number">1</span> -&gt; <span class="hljs-number">1</span>, <span class="hljs-number">3</span> -&gt; <span class="hljs-number">4</span>)
+</code></pre>
+
+
+
+<h2 id="collectasmap-action">collectAsMap() –action</h2>
+
+<p>对于key-value形式的RDD， 先collect，然后把它们转换成map，便于查找。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;    val textRDD = sc<span class="hljs-preprocessor">.parallelize</span>(List((<span class="hljs-number">1</span>, <span class="hljs-number">3</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">5</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">7</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">8</span>), (<span class="hljs-number">3</span>, <span class="hljs-number">9</span>)))
+<span class="hljs-label">textRDD:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[(Int, Int)] = ParallelCollectionRDD[<span class="hljs-number">25</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">24</span>
+
+scala&gt; val countRDD = textRDD<span class="hljs-preprocessor">.collectAsMap</span>()
+<span class="hljs-label">countRDD:</span> scala<span class="hljs-preprocessor">.collection</span><span class="hljs-preprocessor">.Map</span>[Int,Int] = Map(<span class="hljs-number">1</span> -&gt; <span class="hljs-number">3</span>, <span class="hljs-number">3</span> -&gt; <span class="hljs-number">9</span>)</code></pre>
+
+<p>需要注意的是：如果有多个相同的key，那么后一个value会覆盖前一个value。</p>
+
+<p><a href="https://spark.apache.org/docs/2.0.2/mllib-statistics.html" rel="nofollow">mllib-statistics</a></p>
+
+<p><a href="http://www.changhai.org/articles/technology/misc/google_math.php" rel="nofollow">google-math</a></p>
+
+<p><a href="http://spark.apache.org/docs/latest/programming-guide.html" rel="nofollow">programming-guide</a></p>
+
+<p><a href="http://spark.apache.org/docs/latest/tuning.html" rel="nofollow">tuning-spark</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

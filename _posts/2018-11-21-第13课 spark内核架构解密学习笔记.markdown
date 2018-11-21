@@ -1,0 +1,170 @@
+---
+layout:     post
+title:      第13课 spark内核架构解密学习笔记
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+第13课 spark内核架构解密学习笔记  2016.01.16<br><br><br>
+内容：<br>
+1.通过手动绘图的方式解密spark内核架构<br>
+2.通过案例验证spark内核架构<br>
+3.spark架构思考<br><br><br>
+第一阶段：彻底精通spark<br>
+第二阶段：价值千万超大型spark项目：包含所有spark知识点，编码，测试<br><img src="https://img-blog.csdn.net/20160307012302488?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br><br><br>
+driver是运行程序时具有main方法并创建了spark context的环境对象。如果要看一段程序是否是Driver的话，就要看其内部是否有运行Application的main函数/方法，并且一定会创建SparkContext。sparkContext是通往集群的唯一入口，也是开发者使用Spark集群各种功能的唯一通道，SparkContext是整个程序运行调度的核心。注意：是程序运行调度的核心而不是资源调度的核心。SparkContext里有高层调度器和底层调度器。高层调度器就是把整个作业划分成几个阶段，底层调度器是每个阶段里的任务该如何处理；<br>
+SchedulerBackend是管理整个集群中为当前程序分配的计算资源（Executor）。<br>
+这里讲的Standalone模式。原因：<br>
+1）这是Spark自带的。<br>
+2）效率比在Yarn和Mesos上高很多，也不需要其他的内容<br>
+3）只要Spark一个框架就可以了。<br><br><br>
+SparkContext里有高层调度器、低层调度器、SchedulerBackend<br>
+SparkContext在创建这些对象的同时会向Master注册当前程序，注册OK后会分配资源，根据Action触发的JOB，JOB里有RDD，从后往前推，如果有宽依赖的话，就划分成不同的Stage。stage划分完成后提交给底层调度器TaskScheduler。<br>
+一个Stage内部都是计算轮回完全一样，只是计算的数据不同而已。<br>
+TaskScheduler拿到任务的集合，就会根据数据的本地性把任务发到Executor执行。<br>
+Executor在出问题时会向Driver汇报。运行完后SparkContext会关闭。当然创建的对象也都会关闭。<br>
+Driver是应用程序运行调度的核心，因为它负责了整个作业的调度，并且会向Master申请资源来完成具体作业的工作过程。<br>
+应用程序就是用户编写的Spark程序及打包后的依赖，包含driver功能的代码和分布在集群中多个节点上的Executor的代码。<br>
+应用程序有两个层面，application=driver+executor<br>
+Driver是驱动Executor工作的，Executor是具体处理数据分片的，内部是线程池并发地处理数据分片。<br>
+应用程序是Driver和Executors的模式，每个应用程序都有Executor代码。<br>
+Executor部分代码其实就是main方法中new SparkConf，SparkConf进行配置然后创建SparkContext。这些就是driver部分的代码。<br>
+Driver部分的代码：SparkConf+SparkContext<br>
+val conf = new SparkConf()<br>
+conf.setAppName(“...”)<br>
+conf.setMaster(“local”)<br>
+cal sc = new SparkContext(conf)<br><img src="https://img-blog.csdn.net/20160307012340020?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br>
+SparkContext创建的过程中做了很多内容，包括DAG Scheduler、TaskScheduler、SchedulerBackend、SparkEnv<br>
+textFile flatMap map reduceByKey：这些代码都是Transformation级别的，都会产生RDD，既是RDD操作又会产生RDD，这些代码就是具体的业务实现，就是Executor中具体执行的代码。最后都会被Action触发执行，都是在Worker中的Executor中处理的。<br>
+一个应用程序默认只有一个DAG Scheduler。<br>
+sparkContext/Spark  <br><br><br>
+driver是以sparkContext为核心的，可以理解为driver就是sparkContext<br><img src="https://img-blog.csdn.net/20160307012429739?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br><br><br>
+◆ Executor是运行在Worker节点上的为当前应用程序而开启的一个进程里面的处理对象，这个对象负责了Task的运行，通过线程池中的线程并发执行和线程复用的方式，线程池中的每一个线程可以运行一个任务，任务完成后回收到线程池中进行线程复用。<br>
+hadoop的mr的jvm不能复用<br>
+JVM是重量级的，而Spark在一个节点上在默认情况下只为当前程序开启一个JVM。在JVM中是以线程池的方式，通过线程来处理Task任务。<br>
+Executor就是进程里的对象。<br>
+默认情况下Driver运行在当前提交的机器上。<br>
+一个worker默认分为当前的应用程序只开启一个executor，当然可以配置为多个。<br>
+Executor靠线程池中的线程来运行Task时，Task肯定要从磁盘或内存中读写数据，每个APPlication都有自己独立的一批executor。<br>
+※ 问题：一个worker里executor是多点好还是少点好？<br>
+=&gt;看情况。如果只分了一个Executor，占据了大量CPU core，但资源闲置，造成资源浪费。<br>
+由于CPU Cores的个数是有限的，如果只开启一个Executor，当任务比较大时内存易OOM。这时最好分成几个不同的Executor。<br>
+◆ clustermanager是集群获取资源的外部服务。Spark最开始时没有Yarn模式，也没有Standalone模式，最开始的资源管理服务是mesos。<br>
+Spark程序的运行不依赖于ClusterManager。<br>
+Spark应用程序向clustermanager注册成功后，Master就提前直接分配好资源，程序运行过程中不需要ClusterManager参与。<br>
+ClusterManager是可插拨的。<br>
+这种资源分配方式是粗粒度的资源分配方式。<br>
+◆ worker就是集群中任何可以运行APP具体操作代码的节点。worker上不会运行程序代码，worker是管理当前节点内存CPU等资源使用状况的，它会接收Master分配资源的指令，并通过executor runner启动一个新进程，进程内有Executor。<br>
+worker是工头，clustermanager是项目经理，管理很多worker，Worker下面有很多资源。<br>
+Worker管理当前Node的计算资源（主要是CPU和内存），并接受Master的指令来分配具体的计算资源Executor（在新的进程中分配）<br>
+ExecutorRunner 是管理新分配的进程。监控Executor运行状况（代理模式）。实质上就是在ExecutorRunner中创建出Executor进程的。<br>
+※ worker会不会向master汇报当前node的资源信息？<br>
+=&gt; 不会！！！<br>
+worker会不断向Master发的心跳，但内容只有worker ID。是用来判断Worker是否活着。<br>
+那master怎么知道各节点的资源信息？<br>
+=&gt; 分配资源的时候就已经知道了。应用程序在向Master注册时，注册成功后master就会分配资源，分配时就会记录资源，所有的资源都是Master分配的，所以Master当然知道各节点的资源信息了。<br>
+只有当Worker出现故障时才会向Master汇报资源情况。<br>
+◆ 作业：JOB<br>
+JOB就是包含了一系列Task的并行计算。JOB一般由应用程序的Action操作触发，比如saveAsTextFile。<br>
+JOB里面是一系列的RDD及作用在RDD的各种operation操作<br>
+collect就是一个Action，会触发一个作业。<br>
+wordCountOrdered就是一系列的RDD及对RDD的操作。<br>
+包括map、flatMap、TextFile，每一步都会至少产生一个RDD。TextFile就会产生hadoopRDD 和MapPartitionsRDD。<br>
+JOB都是由Action触发的，触发时前面有一系列的RDD。<br>
+action不会产生RDD，只会导致RunJOB。<br>
+action前是RDD，是transformation级别的，是lazy级别的执行方式。<br>
+如果后面的RDD对前面的RDD进行回溯时是窄依赖的话，就会在内存中进行迭代，这是Spark快的一个很重要的原因。<br>
+spark快不仅是因为基于内存。调度,容错才是Spark的精髓的基本点。<br>
+窄依赖有一个Range级别，即依赖固定个数的父RDD。所谓固定个数是说不会随着数据规模的扩大而改变。<br>
+依赖构成了DAG。如果是宽依赖DAG Scheduler就会划分Stage，Stage内部是基于内存迭代的，当然也可以基于磁盘迭代。<br>
+stage内部计算逻辑完全一样，只是计算的数据不同。<br>
+任务（Task）就是计算一个数据分片的，<br>
+数据分片：例如从HDFS上读取数据时默认数据分片就是128MB。<br>
+※ 一个数据分片是否精准地等于一个Block的大小（默认128MB）？<br>
+=&gt; 一般情况下都不等于，因为最后一个分片会跨两个Block。<br><br><br>
+下面实际运行一个程序：<br>
+1）启动Spark集群：  start-all.sh<br>
+启动historyserver：  start-historyserver.sh<br>
+2）在浏览器中打开：<br>
+master:50070 (HDFS)<br>
+master:8080 (计算框架的资源管理器)<br>
+master:18080 （historyserver）<br>
+可以看到以前运行过的JOB详情：<br><img src="https://img-blog.csdn.net/20160307012645168?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br><br>
+这里有两个stage是因为reduceByKey产生了shuffle，所以划分成了两个Stage。<br>
+Stage内部textFile、flatMap、Map默认都是基于内存迭代（内存不够时可会基于磁盘迭代）<br>
+Collect操作触发作业，作业从后往前推，Stage内部都有一系列的任务。<br>
+点击Stage名，就可以看到Stage的详细情况，这里可以看到有88个并行任务。<br>
+A）在DAG Visuallization里可以清楚地看到运行的代码。<br>
+B）在Tasks里可以看到Task分布在不同的节点上的Executor中。<br>
+C）在Aggregated Metrics By Executor中可以看到有4个Executor。这是因为默认情况下每个Worker为当前应用程序只分配一个Executor。Spark集群有4个Worker，所以有4个Executor。在Adress中可以看到每个Executor位于哪个Worker上。在Total Tasks中可以看到运行了哪些任务。同时可以看到Failed Tasks/Successed Tasks。<br>
+★ 在Stage中看不到SparkContext和SparkConf。因为SparkContext和SparkConf是Driver。<br>
+★ 一个application里可以有多个JOB。因为一个应用程序中可以有不同的Action。<br>
+一般一个Action操作就会对应一个JOB。<br>
+特殊情况下：<br>
+checkpoint也可以导致JOB; 排序时进行Range范围的划分也会触发JOB<br><br><br>
+Spark内核架构图<br>
+★ 默认情况下有一台机器专门用来提交spark程序，这台机器一般一定与spark cluster在同一个网络环境中（因为Driver要驱动Application运行，要指挥worker工作，要频繁与Executor交互通信），其配置和普通worker一致（因为要频繁发送接收任务，需要较大的CPU MEM)，<br>
+spark运行有两种模式cluster/client，默认是client模式。因为在client模式下可以看到更多的交互信息，即运行过程的信息。<br>
+指定deploy_mode为cluster模式的话，master会确定Worker中的一台机器作为Driver，Mastter分配的第一个Executor其实就是Driver级别的Executor。<br>
+※ 千万不要在eclipse/IDEA中开发好就把当机提交。<br>
+=&gt; 会出现Task丢失、序列化故障、超时等问题。<br>
+为什么不能够在IDE集成开发环境中直接发布Spark程序到Spark集群中<br><span></span>第一点：内存和Cores的限制，默认情况下Spark程序的Driver会在提交Spark程序的机器上，所以如果在IDE中提交程序的话，那IDE机器就必须非常强大<br><span></span>第二点：Driver要指挥Workers的运行并频繁的发生通信，如果开发环境IDE和Spark集群不在同样一个网络下，就会出现任务丢失，运行缓慢等多种不必要的问题；<br><span></span>第三点：这是不安全的！<br><br><br>
+提交Spark程序用的机器上application(各种依赖外部资源，例如*.SO库,file）,使用spark submit运行程序（可以配置运行时的各种参数，例如memory,cores）<br>
+※ 实际生产环境下会不会手动提交submit？<br>
+实际生产环境下用自动化脚本配置和提交程序。当然当前机要装spark，但这里安装的Spark不属于集群（不安装Spark的话就无法运行Spark-submit）。<br>
+★ driver(核心是sparkContext)，通过driver执行应用程序。<br>
+spark1.6.x内部实现是通过rpc，rpc底层是akka.<br>
+※ 那为什么还要做rpc? =&gt; 以后可能不用akka。可能是netty？。<br>
+※ driver需要像master一样做HA吗<br>
+=&gt; client模式运行的话，Driver无法做HA。<br>
+cluster模式在提交spark-submit时可以指定--supervise，如果是supervise的话，当前Driver故障时会自动再启动。 <br><br><br>
+★ 编写程序时先是创建sparkConf-&gt;然后是sparkContext<br>
+在程序开始时就要实例化sparkContext，<br>
+sparkContext要做三件事：<br>
+对sparkContext本身来讲，最重要的是创建DAG Scheduler/ task scheduler/ scheduler backend<br>
+Task Scheduler是负责一个作业内部运行的。<br>
+SchedulerBackend是管理计算资源的。<br>
+sparkContext在实例化的过程中一定要注册当前程序给master,master接受注册，如果没有问题，master会为当前程序分配AppID并分配计算资源。<br><br><br>
+★ spark Cluster（核心：masters)<br>
+master接收用户提交的程序，并发指令给worker为当前程序分配计算资源。每个worker所在节点默认为当前程序分配一个executor,在excutor中通过线程池并发执行，<br>
+※ 程序还未执行master怎么知道分配多少资源？<br>
+1，spark-env.sh和spark-defaults.sh<br>
+2，spark-submit提供的参数<br>
+3，程序中SparkConf配置的参数<br><br><br>
+master通知worker按照要求启动executor,默认启动一个Executor。<br>
+WorkerNode上Worker进程通过一个Proxy为ExecutorRunner的对象实例来远程启动ExecutorBackend进行。<br>
+Executor里有线程池。<br>
+实际在工作时Executor接收一个Task会通过TaskRunner来封装task,然后从ThreadPool中获取一条线程执行task,执行完后线程被回收复用<br>
+TaskRunner在封装时（具体运行时）会把代码反序列化执行具体内容。<br><br><br>
+★ 一般情况当通过action触发job时sparkContext会通过DAGscheduler来把job中的RDD构成的DAG划分成不同的stage(宽依赖），每个stage内部是一系列业务逻辑完全相同 但处理数据不同的tasks，构成了task set（任务集合）。<br>
+Task Set底层交给task scheduler。<br>
+task scheduler和schedulerbackend负责具体任务的运行（遵循数据本地性）<br>
+数据本地性是在什么时候确定的？就是说Task运行在哪台机器上是什么时候确定的？<br>
+=&gt;DAG Scheduler划分Stage时确定的。<br>
+TaskScheduler会把每个Stage内部的一系列的Task发送给Executor。TaskScheduler就是根据数据本地性来确定把哪些任务发给哪个Executor的。<br>
+大数据一句精髓的话就是数据不动代码动。<br>
+触发JOB前已经通过SchedulerBackend获得了Executor了。<br>
+执行时运行的Task有两种类型：<br>
+1） 最后一个stage中的task称为ResultTask,产生job的结果，其它前面的stage中的task都是shuffleMapTask,为下一阶段的stage做准备，相当于MapReduce的Mapper<br>
+2）整个spark程序的运行，就是DAGScheduler把JOB分成不同的stage，提交taskset给taskScheduler，进而提交给executor执行(符合数据本地性)，每个task会RDD中的一个partition，partition来具体执行我们定义的一系列同一个stage内部的函数，以此类推直到整个程序运行完成！！！<br>
+Spark是对MR的更精致和高效的实现。<br><br><p>Spark内核架构图</p>
+<p><img src="https://img-blog.csdn.net/20160307012729052?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p></p>
+<p style="color:rgb(51,51,51);font-family:Arial;font-size:14px;line-height:26px;">
+以上内容是王家林老师DT<span style="font-family:'宋体';">大数据梦工厂《</span><span style="font-family:'宋体';font-size:14.6667px;"><span style="color:rgb(255,0,0);font-family:Arial;font-size:13.913px;line-height:25.9918px;"> IMF传奇行动</span></span><span style="font-family:'宋体';">》第</span>13课<span style="font-family:'宋体';">的学习笔记。</span><br>
+王家林老师是Spark<span style="font-family:'宋体';">、</span>Flink<span style="font-family:'宋体';">、</span><a href="http://lib.csdn.net/base/11" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/15" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/4" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/4" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/4" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/4" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/15" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">Docker</a><span style="font-family:'宋体';">、</span><a href="http://lib.csdn.net/base/4" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/15" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/15" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/15" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/15" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"></a><a href="http://lib.csdn.net/base/4" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;">Android</a><span style="font-family:'宋体';">技术中国区布道师。</span>Spark<span style="font-family:'宋体';">亚太研究院院长和首席专家，</span>DT<span style="font-family:'宋体';">大数据梦工厂创始人，</span>Android<span style="font-family:'宋体';">软硬整合源码级专家，英语发音魔术师，健身狂热爱好者。</span></p>
+<p style="color:rgb(51,51,51);font-family:Arial;font-size:14px;line-height:26px;">
+微信公众账号：DT_Spark</p>
+<p style="color:rgb(51,51,51);font-family:Arial;font-size:14px;line-height:26px;">
+联系邮箱<a href="mailto:18610086859@126.com" rel="nofollow" style="color:rgb(51,102,153);text-decoration:none;"><span style="color:rgb(0,0,0);">18610086859@126.com</span></a> </p>
+<p style="color:rgb(51,51,51);font-family:Arial;font-size:14px;line-height:26px;">
+电话：18610086859</p>
+<p style="color:rgb(51,51,51);font-family:Arial;font-size:14px;line-height:26px;">
+QQ:1740415547</p>
+<p style="color:rgb(51,51,51);font-family:Arial;font-size:14px;line-height:26px;">
+微信号：18610086859  </p>
+<p style="color:rgb(51,51,51);font-family:Arial;font-size:14px;line-height:26px;">
+新浪微博：ilovepains</p>
+<br>            </div>
+                </div>

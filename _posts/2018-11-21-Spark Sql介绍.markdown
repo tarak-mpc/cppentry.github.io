@@ -1,0 +1,288 @@
+---
+layout:     post
+title:      Spark Sql介绍
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/meijie770342/article/details/79045645				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2 id="概况">概况</h2>
+
+<p>Spark SQL是用于结构化数据处理的Spark模块。与基本的Spark RDD API不同，Spark SQL提供的接口为Spark提供了关于数据结构和正在执行的计算的更多信息。在内部，Spark SQL使用这些额外的信息来执行额外的优化。有几种与Spark SQL进行交互的方式，包括SQL和Dataset API。在计算结果时，使用相同的执行引擎，而不管使用哪种API /语言表示计算。这种统一意味着开发人员可以轻松地在不同的API之间来回切换，基于这些API提供了表达给定转换的最自然的方式。</p>
+
+
+
+<h4 id="sql">SQL</h4>
+
+<p>Spark SQL的一个用途是执行SQL查询。Spark SQL也可以用来从现有的Hive安装中读取数据。有关如何配置此功能的更多信息，请参阅Hive表部分。从另一种编程语言中运行SQL时，结果将作为数据集/数据框返回。您还可以使用命令行 或通过JDBC / ODBC与SQL接口进行交互。</p>
+
+
+
+<h3 id="dataframes">DataFrames</h3>
+
+<p>DataFrame是分布式数据集合，组织到命名列中。它的作用上相当于关系数据库中的表格或R / Python中的DataFrames，但具有更丰富的优化。DataFrame可以从各种各样的源构建，例如：结构化数据文件，Hive中的表，外部数据库或现有的RDD。相对于Rdd，DataFrames具有更好的性能优化。spark sql的查询结果最后以DataFrames的形式返回</p>
+
+<p>从Rdd转换为DataFrames有两种方式： <br>
+- 利用反射推断模式 <br>
+- 编程指定模式</p>
+
+
+
+<h4 id="利用反射推断模式">利用反射推断模式</h4>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">package sql
+
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.log</span>4j.{Level, Logger}
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span>.{SparkContext, SparkConf}
+
+<span class="hljs-comment">/**
+  * Created by Administrator on 2018/1/12.
+  */</span>
+object RddToDf_1 {
+
+  case class Person(name: String, age: Int)
+  def main(args: Array[String]) {
+
+    // 屏蔽不必要的日志显示在终端上
+    Logger<span class="hljs-preprocessor">.getLogger</span>(<span class="hljs-string">"org.apache.spark"</span>)<span class="hljs-preprocessor">.setLevel</span>(Level<span class="hljs-preprocessor">.WARN</span>)
+    Logger<span class="hljs-preprocessor">.getLogger</span>(<span class="hljs-string">"org.eclipse.jetty.server"</span>)<span class="hljs-preprocessor">.setLevel</span>(Level<span class="hljs-preprocessor">.OFF</span>)
+
+    val conf = new SparkConf()<span class="hljs-preprocessor">.setAppName</span>(<span class="hljs-string">"RddToDf_1"</span>)<span class="hljs-preprocessor">.setMaster</span>(<span class="hljs-string">"local"</span>)
+    val sc = new SparkContext(conf)
+
+    val sqlContext = new org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.sql</span><span class="hljs-preprocessor">.SQLContext</span>(sc)
+
+    // this is used to implicitly convert an RDD to a DataFrame.
+    import sqlContext<span class="hljs-preprocessor">.implicits</span>._
+
+    // Define the schema using a case class.
+    // Note: Case classes <span class="hljs-keyword">in</span> Scala <span class="hljs-number">2.10</span> can support only up to <span class="hljs-number">22</span> fields. To work around this limit,
+    // you can use custom classes that implement the Product interface.
+
+
+//    // Create an RDD of Person objects <span class="hljs-keyword">and</span> register it as a table.
+    val people = sc<span class="hljs-preprocessor">.textFile</span>(<span class="hljs-string">"E:\\wgz\\hadoop\\Spark\\SparkLearning\\data\\people.txt"</span>)<span class="hljs-preprocessor">.map</span>(_<span class="hljs-preprocessor">.split</span>(<span class="hljs-string">","</span>))<span class="hljs-preprocessor">.map</span>(p =&gt; Person(p(<span class="hljs-number">0</span>), p(<span class="hljs-number">1</span>)<span class="hljs-preprocessor">.trim</span><span class="hljs-preprocessor">.toInt</span>))<span class="hljs-preprocessor">.toDF</span>()
+    people<span class="hljs-preprocessor">.registerTempTable</span>(<span class="hljs-string">"people"</span>)
+
+    // SQL statements can be run by using the sql methods provided by sqlContext.
+    val teenagers = sqlContext<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">"SELECT name, age FROM people WHERE age &gt;= 13 AND age &lt;= 19"</span>)
+
+    // The results of SQL queries are DataFrames <span class="hljs-keyword">and</span> support all the normal RDD operations.
+    // The columns of a row <span class="hljs-keyword">in</span> the result can be accessed by field index:
+    teenagers<span class="hljs-preprocessor">.map</span>(t =&gt; <span class="hljs-string">"Name: "</span> + t(<span class="hljs-number">0</span>))<span class="hljs-preprocessor">.collect</span>()<span class="hljs-preprocessor">.foreach</span>(println)
+
+    // <span class="hljs-keyword">or</span> by field name:
+    teenagers<span class="hljs-preprocessor">.map</span>(t =&gt; <span class="hljs-string">"Name: "</span> + t<span class="hljs-preprocessor">.getAs</span>[String](<span class="hljs-string">"name"</span>))<span class="hljs-preprocessor">.collect</span>()<span class="hljs-preprocessor">.foreach</span>(println)
+
+    // row<span class="hljs-preprocessor">.getValuesMap</span>[T] retrieves multiple columns at once into a Map[String, T]
+    teenagers<span class="hljs-preprocessor">.map</span>(_<span class="hljs-preprocessor">.getValuesMap</span>[Any](List(<span class="hljs-string">"name"</span>, <span class="hljs-string">"age"</span>)))<span class="hljs-preprocessor">.collect</span>()<span class="hljs-preprocessor">.foreach</span>(println)
+    // Map(<span class="hljs-string">"name"</span> -&gt; <span class="hljs-string">"Justin"</span>, <span class="hljs-string">"age"</span> -&gt; <span class="hljs-number">19</span>)
+
+
+  }
+}
+
+</code></pre>
+
+
+
+<h4 id="编程指定模式">编程指定模式</h4>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.log</span>4j.{Level, Logger}
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span>.{SparkContext, SparkConf}
+
+<span class="hljs-comment">/**
+  * Created by Administrator on 2018/1/12.
+  */</span>
+object RddToDf_1 {
+
+  case class Person(name: String, age: Int)
+  def main(args: Array[String]) {
+
+    // 屏蔽不必要的日志显示在终端上
+    Logger<span class="hljs-preprocessor">.getLogger</span>(<span class="hljs-string">"org.apache.spark"</span>)<span class="hljs-preprocessor">.setLevel</span>(Level<span class="hljs-preprocessor">.WARN</span>)
+    Logger<span class="hljs-preprocessor">.getLogger</span>(<span class="hljs-string">"org.eclipse.jetty.server"</span>)<span class="hljs-preprocessor">.setLevel</span>(Level<span class="hljs-preprocessor">.OFF</span>)
+
+    val conf = new SparkConf()<span class="hljs-preprocessor">.setAppName</span>(<span class="hljs-string">"RddToDf_1"</span>)<span class="hljs-preprocessor">.setMaster</span>(<span class="hljs-string">"local"</span>)
+    val sc = new SparkContext(conf)
+
+    val sqlContext = new org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.sql</span><span class="hljs-preprocessor">.SQLContext</span>(sc)
+
+    // this is used to implicitly convert an RDD to a DataFrame.
+    import sqlContext<span class="hljs-preprocessor">.implicits</span>._
+
+    // Define the schema using a case class.
+    // Note: Case classes <span class="hljs-keyword">in</span> Scala <span class="hljs-number">2.10</span> can support only up to <span class="hljs-number">22</span> fields. To work around this limit,
+    // you can use custom classes that implement the Product interface.
+
+
+//    // Create an RDD of Person objects <span class="hljs-keyword">and</span> register it as a table.
+    val people = sc<span class="hljs-preprocessor">.textFile</span>(<span class="hljs-string">"E:\\wgz\\hadoop\\Spark\\SparkLearning\\data\\people.txt"</span>)<span class="hljs-preprocessor">.map</span>(_<span class="hljs-preprocessor">.split</span>(<span class="hljs-string">","</span>))<span class="hljs-preprocessor">.map</span>(p =&gt; Person(p(<span class="hljs-number">0</span>), p(<span class="hljs-number">1</span>)<span class="hljs-preprocessor">.trim</span><span class="hljs-preprocessor">.toInt</span>))<span class="hljs-preprocessor">.toDF</span>()
+    people<span class="hljs-preprocessor">.registerTempTable</span>(<span class="hljs-string">"people"</span>)
+
+    // SQL statements can be run by using the sql methods provided by sqlContext.
+    val teenagers = sqlContext<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">"SELECT name, age FROM people WHERE age &gt;= 13 AND age &lt;= 19"</span>)
+
+    // The results of SQL queries are DataFrames <span class="hljs-keyword">and</span> support all the normal RDD operations.
+    // The columns of a row <span class="hljs-keyword">in</span> the result can be accessed by field index:
+    teenagers<span class="hljs-preprocessor">.map</span>(t =&gt; <span class="hljs-string">"Name: "</span> + t(<span class="hljs-number">0</span>))<span class="hljs-preprocessor">.collect</span>()<span class="hljs-preprocessor">.foreach</span>(println)
+
+    // <span class="hljs-keyword">or</span> by field name:
+    teenagers<span class="hljs-preprocessor">.map</span>(t =&gt; <span class="hljs-string">"Name: "</span> + t<span class="hljs-preprocessor">.getAs</span>[String](<span class="hljs-string">"name"</span>))<span class="hljs-preprocessor">.collect</span>()<span class="hljs-preprocessor">.foreach</span>(println)
+
+    // row<span class="hljs-preprocessor">.getValuesMap</span>[T] retrieves multiple columns at once into a Map[String, T]
+    teenagers<span class="hljs-preprocessor">.map</span>(_<span class="hljs-preprocessor">.getValuesMap</span>[Any](List(<span class="hljs-string">"name"</span>, <span class="hljs-string">"age"</span>)))<span class="hljs-preprocessor">.collect</span>()<span class="hljs-preprocessor">.foreach</span>(println)
+    // Map(<span class="hljs-string">"name"</span> -&gt; <span class="hljs-string">"Justin"</span>, <span class="hljs-string">"age"</span> -&gt; <span class="hljs-number">19</span>)
+
+
+  }
+}
+</code></pre>
+
+
+
+<h3 id="数据源">数据源</h3>
+
+<p>sparksql的数据大致分为以下四种 <br>
+- RDDs <br>
+- parquet文件 <br>
+- JSON数据集 <br>
+- Hive表</p>
+
+
+
+<h4 id="rdds">RDDs</h4>
+
+<p>详情可以参考rdd To DataFrames</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">    val people = sc<span class="hljs-preprocessor">.textFile</span>(<span class="hljs-string">"E:\\wgz\\hadoop\\Spark\\SparkLearning\\data\\people.txt"</span>)<span class="hljs-preprocessor">.map</span>(_<span class="hljs-preprocessor">.split</span>(<span class="hljs-string">","</span>))<span class="hljs-preprocessor">.map</span>(p =&gt; Person(p(<span class="hljs-number">0</span>), p(<span class="hljs-number">1</span>)<span class="hljs-preprocessor">.trim</span><span class="hljs-preprocessor">.toInt</span>))<span class="hljs-preprocessor">.toDF</span>()
+    people<span class="hljs-preprocessor">.registerTempTable</span>(<span class="hljs-string">"people"</span>)
+
+    // SQL statements can be run by using the sql methods provided by sqlContext.
+    val teenagers = sqlContext<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">"SELECT name, age FROM people WHERE age &gt;= 13 AND age &lt;= 19"</span>)</code></pre>
+
+
+
+<h3 id="parquet">parquet</h3>
+
+<p>parquet可以加速查询，因为它只检查所有需要的列并对它们的值执行计算，因此只读取一个数据文件或表的小部分数据。Parquet 还支持灵活的压缩选项，因此可以显著减少磁盘上的存储。 <br>
+如果您在 HDFS 上拥有基于文本的数据文件或表，而且正在使用 Spark SQL 对它们执行查询，那么强烈推荐将文本数据文件转换为 Parquet 数据文件，以实现性能和存储收益。当然，转换需要时间，但查询性能的提升在某些情况下可能达到 30 倍或更高，存储的节省可高达 75%！</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">    val sqlContext = new org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.sql</span><span class="hljs-preprocessor">.SQLContext</span>(sc)
+
+    val df = sqlContext<span class="hljs-preprocessor">.read</span><span class="hljs-preprocessor">.load</span>(<span class="hljs-string">"data\\users.parquet"</span>)
+    //val df = sqlContext<span class="hljs-preprocessor">.parquetFile</span>(<span class="hljs-string">"data\\users.parquet"</span>)
+//    val df = sqlContext<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">"SELECT * FROM parquet.`E:\\wgz\\hadoop\\Spark\\SparkLearning\\data\\users.parquet`"</span>)
+    df<span class="hljs-preprocessor">.show</span>()
+</code></pre>
+
+
+
+<h3 id="json">JSON</h3>
+
+
+
+<pre class="prettyprint"><code class=" hljs fsharp">    <span class="hljs-keyword">val</span> sqlContext = <span class="hljs-keyword">new</span> org.apache.spark.sql.SQLContext(sc)
+
+    <span class="hljs-keyword">val</span> df = sqlContext.read.json(<span class="hljs-string">"data\\people.json"</span>)
+
+    df.show()
+<span class="hljs-comment">//    +----+-------+</span>
+<span class="hljs-comment">//    | age|   name|</span>
+<span class="hljs-comment">//    +----+-------+</span>
+<span class="hljs-comment">//    |null|Michael|</span>
+<span class="hljs-comment">//      |  30|   Andy|</span>
+<span class="hljs-comment">//      |  19| Justin|</span>
+<span class="hljs-comment">//      +----+-------+</span></code></pre>
+
+
+
+<h4 id="hive表">Hive表</h4>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql">// sc is an existing SparkContext.
+val sqlContext = new org.apache.spark.sql.hive.HiveContext(sc)
+
+sqlContext.sql("<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> src (<span class="hljs-keyword">key</span> <span class="hljs-keyword">INT</span>, <span class="hljs-keyword">value</span> STRING)<span class="hljs-string">")
+sqlContext.sql("</span><span class="hljs-keyword">LOAD</span> DATA <span class="hljs-keyword">LOCAL</span> INPATH <span class="hljs-string">'examples/src/main/resources/kv1.txt'</span> <span class="hljs-keyword">INTO</span> <span class="hljs-keyword">TABLE</span> src<span class="hljs-string">")
+
+// Queries are expressed in HiveQL
+sqlContext.sql("</span><span class="hljs-keyword">FROM</span> src <span class="hljs-keyword">SELECT</span> <span class="hljs-keyword">key</span>, <span class="hljs-keyword">value</span><span class="hljs-string">").collect().foreach(println)</span></span></code></pre>
+
+
+
+<h3 id="性能优化">性能优化</h3>
+
+
+
+<h5 id="在内存中缓存数据">在内存中缓存数据</h5>
+
+<ul>
+<li>sqlContext.cacheTable(“tableName”)</li>
+<li>dataFrame.cache()</li>
+<li>sqlContext.uncacheTable(“tableName”)</li>
+</ul>
+
+<p>Spark SQL可以通过调用sqlContext.cacheTable(“tableName”)或使用内存中的列格式缓存表dataFrame.cache()。然后，Spark SQL将只扫描所需的列，并自动调整压缩以最大限度地减少内存使用和GC压力。你可以调用sqlContext.uncacheTable(“tableName”)从内存中删除表。</p>
+
+<p>SQLContext.setConf 的配置选项</p>
+
+<table>
+<thead>
+<tr>
+  <th>属性名称</th>
+  <th>默认</th>
+  <th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>spark.sql.inMemoryColumnarStorage.compressed</td>
+  <td>True</td>
+  <td>设置为true时，Spark SQL将根据数据的统计信息自动为每列选择压缩编解码器。</td>
+</tr>
+<tr>
+  <td>spark.sql.inMemoryColumnarStorage.batchSize</td>
+  <td>10000</td>
+  <td>控制列式高速缓存的批量大小。较大的批量大小可以提高内存利用率和压缩率，但是在缓存数据时会面临OOM风险。</td>
+</tr>
+<tr>
+  <td>spark.sql.tungsten.enabled</td>
+  <td>True</td>
+  <td>当为true时，特定查询中的表达式求值的代码将会在运行时动态生成。对于一些拥有复杂表达式的查询，此选项可导致显著速度提升。然而，对于简单的查询，这个选项会减慢查询的执行</td>
+</tr>
+<tr>
+  <td>spark.sql.shuffle.partitions</td>
+  <td>200</td>
+  <td>配置shuffer的分区数</td>
+</tr>
+</tbody></table>
+
+
+
+
+<h3 id="运行spark-sql-cli">运行Spark SQL CLI</h3>
+
+<p>Spark SQL CLI是一种方便的工具，可以在本地模式下运行Hive Metastore服务，并从命令行执行查询输入。请注意，Spark SQL CLI无法与Thrift JDBC服务器通信。使用方法和原生的hive语句一样</p>
+
+<p>要启动Spark SQL CLI，请在Spark目录中运行以下命令：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso"><span class="hljs-built_in">.</span>/bin/spark<span class="hljs-attribute">-sql</span></code></pre>
+
+<p>前提是需要hive-site.xml，core-site.xml和hdfs-site.xml拷贝到conf/下</p>
+
+<p><a href="http://dl.download.csdn.net/down11/20180112/1a4f44363aa284be2d9e7cd7b7be61be.zip?response-content-disposition=attachment;filename=%22Spark_sql.zip%22&amp;OSSAccessKeyId=9q6nvzoJGowBj4q1&amp;Expires=1515747000&amp;Signature=KeEKi6RI9uidjvsO4nrA1/ZbbPc=&amp;user=meijie770342&amp;sourceid=10202740&amp;sourcescore=2&amp;isvip=0%20%E8%AF%BE%E4%BB%B6%E8%B5%84%E6%BA%90" rel="nofollow">资源下载</a></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

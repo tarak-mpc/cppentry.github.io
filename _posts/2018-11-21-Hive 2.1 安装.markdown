@@ -1,0 +1,160 @@
+---
+layout:     post
+title:      Hive 2.1 安装
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><strong>安装Hive2.1</strong><br>
+1. 准备工作：安装JDK、Hadoop</p>
+<p>2. 下载并解压Hive，设置环境变量 HIVE_HOME、PATH</p>
+<p>3. 设置Hadoop环境变量</p>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">./hadoop fs -mkdir /tmp
+./hadoop fs -mkdir /usr/hive/warehouse
+./hadoop fs -chmod g+w /tmp
+./hadoop fs -chmod g+w /usr/hive/warehouse</span></pre>
+</div>
+<p><span style="line-height:1.5;">4. 修改Hive的配置文件</span></p>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">conf/hive-default.xml.template -&gt; hive-site.xml
+conf/hive-log4j.properties.template -&gt; hive-log4j.properties
+conf/hive-exec-log4j.properties.template -&gt; hive-exec-log4j.properties</span></pre>
+</div>
+<p><span style="line-height:1.5;">5. 修改 hive-site.xml</span></p>
+<p>替换${system:java.io.tmpdir} 和 ${system:user.name}</p>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">:%s@\${system:java.io.tmpdir}@/home/c3/hive_tmp@g    
+:%s@\${system:user.name}@/c3@g</span></pre>
+</div>
+<p> <strong><span style="line-height:1.5;">启动Hive时报错</span></strong></p>
+<p>Caused by: MetaException(message:Hive metastore database is not initialized. Please use schematool (e.g. ./schematool -initSchema -dbType ...) to create the schema. If needed, don't forget to include the option to auto-create the underlying database in your
+ JDBC connection string (e.g. ?createDatabaseIfNotExist=true for mysql))</p>
+<p><span style="line-height:1.5;">这是由于没有初始化Hive元数据的数据库，默认情况下，Hive的元数据保存在了内嵌的derby数据库里</span></p>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">schematool -initSchema -dbType derby
+</span></pre>
+</div>
+<p><strong><span style="line-height:1.5;">元数据放入MySQL</span></strong></p>
+<p>1、将mysql-connector-java-5.1.30-bin.jar 放入 $HIVE_HOME/lib下<br>
+2、修改 $HIVE_HOME/conf/hive-site.xml里的 数据库连接串、驱动、用户和密码</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+<pre><span style="color:#000000;">&lt;property&gt;
+    &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt;
+    &lt;value&gt;jdbc:mysql://</span>10.1.195.50:3306/hivedb?createDatabaseIfNotExist=true&amp;amp<span style="color:#008000;">;</span><span style="color:#008000;">useUnicode=true&amp;amp;characterEncoding=UTF-8&lt;/value&gt;</span>
+<span style="color:#000000;">    &lt;description&gt;JDBC connect string for a JDBC metastore&lt;/description&gt;
+&lt;/property&gt;
+&lt;property&gt;
+    &lt;name&gt;javax.jdo.option.ConnectionDriverName&lt;/name&gt;
+    &lt;value&gt;com.mysql.jdbc.Driver&lt;/value&gt;
+    &lt;description&gt;Driver class name for a JDBC metastore&lt;/description&gt;
+&lt;/property&gt;
+&lt;property&gt;
+    &lt;name&gt;javax.jdo.option.ConnectionUserName&lt;/name&gt;
+    &lt;value&gt;umobile&lt;/value&gt;
+    &lt;description&gt;username to use against metastore database&lt;/description&gt;
+&lt;/property&gt;
+&lt;property&gt;
+    &lt;name&gt;javax.jdo.option.ConnectionPassword&lt;/name&gt;
+    &lt;value&gt;umobile&lt;/value&gt;
+    &lt;description&gt;password to use against metastore database&lt;/description&gt;
+&lt;/property&gt;</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+</div>
+<p><span style="line-height:1.5;">3、初始化Hive在mysql里的脚本 $HIVE_HOME/scripts</span></p>
+<div class="cnblogs_code">
+<pre>schematool -initSchema -dbType mysql</pre>
+</div>
+<p><strong> 测试Hive</strong></p>
+<p>在Hive里创建的表和数据，都保存在了Hadoop里的hdfs上面，hive-site.xml里的 hive.user.install.directory 参数，定义了HDFS的路径，默认/user</p>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">$ hadoop fs -ls /usr/hive
+Found </span>1<span style="color:#000000;"> items
+drwxrwxr-x   - c3 supergroup          </span>0 2016-06-30 17:18 /usr/hive/warehouse</pre>
+</div>
+<p>创建库表并插入数据</p>
+<div class="cnblogs_code">
+<pre>create database test<span style="color:#008000;">;
+</span><span style="color:#000000;">use test</span><span style="color:#008000;">;
+</span><span style="color:#000000;">create table test_table (id int</span>,name string,no int) row format delimited fields terminated by ',<span style="color:#000000;">' stored as textfile
+select * from test_table</span><span style="color:#008000;">;
+</span><span style="color:#000000;">insert into test_table values (</span>1, 'test', 1)<span style="color:#008000;">;</span></pre>
+</div>
+<p>报如下错误：</p>
+<p>WARNING: Hive-on-MR is deprecated in Hive 2 and may not be available in the future versions. Consider using a different execution engine (i.e. spark, tez) or using Hive 1.X releases.</p>
+<p>我太激进了，不该用这么新的Hive版本。。</p>
+<p><strong>将Hive的版本降到1.2再装</strong></p>
+<p>schematool -initSchema -dbType mysql 报错：</p>
+<p>Exception in thread "main" java.lang.IncompatibleClassChangeError: Found class jline.Terminal, but interface was expected</p>
+<p>解决方法：</p>
+<p>将hive下的新版本jline的JAR包拷贝到hadoop下<br>
+hive/lib/jline-2.12.jar 拷贝到 hadoop/share/hadoop/yarn/lib/<br>
+hadoop下的jline-0.9.94.jar 重命名为 jline-0.9.94.jar.bak</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+<pre>hive&gt; CREATE TABLE student(id STRING, name String) ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' STORED AS TEXTFILE<span style="color:#008000;">;
+</span><span style="color:#000000;">
+bash&gt; echo </span>1,<span style="color:#000000;">wang &gt;&gt; student.txt
+bash&gt; echo </span>2,<span style="color:#000000;">wang &gt;&gt; student.txt
+bash&gt; echo </span>3,<span style="color:#000000;">wang &gt;&gt; student.txt
+
+hive&gt; load data local inpath '/home/c3/student.txt' into table student</span><span style="color:#008000;">;</span><span style="color:#008000;"> 要用绝对路径</span>
+hive&gt; select * <span style="text-decoration:line-through;">from</span> student<span style="color:#008000;">;</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+</div>
+<p><span style="line-height:1.5;">注意：不能使用insert into values 语句</span></p>
+<p><strong>以hiveserver方式启动hive</strong></p>
+<div class="cnblogs_code">
+<pre>bash&gt; hive --service hiveserver</pre>
+</div>
+<p>报错：Exception in thread "main" java.lang.ClassNotFoundException: org.apache.hadoop.hive.service.HiveServer</p>
+<p>HiveServer本身存在很多问题（比如：安全性、并发性等），针对这些问题，Hive0.11.0版本提供了一个全新的服务：HiveServer2，这个很好的解决HiveServer存在的安全性、并发性等问题。这个服务启动程序在${HIVE_HOME}/bin/hiveserver2里面，你可以通过下面的方式来启动HiveServer2服务。</p>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">bash&gt; hive --service hiveserver2
+bash&gt; hive --service hiveserver2 --hiveconf hive.server2.thrift.port=10001</span> #指定端口</pre>
+</div>
+<p><span style="line-height:1.5;">启动成功之后，就可以用DBVisualizer访问Hive了，就像访问MySQL</span></p>
+<p>Tools &gt; DriverManager... &gt; 新建Hive</p>
+<p> <img src="http://images2015.cnblogs.com/blog/955497/201607/955497-20160702173739968-1796972695.png" alt=""></p>
+<p>创建好Hive驱动，就可以创建Hive库的链接了</p>
+<p><img src="http://images2015.cnblogs.com/blog/955497/201607/955497-20160702174224562-557130413.png" alt=""></p>
+<p> </p>
+<p>Database Type: Generic</p>
+<p>Driver：上面创建的驱动</p>
+<p>userid/password：随意输入</p>
+<p> </p>
+<p>数据准备，先在HDFS上准备文本文件，逗号分割，并上传到/1目录，然后在Hive里创建table，表名和文件名要相同，表的存储路径也是目录/1</p>
+<div class="cnblogs_code">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+<pre><span style="color:#000000;">bash&gt; vim table_test
+
+d1</span>,user1,1000<span style="color:#000000;">
+d1</span>,user2,2000<span style="color:#000000;">
+d1</span>,user3,3000<span style="color:#000000;">
+d2</span>,user4,4000<span style="color:#000000;">
+d2</span>,user5,5000<span style="color:#000000;">
+
+bash&gt; hadoop fs -mkdir /</span>1<span style="color:#000000;">
+bash&gt; hadoop fs -put table_test /</span>1<span style="color:#000000;">
+
+hive&gt; CREATE EXTERNAL TABLE table_test (
+dept STRING</span>,<span style="color:#000000;">
+userid string</span>,<span style="color:#000000;">
+sal INT
+) ROW FORMAT DELIMITED 
+FIELDS TERMINATED BY '</span>,<span style="color:#000000;">' 
+stored as textfile location '/</span>1'<span style="color:#008000;">;
+</span><span style="color:#000000;">
+hive&gt; select * from table_test</span><span style="color:#008000;">;</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+</div>
+<p>另外，SparkSQL也可以作为 JDBC Server，这种方式与上面的Hive作为server的区别在于，SparkSQL使用Spark引擎来执行SQL，而Hive使用MR来执行SQL。</p>
+<p>1、hive-site.xml拷贝将hive-site.xml拷贝到￥SPARK_HOME/conf下</p>
+<p>2、需要在$SPARK_HOME/conf/spark-env.sh中的SPARK_CLASSPATH添加jdbc驱动的jar包</p>
+<p>export SPARK_CLASSPATH=.:/home/Hadoop/software/mysql-connector-java-5.1.27-bin.jar</p>
+<p>3、启动：./start-thriftserver.sh  --hiveconf hive.server2.thrift.port=10001 --hiveconf hive.server2.thrift.bind.host=rti9</p>
+<p>4、查看日志：tail -f  /home/c3/apps/spark-1.6.1-bin-hadoop2.6/logs/spark-c3-org.apache.spark.sql.hive.thriftserver.HiveThriftServer2-1-rti9.out</p>
+            </div>
+                </div>

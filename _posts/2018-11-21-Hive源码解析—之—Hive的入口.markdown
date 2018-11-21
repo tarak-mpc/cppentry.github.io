@@ -1,0 +1,383 @@
+---
+layout:     post
+title:      Hive源码解析—之—Hive的入口
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<span style="font-family:Arial, '宋体', Helvetica, sans-serif;font-size:15px;line-height:22px;background-color:rgb(235,239,249);"></span>
+<p>
+Hive源码解析—之—hive的入口：</p>
+<p>
+初衷：hi，大家好，我叫红门，在hive方面是个菜鸟，现在读hive源码希望能够更了解底层，尤其是hive与Hadoop切换这块。但在读hive源码时发现比Hadoop源码难读一些，虽然Hadoop源码量比较大，但是整体很规范，命名规范，关键地方注释的比较明确。<br>
+去年在读和修改Hadoop源码时都感觉比较清晰，可读性比较好一些，往往可以望文生义，可能也有自己对hive不熟的原因在里面吧！</p>
+<p>
+想必别人应该也有人在关注hive底层，所以决定拿出来与大家分享，共同学习，如有理解不到位的地方，欢迎拍砖，更欢迎交流。</p>
+<p>
+一直在思索应该从哪里写，不能一大堆代码粘上来，一通狂砍，大家会不知所云，有点装大。<br>
+后来给自己定了个原则：<br>
+1。hive执行过程为主线，尽量把关键的一些部分提出来，每次定一个主题。<br>
+2．怎么描述才能让别人更容易理解，更容易理清思路，尽量图形化描述。（我用的是mindManager画的图，不知道这种图形化的是不是可以让你看的更舒服。）</p>
+<p>
+废话说得差不多了，现在开始！！</p>
+<p>
+我们先从hive入口聊起，一路按着hive的执行过程主线走下来，<br>
+这次的主题就叫做： hive的入口！！ (该图借用网上的，不知出处)：</p>
+<p>
+<a href="http://www.tbdata.org/wp-content/uploads/2010/11/system_architecture3.png" rel="nofollow" style="text-decoration:none;color:rgb(128,128,128);"><img src="http://www.tbdata.org/wp-content/uploads/2010/11/system_architecture3-300x155.png" alt="" width="300" height="155" class="alignnone size-medium wp-image-1055"></a></p>
+<p>
+CliDriver可以说是hive的入口，对应上图中的UI部分。大家看它的结构就可以明白了，main（）函数！对！你猜的没错就是从main（）开始。<br>
+下图是类结构，总共有五个关键的函数。</p>
+<p>
+<a href="http://www.tbdata.org/wp-content/uploads/2010/11/cliDriver%E7%B1%BB.png" rel="nofollow" style="text-decoration:none;color:rgb(128,128,128);"><img src="http://www.tbdata.org/wp-content/uploads/2010/11/cliDriver%E7%B1%BB.png" alt="" width="293" height="233" class="alignnone size-full wp-image-1062"></a><br>
+这个类可以说是用户和hive交互的平台，你可以把它认为是hive客户端。总共有4个key函数：<br>
+下图是这个CliDriver类在整个Hive执行过程中的作用的地位。</p>
+<p>
+<a href="http://www.tbdata.org/wp-content/uploads/2010/11/CliDriver%E5%BC%80%E5%A7%8B.png" rel="nofollow" style="text-decoration:none;color:rgb(128,128,128);"><img src="http://www.tbdata.org/wp-content/uploads/2010/11/CliDriver%E5%BC%80%E5%A7%8B.png" alt="" width="853" height="454" class="alignnone size-full wp-image-1059"></a></p>
+<p>
+如图，hive执行流程_按正常步骤走：<br>
+1．—CliDriver.classz中main（）开始，初始化Hive环境变量，获取客户端提供的string或者file。<br>
+2 —将其代码送入processLine（cmd），这步主要是读入cmd：‘;’之前的所有字符串都读入(不做任何检查)，之后的会忽略。读完后，传入processCmd()处理<br>
+3 —调用processCmd（cmd），分情况处理<br>
+//– 读入cmd，并分情况处理，总共分为以下五种情况，根据命令的开头字符串来确定用什么方法处理。<br>
+// 1.set.. 设置operator参数，hive环境参数<br>
+// 2.quit or exit — 退出Hive环境<br>
+// 3.! 开头<br>
+// 4.dfs 开头 交给FsShell处理<br>
+// 5.hivesql 正常hivesql执行语句，我们最关心的是这里。语句交给了、、Hive真正的核心引擎 Driver。返回ret = Driver.run(cmd);<br>
+4．—不同情况不同处理方法。我们关心的第五种情况：正常的HiveSQL如何处理？其实是进入driver.class里面run()，<br>
+//读入hivesql ,词法分析，语法分析，直到执行结束<br>
+//1.ParseDriver 返回 词法树 CommonTree<br>
+//2.BaseSemanticAnalyzer sem.analyze(tree, ctx);//语义解释，生成执行计划<br>
+5．—。。。etc</p>
+<p>
+今天的主题是hive的入口，我们只聊前三步。</p>
+<p>
+现在我们细化主要函数，看hive实际是怎么处理的。（如果你只想了解hive工作流程或原理，不想拘泥于细节，可以跳过下面的细节，如果你想修改源码，做优化，可以继续往下看）</p>
+<p>
+<a href="http://www.tbdata.org/wp-content/uploads/2010/11/cli%E7%B1%BB.png" rel="nofollow" style="text-decoration:none;color:rgb(128,128,128);"><img src="http://www.tbdata.org/wp-content/uploads/2010/11/cli%E7%B1%BB.png" alt="" width="265" height="107" class="alignnone size-full wp-image-1057"></a><br>
+下面是hive入口 涉及的一些关键类和关键函数。</p>
+<p>
+——————————-类CliDriver —</p>
+<p>
+由于这个类，可以说贯彻Hive的整个流程架构，所以我聊的比较细。</p>
+<p>
+————————————————main()</p>
+<pre>  public static void main(String[] args) throws IOException {
+
+    OptionsProcessor oproc = new OptionsProcessor();
+    if(! oproc.process_stage1(args)) {
+      System.exit(1);
+    }
+
+    // NOTE: It is critical to do this here so that log4j is reinitialized before
+    // any of the other core hive classes are loaded
+    SessionState.initHiveLog4j();
+    //建立客户端sesssion
+    CliSessionState ss = new CliSessionState (new HiveConf(SessionState.class));
+    ss.in = System.in;//标准输入
+    try {
+      ss.out = new PrintStream(System.out, true, "UTF-8");//??
+      ss.err = new PrintStream(System.err, true, "UTF-8");//??
+    } catch (UnsupportedEncodingException e) {
+      System.exit(3);
+    }
+
+    SessionState.start(ss);// -- start session  通过复制当前CliSessionState新建立SessionState
+
+    if(! oproc.process_stage2(ss)) {
+      System.exit(2);
+    }
+
+    // set all properties specified via command line
+    HiveConf conf = ss.getConf();//设置所有配置属性
+    for(Map.Entry item: ss.cmdProperties.entrySet()) {
+      conf.set((String) item.getKey(), (String) item.getValue());
+    }
+
+    sp = new SetProcessor();//?? what is proccessor
+    qp = new Driver();  // 正常hiveSql的处理引擎
+    dfs = new FsShell(ss.getConf());//dfs接口，用于 dfs命令处理
+
+    if(ss.execString != null) {// 输入的是命令行，按命令执行
+      System.exit(processLine(ss.execString));
+    }
+
+    try {
+      if(ss.fileName != null) {// 输入的是文件名，读文件执行
+        System.exit(processReader(new BufferedReader(new FileReader(ss.fileName))));
+      }
+    } catch (FileNotFoundException e) {//没有找到该文件
+      System.err.println("Could not open input file for reading. ("+e.getMessage()+")");
+      System.exit(3);
+    }
+
+    Character mask = null;
+    String trigger = null;
+
+    ConsoleReader reader = new ConsoleReader();//hive Console控制台命令读取器
+    reader.setBellEnabled(false);
+    //reader.setDebug(new PrintWriter(new FileWriter("writer.debug", true)));
+
+    List completors = new LinkedList();
+    completors.add(new SimpleCompletor(new String[] { "set", "from",
+                                                      "create", "load",
+                                                      "describe", "quit", "exit" }));
+    reader.addCompletor(new ArgumentCompletor(completors));
+
+    String line;
+    PrintWriter out = new PrintWriter(System.out);
+    final String HISTORYFILE = ".hivehistory";//建立历史文件，记录所有的命令行
+    String historyFile = System.getProperty("user.home") + File.separator  + HISTORYFILE;
+    reader.setHistory(new History(new File(historyFile)));
+    int ret = 0;
+    Log LOG = LogFactory.getLog("CliDriver");//建立日志
+    LogHelper console = new LogHelper(LOG);
+    String prefix = "";
+    String curPrompt = prompt;// -- is "hive"
+    //不断地获取hiveSql，读取；之前的所有内容，传个processLine处理
+    while ((line = reader.readLine(curPrompt+"&gt; ")) != null) {//--循环开始读命令
+      long start = System.currentTimeMillis();// 命令计时开始
+      if(line.trim().endsWith(";")) {//如果碰见';'表示结束,该
+        line = prefix + " " + line;
+        ret = processLine(line);// ----重点： 把命令行传入给解析，执行
+        prefix = "";// 把前缀重置为空
+        curPrompt = prompt;// "hive"
+      } else {
+        prefix = prefix + line;
+        curPrompt = prompt2;// 应该是 "  "
+        continue;
+      }
+      long end = System.currentTimeMillis();
+      if (end &gt; start) {//统计开始到结束的时间，如：命令开始执行所用的时间，
+    	                //console reader需要可以添加很多屏幕操作
+
+double timeTaken = (double)(end-start)/1000.0;
+        console.printInfo("Time taken: " + timeTaken + " seconds", null);     //对应在Hive Session上。
+      }
+    }
+
+System.exit(ret);
+</pre>
+<p>
+—————————— processLine(Cmd)<br>
+// 读入cmd：‘;’之前的所有字符串都读入(不做任何检查)，之后的都会忽略。读完后，传入processCmd处理.</p>
+<pre>  public static int processLine(String line) {
+    int ret = 0;
+    for(String oneCmd: line.split(";")) {
+      oneCmd = oneCmd.trim();
+      if(oneCmd.equals(""))
+        continue;
+
+      ret = processCmd(oneCmd);//--执行命令
+      if(ret != 0) {
+        // ignore anything after the first failed command
+        return ret;
+      }
+    }
+    return 0;
+  }
+</pre>
+<p>
+—————————— processCmd（）<br>
+//– 读入cmd，并分情况处理，总共分为以下五种情况，根据命令的开头字符串来确定用什么方法处理。<br>
+// 1.set.. 设置operator参数，hive环境参数<br>
+// 2.quit or exit — 退出Hive环境<br>
+// 3.! 开头<br>
+// 4.dfs 开头 交给FsShell处理<br>
+// 5.hivesql 正常hivesql执行语句，我们最关心的是这里。语句交给了、、Hive真正的核心引</p>
+<pre>public static int processCmd(String cmd) {
+    String[] tokens = cmd.split("\\s+");
+    String cmd_1 = cmd.substring(tokens[0].length());
+    int ret = 0;
+
+    if(tokens[0].equals("set")) { //1
+      ret = sp.run(cmd_1);// 调用这句就可以更改hadoop配置
+    } else if (cmd.equals("quit") || cmd.equals("exit")) {//2
+      //退出Hive环境
+      System.exit(0);
+    } else if (cmd.startsWith("!")) {//3 ：！ 开头的命令
+      SessionState ss = SessionState.get();
+      String shell_cmd = cmd.substring(1);
+      if (shell_cmd.endsWith(";")) {
+        shell_cmd = shell_cmd.substring(0, shell_cmd.length()-1);
+      }//--除掉';'??
+      //shell_cmd = "/bin/bash -c \'" + shell_cmd + "\'";
+
+      try {
+        Process executor = Runtime.getRuntime().exec(shell_cmd);//!!??这句得好好 跟踪
+        StreamPrinter outPrinter = new StreamPrinter(executor.getInputStream(), null, ss.out);
+        StreamPrinter errPrinter = new StreamPrinter(executor.getErrorStream(), null, ss.err);
+
+        outPrinter.start();
+        errPrinter.start();
+
+        int exitVal = executor.waitFor();//?? look executor
+        if (exitVal != 0) {
+          ss.err.write((new String("Command failed with exit code = " + exitVal)).getBytes());
+        }
+      }
+      catch (Exception e) {
+        e.printStackTrace();
+      }
+    } else if (cmd.startsWith("dfs")) {//4  "dfs"  开头解析方法  -- cmd.
+      // Hadoop DFS 操作接口 处理！
+      SessionState ss = SessionState.get();
+      if(dfs == null)
+        dfs = new FsShell(ss.getConf());
+      String hadoopCmd = cmd.replaceFirst("dfs\\s+", "");
+      hadoopCmd = hadoopCmd.trim();
+      if (hadoopCmd.endsWith(";")) {
+        hadoopCmd = hadoopCmd.substring(0, hadoopCmd.length()-1);
+      }
+      String[] args = hadoopCmd.split("\\s+");//
+      try {
+        PrintStream oldOut = System.out;
+        System.setOut(ss.out);
+        int val = dfs.run(args);//??
+        System.setOut(oldOut);
+        if (val != 0) {
+          ss.err.write((new String("Command failed with exit code = " + val)).getBytes());
+        }
+      } catch (Exception e) {
+        ss.err.println("Exception raised from DFSShell.run " + e.getLocalizedMessage());
+      }
+    } else {//5 hivesql 正常运行，重点在这里
+      ret = qp.run(cmd);//正常执行hive命令,如：select  .. ;  addfile ..;
+      Vector res = new Vector();
+      while (qp.getResults(res)) {//获得执行结果result
+      	for (String r:res) {
+          SessionState ss  = SessionState.get();
+          PrintStream out = ss.out;
+          out.println(r);
+      	}
+        res.clear();
+      }
+
+      int cret = qp.close();
+      if (ret == 0) {
+        ret = cret;
+      }
+    }
+    return ret;
+  }
+</pre>
+<p>
+———————–类CliSessionState</p>
+<p>
+CliSessionState 除了做了个初始化，基本都是上继承了SessionState的实现方法，可能是作者为了低耦合。<br>
+public class CliSessionState extends SessionState</p>
+<p>
+<a href="http://www.tbdata.org/wp-content/uploads/2010/11/cliSessionState.png" rel="nofollow" style="text-decoration:none;color:rgb(128,128,128);"><img src="http://www.tbdata.org/wp-content/uploads/2010/11/cliSessionState.png" alt="" width="305" height="148" class="alignnone size-full wp-image-1060"></a><br>
+所以我们直接看SessionState。<br>
+SessionState可以说你是你自己当前的Hive环境，建立、初始化你Hive的session，一方面它来自conf的初始化设置，一方面来自你手动set。可以通过命令行形式，也可以通过file，这都取决于你的选择。<br>
+它会连接Hive元数据数据库，得到现有的元数据信息。<br>
+此类主要关键功能：<br>
+1 主要是生成session，并赋予一个唯一id(设置规则：用户名_年月日分秒 即 user_id + “_”+ yyyymmddHHmm)的session，<br>
+生成session有两种方式：1.直接新建session ，2. 通过拷贝方式复制一个session。<br>
+第一种我们最常用，但第二种很有用，我们可以确保我们两个环境是完全一致的，而且避免琐碎设置工作。<br>
+2 给每个cmd给予一个queryID，可以通过queryID得到命令行，也可以反过来得到id<br>
+3 每个sessionState 都会有一个logHelper，用于日志记录<br>
+其中 clude ： hiveconf , 连接db元数据数据库</p>
+<p>
+下图是SessionState的类结构：<br><a href="http://www.tbdata.org/wp-content/uploads/2010/11/SessionState.png" rel="nofollow" style="text-decoration:none;color:rgb(128,128,128);"><img src="http://www.tbdata.org/wp-content/uploads/2010/11/SessionState.png" alt="" width="321" height="497" class="alignnone size-full wp-image-1061"></a></p>
+<p>
+关键函数：<br>
+String makeSessionId() ——— //生成sessionID ： user_id+”_” + yyyyMMDDhhmm<br>
+setCmd(String cmdString)—— //给命令cmd设置query Id<br>
+protected final static HiveConf.ConfVars [] metaVars —-//获取元数据系统，路径等<br>
+public String getCmd() —— // –通过queryID获取命令代码cmd</p>
+<p>
+——————————–类 CommandProcessor<br>
+CommandProcessor类的很简单，是个接口类。</p>
+<p>
+public interface CommandProcessor {<br>
+public int run(String command);<br>
+}</p>
+<p>
+你会奇怪为什么先聊这个接口类，因为有三个类实现了这个接口（如下图），其中setProcessor, MetadataProcessor是我们Hive入口的关键类。</p>
+<p>
+<a href="http://www.tbdata.org/wp-content/uploads/2010/11/hive.jpeg" rel="nofollow" style="text-decoration:none;color:rgb(128,128,128);"><img src="http://www.tbdata.org/wp-content/uploads/2010/11/hive.jpeg" alt="" width="304" height="131" class="alignnone size-full wp-image-1074"></a></p>
+<p>
+———–类MetadataProcessor<br>
+Hive部分元信息提取与处理<br>
+// run()中 得到表的元信息，如果出错返回1，如：找不到表名等情况</p>
+<pre>public int run(String command) {
+    SessionState ss = SessionState.get();
+    String table_name = command.trim();
+    if(table_name.equals("")) {
+      return 0;
+    }
+
+    try {
+      MetaStoreClient msc = new MetaStoreClient(ss.getConf());
+
+      if(!msc.tableExists(table_name)) {//表不存在
+        ss.err.println("table does not exist: " + table_name);
+        return 1;
+      } else {
+        List fields = msc.get_fields(table_name);//获得表信息
+
+        for(FieldSchema f: fields) {
+          ss.out.println(f.getName() + ": " + f.getType());
+        }
+      }
+    } catch (MetaException err) {
+      ss.err.println("Got meta exception: " + err.getMessage());
+      return 1;
+    } catch (Exception err) {
+      ss.err.println("Got exception: " + err.getMessage());
+      return 1;
+    }
+    return 0;
+  }
+</pre>
+<p>
+——————- 类SetProcessor<br>
+主要是设置Hive环境，总共分为两大类：<br>
+1. set session为安全模式，<br>
+如：set silent = true;<br>
+2.set 该session的conf配置，即调用hadoop时的配置参数，以及改变执行时的具体实现。 如：set hive.exec.compress.output=’false’;<br>
+// 我们可以调用这里run(String command)更改hadoop配置 ，hive执行参数等，</p>
+<pre>public int run(String command) {
+    SessionState ss = SessionState.get();//建一个SessionState对象
+    String nwcmd = command.trim();//去空格
+    if(nwcmd.equals("")) {
+      dumpOptions(ss.getConf().getChangedProperties());
+      return 0;
+    }
+    if(nwcmd.equals("-v")) {
+      dumpOptions(ss.getConf().getAllProperties());
+      return 0;
+    }
+    String[] part = new String [2];
+    int eqIndex = nwcmd.indexOf('=');
+    if(eqIndex == -1) {
+      // no equality sign - print the property out
+      dumpOption(ss.getConf().getAllProperties(), nwcmd);
+      return (0);
+    } else if (eqIndex == nwcmd.length()-1) {
+      part[0] = nwcmd.substring(0, nwcmd.length()-1);
+      part[1] = "";
+    } else {
+      part[0] = nwcmd.substring(0, eqIndex);// 中间=号隔开的 set cmd
+      part[1] = nwcmd.substring(eqIndex+1);
+    }
+
+    try {//
+      if (part[0].equals("silent")) {// 设置silent模式
+        boolean val = getBoolean(part[1]);//
+        ss.setIsSilent(val);//
+      } else {
+        ss.getConf().set(part[0], part[1]);// 设置key - value（如：.gmmt = ture）修改该session的conf里配置
+      }
+</pre>
+<p>
+Hive的入口先到这里，以后会陆续更新，欢迎交流。希望能这个Hive源码分析系列能够在你探索Hive的路上，节省您的时间。谢谢~</p>
+<p>
+<br></p>
+<p>
+转自：<a href="http://www.tbdata.org/archives/1019" rel="nofollow">http://www.tbdata.org/archives/1019</a></p>
+            </div>
+                </div>

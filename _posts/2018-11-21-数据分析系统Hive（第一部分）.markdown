@@ -1,0 +1,633 @@
+---
+layout:     post
+title:      数据分析系统Hive（第一部分）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="第一hive简介">第一：Hive简介</h1>
+
+<ol>
+<li>Hive是构建在Hadoop之上的数据仓库</li>
+<li>Hive优点 <br>
+<ul><li>传统数据仓库的任务（ETL，报表，Ad-hoc数据分析）</li>
+<li>大规模数据分析</li></ul></li>
+<li>Hive缺点 <br>
+<ul><li>Hive不是一个OLTP系统（响应时间慢，无法实时更新系统）</li>
+<li>Hive的表达能力有限（不支持迭代式算法，有些复杂运算用sql不易表达）</li></ul></li>
+</ol>
+
+
+
+<h1 id="第二hive安装">第二：Hive安装</h1>
+
+<p>一、下载安装包并解压</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[hadoop<span class="hljs-variable">@hadoopa</span> ~]<span class="hljs-variable">$ </span>tar -zxvf apache-hive-<span class="hljs-number">2.1</span>.<span class="hljs-number">0</span>-bin.tar.gz
+</code></pre>
+
+<p>二、安装mysql数据库 <br>
+1.执行安装命令</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">  [hadoop<span class="hljs-variable">@hadoopa</span> ~]<span class="hljs-variable">$ </span>sudo yum install -y mysql-server mysql mysql-devel</code></pre>
+
+<p>2.将mysql设置为开机自动启动</p>
+
+<pre class="prettyprint"><code class=" hljs ruby">[hadoop<span class="hljs-variable">@hadoopa</span> ~]<span class="hljs-variable">$ </span>sudo chkconfig mysqld on
+</code></pre>
+
+<p>3.启动mysql</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[hadoop<span class="hljs-variable">@hadoopa</span> ~]<span class="hljs-variable">$ </span>service mysqld start
+</code></pre>
+
+<p>4.给默认的root用户设置密码</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[hadoop<span class="hljs-variable">@hadoopa</span> ~]<span class="hljs-variable">$ </span>mysqladmin -u root password <span class="hljs-string">'123'</span>
+</code></pre>
+
+<p>5.进入mysql设置root用户权限</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">mysql<span class="hljs-subst">&gt;</span>grant <span class="hljs-literal">all</span> <span class="hljs-keyword">on</span> <span class="hljs-subst">*</span><span class="hljs-built_in">.</span><span class="hljs-subst">*</span> <span class="hljs-keyword">to</span> root@<span class="hljs-string">'%'</span> identified <span class="hljs-keyword">by</span> <span class="hljs-string">'123'</span>;
+mysql<span class="hljs-subst">&gt;</span>grant <span class="hljs-literal">all</span> <span class="hljs-keyword">on</span> <span class="hljs-subst">*</span><span class="hljs-built_in">.</span><span class="hljs-subst">*</span> <span class="hljs-keyword">to</span> root@<span class="hljs-string">'localhost'</span> identified <span class="hljs-keyword">by</span> <span class="hljs-string">'123'</span>;
+mysql<span class="hljs-subst">&gt;</span>grant <span class="hljs-literal">all</span> <span class="hljs-keyword">on</span> <span class="hljs-subst">*</span><span class="hljs-built_in">.</span><span class="hljs-subst">*</span> <span class="hljs-keyword">to</span> root@<span class="hljs-string">'hadoopA'</span> identified <span class="hljs-keyword">by</span> <span class="hljs-string">'123'</span>;
+mysql<span class="hljs-subst">&gt;</span>flush privileges;</code></pre>
+
+<p>三、编辑配置文件 <br>
+1.在hive-env.sh中增加Hdoop的安装目录</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs fix"><span class="hljs-attribute">HADOOP_HOME</span>=<span class="hljs-string">/home/hadoop/hadoop-2.7.3
+</span></code></pre>
+
+<p>2.编辑hive-site.xml文件</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml">[hadoop@hadoopa ~]$ cat /home/hadoop/apache-hive-2.1.0-bin/conf/hive-site.xml
+<span class="hljs-pi">&lt;?xml version="1.0" encoding="UTF-8"?&gt;</span>
+<span class="hljs-pi">&lt;?xml-stylesheet type="text/xsl" href="configuration.xsl"?&gt;</span>
+<span class="hljs-comment">&lt;!--
+       Licensed under the Apache License, Version 2.0 (the "License");
+         you may not use this file except in compliance with the License.
+           You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+        See the License for the specific language governing permissions and
+          limitations under the License. See accompanying LICENSE file.
+          --&gt;</span>
+
+<span class="hljs-comment">&lt;!-- Put site-specific property overrides in this file. --&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-title">configuration</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.metastore.uris<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>thrift://hadoopA:9083<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.server2.thrift.port<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>10000<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionURL<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>jdbc:mysql://hadoopA/metastore?createDatabaseIfNotExist=true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionDriverName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>com.mysql.jdbc.Driver<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionUserName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>root<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionPassword<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>123<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.metastore.warehouse.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/warehouse<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>fs.defaultFS<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hdfs://hadoopA:8020<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>datanucleus.autoCreateSchema<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>datanucleus.autoStartMechanism<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>SchemaTable<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>datanucleus.schema.autoCreateTables<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>beeline.hs2.connection.user<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>hadoop<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+     <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>beeline.hs2.connection.password<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>123<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+     <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-title">configuration</span>&gt;</span></code></pre>
+
+<ol>
+<li>增加hive-log4j2.properties</li>
+</ol>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">
+[hadoop@hadoopa conf]$ cd /home/hadoop/apache-hive-<span class="hljs-number">2.1</span><span class="hljs-number">.0</span>-bin/conf/
+[hadoop@hadoopa conf]$ cat hive-log4j2<span class="hljs-preprocessor">.properties</span>
+<span class="hljs-preprocessor"># Licensed to the Apache Software Foundation (ASF) under one</span>
+<span class="hljs-preprocessor"># or more contributor license agreements.  See the NOTICE file</span>
+<span class="hljs-preprocessor"># distributed with this work for additional information</span>
+<span class="hljs-preprocessor"># regarding copyright ownership.  The ASF licenses this file</span>
+<span class="hljs-preprocessor"># to you under the Apache License, Version 2.0 (the</span>
+<span class="hljs-preprocessor"># "License"); you may not use this file except in compliance</span>
+<span class="hljs-preprocessor"># with the License.  You may obtain a copy of the License at</span>
+<span class="hljs-preprocessor">#</span>
+<span class="hljs-preprocessor">#     http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="hljs-preprocessor">#</span>
+<span class="hljs-preprocessor"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="hljs-preprocessor"># distributed under the License is distributed on an "AS IS" BASIS,</span>
+<span class="hljs-preprocessor"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="hljs-preprocessor"># See the License for the specific language governing permissions and</span>
+<span class="hljs-preprocessor"># limitations under the License.</span>
+
+status = INFO
+name = HiveLog4j2
+packages = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hive</span><span class="hljs-preprocessor">.ql</span><span class="hljs-preprocessor">.log</span>
+
+<span class="hljs-preprocessor"># list of properties</span>
+property<span class="hljs-preprocessor">.hive</span><span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.level</span> = INFO
+property<span class="hljs-preprocessor">.hive</span><span class="hljs-preprocessor">.root</span><span class="hljs-preprocessor">.logger</span> = DRFA
+property<span class="hljs-preprocessor">.hive</span><span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.dir</span> = /home/hadoop/apache-hive-<span class="hljs-number">2.1</span><span class="hljs-number">.0</span>-bin/logs
+property<span class="hljs-preprocessor">.hive</span><span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.file</span> = hive<span class="hljs-preprocessor">.log</span>
+property<span class="hljs-preprocessor">.hive</span><span class="hljs-preprocessor">.perflogger</span><span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.level</span> = INFO
+
+<span class="hljs-preprocessor"># list of all appenders</span>
+appenders = console, DRFA
+
+<span class="hljs-preprocessor"># console appender</span>
+appender<span class="hljs-preprocessor">.console</span><span class="hljs-preprocessor">.type</span> = Console
+appender<span class="hljs-preprocessor">.console</span><span class="hljs-preprocessor">.name</span> = console
+appender<span class="hljs-preprocessor">.console</span><span class="hljs-preprocessor">.target</span> = SYSTEM_ERR
+appender<span class="hljs-preprocessor">.console</span><span class="hljs-preprocessor">.layout</span><span class="hljs-preprocessor">.type</span> = PatternLayout
+appender<span class="hljs-preprocessor">.console</span><span class="hljs-preprocessor">.layout</span><span class="hljs-preprocessor">.pattern</span> = %d{yy/MM/dd HH:mm:ss} [%t]: %p %c{<span class="hljs-number">2</span>}: %m%n
+
+<span class="hljs-preprocessor"># daily rolling file appender</span>
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.type</span> = RollingRandomAccessFile
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.name</span> = DRFA
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.fileName</span> = ${sys:hive<span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.dir</span>}/${sys:hive<span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.file</span>}
+<span class="hljs-preprocessor"># Use %pid in the filePattern to append &lt;process-id&gt;@&lt;host-name&gt; to the filename if you want separate log files for different CLI session</span>
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.filePattern</span> = ${sys:hive<span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.dir</span>}/${sys:hive<span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.file</span>}.%d{yyyy-MM-dd}
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.layout</span><span class="hljs-preprocessor">.type</span> = PatternLayout
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.layout</span><span class="hljs-preprocessor">.pattern</span> = %d{ISO8601} %-<span class="hljs-number">5</span>p [%t]: %c{<span class="hljs-number">2</span>} (%F:%M(%L)) - %m%n
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.policies</span><span class="hljs-preprocessor">.type</span> = Policies
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.policies</span><span class="hljs-preprocessor">.time</span><span class="hljs-preprocessor">.type</span> = TimeBasedTriggeringPolicy
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.policies</span><span class="hljs-preprocessor">.time</span><span class="hljs-preprocessor">.interval</span> = <span class="hljs-number">1</span>
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.policies</span><span class="hljs-preprocessor">.time</span><span class="hljs-preprocessor">.modulate</span> = true
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.strategy</span><span class="hljs-preprocessor">.type</span> = DefaultRolloverStrategy
+appender<span class="hljs-preprocessor">.DRFA</span><span class="hljs-preprocessor">.strategy</span><span class="hljs-preprocessor">.max</span> = <span class="hljs-number">30</span>
+
+<span class="hljs-preprocessor"># list of all loggers</span>
+loggers = NIOServerCnxn, ClientCnxnSocketNIO, DataNucleus, Datastore, JPOX, PerfLogger
+
+logger<span class="hljs-preprocessor">.NIOServerCnxn</span><span class="hljs-preprocessor">.name</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.zookeeper</span><span class="hljs-preprocessor">.server</span><span class="hljs-preprocessor">.NIOServerCnxn</span>
+logger<span class="hljs-preprocessor">.NIOServerCnxn</span><span class="hljs-preprocessor">.level</span> = WARN
+
+logger<span class="hljs-preprocessor">.ClientCnxnSocketNIO</span><span class="hljs-preprocessor">.name</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.zookeeper</span><span class="hljs-preprocessor">.ClientCnxnSocketNIO</span>
+logger<span class="hljs-preprocessor">.ClientCnxnSocketNIO</span><span class="hljs-preprocessor">.level</span> = WARN
+
+logger<span class="hljs-preprocessor">.DataNucleus</span><span class="hljs-preprocessor">.name</span> = DataNucleus
+logger<span class="hljs-preprocessor">.DataNucleus</span><span class="hljs-preprocessor">.level</span> = ERROR
+
+logger<span class="hljs-preprocessor">.Datastore</span><span class="hljs-preprocessor">.name</span> = Datastore
+logger<span class="hljs-preprocessor">.Datastore</span><span class="hljs-preprocessor">.level</span> = ERROR
+
+logger<span class="hljs-preprocessor">.JPOX</span><span class="hljs-preprocessor">.name</span> = JPOX
+logger<span class="hljs-preprocessor">.JPOX</span><span class="hljs-preprocessor">.level</span> = ERROR
+
+logger<span class="hljs-preprocessor">.PerfLogger</span><span class="hljs-preprocessor">.name</span> = org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.hadoop</span><span class="hljs-preprocessor">.hive</span><span class="hljs-preprocessor">.ql</span><span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.PerfLogger</span>
+logger<span class="hljs-preprocessor">.PerfLogger</span><span class="hljs-preprocessor">.level</span> = ${sys:hive<span class="hljs-preprocessor">.perflogger</span><span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.level</span>}
+
+<span class="hljs-preprocessor"># root logger</span>
+rootLogger<span class="hljs-preprocessor">.level</span> = ${sys:hive<span class="hljs-preprocessor">.log</span><span class="hljs-preprocessor">.level</span>}
+rootLogger<span class="hljs-preprocessor">.appenderRefs</span> = root
+rootLogger<span class="hljs-preprocessor">.appenderRef</span><span class="hljs-preprocessor">.root</span><span class="hljs-preprocessor">.ref</span> = ${sys:hive<span class="hljs-preprocessor">.root</span><span class="hljs-preprocessor">.logger</span>}
+</code></pre>
+
+<p>四、启动hive <br>
+1.启动metastore服务</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[hadoop<span class="hljs-variable">@hadoopa</span> apache-hive-<span class="hljs-number">2.1</span>.<span class="hljs-number">0</span>-bin]<span class="hljs-variable">$ </span>bin/hive --service metastore &amp;</code></pre>
+
+<p>2.启动hiveserver服务</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[hadoop<span class="hljs-variable">@hadoopa</span> apache-hive-<span class="hljs-number">2.1</span>.<span class="hljs-number">0</span>-bin]<span class="hljs-variable">$ </span>bin/hive --service hiveserver2 &amp;</code></pre>
+
+<p>五：进入Hive Cli</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[hadoop<span class="hljs-variable">@hadoopa</span> apache-hive-<span class="hljs-number">2.1</span>.<span class="hljs-number">0</span>-bin]<span class="hljs-variable">$ </span>bin/hive
+</code></pre>
+
+<p>六：启动hive服务报错处理 <br>
+<a href="http://www.codeweblog.com/hive-%E5%B8%B8%E8%A7%81%E6%8A%A5%E9%94%99%E4%B9%8B-%E8%AE%BE%E7%BD%AEmysql%E6%95%B0%E6%8D%AE%E5%BA%93%E6%9D%83%E9%99%90/%20%E6%9D%83%E9%99%90%E9%94%99%E8%AF%AF%E5%A4%84%E7%90%86" rel="nofollow">权限错误解决方法</a></p>
+
+
+
+<h1 id="第三hvie基本概念">第三：Hvie基本概念</h1>
+
+
+
+<h2 id="一数据模型数据的组织方式">一、数据模型（数据的组织方式）</h2>
+
+<p><strong>1.database（和关系型数据库中的数据库一样）</strong> <br>
+<strong>2.tables（和关系型数据库中的表一样）</strong> <br>
+ - 每张表对应在hdfs上的一个目录 <br>
+<strong>3.Partitions（可选）一些特殊的列，用于优化存储和查询</strong> <br>
+ - 对每张表的目录进行子目录的划分 <br>
+ - 为减少不必要的暴力数据扫描，可以对表进行分区 <br>
+ - 为避免产生过多小文件，建议多离散字段进行分区 <br>
+<strong>4.Buckets（可以）一种特殊的分区数据组织方式</strong> <br>
+ - 对于值较多的字段，可以将其分成若干个bucket <br>
+ - 可结合clustered by 与 Bucket使用 <br>
+<strong>5.Files实际数据的物理存储单元</strong> <br>
+<strong>6.文件格式</strong> <br>
+  - 由用户自定义 <br>
+    1.默认是文本文件（TEXTFILE） <br>
+    2.文本文件，用户需显示指定分隔符 <br>
+  - 其它已支持格式 <br>
+    1.SequenceFile <br>
+    2.Avro <br>
+    3.RC/ORC/Parquet <br>
+    4.用户自定义的（InputFormat和OutputFormat） <br>
+  - 支持数据压缩 <br>
+   1.Bzip，Gzip <br>
+   2.LZO <br>
+   3.Snappy</p>
+
+
+
+<h2 id="二类型系统数据的类型">二、类型系统（数据的类型）</h2>
+
+<ol>
+<li>原子类型 <br>
+<ul><li>数值，时间，字符</li>
+<li>布尔</li>
+<li>二进制</li></ul></li>
+<li>复杂类型 <br>
+<ul><li>Map</li>
+<li>Array</li>
+<li>Struct</li>
+<li>Union</li></ul></li>
+</ol>
+
+
+
+<h1 id="第四hive数据定义语言ddl">第四：Hive数据定义语言（DDL）</h1>
+
+<p><strong>1.在shell端执行的命令</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">
+[hadoop<span class="hljs-variable">@hadoopa</span> apache-hive-<span class="hljs-number">2.1</span>.<span class="hljs-number">0</span>-bin]<span class="hljs-variable">$ </span>hive -e <span class="hljs-string">"show databases"</span>
+
+[hadoop<span class="hljs-variable">@hadoopa</span> command]<span class="hljs-variable">$ </span>hive -f employees.sql</code></pre>
+
+<p><strong>2.在hive端执行的命令</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">
+hive<span class="hljs-subst">&gt;</span> <span class="hljs-subst">!</span> pwd;
+/home/hadoop/apache<span class="hljs-attribute">-hive</span><span class="hljs-subst">-</span><span class="hljs-number">2.1</span><span class="hljs-number">.0</span><span class="hljs-attribute">-bin</span>/conf
+
+
+hive<span class="hljs-subst">&gt;</span> dfs <span class="hljs-attribute">-ls</span> /out;
+Found <span class="hljs-number">2</span> items
+<span class="hljs-attribute">-rw</span><span class="hljs-attribute">-r</span><span class="hljs-subst">--</span>r<span class="hljs-subst">--</span>   <span class="hljs-number">3</span> hadoop supergroup          <span class="hljs-number">0</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">03</span><span class="hljs-subst">-</span><span class="hljs-number">11</span> <span class="hljs-number">18</span>:<span class="hljs-number">47</span> /out/_SUCCESS
+<span class="hljs-attribute">-rw</span><span class="hljs-attribute">-r</span><span class="hljs-subst">--</span>r<span class="hljs-subst">--</span>   <span class="hljs-number">3</span> hadoop supergroup          <span class="hljs-number">0</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">03</span><span class="hljs-subst">-</span><span class="hljs-number">11</span> <span class="hljs-number">18</span>:<span class="hljs-number">47</span> /out/part<span class="hljs-attribute">-r</span><span class="hljs-subst">-</span><span class="hljs-number">00000</span>
+hive<span class="hljs-subst">&gt;</span></code></pre>
+
+<p><strong>3.创建复杂表的语法</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs r">
+CREATE [EXTERNAL] TABLE [IF NOT EXISTS] table_name(
+col_name data_type
+<span class="hljs-keyword">...</span>
+)
+[PARTITIONED BY (col_name data_type,<span class="hljs-keyword">...</span>)]
+[CLUSTERED BY (col_name,col_name,<span class="hljs-keyword">...</span>) [SORT BY (col_name[ASC|DESC],<span class="hljs-keyword">...</span>)] INTO num_buckets BUCKETS]
+[SKEWED BY (col_name,col_name,<span class="hljs-keyword">...</span>)]
+[[ROW FORMAT row_format] [STORED AS file_format]]
+[LOCATION hdfs_path]</code></pre>
+
+<ul>
+<li>创建表语句</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql">[hadoop@hadoopa command]$ cat employees.sql
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> employees (
+        name    STRING,
+        salary  <span class="hljs-keyword">FLOAT</span>,
+        subordinates ARRAY&lt;STRING&gt;,
+        decutions       MAP&lt;STRING, <span class="hljs-keyword">FLOAT</span>&gt;,
+        address STRUCT&lt;street:STRING, city:STRING, state:STRING, zip:<span class="hljs-keyword">INT</span>&gt;
+)
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED
+FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\001'</span>
+COLLECTION ITEMS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\002'</span>
+MAP KEYS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\003'</span>
+LINES TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\n'</span>
+STORED <span class="hljs-keyword">AS</span> TEXTFILE;</span>
+
+<span class="hljs-operator"><span class="hljs-keyword">LOAD</span> DATA <span class="hljs-keyword">LOCAL</span> INPATH <span class="hljs-string">'/home/hadoop/apache-hive-2.1.0-bin/examples/data/employees.txt'</span> OVERWRITE <span class="hljs-keyword">INTO</span> <span class="hljs-keyword">TABLE</span> employees;</span>
+</code></pre>
+
+<ul>
+<li>查看表的schema</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs cpp">
+hive&gt; describe employees;
+OK
+name                    <span class="hljs-built_in">string</span>
+salary                  <span class="hljs-keyword">float</span>
+subordinates            <span class="hljs-stl_container"><span class="hljs-built_in">array</span>&lt;<span class="hljs-built_in">string</span>&gt;</span>
+decutions               <span class="hljs-stl_container"><span class="hljs-built_in">map</span>&lt;<span class="hljs-built_in">string</span>,<span class="hljs-keyword">float</span>&gt;</span>
+address                 <span class="hljs-keyword">struct</span>&lt;street:<span class="hljs-built_in">string</span>,city:<span class="hljs-built_in">string</span>,state:<span class="hljs-built_in">string</span>,zip:<span class="hljs-keyword">int</span>&gt;  
+Time taken: <span class="hljs-number">1.449</span> seconds, Fetched: <span class="hljs-number">5</span> row(s)
+
+</code></pre>
+
+<ul>
+<li>查看表的创建</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs mel">
+hive&gt; show create table employees;
+OK
+CREATE TABLE <span class="hljs-string">`employees`</span>(
+  <span class="hljs-string">`name`</span> <span class="hljs-keyword">string</span>,
+  <span class="hljs-string">`salary`</span> <span class="hljs-keyword">float</span>,
+  <span class="hljs-string">`subordinates`</span> array&lt;<span class="hljs-keyword">string</span>&gt;,
+  <span class="hljs-string">`decutions`</span> map&lt;<span class="hljs-keyword">string</span>,<span class="hljs-keyword">float</span>&gt;,
+  <span class="hljs-string">`address`</span> struct&lt;street:<span class="hljs-keyword">string</span>,city:<span class="hljs-keyword">string</span>,state:<span class="hljs-keyword">string</span>,zip:<span class="hljs-keyword">int</span>&gt;)
+ROW FORMAT SERDE
+  <span class="hljs-string">'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'</span>
+WITH SERDEPROPERTIES (
+  <span class="hljs-string">'colelction.delim'</span>=<span class="hljs-string">'\u0002'</span>,
+  <span class="hljs-string">'field.delim'</span>=<span class="hljs-string">'\u0001'</span>,
+  <span class="hljs-string">'line.delim'</span>=<span class="hljs-string">'\n'</span>,
+  <span class="hljs-string">'mapkey.delim'</span>=<span class="hljs-string">'\u0003'</span>,
+  <span class="hljs-string">'serialization.format'</span>=<span class="hljs-string">'\u0001'</span>)
+STORED AS INPUTFORMAT
+  <span class="hljs-string">'org.apache.hadoop.mapred.TextInputFormat'</span>
+OUTPUTFORMAT
+  <span class="hljs-string">'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'</span>
+LOCATION
+  <span class="hljs-string">'hdfs://hadoopA:8020/warehouse/employees'</span>
+TBLPROPERTIES (
+  <span class="hljs-string">'numFiles'</span>=<span class="hljs-string">'1'</span>,
+  <span class="hljs-string">'numRows'</span>=<span class="hljs-string">'0'</span>,
+  <span class="hljs-string">'rawDataSize'</span>=<span class="hljs-string">'0'</span>,
+  <span class="hljs-string">'totalSize'</span>=<span class="hljs-string">'429'</span>,
+  <span class="hljs-string">'transient_lastDdlTime'</span>=<span class="hljs-string">'1489303083'</span>)
+Time taken: <span class="hljs-number">1.528</span> seconds, Fetched: <span class="hljs-number">26</span> row(s)</code></pre>
+
+<ul>
+<li>加载数据</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql">
+<span class="hljs-operator"><span class="hljs-keyword">LOAD</span> DATA <span class="hljs-keyword">LOCAL</span> INPATH <span class="hljs-string">'/home/hadoop/apache-hive-2.1.0-bin/examples/data/employees.txt'</span> OVERWRITE <span class="hljs-keyword">INTO</span> <span class="hljs-keyword">TABLE</span> employees;</span></code></pre>
+
+<ul>
+<li>employees.txt的数据格式</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs parser3"><span class="xml">
+John Doe</span><span class="hljs-keyword">^A100000.0</span><span class="xml"></span><span class="hljs-keyword">^AMary</span><span class="xml"> Smith</span><span class="hljs-keyword">^BTodd</span><span class="xml"> Jones</span><span class="hljs-keyword">^AFederal</span><span class="xml"> Taxes</span><span class="hljs-keyword">^C.2</span><span class="xml"></span><span class="hljs-keyword">^BState</span><span class="xml"> Taxes</span><span class="hljs-keyword">^C.05</span><span class="xml"></span><span class="hljs-keyword">^BInsurance</span><span class="xml"></span><span class="hljs-keyword">^C.1</span><span class="xml"></span><span class="hljs-keyword">^A1</span><span class="xml"> Michigan Ave.</span><span class="hljs-keyword">^BChicago</span><span class="xml"></span><span class="hljs-keyword">^BIL</span><span class="xml"></span><span class="hljs-keyword">^B60600</span><span class="xml">
+Mary Smith</span><span class="hljs-keyword">^A80000.0</span><span class="xml"></span><span class="hljs-keyword">^ABill</span><span class="xml"> King</span><span class="hljs-keyword">^AFederal</span><span class="xml"> Taxes</span><span class="hljs-keyword">^C.2</span><span class="xml"></span><span class="hljs-keyword">^BState</span><span class="xml"> Taxes</span><span class="hljs-keyword">^C.05</span><span class="xml"></span><span class="hljs-keyword">^BInsurance</span><span class="xml"></span><span class="hljs-keyword">^C.1</span><span class="xml"></span><span class="hljs-keyword">^A100</span><span class="xml"> Ontario St.</span><span class="hljs-keyword">^BChicago</span><span class="xml"></span><span class="hljs-keyword">^BIL</span><span class="xml"></span><span class="hljs-keyword">^B60601</span><span class="xml">
+Todd Jones</span><span class="hljs-keyword">^A70000.0</span><span class="xml"></span><span class="hljs-keyword">^A</span><span class="xml"></span><span class="hljs-keyword">^AFederal</span><span class="xml"> Taxes</span><span class="hljs-keyword">^C.15</span><span class="xml"></span><span class="hljs-keyword">^BState</span><span class="xml"> Taxes</span><span class="hljs-keyword">^C.03</span><span class="xml"></span><span class="hljs-keyword">^BInsurance</span><span class="xml"></span><span class="hljs-keyword">^C.1</span><span class="xml"></span><span class="hljs-keyword">^A200</span><span class="xml"> Chicago Ave.</span><span class="hljs-keyword">^BOak</span><span class="xml"> Park</span><span class="hljs-keyword">^BIL</span><span class="xml"></span><span class="hljs-keyword">^B60700</span><span class="xml">
+Bill King</span><span class="hljs-keyword">^A60000.0</span><span class="xml"></span><span class="hljs-keyword">^A</span><span class="xml"></span><span class="hljs-keyword">^AFederal</span><span class="xml"> Taxes</span><span class="hljs-keyword">^C.15</span><span class="xml"></span><span class="hljs-keyword">^BState</span><span class="xml"> Taxes</span><span class="hljs-keyword">^C.03</span><span class="xml"></span><span class="hljs-keyword">^BInsurance</span><span class="xml"></span><span class="hljs-keyword">^C.1</span><span class="xml"></span><span class="hljs-keyword">^A300</span><span class="xml"> Obscure Dr.</span><span class="hljs-keyword">^BObscuria</span><span class="xml"></span><span class="hljs-keyword">^BIL</span><span class="xml"></span><span class="hljs-keyword">^B60100</span><span class="xml"></span></code></pre>
+
+<p><strong>4.创建分区表</strong></p>
+
+<ul>
+<li>动态分区需要非严格模式</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-keyword">set</span> hive<span class="hljs-preprocessor">.exec</span><span class="hljs-preprocessor">.dynamic</span><span class="hljs-preprocessor">.partition</span><span class="hljs-preprocessor">.mode</span>=nonstrict<span class="hljs-comment">;</span></code></pre>
+
+<ul>
+<li>创建非分区表语句</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql">
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span> employees_part (
+        name    STRING,
+        salary  <span class="hljs-keyword">FLOAT</span>,
+        subordinates ARRAY&lt;STRING&gt;,
+        decutions       MAP&lt;STRING, <span class="hljs-keyword">FLOAT</span>&gt;,
+        address STRUCT&lt;street:STRING, city:STRING, state:STRING, zip:<span class="hljs-keyword">INT</span>&gt;
+)
+PARTITIONED <span class="hljs-keyword">BY</span> (state STRING)
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED
+FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\001'</span>
+COLLECTION ITEMS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\002'</span>
+MAP KEYS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\003'</span>
+LINES TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\n'</span>
+STORED <span class="hljs-keyword">AS</span> TEXTFILE;</span>
+
+FROM employees e
+<span class="hljs-operator"><span class="hljs-keyword">INSERT</span> OVERWRITE <span class="hljs-keyword">TABLE</span> employees_part PARTITION(state) <span class="hljs-keyword">SELECT</span> e.*,e.address.state</span></code></pre>
+
+<ul>
+<li>查看导入到动态分区的数据</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">hive<span class="hljs-subst">&gt;</span> dfs <span class="hljs-attribute">-lsr</span> /warehouse<span class="hljs-subst">/</span>;
+lsr: DEPRECATED: Please use <span class="hljs-string">'ls -R'</span> instead<span class="hljs-built_in">.</span>
+drwxr<span class="hljs-attribute">-xr</span><span class="hljs-attribute">-x</span>   <span class="hljs-subst">-</span> hadoop supergroup          <span class="hljs-number">0</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">03</span><span class="hljs-subst">-</span><span class="hljs-number">12</span> <span class="hljs-number">14</span>:<span class="hljs-number">59</span> /warehouse/demo1
+drwxr<span class="hljs-attribute">-xr</span><span class="hljs-attribute">-x</span>   <span class="hljs-subst">-</span> hadoop supergroup          <span class="hljs-number">0</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">03</span><span class="hljs-subst">-</span><span class="hljs-number">12</span> <span class="hljs-number">15</span>:<span class="hljs-number">18</span> /warehouse/employees
+<span class="hljs-attribute">-rwxr</span><span class="hljs-attribute">-xr</span><span class="hljs-attribute">-x</span>   <span class="hljs-number">3</span> hadoop supergroup        <span class="hljs-number">429</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">03</span><span class="hljs-subst">-</span><span class="hljs-number">12</span> <span class="hljs-number">15</span>:<span class="hljs-number">18</span> /warehouse/employees/employees<span class="hljs-built_in">.</span>txt
+drwxr<span class="hljs-attribute">-xr</span><span class="hljs-attribute">-x</span>   <span class="hljs-subst">-</span> hadoop supergroup          <span class="hljs-number">0</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">03</span><span class="hljs-subst">-</span><span class="hljs-number">12</span> <span class="hljs-number">16</span>:<span class="hljs-number">15</span> /warehouse/employees_part
+drwxr<span class="hljs-attribute">-xr</span><span class="hljs-attribute">-x</span>   <span class="hljs-subst">-</span> hadoop supergroup          <span class="hljs-number">0</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">03</span><span class="hljs-subst">-</span><span class="hljs-number">12</span> <span class="hljs-number">16</span>:<span class="hljs-number">15</span> /warehouse/employees_part/state<span class="hljs-subst">=</span>IL
+<span class="hljs-attribute">-rwxr</span><span class="hljs-attribute">-xr</span><span class="hljs-attribute">-x</span>   <span class="hljs-number">3</span> hadoop supergroup        <span class="hljs-number">441</span> <span class="hljs-number">2017</span><span class="hljs-subst">-</span><span class="hljs-number">03</span><span class="hljs-subst">-</span><span class="hljs-number">12</span> <span class="hljs-number">16</span>:<span class="hljs-number">15</span> /warehouse/employees_part/state<span class="hljs-subst">=</span>IL/<span class="hljs-number">000000</span>_0</code></pre>
+
+<p><strong>5.创建外部表</strong></p>
+
+<ul>
+<li>创建外部表的语句</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">EXTERNAL</span> <span class="hljs-keyword">TABLE</span> Los(
+domain_id <span class="hljs-keyword">INT</span>,
+)
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED
+FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">','</span>
+LOCATION <span class="hljs-string">'/user/hivetest/logs'</span></span></code></pre>
+
+<p><strong>6.使用不同的文件格式</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs haml">STORED AS file_format
+-<span class="ruby"><span class="hljs-constant">STORED</span> <span class="hljs-constant">AS</span> <span class="hljs-constant">PARQUET</span>
+</span>-<span class="ruby"><span class="hljs-constant">STORED</span> <span class="hljs-constant">AS</span> <span class="hljs-constant">ORC</span>
+</span>-<span class="ruby"><span class="hljs-constant">STORED</span> <span class="hljs-constant">AS</span> <span class="hljs-constant">SEQUENCEFILE</span>
+</span>-<span class="ruby"><span class="hljs-constant">STORED</span> <span class="hljs-constant">AS</span> <span class="hljs-constant">AVRO</span>
+</span>-<span class="ruby"><span class="hljs-constant">STORED</span> <span class="hljs-constant">AS</span> <span class="hljs-constant">TEXTFILE</span>
+</span>-<span class="ruby">自定义的表</span></code></pre>
+
+<p><strong>7.如何创建带压缩的ORC表：步骤</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs brainfuck"><span class="hljs-comment">原始数据（存储在HDFS中）</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span><span class="hljs-comment">Hive临时表（text或者SequenceFile）</span><span class="hljs-literal">-</span><span class="hljs-literal">-</span> <span class="hljs-comment">Hive</span> <span class="hljs-comment">ORC表</span></code></pre>
+
+<p><strong>8.删除表</strong></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">DROP</span> <span class="hljs-keyword">DATABASE</span> [<span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span>] database_name
+<span class="hljs-keyword">DROP</span> <span class="hljs-keyword">TABLE</span> [<span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span>] table_name
+- 元数据被删除
+- 内部表的数据被删除
+- 外部表的数据不会被删除</span></code></pre>
+
+
+
+<h1 id="第五hive数据查询语言dml">第五：Hive数据查询语言（DML）</h1>
+
+<p><strong>1.DML:Load，Insert，Update，Delete</strong></p>
+
+<p><strong>2.Select</strong></p>
+
+<ul>
+<li>With语句作为临时表</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbnet"><span class="hljs-keyword">with</span> q1 <span class="hljs-keyword">as</span> (<span class="hljs-keyword">select</span> <span class="hljs-keyword">key</span> <span class="hljs-keyword">from</span> src <span class="hljs-keyword">where</span> <span class="hljs-keyword">key</span>=<span class="hljs-comment">'5')</span>
+<span class="hljs-keyword">select</span> * <span class="hljs-keyword">from</span> q1;</code></pre>
+
+<ul>
+<li>Group By</li>
+<li>Joins</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">INNER <span class="hljs-keyword">JOIN</span>
+LEFT OUTER <span class="hljs-keyword">JOIN</span>
+RIGHT OUTER <span class="hljs-keyword">JOIN</span>
+<span class="hljs-literal">FULL</span> OUTER <span class="hljs-keyword">JOIN</span>
+LEFT SEMI<span class="hljs-attribute">-JOIN</span>
+<span class="hljs-built_in">Map</span><span class="hljs-attribute">-side</span> Joins
+两种分布式<span class="hljs-keyword">Join</span>算法
+<span class="hljs-built_in">Map</span><span class="hljs-attribute">-side</span> <span class="hljs-keyword">Join</span>（Broadcast <span class="hljs-keyword">join</span>）
+Reduce<span class="hljs-attribute">-side</span> <span class="hljs-keyword">Join</span>（shuffle <span class="hljs-keyword">join</span>）</code></pre>
+
+<ul>
+<li>Sort/Distribute/Cluster/Order By</li>
+<li>Transform and Map-Reduce Scripts</li>
+<li>Operators and User-Defined Functions(UDFs)</li>
+<li>Union</li>
+<li>Lateral View</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">SELECT</span> pageid，adid <span class="hljs-keyword">FROM</span> pageAds LATERAL <span class="hljs-keyword">VIEW</span> explode（adid_list）adTable <span class="hljs-keyword">AS</span> adid;</span></code></pre>
+
+<p><strong>3.Explain</strong></p>
+
+<p>1.语法</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs erlang"><span class="hljs-variable">EXPLAIN</span> [<span class="hljs-variable">EXTENDED</span>] <span class="hljs-keyword">query</span></code></pre>
+
+<p>2.作用 <br>
+查询Query的执行计划</p>
+
+<p>3.例子</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs cpp">
+hive&gt; explain select * from employees;
+OK
+STAGE DEPENDENCIES:
+  Stage-<span class="hljs-number">0</span> is a root stage
+
+STAGE PLANS:
+  Stage: Stage-<span class="hljs-number">0</span>
+    Fetch Operator
+      limit: -<span class="hljs-number">1</span>
+      Processor Tree:
+        TableScan
+          alias: employees
+          Statistics: Num rows: <span class="hljs-number">1</span> Data size: <span class="hljs-number">429</span> Basic stats: COMPLETE Column stats: NONE
+          Select Operator
+            expressions: name (type: <span class="hljs-built_in">string</span>), salary (type: <span class="hljs-keyword">float</span>), subordinates (type: <span class="hljs-stl_container"><span class="hljs-built_in">array</span>&lt;<span class="hljs-built_in">string</span>&gt;</span>), decutions (type: <span class="hljs-stl_container"><span class="hljs-built_in">map</span>&lt;<span class="hljs-built_in">string</span>,<span class="hljs-keyword">float</span>&gt;</span>), address (type: <span class="hljs-keyword">struct</span>&lt;street:<span class="hljs-built_in">string</span>,city:<span class="hljs-built_in">string</span>,state:<span class="hljs-built_in">string</span>,zip:<span class="hljs-keyword">int</span>&gt;)
+            outputColumnNames: _col0, _col1, _col2, _col3, _col4
+            Statistics: Num rows: <span class="hljs-number">1</span> Data size: <span class="hljs-number">429</span> Basic stats: COMPLETE Column stats: NONE
+            ListSink
+
+Time taken: <span class="hljs-number">2.996</span> seconds, Fetched: <span class="hljs-number">17</span> row(s)
+</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

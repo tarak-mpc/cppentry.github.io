@@ -1,0 +1,288 @@
+---
+layout:     post
+title:      hive函数篇
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-github-gist">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<ul>
+<li>hive与关系型数据库</li>
+<li>hive函数</li>
+</ul>
+<h1><a id="part1_hive_2"></a>part1: hive对比关系型数据库</h1>
+<p>hive: 基于Hadoop的一个数据仓库工具，将结构化的数据文件映射成一张表，并提供类sql语句的查询功能, 使用Hql作为查询接口，使用HDFS存储，使用mapreduce计算</p>
+
+<table>
+<thead>
+<tr>
+<th></th>
+<th>mysql</th>
+<th>hive</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>存储位置</td>
+<td>本地文件系统</td>
+<td>hdfs文件系统</td>
+</tr>
+<tr>
+<td>表文件存储形式</td>
+<td>数据文件,索引文件</td>
+<td>metadata表(使用关系型数据库),  真实数据文件</td>
+</tr>
+<tr>
+<td>数据格式</td>
+<td>系统定义</td>
+<td>用户自定义(serde,fileformat,compress)</td>
+</tr>
+<tr>
+<td>作业引擎</td>
+<td>MyISAM</td>
+<td>mapreduce</td>
+</tr>
+<tr>
+<td>使用场景</td>
+<td>online 事务处理(实时查询)</td>
+<td>online 分析(高延迟,读多写少,数据挖掘)</td>
+</tr>
+<tr>
+<td>使用的脚本语言</td>
+<td>sql</td>
+<td>hql</td>
+</tr>
+<tr>
+<td>可扩展性</td>
+<td>弱</td>
+<td>强</td>
+</tr>
+</tbody>
+</table><h1><a id="part2_hive_14"></a>part2: hive分析函数</h1>
+<h5><a id="1___15"></a>1，窗口函数+ 聚合函数+ 普通字段</h5>
+<pre><code>hive (db)&gt; select * from stu;
+OK
+stu.class_id	stu.stu_id	stu.score
+1	1	90
+1	2	94
+1	3	87
+1	4	89
+2	4	96
+2	2	59
+2	1	75
+3	2	67
+3	1	87
+</code></pre>
+<p>现有数据如上：（如何用一条sql求出： 每班总分，平均分，最高分学生信息 ？）<br>
+1，hql实现</p>
+<pre><code>select * from (
+select *, 
+max(score)over(partition by class_id) max,
+sum(score)over(partition by class_id) sum, 
+avg(score)over( partition by class_id) avg
+from stu )tmp
+where tmp.score=tmp.max;
+
+Total jobs = 1
+OK
+tmp.class_id	tmp.stu_id	tmp.score	tmp.max	tmp.sum	tmp.avg
+1	2	94	94	360	90.0
+2	4	96	96	230	76.66666666666667
+3	1	87	87	154	77.0
+Time taken: 3.266 seconds, Fetched: 3 row(s)
+
+</code></pre>
+<p>2， mysql实现</p>
+<pre><code>select stu.class_id, stu.stu_id, stu.score ,tab_max.max ,tab_sum.sum, tab_avg.avg from stu  
+
+inner join (select class_id ,sum(score)sum  from stu  group by class_id) tab_sum 
+on tab_sum.class_id=stu.class_id
+
+inner join (select class_id ,avg(score)avg from stu group by class_id) tab_avg 
+on tab_avg.class_id=stu.class_id
+
+inner join (select class_id,max(score)max from stu group by class_id ) tab_max
+on stu.class_id=tab_max.class_id
+
+where stu.score=tab_max.max;
+
+Total jobs = 10
+OK
+stu.class_id	stu.stu_id	stu.score	tab_max.max	tab_sum.sum	tab_avg.avg
+1	2	94	94	360	90.0
+2	4	96	96	230	76.66666666666667
+3	1	87	87	154	77.0
+Time taken: 119.113 seconds, Fetched: 3 row(s)
+
+</code></pre>
+<h5><a id="2____group_by__grouping_sets_with_cube_with_rollup_74"></a>2，  一条语句 + 多个group by = 多条件分组(grouping sets, with cube, with rollup)</h5>
+
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+<th align="left">with cube</th>
+<th align="left">grouping sets</th>
+<th align="left">with rollup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>group 组合数</td>
+<td>1个条件(A)</td>
+<td align="left">2(2^1)种 (0,1)</td>
+<td align="left">1(2^1-1)种 (0)</td>
+<td align="left">2(1+1)种 (0,1)</td>
+</tr>
+<tr>
+<td>group 组合数</td>
+<td>2个条件(A,B)</td>
+<td align="left">4(2^2)种(00,01,10,11)</td>
+<td align="left">3(2^2-1)种 (01, 10,11)</td>
+<td align="left">3(2+1)种 (00,01,11)</td>
+</tr>
+<tr>
+<td>group 组合数</td>
+<td>3个条件(A,B,C)</td>
+<td align="left">8(2^3)种 (000,001,010, 011 ,100, 101, 110, 111)</td>
+<td align="left">7种(2^3-1)–(000,001,011,111)</td>
+<td align="left">4(3+1)种(000,001,011,111)</td>
+</tr>
+<tr>
+<td>group 组合数</td>
+<td>4个条件(A,B,C,D)</td>
+<td align="left">16(2^4)种 (0000,0001,0010, 0100 ,1000, 1001, 1010, 1100…)</td>
+<td align="left">15种(2^4-1)–(0000,0001,0010, 0100 ,1000, 1001, 1010, 1100…)</td>
+<td align="left">5(4+1)种(0000,0001,0011,0111, 1111)</td>
+</tr>
+</tbody>
+</table><p>grouping__id ： 根据group by后面声明的顺序字段是否存在于当前group by中的一个二进制位组合数据。【 比如（A,C）的grouping__id(A,C) = grouping(A)+grouping(B)+grouping ( C )  ：二进制=101 也就是5】</p>
+<pre><code>hive (db)&gt; select * from orders;
+OK
+orders.id	orders.produce_name	orders.price	orders.customerid
+1	phone	7000.0	1
+2	book	34.0	1
+3	shooe	300.0	1
+4	cup	90.0	5
+5	book	34.0	2
+6	shooe	300.0	2
+7	cup	90.0	2
+8	cup	90.0	3
+9	cup	90.0	3
+10	book	78.0	4
+11	cup	90.0	5
+#三个条件： grouping sets(...)
+select customerid, price, produce_name,grouping__id gid from orders 
+group by customerid,price,produce_name
+grouping sets (
+customerid,
+price,
+produce_name,
+
+(customerid,price),
+(customerid,produce_name),
+(price,customerid),
+(price,produce_name),
+(customerid,price),
+(customerid,produce_name),
+(customerid,price,produce_name))
+order by gid;
+#三个条件： with cube/ with rollup
+select customerid, price, produce_name,grouping__id gid from orders 
+group by customerid,price,produce_name
+with cube 
+order by gid;
+</code></pre>
+<h5><a id="3__top_kLAGLEADFIRST_VALUE_LAST_VALUE_119"></a>3，  分区内求最值（top k问题）：LAG,LEAD,FIRST_VALUE, LAST_VALUE</h5>
+<pre><code>hive (db)&gt; select * from urls;
+OK
+urls.id	urls.visit_time	urls.url
+USER1	2016-10-12 01:10:00	url1 
+USER1	2016-10-12 01:15:10	url2          
+USER1	2016-10-12 01:16:40	url3          
+USER1	2016-10-12 02:13:00	url4          
+USER1	2016-10-12 03:14:30	url5          
+USER2	2016-11-12 01:10:00	url1          
+USER2	2016-11-12 01:15:10	url2          
+USER2	2016-11-12 01:16:40	url3          
+USER3	2016-11-12 02:13:00	url2          
+USER3	2016-11-12 03:14:30	url3 
+</code></pre>
+<p>有数据如上， 要求出： 每个用户的页面的访问次序，每个页面的访问时长</p>
+<pre><code>select tmp3.* ,first_value(tmp3.times)over(partition by tmp3.id order by tmp3.times desc) maxtime from (
+select tmp2.id,tmp2.starts,tmp2.ends, nvl(tmp2.url1,'起始url')url1,tmp2.url2, 
+nvl(tmp2.ends-tmp2.starts ,0)times from (
+select tmp.id,tmp.starts, 
+lead(tmp.starts,1,null)over(partition by tmp.id order by tmp.starts )ends,
+lag(tmp.url)over(partition by tmp.id order by tmp.starts) url1,
+tmp.url as url2 
+from
+(select id,url , 
+unix_timestamp(visit_time,'yyyy-MM-dd HH:mm:ss') starts 
+from urls )tmp
+)tmp2
+)tmp3;
+
+Total jobs = 2
+OK
+tmp3.id	tmp3.starts	tmp3.ends	tmp3.url1	tmp3.url2	tmp3.times	maxtime
+USER1	1476209580	1476213270	url3          	url4          	3690	3690
+USER1	1476206200	1476209580	url2          	url3          	3380	3690
+USER1	1476205800	1476206110	起始url	url1 	310	3690
+USER1	1476206110	1476206200	url1 	url2          	90	3690
+USER1	1476213270	NULL	url4          	url5          	0	3690
+USER2	1478884200	1478884510	起始url	url1          	310	310
+USER2	1478884510	1478884600	url1          	url2          	90	310
+USER2	1478884600	NULL	url2          	url3          	0	310
+USER3	1478887980	1478891670	起始url	url2          	3690	3690
+USER3	1478891670	NULL	url2          	url3 	0	3690
+</code></pre>
+<h5><a id="4NTILE_n__ROW_NUMBER__RANK___DENSE_RANK_167"></a>4，分段/排名函数NTILE( n ), ROW_NUMBER,  RANK,   DENSE_RANK</h5>
+<pre><code>hive (db)&gt; select * from orders;
+OK
+orders.id	orders.produce_name	orders.price	orders.customerid
+1	phone	7000.0	1
+2	book	90.0	1
+3	shooe	300.0	1
+4	cup	90.0	1
+8	book2	34.0	2
+6	shooe	300.0	2
+7	cup	34.0	2
+13	video	30.0	5
+11	cup	90.0	5
+14	pc	9000.0	1
+15	chair	200.0	5
+16	chair2	200.0	5
+</code></pre>
+<p>数据如上， 要求出每个用户的商品购买总数，价格最高的由哪些？ 价格最高的前1/3商品是哪些？</p>
+<pre><code>select * from (
+
+select produce_name, price, customerid,
+count(*)over(partition by customerid ) cnt,
+rank()over(partition by customerid order by price desc )rk,
+ntile(3)over(partition by customerid order by price desc) nt
+from orders
+
+)tmp 
+where tmp.rk=1
+or tmp.nt=1
+
+OK
+tmp.produce_name	tmp.price	tmp.customerid	tmp.cnt	tmp.rk	tmp.nt
+pc	9000.0	1	5	1	1
+phone	7000.0	1	5	2	1
+shooe	300.0	2	3	1	1
+chair	200.0	5	4	1	1
+chair2	200.0	5	4	1	1
+
+</code></pre>
+<h1><a id="part3_hive_210"></a>part3: 其他hive常用函数</h1>
+<p><img src="https://img-blog.csdn.net/20180928143435979?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdn.net/20180928143515504?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdn.net/2018092814354450?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"><br>
+<img src="https://img-blog.csdn.net/20180928143623616?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="在这里插入图片描述"></p>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

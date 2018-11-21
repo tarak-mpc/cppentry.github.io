@@ -1,0 +1,308 @@
+---
+layout:     post
+title:      【Hive】Hive编程指南
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="第一章-基础知识">第一章 基础知识</h1>
+
+<h2 id="hive">Hive</h2>
+
+<ol>
+<li>Hive不是一个完整的数据库。Hadoop以及HDFS的设计本身约束和局限性地限制了Hive所能胜任的工作。<strong>其中最大的限制就是Hive不支持<font color="red">记录级别</font>的更新、插入或者删除操作。</strong></li>
+<li>同时，因为Hadoop是一个面向批处理的系统，而MapReduce任务(job)的启动过程需要消耗较长的时间，所以<strong>Hive延时比较严重</strong>。</li>
+<li><strong>Hive不支持事务。</strong></li>
+<li><strong>Hive是最适合数据仓库应用程序的。</strong> </li>
+</ol>
+
+<h2 id="mapreduce计算框架">MapReduce计算框架</h2>
+
+<ol>
+<li>每次调用时，传递给Mapper的键是文档中这行的<strong>起始位置的字符偏移量</strong>。</li>
+<li>Hadoop神奇的地方一部分在与后面要进行的Sort（排序）和Shuffle（重新分发）过程。<strong>Hadoop会按照键-值对进行<font color="red">排序</font>，然后“重新洗牌”，将所有的<font color="red">相同的键-值对分发</font>到同一个Reducer中。</strong></li>
+</ol>
+
+<h1 id="第二章-基础操作">第二章 基础操作</h1>
+
+
+
+<h2 id="安装hive">安装Hive</h2>
+
+
+
+<pre class="prettyprint"><code class="language-bash hljs ">$ <span class="hljs-built_in">cd</span> /your/hive/directory/
+$ tar -xzf hive-<span class="hljs-number">0.9</span>.<span class="hljs-number">0</span>.tar.gz</code></pre>
+
+
+
+<pre class="prettyprint"><code class="language-bash hljs ">$ <span class="hljs-built_in">sudo</span> <span class="hljs-built_in">echo</span> <span class="hljs-string">"export HIVE_HOME=<span class="hljs-variable">$PWD</span>/hive-0.9.0"</span> &gt; /etc/profile.d/hive.sh
+$ <span class="hljs-built_in">sudo</span> <span class="hljs-built_in">echo</span> <span class="hljs-string">"PATH=<span class="hljs-variable">$PATH</span>:<span class="hljs-variable">$HIVE_HOME</span>/bin"</span> &gt; /etc/profile.d/hive.sh
+$ . /etc/profile</code></pre>
+
+<h2 id="配置hive">配置Hive</h2>
+
+<ol>
+<li>配置目录<code>$HIVE_HOME/conf</code>下的<strong>hive-site.xml</strong>文件（如不存在则自己创建）。</li>
+<li>使用JDBC连接元数据。</li>
+<li>在实践中，大多数的Hive客户端会使用MySQL。</li>
+</ol>
+
+<h2 id="启动hive">启动Hive</h2>
+
+
+
+<pre class="prettyprint"><code class="language-bash hljs ">$ <span class="hljs-built_in">cd</span> <span class="hljs-variable">$HIVE_HOME</span>
+$ bin/hive
+...
+hive&gt; CREATE TABLE x (a INT);
+OK
+Time taken: ...
+hive&gt; SELECT *
+    &gt; FROM x;
+OK
+Time taken: ...
+hive&gt; DROP TABLE x;
+OK
+Time taken: ...
+hive&gt; <span class="hljs-keyword">exit</span>;
+$</code></pre>
+
+<h2 id="命令行界面">命令行界面</h2>
+
+<ol>
+<li>Hive中“一次使用”命令</li>
+<li>从文件中执行Hive查询</li>
+<li>在Hive内使用Hadoop的dfs命令</li>
+<li>……</li>
+</ol>
+
+<h1 id="第三章-数据类型和文件格式">第三章 数据类型和文件格式</h1>
+
+<h2 id="集合数据类型">集合数据类型</h2>
+
+<table>
+<thead>
+<tr>
+  <th>数据类型</th>
+  <th>字面语法示例</th>
+  <th>引用</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>STRUCT</td>
+  <td>struct(‘Jone’, ‘Doe’)</td>
+  <td><em>字段名.first</em></td>
+</tr>
+<tr>
+  <td>MAP</td>
+  <td>map(‘first’, ‘Jone’, ‘last’, ‘Doe’)</td>
+  <td><em>字段名[‘last’]</em></td>
+</tr>
+<tr>
+  <td>ARRAY</td>
+  <td>Array(‘Jone’, ‘Doe’)</td>
+  <td><em>数组名[1]</em></td>
+</tr>
+</tbody></table>
+
+
+<h2 id="文本文件数据编码">文本文件数据编码</h2>
+
+<p>表结构声明（明确指定分隔符）：</p>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> employees (
+    name STRING,
+    salary <span class="hljs-keyword">FLOAT</span>,
+    subordinates ARRAY&lt;STRING&gt;,
+    deductions MAP&lt;STRING, <span class="hljs-keyword">FLOAT</span>&gt;,
+    address STRUCT&lt;street:STRING, city:STRING, state:STRING, zip:<span class="hljs-keyword">INT</span>&gt;
+)
+<span class="hljs-keyword">ROW</span> FORMAT DELIMITED
+FILEDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\001'</span>
+COLLECTION ITEMS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\002'</span>
+MAP KEYS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\003'</span>
+LINES TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-string">'\n'</span>
+STORED <span class="hljs-keyword">AS</span> TEXTFILE;</span></code></pre>
+
+<h1 id="第四章-hiveql数据定义">第四章 HiveQL：数据定义</h1>
+
+<ol>
+<li>Hive不支持行级<strong>插入操作</strong>、<strong>更新操作</strong>和<strong>删除操作</strong>。</li>
+<li>Hive也不支持事务。</li>
+</ol>
+
+
+
+<h2 id="41-hive中的数据库">4.1 Hive中的数据库</h2>
+
+<ol>
+<li>在所有的数据库相关的命令中，都可以使用<strong><code>SCHEMA</code></strong>这个关键字来替代关键字<code>TABLE</code>。</li>
+<li>语言</li>
+</ol>
+
+<p>创建数据库</p>
+
+<pre class="prettyprint"><code class="language-sql hljs ">hive&gt; <span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">DATABASE</span> financials
+    &gt; LOCATION <span class="hljs-string">'my/prefered/directory'</span>;</span>
+
+hive&gt; <span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">DATABASE</span> financials
+    &gt; COMMENT <span class="hljs-string">'Holds all financial tables'</span>;</span>
+
+hive&gt; DESCRIBE DATABASE financials;</code></pre>
+
+<pre class="prettyprint"><code class="language-sql hljs ">hive&gt; <span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">DATABASE</span> financials
+    &gt; <span class="hljs-keyword">WITH</span> DBPROPERTIES (<span class="hljs-string">'creator'</span> = <span class="hljs-string">'me'</span>, <span class="hljs-string">'date'</span> = <span class="hljs-string">'2016-06-22'</span>);</span>
+hive&gt; DESCRIBE DATABASE EXTENDED financials;</code></pre>
+
+<p>删除数据库</p>
+
+<pre class="prettyprint"><code class="language-sql hljs ">hive&gt; <span class="hljs-operator"><span class="hljs-keyword">DROP</span> <span class="hljs-keyword">DATABASE</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span> financials <span class="hljs-keyword">CASCADE</span>;</span>
+[restrict]</code></pre>
+
+<h2 id="42-修改数据库">4.2 修改数据库</h2>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs ">hive&gt; <span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">DATABASE</span> financials
+    &gt; <span class="hljs-keyword">SET</span> DBPROPERTIES (<span class="hljs-string">'edited-by'</span> = <span class="hljs-string">'dba'</span>);</span></code></pre>
+
+
+
+<h2 id="43-创建表">4.3 创建表</h2>
+
+
+
+<h3 id="创建">创建</h3>
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> employees (
+    name STRING COMMENT <span class="hljs-string">'Employee name'</span>,
+    salary <span class="hljs-keyword">FLOAT</span> COMMENT <span class="hljs-string">'Employee salary'</span>,
+    subordinates ARRAY&lt;STRING&gt; COMMENT <span class="hljs-string">'Names of subordinates'</span>,
+    deductions MAP&lt;STRING, <span class="hljs-keyword">FLOAT</span>&gt; COMMENT <span class="hljs-string">'Keys are deductions names, values are percentages'</span>,
+    address STRUCT&lt;street:STRING, city:STRING, state:STRING, zip:<span class="hljs-keyword">INT</span>&gt; COMMENT <span class="hljs-string">'Home address'</span>
+)
+COMMENT <span class="hljs-string">'Description of the table'</span>
+TBLPROPERTIES (<span class="hljs-string">'creator'</span> = <span class="hljs-string">'me'</span>, <span class="hljs-string">'created_at'</span> = <span class="hljs-string">'2016-06-22'</span>, ...)
+LOCATION <span class="hljs-string">'user/hive/warehouse/mydb.db/employees'</span>;</span></code></pre>
+
+
+
+<h3 id="描述">描述</h3>
+
+<pre class="prettyprint"><code class="language-sql hljs ">hive&gt; DESCRIBE EXTENDED mydb.employees;
+
+hive&gt; DESCRIBE FORMATTED mydb.employees;</code></pre>
+
+<p>实际使用<code>FORMATTED</code>更多一些。</p>
+
+
+
+<h3 id="外部表">外部表</h3>
+
+<pre class="prettyprint"><code class="language-sql hljs ">CREATED EXTERNAL TABLE ...</code></pre>
+
+<p>可以在<code>DESCRIBE EXTENDED tablename</code>语句的输出中看到以下信息： <br>
+<code>... tableType:MANAGED_TABLE)</code> <br>
+<code>... tableType:EXTERNAL_TABLE)</code></p>
+
+<h2 id="分区表管理表">分区表、管理表</h2>
+
+
+
+<h3 id="创建分区表">创建分区表</h3>
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> employees (
+    name STRING,
+    salary <span class="hljs-keyword">FLOAT</span>,
+    subordinates ARRAY&lt;STRING&gt;,
+    deductions MAP&lt;STRING, <span class="hljs-keyword">FLOAT</span>&gt;,
+    address STRUCT&lt;street:STRING, city:STRING, state:STRING, zip:<span class="hljs-keyword">INT</span>&gt;
+)
+PARTITIONED <span class="hljs-keyword">BY</span> (country STRING, state STRING);</span></code></pre>
+
+
+
+<h3 id="分区过滤器">分区过滤器：</h3>
+
+<pre class="prettyprint"><code class="language-sql hljs ">WHERE country = 'US' AND state = 'IL';</code></pre>
+
+<pre class="prettyprint"><code class="language-sql hljs ">hive&gt; <span class="hljs-operator"><span class="hljs-keyword">SHOW</span> PARTITIONS employees PARTITION(country=<span class="hljs-string">'US'</span>);</span></code></pre>
+
+<h3 id="自定义表的存储格式">自定义表的存储格式</h3>
+
+<ol>
+<li>SerDe</li>
+<li>InputFormat</li>
+<li>OutputFormat</li>
+<li>…</li>
+</ol>
+
+<h2 id="46-修改表">4.6 修改表</h2>
+
+<h3 id="重命名">重命名</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages RENAME <span class="hljs-keyword">TO</span> logmsgs;</span></code></pre>
+
+<h3 id="增加修改和删除表分区">增加、修改和删除表分区</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span>
+PARTITION (<span class="hljs-keyword">year</span>=<span class="hljs-number">2000</span>, <span class="hljs-keyword">month</span>=<span class="hljs-number">1</span>, <span class="hljs-keyword">day</span>=<span class="hljs-number">1</span>) LOCATION <span class="hljs-string">'/logs/2000/1/1'</span>
+PARTITION (<span class="hljs-keyword">year</span>=<span class="hljs-number">2000</span>, <span class="hljs-keyword">month</span>=<span class="hljs-number">1</span>, <span class="hljs-keyword">day</span>=<span class="hljs-number">2</span>) LOCATION <span class="hljs-string">'/logs/2000/1/2'</span>
+PARTITION (<span class="hljs-keyword">year</span>=<span class="hljs-number">2000</span>, <span class="hljs-keyword">month</span>=<span class="hljs-number">1</span>, <span class="hljs-keyword">day</span>=<span class="hljs-number">3</span>) LOCATION <span class="hljs-string">'/logs/2000/1/3'</span></span></code></pre>
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages PARTITION (<span class="hljs-keyword">year</span>=<span class="hljs-number">2000</span>,<span class="hljs-keyword">month</span>=<span class="hljs-number">1</span>,<span class="hljs-keyword">day</span>=<span class="hljs-number">1</span>)
+<span class="hljs-keyword">SET</span> LOCATION <span class="hljs-string">'s3n://outbucket/logs/2000/01/01'</span></span></code></pre>
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages <span class="hljs-keyword">DROP</span> <span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span> PARTITION (<span class="hljs-keyword">year</span>=<span class="hljs-number">2000</span>,<span class="hljs-keyword">month</span>=<span class="hljs-number">1</span>,<span class="hljs-keyword">day</span>=<span class="hljs-number">1</span>)</span></code></pre>
+
+<h3 id="修改列信息">修改列信息</h3>
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages
+CHANGE <span class="hljs-keyword">COLUMN</span> hms hours_minutes_seconds <span class="hljs-keyword">INT</span>
+COMMENT <span class="hljs-string">'The hours, minutes, and seconds part of the timestamp'</span>
+<span class="hljs-keyword">AFTER</span> severity;</span></code></pre>
+
+<h3 id="增加列">增加列</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages <span class="hljs-keyword">ADD</span> COLUMNS (
+    app_name STRING COMMENT <span class="hljs-string">'Application name'</span>,
+    session_id LONG COMMENT <span class="hljs-string">'The current session id'</span>
+);</span></code></pre>
+
+<h3 id="删除或者替换列">删除或者替换列</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages <span class="hljs-keyword">REPLACE</span> COLUMNS (
+    hours_mins_secs <span class="hljs-keyword">INT</span> COMMENT <span class="hljs-string">'hours, minutes, seconds from timestamp'</span>,
+    severity STRING COMMENT <span class="hljs-string">'The message severity'</span>,
+    message STRING COMMENT <span class="hljs-string">'The rest of the message'</span>
+);</span></code></pre>
+
+<h3 id="修改表属性">修改表属性</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages <span class="hljs-keyword">SET</span> TBLPROPERTIES (
+    <span class="hljs-string">'notes'</span> = <span class="hljs-string">'The process id is no longer captured; this column is always NULL'</span>
+);</span></code></pre>
+
+<h3 id="修改存储属性">修改存储属性</h3>
+
+
+
+<pre class="prettyprint"><code class="language-sql hljs "><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> log_messages
+PARTITION(<span class="hljs-keyword">year</span>=<span class="hljs-number">2000</span>, <span class="hljs-keyword">month</span>=<span class="hljs-number">1</span>, <span class="hljs-keyword">day</span>=<span class="hljs-number">1</span>)
+<span class="hljs-keyword">SET</span> FILEFORMAT SEQUENCEFILE;</span></code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

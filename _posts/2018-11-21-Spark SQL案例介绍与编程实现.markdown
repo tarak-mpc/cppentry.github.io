@@ -1,0 +1,545 @@
+---
+layout:     post
+title:      Spark SQL案例介绍与编程实现
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/yjgithub/article/details/78770489				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<p>要点 <br>
+Spark SQL/DataFrame如何理解？ <br>
+如何使用spark SQL编写统计代码？ <br>
+如何查看spark任务监控过程？ <br>
+Spark SQL程序开发需要注意哪些内容？</p>
+
+<h2 id="1spark-sqldataframe如何理解">1、Spark SQL/DataFrame如何理解</h2>
+
+<p>Spark SQL 是 Spark 生态系统里用于处理结构化大数据的模块，该模块里最重要的概念就是 DataFrame, 相信熟悉 R 语言的工程师对此并不陌生。Spark 的 DataFrame 是基于早期版本中的 SchemaRDD，所以很自然的使用分布式大数据处理的场景。Spark DataFrame 以 RDD 为基础，但是带有 Schema 信息，它类似于传统数据库中的二维表格。</p>
+
+<p>Spark SQL 模块目前支持将多种外部数据源的数据转化为 DataFrame，并像操作 RDD 或者将其注册为临时表的方式处理和分析这些数据。当前支持的数据源有：</p>
+
+<pre class="prettyprint"><code class=" hljs ">    Json
+    文本文件
+    RDD
+    关系数据库
+    Hive
+    Parquet</code></pre>
+
+<p>一旦将 DataFrame 注册成临时表，我们就可以使用类 SQL 的方式操作这些数据，我们将在下文的案例中详细向读者展示如何使用 Spark SQL/DataFrame 提供的 API 完成数据读取，临时表注册，统计分析等步骤。</p>
+
+<h2 id="2如何使用spark-sql编写统计代码">2、如何使用spark SQL编写统计代码</h2>
+
+<p>案例介绍与编程实现</p>
+
+<h3 id="案例一">案例一:</h3>
+
+<h3 id="a案例描述与分析">a.案例描述与分析</h3>
+
+<p>本案例中，我们将使用 Spark SQL 分析包含 5 亿条人口信息的结构化数据，数据存储在文本文件上，总大小为 705m。文件总共包含三列，第一列是 ID，第二列是性别信息 (F -&gt; 女，M -&gt; 男)，第三列是人口的身高信息，单位是 cm。实际上这个文件与我们在本系列文章第一篇中的案例三使用的格式是一致的，读者可以参考相关章节，并使用提供的测试数据生成程序，生成 5 千万条数据，用于本案例中。为了便于读者理解，本案例依然把用于分析的文本文件的内容片段贴出来，具体格式如下。</p>
+
+<p>文件大小: <br>
+<img src="https://img-blog.csdn.net/20171211100043924?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>文件格式内容:</p>
+
+<p><img src="https://img-blog.csdn.net/20171211100137400?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>上传Hdfs: <br>
+<img src="https://img-blog.csdn.net/20171211100310653?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>本例中，我们的统计任务如下： <br>
+    用 SQL 语句的方式统计男性中身高超过 180cm 的人数。 <br>
+    用 SQL 语句的方式统计女性中身高超过 170cm 的人数。 <br>
+    对人群按照性别分组并统计男女人数。 <br>
+    用类 RDD 转换的方式对 DataFrame 操作来统计并打印身高大于 210cm 的前 50 名男性。 <br>
+    对所有人按身高进行排序并打印前 50 名的信息。 <br>
+    统计男性的平均身高。 <br>
+    统计女性身高的最大值。</p>
+
+<h3 id="b编码实现">b.编码实现</h3>
+
+<p>b1.数据制造</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">import</span> java.io.BufferedWriter;
+<span class="hljs-keyword">import</span> java.io.File;
+<span class="hljs-keyword">import</span> java.io.FileWriter;
+<span class="hljs-keyword">import</span> java.io.IOException;
+<span class="hljs-keyword">import</span> java.util.Random;
+
+<span class="hljs-javadoc">/**
+ * args[0] : 文件路径
+ * args[1] : 生成数据量条数
+ * Created by Administrator on 2017/12/8.
+ */</span>
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">samplePeopleInfo</span> {</span>
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">main</span>(String[] args) {
+        <span class="hljs-keyword">if</span> (args.length &lt; <span class="hljs-number">2</span>) {
+            System.out.println(<span class="hljs-string">"file path or num is null"</span>);
+            System.exit(<span class="hljs-number">1</span>);
+        }
+        String filePath = args[<span class="hljs-number">0</span>];
+        <span class="hljs-keyword">int</span> peopleNum = Integer.valueOf(args[<span class="hljs-number">1</span>]);
+        File file = <span class="hljs-keyword">new</span> File(filePath);
+        FileWriter fw = <span class="hljs-keyword">null</span>;
+        BufferedWriter writer = <span class="hljs-keyword">null</span>;
+        Random rand = <span class="hljs-keyword">new</span> Random();
+        <span class="hljs-keyword">int</span> age = <span class="hljs-number">0</span>;
+        <span class="hljs-keyword">int</span> se = <span class="hljs-number">0</span>;
+        String sex = <span class="hljs-keyword">null</span>;
+        <span class="hljs-keyword">try</span> {
+            fw = <span class="hljs-keyword">new</span> FileWriter(file);
+            writer = <span class="hljs-keyword">new</span> BufferedWriter(fw);
+            <span class="hljs-keyword">for</span>(<span class="hljs-keyword">int</span> i = <span class="hljs-number">1</span>;i&lt;= peopleNum ;i++){
+                age =  rand.nextInt(<span class="hljs-number">100</span>)+<span class="hljs-number">120</span>;
+                se = rand.nextInt(<span class="hljs-number">2</span>);
+                <span class="hljs-keyword">if</span>(se!=<span class="hljs-number">0</span>){
+                    sex = <span class="hljs-string">"F"</span>;
+                }<span class="hljs-keyword">else</span> {
+                    sex = <span class="hljs-string">"M"</span>;
+                }
+                writer.write(i+<span class="hljs-string">","</span>+sex+<span class="hljs-string">","</span>+age);
+                writer.newLine();<span class="hljs-comment">//换行</span>
+                writer.flush();
+            }
+
+        } <span class="hljs-keyword">catch</span> (IOException e) {
+            e.printStackTrace();
+        }<span class="hljs-keyword">finally</span> {
+            <span class="hljs-keyword">try</span> {
+                writer.close();
+                fw.close();
+            } <span class="hljs-keyword">catch</span> (IOException e) {
+                e.printStackTrace();
+            }
+
+        }
+    }
+}
+</code></pre>
+
+<p>b2:业务代码编写</p>
+
+<pre class="prettyprint"><code class=" hljs avrasm">package <span class="hljs-keyword">com</span>
+
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.sql</span><span class="hljs-preprocessor">.types</span>.{StringType, StructField, StructType}
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.sql</span>.{Row, SQLContext}
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.storage</span><span class="hljs-preprocessor">.StorageLevel</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span>.{SparkConf, SparkContext}
+
+<span class="hljs-comment">/**
+  * args(0) : HDFS数据文件地址
+  * Created by Administrator on 2017/12/8.
+  * //致命的缺点,可以从sparkUI看到,每个sql都是从新加载数据,性能缓慢
+  */</span>
+object PeopleDataStatistics {
+  private val schemaString = <span class="hljs-string">"id,gender,height"</span>
+
+  def main(args: Array[String]): Unit = {
+    if (args<span class="hljs-preprocessor">.length</span> &lt; <span class="hljs-number">1</span>) {
+      println(<span class="hljs-string">"Usage:PeopleDataStatistics2 filePath"</span>)
+      System<span class="hljs-preprocessor">.exit</span>(<span class="hljs-number">1</span>)
+    }
+
+    val conf = new SparkConf()<span class="hljs-preprocessor">.setAppName</span>(<span class="hljs-string">"Spark Analysis:PeopleDataStatistics"</span>)
+    val sc = new SparkContext(conf)
+    val peopleDateRdd = sc<span class="hljs-preprocessor">.textFile</span>(args(<span class="hljs-number">0</span>)<span class="hljs-preprocessor">.trim</span>)<span class="hljs-comment">;</span>
+    val sqlCtx = new SQLContext(sc)
+
+    val schemaArr = schemaString<span class="hljs-preprocessor">.split</span>(<span class="hljs-string">","</span>)
+    val schema = StructType(schemaArr<span class="hljs-preprocessor">.map</span>(fieldName =&gt; StructField(fieldName,StringType,true)))
+    val rowRdd : RDD[Row] = peopleDateRdd
+      <span class="hljs-preprocessor">.map</span>(_<span class="hljs-preprocessor">.split</span>(<span class="hljs-string">","</span>))
+      <span class="hljs-preprocessor">.map</span>(eachRow =&gt; Row(eachRow(<span class="hljs-number">0</span>),eachRow(<span class="hljs-number">1</span>),eachRow(<span class="hljs-number">2</span>)))
+    val peopleDF = sqlCtx<span class="hljs-preprocessor">.createDataFrame</span>(rowRdd,schema)
+
+    //注意DF缓存在内存中,会根据数据量节省很多时间
+    peopleDF<span class="hljs-preprocessor">.persist</span>(StorageLevel<span class="hljs-preprocessor">.MEMORY</span>_ONLY_SER)
+    peopleDF<span class="hljs-preprocessor">.registerTempTable</span>(<span class="hljs-string">"people"</span>)
+
+
+    //get the male people whose height is more than <span class="hljs-number">180</span>
+    val higherMale180 = sqlCtx<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">""</span> +
+      <span class="hljs-string">"select *"</span> +
+      <span class="hljs-string">" from people"</span> +
+      <span class="hljs-string">" where height &gt; 180 and gender = 'F'"</span>)
+    println(<span class="hljs-string">"Men whose height are more than 180: "</span> + higherMale180<span class="hljs-preprocessor">.count</span>())
+    println(<span class="hljs-string">"&lt;Display #1&gt;"</span>)
+
+    //get the female people whose height is more than <span class="hljs-number">170</span>
+    val higherMale170 = sqlCtx<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">""</span> +
+      <span class="hljs-string">"select *"</span> +
+      <span class="hljs-string">" from people"</span> +
+      <span class="hljs-string">" where height &gt; 170 and gender = 'M'"</span>)
+    println(<span class="hljs-string">"female whose height are more than 170: "</span> + higherMale170<span class="hljs-preprocessor">.count</span>())//job <span class="hljs-number">1</span>
+    println(<span class="hljs-string">"&lt;Display #2&gt;"</span>)
+
+    //Grouped the people by gender <span class="hljs-keyword">and</span> count the number
+    peopleDF<span class="hljs-preprocessor">.groupBy</span>(peopleDF(<span class="hljs-string">"gender"</span>))<span class="hljs-preprocessor">.count</span>()<span class="hljs-preprocessor">.show</span>()
+    println(<span class="hljs-string">"People Count Grouped By Gender"</span>)
+    println(<span class="hljs-string">"&lt;Display #3&gt;"</span>)
+
+    //count <span class="hljs-keyword">and</span> print the first <span class="hljs-number">50</span> men with a height greater than <span class="hljs-number">210</span>cm
+    peopleDF<span class="hljs-preprocessor">.filter</span>(peopleDF(<span class="hljs-string">"gender"</span>)<span class="hljs-preprocessor">.equalTo</span>(<span class="hljs-string">"M"</span>))<span class="hljs-preprocessor">.filter</span>(peopleDF(<span class="hljs-string">"height"</span>) &gt; <span class="hljs-number">210</span>)<span class="hljs-preprocessor">.show</span>(<span class="hljs-number">50</span>)
+    println(<span class="hljs-string">"Men whose height is more than 210"</span>)
+    println(<span class="hljs-string">"&lt;Display #4&gt;"</span>)
+
+    //To sort all people by height <span class="hljs-keyword">and</span> print the top <span class="hljs-number">50</span>
+    peopleDF<span class="hljs-preprocessor">.sort</span>(peopleDF(<span class="hljs-string">"height"</span>)<span class="hljs-preprocessor">.desc</span>)<span class="hljs-preprocessor">.take</span>(<span class="hljs-number">50</span>)<span class="hljs-preprocessor">.foreach</span> { println }
+    println(<span class="hljs-string">"Sorted the people by height in descend order,Show top 50 people"</span>)
+    println(<span class="hljs-string">"&lt;Display #5&gt;"</span>)
+
+
+    //The average height of a man was counted
+    peopleDF<span class="hljs-preprocessor">.filter</span>(peopleDF(<span class="hljs-string">"gender"</span>)<span class="hljs-preprocessor">.equalTo</span>(<span class="hljs-string">"M"</span>))<span class="hljs-preprocessor">.agg</span>(Map(<span class="hljs-string">"height"</span> -&gt; <span class="hljs-string">"avg"</span>))<span class="hljs-preprocessor">.show</span>()
+    println(<span class="hljs-string">"The Average height for Men"</span>)
+    println(<span class="hljs-string">"&lt;Display #6&gt;"</span>)
+
+    //The Max height of a women was counted
+    peopleDF<span class="hljs-preprocessor">.filter</span>(peopleDF(<span class="hljs-string">"gender"</span>)<span class="hljs-preprocessor">.equalTo</span>(<span class="hljs-string">"F"</span>))<span class="hljs-preprocessor">.agg</span>(<span class="hljs-string">"height"</span> -&gt; <span class="hljs-string">"max"</span>)<span class="hljs-preprocessor">.show</span>()
+    println(<span class="hljs-string">"The Max height for Women:"</span>)
+    println(<span class="hljs-string">"&lt;Display #7&gt;"</span>)
+    //......
+    println(<span class="hljs-string">"All the statistics actions are finished on structured People data."</span>)
+  }
+
+}
+</code></pre>
+
+<h3 id="c提交并运行">c.提交并运行</h3>
+
+<p>编码完成后，把项目打成 jar 包，在这里，我们将源码打成名为 DataDemo.jar</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs haml"><span class="hljs-comment">/opt/cloudera/parcels/CDH/bin/spark-submit \</span>
+  -<span class="ruby">-<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">com</span>.<span class="hljs-title">PeopleDataStatistics</span> \</span>
+</span>  -<span class="ruby">-master <span class="hljs-symbol">spark:</span>/<span class="hljs-regexp">/namenode1:7077 \
+</span></span>  -<span class="ruby">-driver-memory <span class="hljs-number">8</span>g \
+</span>  -<span class="ruby">-executor-memory <span class="hljs-number">2</span>g \
+</span>  -<span class="ruby">-total-executor-cores <span class="hljs-number">12</span> \
+</span><span class="hljs-comment">  /var/lib/flume-ng/cyj/DataDemo.jar hdfs://172.20.1.102:8020/user/flume/Test/samplePeopleInfomin.txt</span></code></pre>
+
+
+
+<h3 id="d监控执行过程">d.监控执行过程</h3>
+
+<p>在提交后，我们可以在 Spark web console(http://:8080) 中监控程序执行过程。下面我们将分别向读者展示如何监控程序产生的 Jobs，Stages，以及 D 可视化的查看 DAG 信息。</p>
+
+<p><img src="https://img-blog.csdn.net/20171211101348603?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>ps: 这里我有两个分析,ID-0021   /  ID 0020 <br>
+ID-0021 :  将数据存内存中 (peopleDF.persist(StorageLevel.MEMORY_ONLY_SER)) <br>
+<img src="https://img-blog.csdn.net/20171211101741713?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+ID 0020 :   每次sql都从hadoop中拉取数据 <br>
+<img src="https://img-blog.csdn.net/20171211101757058?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>ps:这里也是个性能调优,重复利用的RDD,尽量缓存起来,速度会提升很多</p>
+
+<p>运行结果: <br>
+<img src="https://img-blog.csdn.net/20171211103442181?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+<img src="https://img-blog.csdn.net/20171211103515243?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+<img src="https://img-blog.csdn.net/20171211103526746?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+<img src="https://img-blog.csdn.net/20171211103538417?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+
+
+<h3 id="案例二">案例二:</h3>
+
+<h3 id="a案例描述与分析-1">a.案例描述与分析</h3>
+
+<p>在案例一中，我们将存储于 HDFS 中的文件转换成 DataFrame 并进行了一系列的统计，细心的读者会发现，都是一个关联于一个 DataFrame 的简单查询和统计，那么在案例二中，我们将向读者展示如何连接多个 DataFrame 做更复杂的统计分析。</p>
+
+<p>在本案例中，我们将统计分析 100W用户和 1 000W条交易数据。对于用户数据，它是一个包含 6 个列 (ID, 性别, 年龄, 注册日期, 角色 (从事行业), 所在区域) 的文本文件，具有以下格式。</p>
+
+<p>用户数据 <br>
+<img src="https://img-blog.csdn.net/20171211104355639?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<p>对于交易数据，它是一个包含 5 个列 (交易单号, 交易日期, 产品种类, 价格, 用户 ID) 的文本文件，具有以下格式。</p>
+
+<p>交易数据 <br>
+<img src="https://img-blog.csdn.net/20171211104404517?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+<h3 id="b编码实现-1">b.编码实现</h3>
+
+<p>b1.数据生成 <br>
+用户数据:</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-keyword">package</span> Sql.peopleinfo
+
+<span class="hljs-keyword">import</span> java.io.FileWriter
+<span class="hljs-keyword">import</span> scala.util.Random
+
+<span class="hljs-javadoc">/**
+  * Created by Administrator on 2017/12/8.
+  */</span>
+<span class="hljs-class"><span class="hljs-keyword">object</span> <span class="hljs-title">UserDataGenerator</span> {</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> FILE_PATH = <span class="hljs-string">"F:/sparkTestData/UserDataMin.txt"</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> ROLE_ID_ARRAY = Array[String](<span class="hljs-string">"ROLE001"</span>,<span class="hljs-string">"ROLE002"</span>,<span class="hljs-string">"ROLE003"</span>,<span class="hljs-string">"ROLE004"</span>,<span class="hljs-string">"ROLE005"</span>)
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> REGION_ID_ARRAY = Array[String](<span class="hljs-string">"REG001"</span>,<span class="hljs-string">"REG002"</span>,<span class="hljs-string">"REG003"</span>,<span class="hljs-string">"REG004"</span>,<span class="hljs-string">"REG005"</span>)
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> MAX_USER_AGE = <span class="hljs-number">60</span>
+  <span class="hljs-comment">//how many records to be generated 100W</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> MAX_RECORDS = <span class="hljs-number">1000000</span>
+
+  <span class="hljs-keyword">def</span> main(args:Array[String]): Unit = {
+    generateDataFile(FILE_PATH , MAX_RECORDS)
+  }
+
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> generateDataFile(filePath : String, recordNum: Int): Unit = {
+    <span class="hljs-keyword">var</span> writer:FileWriter = <span class="hljs-keyword">null</span>
+
+    <span class="hljs-keyword">try</span> {
+      writer = <span class="hljs-keyword">new</span> FileWriter(filePath,<span class="hljs-keyword">true</span>)
+      <span class="hljs-keyword">val</span> rand = <span class="hljs-keyword">new</span> Random()
+      <span class="hljs-keyword">for</span> (i &lt;- <span class="hljs-number">1</span> to recordNum) {
+        <span class="hljs-comment">//generate the gender of the user</span>
+        <span class="hljs-keyword">var</span> gender = getRandomGender
+        <span class="hljs-comment">//</span>
+        <span class="hljs-keyword">var</span> age = rand.nextInt(MAX_USER_AGE)
+        <span class="hljs-keyword">if</span> (age &lt; <span class="hljs-number">10</span>) {
+          age = age + <span class="hljs-number">10</span>
+        }
+
+        <span class="hljs-comment">//generate the registering date for the user</span>
+        <span class="hljs-keyword">var</span> year = rand.nextInt(<span class="hljs-number">16</span>) + <span class="hljs-number">2000</span>
+        <span class="hljs-keyword">var</span> month = rand.nextInt(<span class="hljs-number">12</span>)+<span class="hljs-number">1</span>
+
+        <span class="hljs-comment">//to avoid checking if it is a valid day for specific month</span>
+        <span class="hljs-comment">//we always generate a day which is no more than 28</span>
+        <span class="hljs-keyword">var</span> day = rand.nextInt(<span class="hljs-number">28</span>) + <span class="hljs-number">1</span>
+        <span class="hljs-keyword">var</span> registerDate = year + <span class="hljs-string">"-"</span> + month + <span class="hljs-string">"-"</span> + day
+
+        <span class="hljs-comment">//generate the role of the user</span>
+        <span class="hljs-keyword">var</span> roleIndex:Int = rand.nextInt(ROLE_ID_ARRAY.length)
+        <span class="hljs-keyword">var</span> role = ROLE_ID_ARRAY(roleIndex)
+
+        <span class="hljs-comment">//generate the region where the user is</span>
+        <span class="hljs-keyword">var</span> regionIndex:Int = rand.nextInt(REGION_ID_ARRAY.length)
+        <span class="hljs-keyword">var</span> region = REGION_ID_ARRAY(regionIndex)
+
+        writer.write(i + <span class="hljs-string">" "</span> + gender + <span class="hljs-string">" "</span> + age + <span class="hljs-string">" "</span> + registerDate
+          + <span class="hljs-string">" "</span> + role + <span class="hljs-string">" "</span> + region)
+        writer.write(System.getProperty(<span class="hljs-string">"line.separator"</span>))
+      }
+    }<span class="hljs-keyword">catch</span> {
+      <span class="hljs-keyword">case</span> e:Exception =&gt; println(<span class="hljs-string">"Error occurred:"</span> + e)
+    }<span class="hljs-keyword">finally</span> {
+      <span class="hljs-keyword">if</span> (writer != <span class="hljs-keyword">null</span>)
+        writer.close()
+    }
+    println(<span class="hljs-string">"User Data File generated successfully."</span>)
+  }
+
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> getRandomGender() :String = {
+    <span class="hljs-keyword">val</span> rand = <span class="hljs-keyword">new</span> Random()
+    <span class="hljs-keyword">val</span> randNum = rand.nextInt(<span class="hljs-number">2</span>) + <span class="hljs-number">1</span>
+    <span class="hljs-keyword">if</span> (randNum % <span class="hljs-number">2</span> == <span class="hljs-number">0</span>) {
+      <span class="hljs-string">"M"</span>
+    } <span class="hljs-keyword">else</span> {
+      <span class="hljs-string">"F"</span>
+    }
+  }
+
+}
+</code></pre>
+
+<p>交易记录:</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs scala"><span class="hljs-keyword">package</span> Sql.peopleinfo
+
+<span class="hljs-keyword">import</span> java.io.FileWriter
+
+<span class="hljs-keyword">import</span> scala.util.Random
+<span class="hljs-javadoc">/**
+  * Created by Administrator on 2017/12/8.
+  */</span>
+<span class="hljs-class"><span class="hljs-keyword">object</span> <span class="hljs-title">ConsumingDataGenerator</span> {</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> FILE_PATH = <span class="hljs-string">"F:/sparkTestData/ConsumingDataMin.txt"</span>
+  <span class="hljs-comment">// how many records to be generated</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> MAX_RECORDS = <span class="hljs-number">10000000</span>
+  <span class="hljs-comment">// we suppose only 10 kinds of products in the consuming data</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> PRODUCT_ID_ARRAY = Array[Int](<span class="hljs-number">1</span>,<span class="hljs-number">2</span>,<span class="hljs-number">3</span>,<span class="hljs-number">4</span>,<span class="hljs-number">5</span>,<span class="hljs-number">6</span>,<span class="hljs-number">7</span>,<span class="hljs-number">8</span>,<span class="hljs-number">9</span>,<span class="hljs-number">10</span>)
+  <span class="hljs-comment">// we suppose the price of most expensive product will not exceed 2000 RMB</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> MAX_PRICE = <span class="hljs-number">2000</span>
+  <span class="hljs-comment">// we suppose the price of cheapest product will not be lower than 10 RMB</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> MIN_PRICE = <span class="hljs-number">10</span>
+  <span class="hljs-comment">//the users number which should be same as the one in UserDataGenerator object</span>
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">val</span> USERS_NUM = <span class="hljs-number">1000000</span>
+
+  <span class="hljs-keyword">def</span> main(args:Array[String]): Unit = {
+    generateDataFile(FILE_PATH,MAX_RECORDS);
+  }
+
+  <span class="hljs-keyword">private</span> <span class="hljs-keyword">def</span> generateDataFile(filePath : String, recordNum: Int): Unit = {
+    <span class="hljs-keyword">var</span> writer:FileWriter = <span class="hljs-keyword">null</span>
+    <span class="hljs-keyword">try</span> {
+      writer = <span class="hljs-keyword">new</span> FileWriter(filePath,<span class="hljs-keyword">true</span>)
+      <span class="hljs-keyword">val</span> rand = <span class="hljs-keyword">new</span> Random()
+      <span class="hljs-keyword">for</span> (i &lt;- <span class="hljs-number">1</span> to recordNum) {
+        <span class="hljs-comment">//generate the buying date</span>
+        <span class="hljs-keyword">var</span> year = rand.nextInt(<span class="hljs-number">16</span>) + <span class="hljs-number">2000</span>
+        <span class="hljs-keyword">var</span> month = rand.nextInt(<span class="hljs-number">12</span>)+<span class="hljs-number">1</span>
+        <span class="hljs-comment">//to avoid checking if it is a valid day for specific</span>
+        <span class="hljs-comment">// month,we always generate a day which is no more than 28</span>
+        <span class="hljs-keyword">var</span> day = rand.nextInt(<span class="hljs-number">28</span>) + <span class="hljs-number">1</span>
+        <span class="hljs-keyword">var</span> recordDate = year + <span class="hljs-string">"-"</span> + month + <span class="hljs-string">"-"</span> + day
+        <span class="hljs-comment">//generate the product ID</span>
+        <span class="hljs-keyword">var</span> index:Int = rand.nextInt(PRODUCT_ID_ARRAY.length)
+        <span class="hljs-keyword">var</span> productID = PRODUCT_ID_ARRAY(index)
+        <span class="hljs-comment">//generate the product price</span>
+        <span class="hljs-keyword">var</span> price:Int = rand.nextInt(MAX_PRICE)
+        <span class="hljs-keyword">if</span> (price == <span class="hljs-number">0</span>) {
+          price = MIN_PRICE
+        }
+        <span class="hljs-comment">// which user buys this product</span>
+        <span class="hljs-keyword">val</span> userID = rand.nextInt(USERS_NUM)+<span class="hljs-number">1</span>
+        writer.write(i + <span class="hljs-string">" "</span> + recordDate + <span class="hljs-string">" "</span> + productID
+          + <span class="hljs-string">" "</span> + price + <span class="hljs-string">" "</span> + userID)
+        writer.write(System.getProperty(<span class="hljs-string">"line.separator"</span>))
+      }
+      writer.flush()
+    } <span class="hljs-keyword">catch</span> {
+      <span class="hljs-keyword">case</span> e:Exception =&gt; println(<span class="hljs-string">"Error occurred:"</span> + e)
+    } <span class="hljs-keyword">finally</span> {
+      <span class="hljs-keyword">if</span> (writer != <span class="hljs-keyword">null</span>)
+        writer.close()
+    }
+    println(<span class="hljs-string">"Consuming Data File generated successfully."</span>)
+  }
+
+}
+</code></pre>
+
+<p>b2.业务代码</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">package Sql<span class="hljs-preprocessor">.peopleinfo</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.log</span>4j.{Level, Logger}
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.sql</span><span class="hljs-preprocessor">.SQLContext</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.storage</span><span class="hljs-preprocessor">.StorageLevel</span>
+import org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span>.{SparkConf, SparkContext}
+<span class="hljs-comment">/**
+  * Created by Administrator on 2017/12/8.
+  */</span>
+//define case class for user
+case class User(userID:String,gender:String,age:Int,registerDate:String,role:String,region:String)
+
+//define case class for consuming data
+case class Order(orderID:String,orderDate:String,productID:Int,price:Int,userID:String)
+
+object UserConsumingDataStatistics {
+  def main(args: Array[String]): Unit = {
+    Logger<span class="hljs-preprocessor">.getLogger</span>(<span class="hljs-string">"org.apache.spark"</span>)<span class="hljs-preprocessor">.setLevel</span>(Level<span class="hljs-preprocessor">.WARN</span>)
+    if (args<span class="hljs-preprocessor">.length</span> &lt; <span class="hljs-number">1</span>) {
+      println(<span class="hljs-string">"Usage:UserConsumingDataStatistics userDataFilePath consumingDataFilePath"</span>)
+      System<span class="hljs-preprocessor">.exit</span>(<span class="hljs-number">1</span>)
+    }
+
+    val conf = new SparkConf()<span class="hljs-preprocessor">.setAppName</span>(<span class="hljs-string">"UserConsumingDataStatistics"</span>)
+    //Kryo serializer is more quickly by default java serializer
+    conf<span class="hljs-preprocessor">.set</span>(<span class="hljs-string">"spark.serializer"</span>, <span class="hljs-string">"org.apache.spark.serializer.KryoSerializer"</span>)
+    val ctx = new SparkContext(conf)
+    val sqlCtx = new SQLContext(ctx)
+
+    //隐士转换
+    //需要添加import sqlContext<span class="hljs-preprocessor">.implicits</span>._,才可以调用<span class="hljs-preprocessor">.toDF</span>
+    import sqlCtx<span class="hljs-preprocessor">.implicits</span>._
+    //Convert user data RDD to a DataFrame <span class="hljs-keyword">and</span> register it as a temp table
+    val userDF = ctx<span class="hljs-preprocessor">.textFile</span>(args(<span class="hljs-number">0</span>))<span class="hljs-preprocessor">.map</span>(_<span class="hljs-preprocessor">.split</span>(<span class="hljs-string">" "</span>))<span class="hljs-preprocessor">.map</span>(
+      u =&gt; User(u(<span class="hljs-number">0</span>), u(<span class="hljs-number">1</span>), u(<span class="hljs-number">2</span>)<span class="hljs-preprocessor">.toInt</span>,u(<span class="hljs-number">3</span>),u(<span class="hljs-number">4</span>),u(<span class="hljs-number">5</span>)))<span class="hljs-preprocessor">.toDF</span>()
+    userDF<span class="hljs-preprocessor">.registerTempTable</span>(<span class="hljs-string">"user"</span>)
+    //Convert consuming data RDD to a DataFrame <span class="hljs-keyword">and</span> register it as a temp table
+    val orderDF = ctx<span class="hljs-preprocessor">.textFile</span>(args(<span class="hljs-number">1</span>))<span class="hljs-preprocessor">.map</span>(_<span class="hljs-preprocessor">.split</span>(<span class="hljs-string">" "</span>))<span class="hljs-preprocessor">.map</span>(o =&gt; Order(
+      o(<span class="hljs-number">0</span>), o(<span class="hljs-number">1</span>), o(<span class="hljs-number">2</span>)<span class="hljs-preprocessor">.toInt</span>,o(<span class="hljs-number">3</span>)<span class="hljs-preprocessor">.toInt</span>,o(<span class="hljs-number">4</span>)))<span class="hljs-preprocessor">.toDF</span>()
+    orderDF<span class="hljs-preprocessor">.registerTempTable</span>(<span class="hljs-string">"orders"</span>)
+
+    //cache the DF <span class="hljs-keyword">in</span> memory with serializer should make the program run much faster
+    userDF<span class="hljs-preprocessor">.persist</span>(StorageLevel<span class="hljs-preprocessor">.MEMORY</span>_ONLY_SER)
+    orderDF<span class="hljs-preprocessor">.persist</span>(StorageLevel<span class="hljs-preprocessor">.MEMORY</span>_ONLY_SER)
+
+    //业务逻辑
+    //The number of people who have orders <span class="hljs-keyword">in</span> the year <span class="hljs-number">2015</span>
+    val count = orderDF<span class="hljs-preprocessor">.filter</span>(orderDF(<span class="hljs-string">"orderDate"</span>)<span class="hljs-preprocessor">.contains</span>(<span class="hljs-string">"2015"</span>))
+      <span class="hljs-preprocessor">.join</span>(userDF,orderDF(<span class="hljs-string">"userID"</span>)<span class="hljs-preprocessor">.equalTo</span>(userDF(<span class="hljs-string">"userID"</span>)))<span class="hljs-preprocessor">.count</span>()
+
+    println(<span class="hljs-string">"The number of people who have orders in the year 2015:"</span> + count)
+
+    //total orders produced <span class="hljs-keyword">in</span> the year <span class="hljs-number">2014</span>
+    val countOfOrders2014 = sqlCtx<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">""</span> +
+      <span class="hljs-string">"SELECT *"</span> +
+      <span class="hljs-string">" FROM orders"</span> +
+      <span class="hljs-string">" where orderDate like '2014%'"</span>)<span class="hljs-preprocessor">.count</span>()
+    println(<span class="hljs-string">"total orders produced in the year 2014:"</span> + countOfOrders2014)
+
+    //Orders that are produced by user with ID <span class="hljs-number">1</span> information overview
+    val countOfOrdersForUser1 = sqlCtx<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">""</span> +
+      <span class="hljs-string">"SELECT"</span> +
+      <span class="hljs-string">" o.orderID,"</span> +
+      <span class="hljs-string">" o.productID,"</span> +
+      <span class="hljs-string">" o.price,"</span> +
+      <span class="hljs-string">" u.userID"</span> +
+      <span class="hljs-string">" FROM orders o,user u"</span> +
+      <span class="hljs-string">" where u.userID = 1 and u.userID = o.userID"</span>)<span class="hljs-preprocessor">.show</span>()
+      println(<span class="hljs-string">"Orders produced by user with ID 1 showed."</span>)
+
+    //Calculate the max,min,avg prices for the orders that are producted by user with ID <span class="hljs-number">10</span>
+    val orderStatsForUser10 = sqlCtx<span class="hljs-preprocessor">.sql</span>(<span class="hljs-string">""</span> +
+      <span class="hljs-string">"SELECT"</span> +
+      <span class="hljs-string">" max(o.price) as maxPrice,"</span> +
+      <span class="hljs-string">" min(o.price) as minPrice,"</span> +
+      <span class="hljs-string">" avg(o.price) as avgPrice,"</span> +
+      <span class="hljs-string">" u.userID"</span> +
+      <span class="hljs-string">" FROM orders o, user u"</span> +
+      <span class="hljs-string">" where u.userID = 10 and u.userID = o.userID"</span> +
+      <span class="hljs-string">" group by u.userID"</span>)
+      println(<span class="hljs-string">"Order statistic result for user with ID 10:"</span>)
+      orderStatsForUser10<span class="hljs-preprocessor">.collect</span>()<span class="hljs-preprocessor">.map</span>(order =&gt; <span class="hljs-string">"Minimum Price="</span> + order<span class="hljs-preprocessor">.getAs</span>(<span class="hljs-string">"minPrice"</span>)
+      + <span class="hljs-string">";Maximum Price="</span> + order<span class="hljs-preprocessor">.getAs</span>(<span class="hljs-string">"maxPrice"</span>)
+      + <span class="hljs-string">";Average Price="</span> + order<span class="hljs-preprocessor">.getAs</span>(<span class="hljs-string">"avgPrice"</span>)
+      )<span class="hljs-preprocessor">.foreach</span>(result =&gt; println(result))
+
+
+  }
+
+}
+</code></pre>
+
+<h3 id="c提交运行">c.提交运行</h3>
+
+<p>./spark-submit –class Sql.peopleinfo.UserConsumingDataStatistics\ <br>
+–master spark://:7077 \ <br>
+–num-executors 6 \ <br>
+–driver-memory 8g \ <br>
+–executor-memory 2g \ <br>
+–executor-cores 2 \ <br>
+/home/fams/DataDemo.jar \ <br>
+hdfs://:9000/user/fams/inputfiles/UserData.txt \ <br>
+hdfs://:9000/user/fams/inputfiles/ConsumingData.txt</p>
+
+<h3 id="d结果数据">d.结果数据</h3>
+
+<p><img src="https://img-blog.csdn.net/20171211105206141?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQveWpnaXRodWI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""></p>
+
+
+
+<h2 id="3spark-sql程序开发需要注意哪些内容">3.Spark SQL程序开发需要注意哪些内容？</h2>
+
+<p>Spark SQL 程序开发过程中，我们有两种方式确定 schema，第一种是反射推断 schema，如本文的案例二，这种方式下，我们需要定义样本类 (case class) 来对应数据的列;第二种方式是通过编程方式来确定 schema，这种方式主要是通过 Spark SQL 提供的 StructType 和 StructField 等 API 来编程实现，这种方式下我们不需要定义样本类，如本文中的案例一</p>
+
+<p>在程序实现中，我们需要使用以便隐式的把 RDD 转化成 DataFrame 来操作。 <br>
+    本文展示的 DataFrame API 使用的方法只是其中很小的一部分，但是一旦读者掌握了开发的基本流程，就能通过参考 DataFrame API 文档 写出更为复杂的程序。 <br>
+    通常来说，我们有两种方式了解 Spark 程序的执行流程。第一种是通过在控制台观察输出日志，另一种则更直观，就是通过 Spark Web Console 来观察 Driver 程序里各个部分产生的 job 信息以及 job 里包含的 stages 信息。 <br>
+    需要指出的是，熟练的掌握 Spark SQL/DataFrame 的知识对学习最新的 Spark 机器学习库 ML Pipeline 至关重要，因为 ML Pipeline 使用 DataFrame 作为数据集来支持多种的数据类型。 <br>
+    笔者在测试的过程中发现，处理相同的数据集和类似的操作，Spark SQL/DataFrame 比传统的 RDD 转换操作具有更好的性能。这是由于 SQL 模块的 Catalyst 对用户 SQL 做了很好的查询优化。在以后的文章中会向读者详细的介绍该组件。</p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

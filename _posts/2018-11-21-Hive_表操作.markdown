@@ -1,0 +1,237 @@
+---
+layout:     post
+title:      Hive_表操作
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/Regan_Hoo/article/details/78672742				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<ol>
+<li><p>Hive架构 <br>
+The Hive metadata store (or called metastore) can use either embedded,local, or remote databases. Hive servers are built on Apache Thrift Server technology.</p></li>
+<li><p>Hive适用derby作为默认元数据存储(仅支持一个客户端在线)，以下方式将元数据库设置为MySQL:</p>
+
+<pre><code>javax.jdo.option.ConnectionURL // the database URL
+javax.jdo.option.ConnectionDriverName // the JDBC driver name
+javax.jdo.option.ConnectionUserName // database username
+javax.jdo.option.ConnectionPassword // database password
+</code></pre>
+
+<p>Make sure the MySQL JDBC driver is available at  $HIVE_HOME/lib  <br>
+An external database offers a shared service so that users can share the metadata of Hive. However, an embed database is only visible to the local users.</p></li>
+<li><p>Hive数据类型</p>
+
+<p>① 简单数据类型:TINYINT、SMALLINT、INT、BIGINT、FLOAT、DOUBLE、DECIMAL（DECIMAL (3,2) for 3.14）、BINARY、BOOLEAN、STRING、CHAR、VARCHAR、DATE（’2013-01-01’）、 <br>
+TIMESTAMP（’2013-01-01 12:00:01.345’）</p>
+
+<p>②复杂数据类型:</p>
+
+<pre><code>Complex data type             Example
+ARRAY                ['apple','orange','mango']
+
+MAP                   {1: "apple",2: "orange"}
+
+STRUCT     such as {val1, val2, val3, and so on}.By default, STRUCT field names will be col1,col2, and so on. Using structs_name.column_name, for example,fruit.col1=1.          {1, "apple"}
+
+NAMED STRUCT           such as (name1, val1, name2,val2, and so on). Using structs_name.column_name, for example, fruit.apple="gala".          {"apple":"gala","weightkg":1}
+UNION             This is a structure that has exactly any one of the specified data types.                    
+                                {2:["apple","orange"]}
+</code></pre></li>
+<li><p>实例：</p>
+
+<p>①准备数据: <br>
+vi employee.txt <br>
+Michael|Montreal,Toronto|Male,30|DB:80|Product:Developer^DLead <br>
+Will|Montreal|Male,35|Perl:85|Product:Lead,Test:Lead <br>
+Shelley|New York|Female,27|Python:80|Test:Lead,COE:Architect <br>
+Lucy|Vancouver|Female,57|Sales:89,HR:94|Sales:Lead</p>
+
+<p>②通过Beeline连接Hive：</p>
+
+<pre><code>beeline -u 'jdbc:hive2://192.168.6.186:10000/silence1101;principal=hadoop/namenode@SILENCE.COM'
+</code></pre>
+
+<p>③Create a table using ARRAY , MAP , and STRUCT composite data types:</p>
+
+<pre><code>CREATE TABLE employee (name string,work_place ARRAY&lt;string&gt;,sex_age STRUCT&lt;sex:string,age:int&gt;,skills_score MAP&lt;string,int&gt;,depart_title MAP&lt;string,ARRAY&lt;string&gt;&gt;) ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' COLLECTION ITEMS TERMINATED BY ','MAP KEYS TERMINATED BY ':';
+</code></pre>
+
+<p>④Verify the table’s creation: </p>
+
+<pre><code>!table employee
+!column employee
+</code></pre>
+
+<p>⑤载入数据:</p>
+
+<pre><code>  LOAD DATA LOCAL INPATH '/home/hadoop/hive/employee.txt' OVERWRITE INTO TABLE employee;
+</code></pre>
+
+<p>⑥ Query the whole array and each array column in the table:</p>
+
+<pre><code>  SELECT work_place FROM employee;
+  SELECT work_place[0] AS col_1,work_place[1] AS col_2, work_place[2] AS col_3 FROM employee;
+</code></pre>
+
+<p>⑦ Query the whole struct and each struct column in the table:</p>
+
+<pre><code>  SELECT sex_age FROM employee;
+  SELECT sex_age.sex, sex_age.age FROM employee;
+</code></pre>
+
+<p>⑧ Query the whole map and each map column in the table:</p>
+
+<pre><code>  SELECT skills_score FROM employee;
+  SELECT name, skills_score['DB'] AS DB,skills_score['Perl'] AS Perl,skills_score['Python'] AS Python,skills_score['Sales'] as Sales,skills_score['HR'] as HR FROM employee;
+</code></pre>
+
+<p>⑨ Query the composite type in the table:</p>
+
+<pre><code>  SELECT depart_title FROM employee;
+  SELECT name,depart_title['Product'] AS Product,depart_title['Test'] AS Test,depart_title['COE'] AS COE,depart_title['Sales'] AS Sales FROM employee;
+  SELECT name,depart_title['Product'][0] AS product_col0,depart_title['Test'][0] AS test_col0 FROM employee;
+</code></pre></li>
+<li><p>Hive Data Definition Language（DDL） <br>
+Most Hive DDL statements start with the keywords  CREATE ,  DROP , or  ALTER . The comments in Hive start from  –  <br>
+① Hive database <br>
+Whenever a new database is created, Hive creates a directory for each database at /user/hive/warehouse , <br>
+defined in hive.metastore.warehouse.dir</p>
+
+<pre><code>CREATE DATABASE IF NOT EXISTS myhivebook;
+CREATE DATABASE IF NOT EXISTS myhivebook COMMENT 'hive database demo' LOCATION '/hdfs/directory' WITH DBPROPERTIES ('creator'='dayongd','date'='2015-01-01');
+SHOW DATABASES LIKE 'my.*';
+DESCRIBE DATABASE default;
+USE myhivebook;
+DROP DATABASE IF EXISTS myhivebook;
+</code></pre>
+
+<p>【Note that In order to remove the parent directory, we need to remove the subdirectories first. But，CASCADE drops the tables in the database automatically before dropping the database.】</p>
+
+<pre><code>DROP DATABASE IF EXISTS myhivebook CASCADE;
+ALTER DATABASE myhivebook SET DBPROPERTIES ('edited-by' = 'Dayong');
+ALTER DATABASE myhivebook SET OWNER user dayongd;
+</code></pre>
+
+<p>② Hive internal and external tables</p>
+
+<pre><code>CREATE EXTERNAL TABLE employee_external (name string,work_place ARRAY&lt;string&gt;,sex_age STRUCT&lt;sex:string,age:int&gt;,skills_score MAP&lt;string,int&gt;,depart_title MAP&lt;string,ARRAY&lt;string&gt;&gt;) ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' COLLECTION ITEMS TERMINATED BY ','MAP KEYS TERMINATED BY ':';
+</code></pre>
+
+<p>【Note：For the STORE AS property, it is set to AS TEXTFILE by default. Other file format values, such as SEQUENCEFILE, RCFILE, ORC, AVRO , and PARQUET can also be specified.】</p>
+
+<pre><code>CREATE TABLE ctas_employee AS SELECT * FROM employee_external;（CTAS）
+SELECT COUNT(*) AS row_cnt FROM empty_ctas_employee;
+DROP TABLE IF EXISTS empty_ctas_employee;
+TRUNCATE TABLE cte_employee;
+!table   #获取所有表的元数据信息
+ALTER TABLE cte_employee RENAME TO c_employee;
+ALTER TABLE c_employee SET TBLPROPERTIES ('comment'='New name, comments');
+ALTER TABLE employee_internal SET SERDEPROPERTIES ('field.delim' = '$');
+ALTER TABLE c_employee SET FILEFORMAT RCFILE;
+ALTER TABLE c_employee SET LOCATION ‘hdfs://namenode:9000/user/dayongd/employee';
+ALTER TABLE c_employee ENABLE NO_DROP;
+ALTER TABLE c_employee DISABLE NO_DROP;
+ALTER TABLE c_employee ENABLE OFFLINE;
+ALTER TABLE c_employee DISABLE OFFLINE;
+ALTER TABLE c_employee SET FILEFORMAT ORC;
+ALTER TABLE c_employee CONCATENATE;
+ALTER TABLE c_employee SET FILEFORMAT TEXTFILE;
+</code></pre>
+
+<p>【Note： Hive release 0.14.0 ORC, the files that are added support fast stripe-level merging of small ORC files using the CONCATENATE command.】</p>
+
+<pre><code>DESC employee_internal;
+ALTER TABLE employee_internal CHANGE name employee_name string AFTER sex_age;
+ALTER TABLE employee_internal CHANGE employee_name name string FIRST;
+ALTER TABLE c_employee ADD COLUMNS (work string);
+ALTER TABLE c_employee REPLACE COLUMNS (name string);
+</code></pre>
+
+<p>【Note：The ALTER command will only modify Hive’s metadata, NOT the data. Users should make sure the actual data conforms with the metadata definition manually.】</p></li>
+<li><p>分区表 <br>
+–Create partitions when creating tables</p>
+
+<pre><code>CREATE TABLE employee_partitioned (name string,work_place ARRAY&lt;string&gt;,sex_age STRUCT&lt;sex:string,age:int&gt;,skills_score MAP&lt;string,int&gt;,depart_title MAP&lt;STRING,ARRAY&lt;STRING&gt;&gt;) PARTITIONED BY (Year INT, Month INT) ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' COLLECTION ITEMS TERMINATED BY ',' MAP KEYS TERMINATED BY ':';
+SHOW PARTITIONS employee_partitioned;
+</code></pre>
+
+<p>【We have to use  ALTER TABLE ADD PARTITION to add partitions to a table.】 <br>
+–Add multiple partitions</p>
+
+<pre><code>ALTER TABLE employee_partitioned ADD PARTITION (year=2014, month=11) PARTITION (year=2014, month=12);
+</code></pre>
+
+<p>–Drop the partition</p>
+
+<pre><code>ALTER TABLE employee_partitioned DROP IF EXISTS PARTITION (year=2014, month=11);
+</code></pre>
+
+<p>【To drop the partition including both data and metadata】 <br>
+–To load or overwrite data in partition, we can use the  LOAD or INSERT OVERWRITE statements. </p>
+
+<pre><code>LOAD DATA LOCAL INPATH '/home/hadoop/hive/employee.txt' OVERWRITE INTO TABLE employee_partitioned PARTITION (year=2014, month=12);
+SELECT name, year, month FROM employee_partitioned;
+</code></pre></li>
+<li><p>桶表 <br>
+By using buckets, Hive can easily and efficiently do sampling and map side joins <br>
+–Prepare another dataset and table for bucket table</p>
+
+<pre><code>CREATE TABLE employee_id (name string,employee_id int,work_place ARRAY&lt;string&gt;,sex_age STRUCT&lt;sex:string,age:int&gt;,skills_score MAP&lt;string,int&gt;,depart_title MAP&lt;string,ARRAY&lt;string&gt;&gt;)ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' COLLECTION ITEMS TERMINATED BY ',' MAP KEYS TERMINATED BY ':';
+LOAD DATA LOCAL INPATH '/home/hadoop/hive/employee_id.txt' OVERWRITE INTO TABLE employee_id;
+</code></pre>
+
+<p>–Create the buckets table</p>
+
+<pre><code>CREATE TABLE employee_id_buckets (name string,employee_id int,work_place ARRAY&lt;string&gt;,sex_age STRUCT&lt;sex:string,age:int&gt;,skills_score MAP&lt;string,int&gt;,depart_title MAP&lt;string,ARRAY&lt;string &gt;&gt;)CLUSTERED BY (employee_id) INTO 2 BUCKETS ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' COLLECTION ITEMS TERMINATED BY ',' MAP KEYS TERMINATED BY ':';
+</code></pre>
+
+<p>【Bucket numbers：To define the proper number of buckets, we should avoid having too much or too little of data in each bucket.  For example, we can plan 512MB of data in each bucket, if the Hadoop block size is 256 MB. If possible, use 2N as the number of buckets.】</p>
+
+<pre><code>set map.reduce.tasks = 2;
+set hive.enforce.bucketing = true;
+INSERT OVERWRITE TABLE employee_id_buckets SELECT * FROM employee_id;
+</code></pre>
+
+<p>–Verify the buckets in the HDFS</p>
+
+<pre><code>hdfs dfs -ls /user/hive/warehouse/employee_id_buckets
+</code></pre></li>
+<li><p>视图 <br>
+Unlike some RDBMS, Hive views do not store data or get materialized. </p>
+
+<pre><code>CREATE VIEW employee_skills AS SELECT name, skills_score['DB'] AS DB,skills_score['Perl'] AS Perl,skills_score['Python'] AS Python,skills_score['Sales'] as Sales,skills_score['HR'] as HR FROM employee;
+</code></pre>
+
+<p>Use  SHOW CREATE TABLE  or  DESC FORMATTED TABLE to display the  CREATE VIEW statement that created a view. The following are other Hive view DDLs:</p>
+
+<pre><code>ALTER VIEW employee_skills SET TBLPROPERTIES ('comment' = 'This is a view');
+ALTER VIEW employee_skills AS SELECT * from employee ;
+DROP VIEW employee_skills;
+</code></pre></li>
+<li><p>Data Manipulation <br>
+① Data exchange – LOAD</p>
+
+<pre><code>LOAD DATA LOCAL INPATH '/home/dayongd/Downloads/employee_hr.txt' OVERWRITE INTO TABLE employee_hr;
+LOAD DATA LOCAL INPATH '/home/dayongd/Downloads/employee.txt' OVERWRITE INTO TABLE employee_partitioned PARTITION (year=2014, month=12);
+LOAD DATA INPATH '/user/dayongd/employee/employee.txt' OVERWRITE INTO TABLE employee;
+LOAD DATA INPATH 'hdfs://[dfs_host]:8020/user/dayongd/employee/employee.txt' OVERWRITE INTO TABLE employee;
+</code></pre>
+
+<p>② Data exchange – INSERT</p>
+
+<pre><code>INSERT INTO TABLE employee SELECT * FROM ctas_employee;
+WITH a AS (SELECT * FROM ctas_employee ) FROM a INSERT OVERWRITE TABLE employee SELECT *;
+FROM ctas_employee INSERT OVERWRITE TABLE employee SELECT * INSERT OVERWRITE TABLE employee_internal SELECT * ;
+</code></pre>
+
+<p>Dynamic partition is not enabled by default. We need to set the following properties to make it work:</p>
+
+<pre><code>SET hive.exec.dynamic.partition=true;
+SET hive.exec.dynamic.partition.mode=nonstrict;
+INSERT INTO TABLE employee_partitioned PARTITION(year, month) SELECT name, array('Toronto') as work_place, named_struct("sex","Male","age",30) as sex_age,map("Python",90) as skills_score,map("R&amp;D",array('Developer')) as depart_title,year(start_date) as year, month(start_date) as month FROM employee_hr eh WHERE eh.employee_id = 102;
+</code></pre></li>
+</ol>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

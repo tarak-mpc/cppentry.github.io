@@ -1,0 +1,208 @@
+---
+layout:     post
+title:      2、大数据集群搭建之---CDH版本的hadoop集群的安装
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h2><a id="_0"></a>本文内容简介：</h2>
+<p><strong>1、CDH版本的hadoop软件的重新编译<br>
+2、上传并解压编译好的CDH版本的hadoop软件<br>
+3、hadoop的相关文件的配置</strong></p>
+<h2><a id="CDHhadoop_6"></a>一、重新编译CDH版本的hadoop软件</h2>
+<ol>
+<li>
+<p><strong>为什么使用CDH版本的hadoop？</strong><br>
+Cloudera版本的hadoop（Cloudera’s Distribution Including Apache Hadoop，简称“CDH”）。Cloudera公司对hadoop软件进行了很好的维护，hadoop关于其他软件的兼容性做的非常好，所以企业生产都使用CDH版本的hadoop。关于更多信息可以上百度，这里不多说了。</p>
+</li>
+<li>
+<p><strong>为什么要编译hadoop？</strong><br>
+由于CDH的所有安装包版本都给出了对应的软件版本，一般情况下是不需要自己进行编译的，但是由于cdh给出的hadoop的安装包没有提供带C程序访问的接口，所以我们在使用本地库（本地库可以用来做压缩，以及支持C程序等等）的时候就会出问题，好了废话不多说，接下来看如何编译</p>
+</li>
+<li>
+<p><strong>CDH版本的hadoop官网下载地址：<a href="http://archive.cloudera.com/cdh5/cdh/5/" rel="nofollow">http://archive.cloudera.com/cdh5/cdh/5/</a></strong><br>
+在这里你可以找到任何的关于集群的软件以及对应的版本，下载软件时看准CDH三个字母之后的数字，如hadoop-2.6.0-cdh5.14.0，版本号为cdh5.14.0，前面的2.6.0不用管，<strong>找与hadoop-2.6.0-cdh5.14.0相对应版本的软件只需要看准软件包是CDH5.14.0就好。</strong> 如hive-1.1.0-cdh5.14.0与hadoop-2.6.0-cdh5.14.0版本号一致。</p>
+</li>
+<li>
+<p><strong>编译环境的准备</strong></p>
+</li>
+</ol>
+<ul>
+<li><strong>4.1 准备linux环境</strong><br>
+准备一台linux环境，内存4G或以上，硬盘40G或以上，我这里使用的是Centos6.9  64位的操作系统（注意：一定要使用64位的操作系统）</li>
+<li><strong>4.2 虚拟机联网，关闭防火墙，关闭selinux</strong></li>
+</ul>
+<p>关闭防火墙命令：</p>
+<pre><code>service  iptables   stop
+chkconfig   iptables  off 
+</code></pre>
+<p>关闭selinux</p>
+<pre><code>vim /etc/selinux/config
+</code></pre>
+<p><img src="https://img-blog.csdnimg.cn/2018103021293919.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9uaWFvcmVuMDAwMQ==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<ul>
+<li><strong>4.3 安装jdk1.7</strong><br>
+注意：亲测证明hadoop-2.6.0-cdh5.14.0 这个版本的编译，只能使用jdk1.7，如果使用jdk1.8那么就会报错</li>
+</ul>
+<p>查看centos6.9自带的openjdk</p>
+<pre><code>rpm -qa | grep java 
+</code></pre>
+<p><img src="https://img-blog.csdnimg.cn/20181030213225131.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9uaWFvcmVuMDAwMQ==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>
+将所有这些openjdk全部卸载掉<br>
+rpm -e java-1.6.0-openjdk-1.6.0.41-1.13.13.1.el6_8.x86_64 tzdata-java-2016j-1.el6.noarch java-1.7.0-openjdk-1.7.0.131-2.6.9.0.el6_8.x86_64</p>
+<h2><a id="jdk18jdk18_46"></a>注意：这里一定不要使用jdk1.8，亲测jdk1.8会出现错误</h2>
+<p>将我们jdk的安装包上传到/export/softwares（我这里使用的是jdk1.7.0_71这个版本），，，个人建议单独搞一台机器来专门编译软件。解压我们的jdk压缩包<br>
+统一两个路径</p>
+<pre><code>mkdir -p /export/servers
+mkdir -p /export/softwares
+cd /export/softwares
+tar -zxvf jdk-7u71-linux-x64.tar.gz -C ../servers/
+</code></pre>
+<p>配置环境变量</p>
+<pre><code>vim /etc/profile
+</code></pre>
+<p>添加</p>
+<pre><code>export JAVA_HOME=/export/servers/jdk1.7.0_71
+export PATH=:$JAVA_HOME/bin:$PATH
+</code></pre>
+<p><img src="https://img-blog.csdnimg.cn/20181030213835656.png" alt="在这里插入图片描述"><br>
+让修改立即生效</p>
+<pre><code>source /etc/profile
+</code></pre>
+<ul>
+<li><strong>4.4 安装maven</strong><br>
+这里使用maven3.x以上的版本应该都可以，不建议使用太高的版本，强烈建议使用3.0.5的版本即可。</li>
+</ul>
+<p>将maven的安装包上传到/export/softwares<br>
+然后解压maven的安装包到/export/servers</p>
+<pre><code> cd /export/softwares/
+ tar -zxvf apache-maven-3.0.5-bin.tar.gz -C ../servers/
+</code></pre>
+<p>配置maven的环境变量</p>
+<pre><code>vim /etc/profile
+</code></pre>
+<p>添加</p>
+<pre><code>export MAVEN_HOME=/export/servers/apache-maven-3.0.5
+export MAVEN_OPTS="-Xms4096m -Xmx4096m"
+export PATH=:$MAVEN_HOME/bin:$PATH
+</code></pre>
+<p><img src="https://img-blog.csdnimg.cn/20181030214233489.png" alt="在这里插入图片描述"><br>
+让修改立即生效</p>
+<pre><code>source /etc/profile
+</code></pre>
+<p>解压maven的仓库，我已经下载好了的一份仓库，用来编译hadoop会比较快</p>
+<pre><code>tar -zxvf mvnrepository.tar.gz -C /export/servers/
+</code></pre>
+<p>修改maven的配置文件</p>
+<pre><code>cd  /export/servers/apache-maven-3.0.5/conf
+vim settings.xml
+</code></pre>
+<p>指定我们本地仓库存放的路径<br>
+<img src="https://img-blog.csdnimg.cn/2018103021434440.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9uaWFvcmVuMDAwMQ==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>
+添加一个我们阿里云的镜像地址，会让我们下载jar包更快</p>
+<pre><code> &lt;mirror&gt;
+      &lt;id&gt;alimaven&lt;/id&gt;
+      &lt;name&gt;aliyun maven&lt;/name&gt;
+      &lt;url&gt;http://maven.aliyun.com/nexus/content/groups/public/&lt;/url&gt;
+      &lt;mirrorOf&gt;central&lt;/mirrorOf&gt;
+ &lt;/mirror&gt;
+</code></pre>
+<p><img src="https://img-blog.csdnimg.cn/20181030214444515.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9uaWFvcmVuMDAwMQ==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<ul>
+<li><strong>4.5 安装findbugs</strong></li>
+</ul>
+<p>下载findbugs</p>
+<pre><code>cd  /export/softwares
+wget --no-check-certificate https://sourceforge.net/projects/findbugs/files/findbugs/1.3.9/findbugs-1.3.9.tar.gz/download -O findbugs-1.3.9.tar.gz
+</code></pre>
+<p>解压findbugs</p>
+<pre><code>tar -zxvf findbugs-1.3.9.tar.gz -C ../servers/
+</code></pre>
+<p>配置findbugs的环境变量</p>
+<pre><code>vim /etc/profile
+</code></pre>
+<p>如下：</p>
+<pre><code>export JAVA_HOME=/export/servers/jdk1.7.0_75
+export PATH=:$JAVA_HOME/bin:$PATH
+
+export MAVEN_HOME=/export/servers/apache-maven-3.0.5
+export PATH=:$MAVEN_HOME/bin:$PATH
+
+export FINDBUGS_HOME=/export/servers/findbugs-1.3.9
+export PATH=:$FINDBUGS_HOME/bin:$PATH
+</code></pre>
+<p><img src="https://img-blog.csdnimg.cn/20181030214903526.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9uaWFvcmVuMDAwMQ==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>
+让修改立即生效</p>
+<pre><code>source  /etc/profile
+</code></pre>
+<ul>
+<li><strong>4.6 在线安装一些依赖包</strong></li>
+</ul>
+<p>执行命令（一条一条执行）</p>
+<pre><code>  yum install autoconf automake libtool cmake
+  yum install ncurses-devel
+  yum install openssl-devel
+  yum install lzo-devel zlib-devel gcc gcc-c++
+</code></pre>
+<p>bzip2压缩需要的依赖包</p>
+<pre><code>yum install -y  bzip2-devel
+</code></pre>
+<ul>
+<li><strong>4.7 安装protobuf</strong></li>
+</ul>
+<p>protobuf下载百度网盘地址 <a href="https://pan.baidu.com/s/1pqW6bHxh37abe8v7iTcGyQ" rel="nofollow">https://pan.baidu.com/s/1pqW6bHxh37abe8v7iTcGyQ</a></p>
+<p>下载之后上传到  /export/softwares<br>
+解压protobuf并进行编译</p>
+<pre><code>cd  /export/softwares
+tar -zxvf protobuf-2.5.0.tar.gz -C ../servers/
+cd   /export/servers/protobuf-2.5.0
+./configure
+make &amp;&amp; make install
+</code></pre>
+<ul>
+<li><strong>4.8 安装snappy</strong></li>
+</ul>
+<p>执行</p>
+<pre><code>cd /export/softwares/
+tar -zxf snappy-1.1.1.tar.gz  -C ../servers/
+cd ../servers/snappy-1.1.1/
+./configure
+make &amp;&amp; make install
+</code></pre>
+<ul>
+<li><strong>4.9 下载cdh源码准备编译</strong></li>
+</ul>
+<p>将hadoop源码进行编译</p>
+<pre><code>cd  /export/softwares
+tar -zxvf hadoop-2.6.0-cdh5.14.0-src.tar.gz -C ../servers/
+cd  /export/servers/hadoop-2.6.0-cdh5.14.0
+</code></pre>
+<p><strong>（注意：不要使用这个命令）编译不支持snappy压缩：</strong><br>
+mvn package -Pdist,native -DskipTests –Dtar<br>
+因为该命令编译后hadoop的本地库不支持snappy压缩，我们编译的目的就是为了让hadoop支持snappy压缩</p>
+<p><strong>需要执行下面的命令：</strong><br>
+编译支持snappy压缩：</p>
+<pre><code>mvn package -DskipTests -Pdist,native -Dtar -Drequire.snappy -e -X
+</code></pre>
+<p>编译完成之后我们需要的压缩包就在下面这个路径里面</p>
+<p><img src="https://img-blog.csdnimg.cn/20181030220836549.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9uaWFvcmVuMDAwMQ==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<ul>
+<li>4.10 <strong>常见编译错误</strong></li>
+</ul>
+<p>如果编译时候出现这个错误：</p>
+<pre><code>An Ant BuildException has occured: exec returned: 2
+</code></pre>
+<p><img src="https://img-blog.csdnimg.cn/20181030221027761.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9uaWFvcmVuMDAwMQ==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>
+<p>这是因为tomcat的压缩包没有下载完成，需要自己下载一个对应版本的apache-tomcat-6.0.53.tar.gz的压缩包放到指定路径下面去即可<br>
+这两个路径下面需要放上这个tomcat的 压缩包</p>
+<pre><code>/export/servers/hadoop-2.6.0-cdh5.14.0/hadoop-hdfs-project/hadoop-hdfs-httpfs/downloads
+/export/servers/hadoop-2.6.0-cdh5.14.0/hadoop-common-project/hadoop-kms/downloads
+</code></pre>
+<p><img src="https://img-blog.csdnimg.cn/2018103022110831.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3hpYW9uaWFvcmVuMDAwMQ==,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>
+hadoop-2.6.0-cdh5.14.0到此编译完成。</p>
+<h2><a id="hadoop_212"></a>二、hadoop集群的安装（未完待续）</h2>
+
+            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

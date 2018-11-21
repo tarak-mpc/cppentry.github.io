@@ -1,0 +1,268 @@
+---
+layout:     post
+title:      Hive体系结构（四）注意事项与扩展特性
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<blockquote>
+  <p><a href="http://blog.csdn.net/lnho2015/article/details/51383717" rel="nofollow">Hive体系结构（一）架构与基本组成</a> <br>
+  <a href="http://blog.csdn.net/lnho2015/article/details/51417880" rel="nofollow">Hive体系结构（二）Hive的执行原理、与关系型数据库的比较</a> <br>
+  <a href="http://blog.csdn.net/lnho2015/article/details/51417996" rel="nofollow">Hive体系结构（三）元数据库与基本操作</a> <br>
+  <a href="http://blog.csdn.net/lnho2015/article/details/51418125" rel="nofollow">Hive体系结构（四）注意事项与扩展特性</a></p>
+</blockquote>
+
+<h2 id="1-使用hive注意点">1. 使用HIVE注意点</h2>
+
+<ol>
+<li>字符集 <br>
+Hadoop和Hive都是用UTF-8编码的，所以, 所有中文必须是UTF-8编码, 才能正常使用。 <br>
+备注：中文数据load到表里面,，如果字符集不同，很有可能全是乱码需要做转码的，但是hive本身没有函数来做这个。</li>
+<li>压缩 <br>
+hive.exec.compress.output 这个参数，默认是false，但是很多时候貌似要单独显式设置一遍，否则会对结果做压缩的，如果你的这个文件后面还要在hadoop下直接操作，那么就不能压缩了。</li>
+<li>count(distinct) <br>
+当前的Hive不支持在一条查询语句中有多Distinct。如果要在Hive查询语句中实现多Distinct，需要使用至少n+1条查询语句（n为distinct的数目），前n条查询分别对n个列去重，最后一条查询语句对n个去重之后的列做Join操作，得到最终结果。</li>
+<li>JOIN <br>
+只支持等值连接</li>
+<li>DML操作 <br>
+只支持INSERT/LOAD操作，无UPDATE和DELTE</li>
+<li>HAVING <br>
+不支持HAVING操作。如果需要这个功能要嵌套一个子查询用where限制</li>
+<li>子查询 <br>
+Hive不支持where子句中的子查询</li>
+<li>Join中处理null值的语义区别 <br>
+SQL标准中，任何对null的操作（数值比较，字符串操作等）结果都为null。Hive对null值处理的逻辑和标准基本一致，除了Join时的特殊逻辑。这里的特殊逻辑指的是，Hive的Join中，作为Join key的字段比较，null=null是有意义的，且返回值为true。</li>
+<li>分号字符 <br>
+分号是SQL语句结束标记，在HiveQL中也是，但是在HiveQL中，对分号的识别没有那么智慧，例如：</li>
+</ol>
+
+
+
+<pre class="prettyprint"><code class=" hljs oxygene"><span class="hljs-keyword">select</span> <span class="hljs-keyword">concat</span>(cookie_id,<span class="hljs-keyword">concat</span>(<span class="hljs-string">';'</span>,’zoo’)) <span class="hljs-keyword">from</span> c02_clickstat_fatdt1 limit <span class="hljs-number">2</span>;
+FAILED: Parse Error: line <span class="hljs-number">0</span>:-<span class="hljs-number">1</span> cannot recognize input <span class="hljs-string">'&lt;EOF&gt;'</span> <span class="hljs-keyword">in</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">specification</span></span></code></pre>
+
+<p>可以推断，Hive解析语句的时候，只要遇到分号就认为语句结束，而无论是否用引号包含起来。 <br>
+解决的办法是，使用分号的八进制的ASCII码进行转义，那么上述语句应写成：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs oxygene"><span class="hljs-keyword">select</span> <span class="hljs-keyword">concat</span>(cookie_id,<span class="hljs-keyword">concat</span>(<span class="hljs-string">'\073'</span>,<span class="hljs-string">'zoo'</span>)) <span class="hljs-keyword">from</span> c02_clickstat_fatdt1 limit <span class="hljs-number">2</span>;</code></pre>
+
+<p>为什么是八进制ASCII码？我尝试用十六进制的ASCII码，但Hive会将其视为字符串处理并未转义，好像仅支持八进制，原因不详。这个规则也适用于其他非SELECT语句，如CREATE TABLE中需要定义分隔符，那么对不可见字符做分隔符就需要用八进制的ASCII码来转义。 <br>
+10. Insert <br>
+根据语法Insert必须加“OVERWRITE”关键字，也就是说每一次插入都是一次重写。</p>
+
+
+
+<h2 id="2-hive的扩展特性">2. Hive的扩展特性</h2>
+
+<p>Hive 是一个很开放的系统，很多内容都支持用户定制，包括： <br>
+* 文件格式：Text File，Sequence File <br>
+* 内存中的数据格式： Java Integer/String, Hadoop IntWritable/Text <br>
+* 用户提供的map/reduce脚本：不管什么语言，利用stdin/stdout传输数据 <br>
+* 用户自定义函数：Substr, Trim, 1 – 1 <br>
+* 用户自定义聚合函数：Sum, Average…… n – 1</p>
+
+
+
+<h2 id="21-数据文件格式">2.1 数据文件格式</h2>
+
+<table>
+<thead>
+<tr>
+  <th>TextFile</th>
+  <th>SequenceFIle</th>
+  <th>RCFFile</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>Data type</td>
+  <td>Text Only</td>
+  <td>Text/Binary</td>
+</tr>
+<tr>
+  <td>Internal Storage Order</td>
+  <td>Row-based</td>
+  <td>Row-based</td>
+</tr>
+<tr>
+  <td>Compression</td>
+  <td>File Based</td>
+  <td>Block Based</td>
+</tr>
+<tr>
+  <td>Splitable</td>
+  <td>YES</td>
+  <td>YES</td>
+</tr>
+<tr>
+  <td>Splitable After Compression</td>
+  <td>No</td>
+  <td>YES</td>
+</tr>
+</tbody></table>
+
+
+<p>例如使用文件文件格式存储创建的表：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> mylog ( user_id BIGINT, page_url STRING, unix_time <span class="hljs-keyword">INT</span>) STORED <span class="hljs-keyword">AS</span> TEXTFILE;</span></code></pre>
+
+<p>当用户的数据文件格式不能被当前Hive所识别的时候，可以自定义文件格式。可以参考<code>contrib/src/java/org/apache/hadoop/hive/contrib/fileformat/base64</code>中的例子。写完自定义的格式后，在创建表的时候指定相应的文件格式就可以：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> base64_test(col1 STRING, col2 STRING)
+STORED <span class="hljs-keyword">AS</span>
+INPUTFORMAT <span class="hljs-string">'org.apache.hadoop.hive.contrib.fileformat.base64.Base64TextInputFormat'</span>
+OUTPUTFORMAT <span class="hljs-string">'org.apache.hadoop.hive.contrib.fileformat.base64.Base64TextOutputFormat'</span>;</span></code></pre>
+
+
+
+<h2 id="22-serde">2.2 SerDe</h2>
+
+<p>SerDe是Serialize/Deserilize的简称，目的是用于序列化和反序列化。 <br>
+序列化的格式包括：分隔符（tab、逗号、CTRL-A）、Thrift 协议。 <br>
+反序列化（内存内）：Java Integer/String/ArrayList/HashMap、Hadoop Writable类、用户自定义类。 <br>
+其中，LazyObject只有在访问到列的时候才进行反序列化。 BinarySortable保留了排序的二进制格式。 <br>
+当存在以下情况时，可以考虑增加新的SerDe： <br>
+* 用户的数据有特殊的序列化格式，当前的Hive不支持，而用户又不想在将数据加载至Hive前转换数据格式。 <br>
+* 用户有更有效的序列化磁盘数据的方法。  </p>
+
+<p>用户如果想为Text数据增加自定义Serde，可以参照<code>contrib/src/java/org/apache/hadoop/hive/contrib/serde2/RegexSerDe.java</code>中的例子。RegexSerDe利用用户提供的正则表倒是来反序列化数据，例如：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs perl">CREATE TABLE apache_log(
+host STRING,
+identity STRING,
+user STRING,
+<span class="hljs-keyword">time</span> STRING,
+request STRING,
+status STRING,
+size STRING,
+referer STRING,
+agent STRING)
+ROW FORMAT
+SERDE <span class="hljs-string">'org.apache.hadoop.hive.contrib.serde2.RegexSerDe'</span>
+WITH SERDEPROPERTIES
+( <span class="hljs-string">"input.regex"</span> = <span class="hljs-string">"([^ ]<span class="hljs-variable">*)</span> ([^ ]<span class="hljs-variable">*)</span> ([^ ]<span class="hljs-variable">*)</span> (-|\\[[^\\]]<span class="hljs-variable">*\</span>\])
+([^ \"]<span class="hljs-variable">*|</span>\"[^\"]<span class="hljs-variable">*\</span>"</span>) (-|[<span class="hljs-number">0</span>-<span class="hljs-number">9</span>]<span class="hljs-variable">*)</span> (-|[<span class="hljs-number">0</span>-<span class="hljs-number">9</span>]<span class="hljs-variable">*)</span>(?: ([^ \<span class="hljs-string">"]<span class="hljs-variable">*|</span>\"[^\"]<span class="hljs-variable">*\</span>"</span>)
+([^ \<span class="hljs-string">"]<span class="hljs-variable">*|</span>\"[^\"]<span class="hljs-variable">*\</span>"</span>))?<span class="hljs-string">",
+"</span>output.<span class="hljs-keyword">format</span>.string<span class="hljs-string">" = "</span><span class="hljs-variable">%1</span><span class="hljs-variable">$s</span> <span class="hljs-variable">%2</span><span class="hljs-variable">$s</span> <span class="hljs-variable">%3</span><span class="hljs-variable">$s</span> <span class="hljs-variable">%4</span><span class="hljs-variable">$s</span> <span class="hljs-variable">%5</span><span class="hljs-variable">$s</span> <span class="hljs-variable">%6</span><span class="hljs-variable">$s</span> <span class="hljs-variable">%7</span><span class="hljs-variable">$s</span> <span class="hljs-variable">%8</span><span class="hljs-variable">$s</span> <span class="hljs-variable">%9</span><span class="hljs-variable">$s</span><span class="hljs-string">";)
+STORED AS TEXTFILE;</span></code></pre>
+
+<p>用户如果想为Binary数据增加自定义的SerDe，可以参考例子<code>serde/src/java/org/apache/hadoop/hive/serde2/binarysortable</code>，例如：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TABLE</span> mythrift_table
+<span class="hljs-keyword">ROW</span> FORMAT SERDE
+<span class="hljs-string">'org.apache.hadoop.hive.contrib.serde2.thrift.ThriftSerDe'</span>
+<span class="hljs-keyword">WITH</span> SERDEPROPERTIES (
+<span class="hljs-string">"serialization.class"</span> = <span class="hljs-string">"com.facebook.serde.tprofiles.full"</span>,
+<span class="hljs-string">"serialization.format"</span> = <span class="hljs-string">"com.facebook.thrift.protocol.TBinaryProtocol"</span>;</span>);</code></pre>
+
+
+
+<h2 id="23-mapreduce脚本transform">2.3 Map/Reduce脚本（Transform）</h2>
+
+<p>用户可以自定义Hive使用的Map/Reduce脚本，比如：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql">FROM (
+<span class="hljs-operator"><span class="hljs-keyword">SELECT</span> TRANSFORM(user_id, page_url, unix_time)
+<span class="hljs-keyword">USING</span> <span class="hljs-string">'page_url_to_id.py'</span>
+<span class="hljs-keyword">AS</span> (user_id, page_id, unix_time)
+<span class="hljs-keyword">FROM</span> mylog
+DISTRIBUTE <span class="hljs-keyword">BY</span> user_id
+SORT <span class="hljs-keyword">BY</span> user_id, unix_time)
+mylog2
+<span class="hljs-keyword">SELECT</span> TRANSFORM(user_id, page_id, unix_time)
+<span class="hljs-keyword">USING</span> <span class="hljs-string">'my_python_session_cutter.py'</span> <span class="hljs-keyword">AS</span> (user_id, session_info);</span></code></pre>
+
+<p>Map/Reduce脚本通过stdin/stdout进行数据的读写，调试信息输出到stderr。</p>
+
+
+
+<h2 id="24-udfuser-defined-function">2.4 UDF（User-Defined-Function）</h2>
+
+<p>用户可以自定义函数对数据进行处理，例如：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql">add jar build/ql/test/test-udfs.jar;
+<span class="hljs-operator"><span class="hljs-keyword">CREATE</span> <span class="hljs-keyword">TEMPORARY</span> FUNCTION testlength
+<span class="hljs-keyword">AS</span> <span class="hljs-string">'org.apache.hadoop.hive.ql.udf.UDFTestLength'</span>;</span>
+<span class="hljs-operator"><span class="hljs-keyword">SELECT</span> testlength(src.<span class="hljs-keyword">value</span>) <span class="hljs-keyword">FROM</span> src;</span>
+<span class="hljs-operator"><span class="hljs-keyword">DROP</span> <span class="hljs-keyword">TEMPORARY</span> FUNCTION testlength;</span></code></pre>
+
+<p>UDFTestLength.java为：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">package</span> org.apache.hadoop.hive.ql.udf;
+
+<span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UDFTestLength</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">UDF</span> {</span>
+  <span class="hljs-keyword">public</span> Integer <span class="hljs-title">evaluate</span>(String s) {
+    <span class="hljs-keyword">if</span> (s == <span class="hljs-keyword">null</span>) {
+      <span class="hljs-keyword">return</span> <span class="hljs-keyword">null</span>;
+    }
+    <span class="hljs-keyword">return</span> s.length();
+  }
+}</code></pre>
+
+<p>UDF 具有以下特性： <br>
+* 用java写UDF很容易。 <br>
+* Hadoop的Writables/Text 具有较高性能。 <br>
+* UDF可以被重载。 <br>
+* Hive支持隐式类型转换。 <br>
+* UDF支持变长的参数。 <br>
+* genericUDF 提供了较好的性能（避免了反射）。</p>
+
+
+
+<h2 id="25-udafuser-defined-aggregation-funcation">2.5 UDAF（User-Defined Aggregation Funcation）</h2>
+
+<p>例子：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">SELECT</span> page_url, <span class="hljs-aggregate">count</span>(<span class="hljs-number">1</span>), <span class="hljs-aggregate">count</span>(<span class="hljs-keyword">DISTINCT</span> user_id) <span class="hljs-keyword">FROM</span> mylog;</span></code></pre>
+
+<p>UDAFCount.java代码如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs java"><span class="hljs-keyword">public</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UDAFCount</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">UDAF</span> {</span>
+  <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Evaluator</span> <span class="hljs-keyword">implements</span> <span class="hljs-title">UDAFEvaluator</span> {</span>
+    <span class="hljs-keyword">private</span> <span class="hljs-keyword">int</span> mCount;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title">init</span>() {
+      mcount = <span class="hljs-number">0</span>;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">iterate</span>(Object o) {
+      <span class="hljs-keyword">if</span> (o!=<span class="hljs-keyword">null</span>)
+        mCount++;
+      <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+    }
+
+    <span class="hljs-keyword">public</span> Integer <span class="hljs-title">terminatePartial</span>() {
+      <span class="hljs-keyword">return</span> mCount;
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-keyword">boolean</span> <span class="hljs-title">merge</span>(Integer o) {
+      mCount += o;
+      <span class="hljs-keyword">return</span> <span class="hljs-keyword">true</span>;
+    }
+
+    <span class="hljs-keyword">public</span> Integer <span class="hljs-title">terminate</span>() {
+      <span class="hljs-keyword">return</span> mCount;
+  }
+}</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

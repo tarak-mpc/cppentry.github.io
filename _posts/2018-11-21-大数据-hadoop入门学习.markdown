@@ -1,0 +1,95 @@
+---
+layout:     post
+title:      大数据-hadoop入门学习
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h2 id="hadoop">Hadoop</h2>
+
+<p>由于apache版本的Hadoop存在一些BUG，这里使用cdh5.3.6版本的Hadoop</p>
+
+<p>简介</p>
+
+<ul><li>Hadoop是一个可靠的、可扩展的、开源的、高可用的分布式并行计算框架</li>
+</ul><p>主要模块</p>
+
+<p><strong>Hadoop Common:</strong>为其他Hadoop模块提供基础设施 <br><strong>Hadoop HDFS:</strong>一个高可靠的、高吞吐量的分布式文件存储系统 <br><strong>Hadoop MapReduce:</strong>一个分布式的离线并行计算框架 <br><strong>Hadoop YARN：</strong>一个新的MapReduce框架，负责MapReduce任务调度与资源管理</p>
+
+<p>HDFS架构</p>
+
+<p><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20180826164110398?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMTQ4MjA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<p><strong>主从架构</strong></p>
+
+<ul><li>主节点(只有一个，HA除外): 
+	<ul><li>NameNode（NN）:存储元数据(数据块的校验和、时间戳、数据块存储的位置)</li>
+		<li>SecondaryNameNode（SNN）:用来辅助NameNode同步元数据，减轻NameNode压力，不是NameNode的热备</li>
+	</ul></li>
+	<li>从节点(可以有多个): 
+	<ul><li>DataNode（DN）:存储数据块，每一个数据块默认副本数是3份(可修改)，如果有两个及以上机架，那么另外的机架必然会至少存在一份副本，防止其中一台机架挂掉(如断电)，导致数据完全丢失</li>
+	</ul></li>
+</ul><p><strong>数据存取（就近原则）</strong></p>
+
+<ul><li>读取的时候,如果当前机架存在数据，不会到另外一个机架去读取</li>
+</ul><p><strong>储存机制</strong></p>
+
+<ul><li>当一个文件上传到HDFS平台时，将会按照128Mb大小切割成数个数据块，并且每个数据块会进行复制，达到设置的副本数。接下来会根据NameNode的平衡机制（平衡各DataNode上储存的数据）分配到不同的DataNode中，并在NameNode中记录元数据</li>
+</ul><p><strong>容错机制</strong></p>
+
+<ul><li>可以随意的增删服务器节点</li>
+	<li>所有datanode会每隔3s向NameNode发送心跳信息(包括数据块的校验和，块报告)，NameNode会接收DataNode发送的块的报告，如果规定时间内，NameNode没有接收到DataNode发送的心跳报告，就默认这台机器已经挂掉</li>
+	<li>如果某台DataNode挂掉或部分数据丢失，这时NameNode收不到这台DataNode发送的心跳报告或者心跳报告信息与元数据不符，将会检查元数据来匹配DataNode中丢失的数据块，并且从另外机架复制数据块达到副本数</li>
+</ul><p><strong>SecondaryNameNode辅助过程</strong></p>
+
+<p><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20180826164925665?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMTQ4MjA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<ol><li>启动NameNode后，NameNode将fsimage载入内存，并按顺序执行edits文件中的命令记录</li>
+	<li>SecondaryNameNode定期通过http get方式从NameNode中获取edits与fsimage，此时NameNode生成新的空edits文件用来接收Client命令，SecondaryNameNode会将读取过来的fsimage加载到内存，按顺序执行edits文件命令，生成新的fsimage文件</li>
+	<li>SecondaryNameNode将新的fsimage文件发送给NameNode代替原来的fsimage</li>
+</ol><p>原本NameNode中的edits文件会记录所有命令，当文件过大时会导致启动NameNode时间过长，启动时NameNode处于安全模式，只读不可写。使用SecondaryNameNode将会减小edits大小，减轻NameNode启动时的压力</p>
+
+<p>YARN架构</p>
+
+<p><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20180826164216689?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMTQ4MjA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<p><strong>资源调度管理框架(负责运行集群中的任务)</strong></p>
+
+<ul><li>主节点(全局的，只有一个，除了HA)： 
+	<ul><li>ResourceManager(RM):资源管理服务，接收Client提交的任务请求，并把任务分发到各个节点中运行，并且给NodeManager提供运行时资源</li>
+	</ul></li>
+	<li>从节点(可以有多个)： 
+	<ul><li>NodeManager(NM):资源管理器，负责向ResourceManager申请运行时的资源并管理运行此节点的任务</li>
+	</ul></li>
+</ul><p><strong>运行机制</strong></p>
+
+<p><img alt="这里写图片描述" class="has" src="https://img-blog.csdn.net/20180826165120640?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMTQ4MjA4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70"></p>
+
+<ol><li>Client提交应用程序（包括用户程序、ApplicationMaster程序、ApplicationMaster启动命令等）到ResourceManager</li>
+	<li>ResourceManager向NodeManager分配一个Container，并在Container中启动ApplicationMaster</li>
+	<li>ApplicationMaster向ResourceManager注册，这样用户可以直接通过ResourceManager査看应用程序的运行状态(然后它将为各个任务申请资源，并监控它的运行状态，直到运行结束)</li>
+	<li>ApplicationMaster采用轮询的方式通过RPC协议向ResourceManager申请和领取资源</li>
+	<li>一旦ApplicationMaster成功申请到资源，便开始与对应的NodeManager通信，要求它启动任务</li>
+	<li>NodeManager为任务设置好运行环境（包括环境变量、JAR包、二进制程序等）后，将任务启动命令写到一个脚本中，并通过运行该脚本启动任务</li>
+	<li>各个任务通过某个RPC协议向ApplicationMaster汇报自己的状态和进度，使ApplicationMaster能够随时掌握各个任务的运行状态，从而可以在任务失败时重新启动任务。在应用程序运行过程中，用户可随时通过RPC向ApplicationMaster查询应用程序的当前运行状态</li>
+	<li>应用程序运行完成后，ApplicationMaster通过RPC协议向ResourceManager注销并关闭自己</li>
+</ol><p>MapReduce架构</p>
+
+<p><strong>Map</strong></p>
+
+<ul><li>并行处理输入的数据</li>
+</ul><p><strong>Reduce    2317384986     yxxy1717</strong></p>
+
+<ul><li>处理Map输出的数据,将Map的结果进行汇总</li>
+</ul><p><strong>Shuffle</strong></p>
+
+<ul><li>分为MapTask与ReduceTask</li>
+	<li>MapTask将数据写到本地磁盘</li>
+	<li>ReduceTask从每一个MapTask上读取数据</li>
+</ul><p><strong>特点</strong></p>
+
+<ul><li>仅适合离线批处理</li>
+	<li>容错性高、扩展性高</li>
+	<li>磁盘开销大、效率低</li>
+</ul><p><strong>MapReduce整体运行过程</strong></p>            </div>
+                </div>

@@ -1,0 +1,402 @@
+---
+layout:     post
+title:      hadoop的伪分布式模式配置与安装
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u013008795/article/details/51133809				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p align="center"><strong>hadoop的伪分布式模式配置与安装</strong></p>
+<p> </p>
+<p>上次对hadoop单机模式中已经介绍了hadoop的基本安装，本次将讲解hadoop的伪分布式模式进行对hadoop的基本模拟部署。</p>
+<p> </p>
+<p>安装软件：</p>
+<p>         系统：Linux 2.6.32-358.el6.x86_64</p>
+<p>         JDK：jdk-7u7-linux-i586.tar.gz</p>
+<p>         Hadoop版本：hadoop-0.20.2-cdh3u4.tar.gz</p>
+<p>硬件环境：</p>
+<p>         三台主机：分别为</p>
+<p>gdy192             192.168.61.192</p>
+<p>gdy194             192.168.61.194</p>
+<p>gdy195             192.168.61.195</p>
+<p>本次部署模型为：</p>
+<p>gdy192上部署：NameNode和JobTracker</p>
+<p>gdy194上部署：SecondaryNameNode</p>
+<p>gdy195上部署：DateNode TaskTracker</p>
+<p> </p>
+<p>首先配置三台主机的hosts文件，以便之后不用ip而直接用别名进行相互访问</p>
+<p>首先在gdy192上配置一份信息。</p>
+<p>[root@gdy192 /]#vim /etc/hosts</p>
+<p><img src="https://img-blog.csdn.net/20160414100455982?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>wq保存退出</p>
+<p>将已经配置好的文件分别拷贝一份到其他两台主机上</p>
+<p>拷贝文件到gdy194上</p>
+<p>[root@gdy192 ~]#scp /etc/hosts root@gdy194:/etc/ </p>
+<p><img src="https://img-blog.csdn.net/20160414100512638?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>输入gdy194的root密码</p>
+<p> <img src="https://img-blog.csdn.net/20160414100532451?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>拷贝成功。</p>
+<p>去gdy194上查看/etc/hosts验证是否是叫我们刚才修改的文件</p>
+<p>[root@gdy194 /]#cat /etc/hosts</p>
+<p><img src="https://img-blog.csdn.net/20160414100544795?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>可以看到拷贝成功。</p>
+<p>同样再次拷贝一份到gdy195</p>
+<p>在gdy192上输入：</p>
+<p>[root@gdy192 ~]#scp /etc/hosts root@gdy195:/etc/</p>
+<p><img src="https://img-blog.csdn.net/20160414100600343?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>这里就不验证了。</p>
+<p>在gdy192上创建jDK和Hadoop的安装目录gd</p>
+<p>[root@gdy192 /]#mkdir /usr/gd/ -pv</p>
+<p><img src="https://img-blog.csdn.net/20160414100626545?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>在gdy194上创建JDK和Hadoop的安装目录gd</p>
+<p><img src="https://img-blog.csdn.net/20160414100640359?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>在gdy195上创建JDK和Hadoop的安装目录gd</p>
+<p><img src="https://img-blog.csdn.net/20160414100852283?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>分别在gdy192,gdy194,gdy195上创建hduser用户并设置密码</p>
+<p>在gdy192上</p>
+<p>[root@gdy192 /]#useradd hduser</p>
+<p>[root@gdy192 /]#passwd hduser</p>
+<p><img src="https://img-blog.csdn.net/20160414100916503?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>在gdy194上</p>
+<p>[root@gdy194 /]#useradd hduser</p>
+<p>[root@gdy194 /]#passwd hduser</p>
+<p><img src="https://img-blog.csdn.net/20160414101221179?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>在gdy195上</p>
+<p>[root@gdy195 /]#useradd hduser</p>
+<p>[root@gdy195 /]#passwd hduser</p>
+<p><img src="https://img-blog.csdn.net/20160414101254344?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>将之前准备好的软件包拷贝到gdy192上，</p>
+<p>如下图是我已经拷贝好的文件</p>
+<p><img src="https://img-blog.csdn.net/20160414101348095?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>将这两个文件解压到之前创建的目录/usr/gd/下面</p>
+<p>[root@gdy192ftpftp]# tar -xf jdk-7u7-linux-i586.tar.gz -C /usr/gd/</p>
+<p>[root@gdy192ftpftp]# tar -xf hadoop-0.20.2-cdh3u4.tar.gz -C /usr/gd/</p>
+<p><img src="https://img-blog.csdn.net/20160414101359885?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>使用ls /usr/gd/可以查看解压后的文件</p>
+<p>为jdk和hadoop创建软链接在/usr/gd目录下面</p>
+<p>[root@gdy192ftpftp]# ln -s /usr/gd/jdk1.7.0_07/ /usr/gd/java</p>
+<p>[root@gdy192ftpftp]# ln -s /usr/gd/hadoop-0.20.2-cdh3u4/ /usr/gd/hadoop</p>
+<p>[root@gdy192ftpftp]# ll /usr/gd/</p>
+<p><img src="https://img-blog.csdn.net/20160414101427166?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>配置java和hadoop的环境变量</p>
+<p>配置java的环境变量</p>
+<p>[root@gdy192 /]#vim /etc/profile.d/java.sh</p>
+<p><img src="https://img-blog.csdn.net/20160414101446642?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>添加如下信息：</p>
+<p>JAVA_HOME=/usr/gd/java</p>
+<p>PATH=$JAVA_HOME/bin:$PATH</p>
+<p>export JAVA_HOMEPATH</p>
+<p><img src="https://img-blog.csdn.net/20160414101503917?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>wq保存退出</p>
+<p>配置hadoop的环境变量</p>
+<p>[root@gdy192 /]#vim /etc/profile.d/hadoop.sh</p>
+<p><img src="https://img-blog.csdn.net/20160414101520402?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>添加如下信息：</p>
+<p>HADOOP_HOME=/usr/gd/hadoop</p>
+<p>PATH=$HADOOP_HOME/bin:$PATH</p>
+<p>export HADOOP_HOMEPATH</p>
+<p><img src="https://img-blog.csdn.net/20160414101534658?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>wq保存退出</p>
+<p>使用scp分别将这两个文件拷贝到gdy194和gdy195机器上的/etc/profile.d/目录下面。</p>
+<p>拷贝到gdy194上</p>
+<p>[root@gdy192 /]#scp /etc/profile.d/java.sh root@gdy194:/etc/profile.d/</p>
+<p>[root@gdy192 /]#scp /etc/profile.d/hadoop.sh root@gdy194:/etc/profile.d/</p>
+<p><img src="https://img-blog.csdn.net/20160414101547153?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>拷贝到gdy195上</p>
+<p>[root@gdy192 /]#scp /etc/profile.d/java.sh root@gdy195:/etc/profile.d/</p>
+<p>[root@gdy192 /]#scp /etc/profile.d/hadoop.sh root@gdy195:/etc/profile.d/</p>
+<p><img src="https://img-blog.csdn.net/20160414101602830?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>修改/usr/gd/目录下的所有文件的属主和属组为hduser</p>
+<p>[root@gdy192 /]#chown -R hduser.hduser /usr/gd</p>
+<p><img src="https://img-blog.csdn.net/20160414101623638?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>在gdy192上切换到hduser用户下面</p>
+<p>[root@gdy192 /]#su – hduser</p>
+<p><img src="https://img-blog.csdn.net/20160414101642393?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>使用ssh-keygen和ssh-copy-id为gdy192能无密码直接访问gdy194和gdy195下的hduser用户</p>
+<p>命令：</p>
+<p>先制作秘钥文件</p>
+<p>[hduser@gdy192 ~]$ssh-keygen -t rsa -P ''</p>
+<p><img src="https://img-blog.csdn.net/20160414101653362?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>回车</p>
+<p><img src="https://img-blog.csdn.net/20160414101709315?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>使用ssh-copy-id拷贝生成的公秘到gdy194机器上的hduser下，使gdy192能无密码访问gdy194</p>
+<p>[hduser@gdy192 ~]$ssh-copy-id -i .ssh/id_rsa.pub hduser@gdy194</p>
+<p><img src="https://img-blog.csdn.net/20160414101730655?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>输入yes</p>
+<p><img src="https://img-blog.csdn.net/20160414101746092?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>输入gdy194上的hduser的用户密码</p>
+<p><img src="https://img-blog.csdn.net/20160414101758218?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>使用ssh-copy-id拷贝生成的公秘到gdy195机器上的hduser下，使gdy192能无密码访问gdy195</p>
+<p>[hduser@gdy192 ~]$ssh-copy-id -i .ssh/id_rsa.pub hduser@gdy195</p>
+<p><img src="https://img-blog.csdn.net/20160414101812378?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>使用ssh-copy-id拷贝生成的公秘到gdy192机器上的hduser下，使gdy192能无密码访问gdy192</p>
+<p>注意：即使是hadoop中使用的是ip进行调度访问，即使是访问自己的机器，如果不配置无密码访问，访问时，一样需要输入密码。这里和之前配置hadoop单机模式时一样。需要配置无密码访问。</p>
+<p>[hduser@gdy192 ~]$ssh-copy-id -i .ssh/id_rsa.pub hduser@gdy192</p>
+<p><img src="https://img-blog.csdn.net/20160414101829718?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>验证gdy192是否已经不用输密码自己访问gdy194</p>
+<p>[hduser@gdy192 ~]$ssh gdy194 'date'</p>
+<p>能不需要输入密码就显示gdy194上的日期，则证明配置成功。</p>
+<p><img src="https://img-blog.csdn.net/20160414101848940?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>验证gdy192是否已经不用输密码自己访问gdy195</p>
+<p>[hduser@gdy192 ~]$ssh gdy195 'date'</p>
+<p><img src="https://img-blog.csdn.net/20160414101907675?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>验证gdy192是否已经不用输入访问自己gdy192</p>
+<p>[hduser@gdy192 ~]$ssh gdy192 'date'</p>
+<p><img src="https://img-blog.csdn.net/20160414101922047?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>查看三台机器上的系统世界是否一样</p>
+<p>[hduser@gdy192 ~]$ssh gdy194 'date';ssh gdy195 'date';ssh gdy192 'date'</p>
+<p>同步三个节点上的时间：</p>
+<p>注意：这里由于hadoop没有权限修改时间，需要配置root能无密码访问gdy194和gdy195,gdy192。然后在统一设定时间。或者你自己设计其他方法保证时间同步。不过，时间同步在正在部署的环境上是必须要有的。如果这步你不配置，对于本次的hadoop伪分布式模式也没有多大影响。不过建议还是配置下。</p>
+<p>配置代码如下。</p>
+<p>[hduser@gdy192 ~]$exit</p>
+<p>先退出hduser用户</p>
+<p>[root@gdy192 /]#cd ~</p>
+<p>进入root用户的家目录</p>
+<p><img src="https://img-blog.csdn.net/20160414101940220?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>制作秘钥文件</p>
+<p>[root@gdy192 ~]#ssh-keygen -t rsa -P ''</p>
+<p><img src="https://img-blog.csdn.net/20160414101955332?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>拷贝秘钥文件到gdy194,gdy195</p>
+<p> [root@gdy192 ~]# ssh-copy-id -i.ssh/id_rsa.pub root@gdy194</p>
+<p><img src="https://img-blog.csdn.net/20160414102013064?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>[root@gdy192 ~]#ssh-copy-id -i .ssh/id_rsa.pub root@gdy195</p>
+<p><img src="https://img-blog.csdn.net/20160414102045737?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>由于root自己访问自己，每次都需要确认一次yes,所以用root用户配置无密码访问自己没有用。再说这里的配置只是为了完成三台电脑的时间同步。</p>
+<p>先检查三台电脑的时间：</p>
+<p>[root@gdy192 ~]#ssh gdy194 'date';ssh gdy195 'date';date</p>
+<p><img src="https://img-blog.csdn.net/20160414102100878?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>将三台电脑的时间设为同一时间：</p>
+<p>[root@gdy192 ~]#ssh gdy194 'date 0929235415';ssh gdy195 'date 0929235415';date 0929235415</p>
+<p><img src="https://img-blog.csdn.net/20160414102117035?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>再次查看时间</p>
+<p>[root@gdy192 ~]#ssh gdy194 'date';ssh gdy195 'date';date</p>
+<p><img src="https://img-blog.csdn.net/20160414102133317?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>可以看到这里的时间就已经同步了。</p>
+<p>用gdy192切换到hduser用户下</p>
+<p>[root@gdy192 ~]#su - hduser</p>
+<p><img src="https://img-blog.csdn.net/20160414102147707?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>再来查看三台电脑的时间：</p>
+<p>[hduser@gdy192 ~]$ssh gdy194 'date';ssh gdy195 'date';ssh gdy192 date</p>
+<p><img src="https://img-blog.csdn.net/20160414102201551?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>接下来就要开始配置hadoop的配置文件了</p>
+<p>进程hadoop的文件目录里面</p>
+<p>[hduser@gdy192hadoop]$ cd /usr/gd/hadoop/conf/</p>
+<p><img src="https://img-blog.csdn.net/20160414102216051?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>由于在hadoop单机模式配置里面已经对重要文件做个解释。这里不再重复解释，详情请见日志《hadoop的单机模式配置与安装》</p>
+<p>编辑masters文件</p>
+<p>[hduser@gdy192conf]$ vim masters</p>
+<p>将原来的localhost修改为gdy194</p>
+<p><img src="https://img-blog.csdn.net/20160414102234458?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>wq保存退出</p>
+<p>注意：在上面就已经说明gdy194是用来做SecondaryNameNode的名称节点的。</p>
+<p>而masters就是配置第二名称节点的。</p>
+<p> </p>
+<p>编辑slaves文件</p>
+<p>[hduser@gdy192conf]$ vim slaves</p>
+<p>将原来的localhost修改为gdy195</p>
+<p><img src="https://img-blog.csdn.net/20160414102248723?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>wq保存退出</p>
+<p>同样这里定义的是数据节点。</p>
+<p> </p>
+<p>编辑文件core-site.xml</p>
+<p>[hduser@gdy192conf]$ vim core-site.xml</p>
+<p>在&lt;configuration&gt;&lt;/configuration&gt;直接添加如下信息</p>
+<p> &lt;property&gt;</p>
+<p>     &lt;name&gt;hadoop.tmp.dir&lt;/name&gt;</p>
+<p>     &lt;value&gt;/hadoop/temp&lt;/value&gt;</p>
+<p> &lt;/property&gt;</p>
+<p> </p>
+<p> &lt;property&gt;</p>
+<p>     &lt;name&gt;fs.default.name&lt;/name&gt;</p>
+<p>     &lt;value&gt;hdfs://gdy192:8020&lt;/value&gt;</p>
+<p> &lt;/property&gt;</p>
+<p><img src="https://img-blog.csdn.net/20160414102304864?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>wq保存退出</p>
+<p>注意：这里的fs.default.name定义的是主节点。由于每个节点上配置文件都一样，所以这里要使用ip或者别名来定义主节点的位置。</p>
+<p>由于这里定义了一个hadoop的缓存文件目录，所以我们需要在三台电脑上分别创建这个缓存文件目录。</p>
+<p>切换到root用户。</p>
+<p>[hduser@gdy192conf]$ su – root</p>
+<p><img src="https://img-blog.csdn.net/20160414102333179?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>创建/hadoop目录</p>
+<p>[root@gdy192 ~]#mkdir /hadoop/</p>
+<p><img src="https://img-blog.csdn.net/20160414102351396?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>修改hadoop目录的属主和属主为hduser，让hduser能在这个目录下有写权限。</p>
+<p>[root@gdy192 ~]#chown -R hduser.hduser /hadoop</p>
+<p><img src="https://img-blog.csdn.net/20160414102405911?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>同样在gdy194和gdy195上创建一个这样的目录，并赋予hadoop权限。</p>
+<p>在gdy194上</p>
+<p>[root@gdy194 /]#mkdir /hadoop</p>
+<p>[root@gdy194 /]#chown -R hduser.hduser /hadoop</p>
+<p><img src="https://img-blog.csdn.net/20160414102432271?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>在gdy195上</p>
+<p>[root@gdy195 /]#mkdir hadoop</p>
+<p>[root@gdy195 /]#chown -R hduser.hduser /hadoop</p>
+<p><img src="https://img-blog.csdn.net/20160414102448837?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p> </p>
+<p>使用gdy192</p>
+<p>退出当前用户，返回之前的hduser用户</p>
+<p>[root@gdy192 ~]#exit</p>
+<p><img src="https://img-blog.csdn.net/20160414102504334?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>注意：这里由于刚刚是直接登录，所以现在能退出返回到之前的hduser用户和hduser操作的目录下面。</p>
+<p>编辑文件 mapred-site.xml</p>
+<p>[root@gdy192conf]# vim mapred-site.xml</p>
+<p>在&lt;configuration&gt;和&lt;/configuration&gt;之间添加如下信息。</p>
+<p>  &lt;property&gt;</p>
+<p>     &lt;name&gt;mapred.job.tracker&lt;/name&gt;</p>
+<p>      &lt;value&gt;gdy192:8021&lt;/value&gt;</p>
+<p>  &lt;/property&gt;</p>
+<p><img src="https://img-blog.csdn.net/20160414102539713?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>wq保存退出</p>
+<p>同样，由于这里定义的是JobTracker,而我们上部署就已经说明gdy192上存放jobTracker</p>
+<p>所以这里在单机模式下的localhost就要改成ip或者是ip别名。</p>
+<p> </p>
+<p>编辑文件：hdfs-site.xml</p>
+<p>[root@gdy192conf]# vim hdfs-site.xml</p>
+<p>在&lt;configuration&gt;和&lt;/configuration&gt;之间添加如下信息。</p>
+<p>&lt;property&gt;</p>
+<p>                &lt;name&gt;dfs.replication&lt;/name&gt;</p>
+<p>                &lt;value&gt;1&lt;/value&gt;</p>
+<p>                &lt;description&gt;The actualnumber of replications can be specified when the file iscreated.&lt;/description&gt;</p>
+<p>        &lt;/property&gt;</p>
+<p> </p>
+<p>        &lt;property&gt;</p>
+<p>               &lt;name&gt;dfs.data.dir&lt;/name&gt;</p>
+<p>               &lt;value&gt;/hadoop/data&lt;/value&gt;</p>
+<p>                &lt;final&gt;ture&lt;/final&gt;</p>
+<p>                &lt;description&gt;Thedirectories where the datanode stores blocks.&lt;/description&gt;</p>
+<p>        &lt;/property&gt;</p>
+<p> </p>
+<p>        &lt;property&gt;</p>
+<p>               &lt;name&gt;dfs.name.dir&lt;/name&gt;</p>
+<p>               &lt;value&gt;/hadoop/name&lt;/value&gt;</p>
+<p>                &lt;final&gt;ture&lt;/final&gt;</p>
+<p>                &lt;description&gt;Thedirectories where the namenode stores its persistentmatadata.&lt;/description&gt;</p>
+<p>        &lt;/property&gt;</p>
+<p> </p>
+<p>        &lt;property&gt;</p>
+<p>                &lt;name&gt;fs.checkpoint.dir&lt;/name&gt;</p>
+<p>               &lt;value&gt;/hadoop/namesecondary&lt;/value&gt;</p>
+<p>                &lt;final&gt;ture&lt;/final&gt;</p>
+<p>                &lt;description&gt;Thedirectories where the secondarynamenode stores checkpoints.&lt;/description&gt;</p>
+<p>        &lt;/property&gt;</p>
+<p><img src="https://img-blog.csdn.net/20160414102558323?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>wq保存退出</p>
+<p>注意：这里是跟想象的定义了hadoop中其他目录的位置，如果这里不定义，将会默认使用core-site.xml文件里面定义的默认缓存目录。</p>
+<p>到这里hadoop的配置文件就已经配置完成了。</p>
+<p>接下来分别在gdy194上和gdy195上解压jdk-7u7-linux-i586.tar.gz和hadoop-0.20.2-cdh3u4.tar.gz软件包到/etc/gd/文件夹下面。并分别创建连接文件。（向上面之前操作一样）</p>
+<p>这由于重复操作。不再做解释。</p>
+<p>接下来拷贝刚刚在gdy192上已经配置好的文件到gdy194和gdy195的对应位置。</p>
+<p>方法如下：</p>
+<p>在gdy192上使用root用户</p>
+<p>拷贝文件到gdy194和gdy195上</p>
+<p>[hduser@gdy192hadoop]$ scp /usr/gd/hadoop/conf/* gdy194:/usr/gd/hadoop/conf/ </p>
+<p> [hduser@gdy192 hadoop]$ scp /usr/gd/hadoop/conf/*gdy195:/usr/gd/hadoop/conf/</p>
+<p><img src="https://img-blog.csdn.net/20160414102615428?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p><br></p>
+<p><img src="https://img-blog.csdn.net/20160414102641823?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>在gdy194和gdy195上分别使用root用户给予/usr/gd/hadoop文件夹赋予hduser用户权限。</p>
+<p>在gdy194上</p>
+<p>[root@gdy194 /]#chown hduser.hduser /usr/gd/ -R</p>
+<p>[root@gdy194 /]#ll /usr/gd/</p>
+<p><img src="https://img-blog.csdn.net/20160414102706006?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>在gdy195上</p>
+<p>[root@gdy195 /]#chown hduser.hduser /usr/gd/ -R</p>
+<p>[root@gdy195 /]#ll /usr/gd/</p>
+<p><img src="https://img-blog.csdn.net/20160414102739178?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>到这里hadoop的伪分布式模式已经全部配置完成。</p>
+<p>启动hadoop伪分布式模式</p>
+<p>使用gdy192主机。重新登录root用户</p>
+<p> <img src="https://img-blog.csdn.net/20160414102753038?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>切换到hduser用户</p>
+<p><img src="https://img-blog.csdn.net/20160414102812897?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>格式化hadoop的文件系统HDFS</p>
+<p>[hduser@gdy192 ~]$hadoop namenode -format</p>
+<p><img src="https://img-blog.csdn.net/20160414102825850?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>启动hadoop</p>
+<p>[hduser@gdy192 ~]$start-all.sh</p>
+<p><img src="https://img-blog.csdn.net/20160414102845585?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>这里已经看到gdy192上成功启动了NameNode和JobTracker两个节点</p>
+<p>查看gdy194上是否已经成功启动SecondaryNameNode</p>
+<p>[hduser@gdy192 ~]$ssh gdy194 'jps'</p>
+<p><img src="https://img-blog.csdn.net/20160414102856476?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>看到已经成功启动</p>
+<p>查看gdy195上是否已经成功启动DataNode和TaskTracker</p>
+<p>[hduser@gdy192 ~]$ssh gdy195 'jps'</p>
+<p><img src="https://img-blog.csdn.net/20160414102908295?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>到这里已经看到都成功启动</p>
+<p>使用</p>
+<p>[hduser@gdy192 ~]$netstat –nlpt</p>
+<p>可以查看hadoop的端口</p>
+<p><img src="https://img-blog.csdn.net/20160414102924717?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>其中50030端口为hadoop的对外web网址端口。可以查看hadoop的MapReduce作业的相关信息</p>
+<p>50070为hadoop的Namenode节点信息。</p>
+<p>查看hadoop的MapReduce作业信息</p>
+<p>可以在浏览器上访问：<a href="http://192.168.61.192:50030/jobtracker.jsp" rel="nofollow">http://192.168.61.192:50030/jobtracker.jsp</a></p>
+<p>如下图：</p>
+<p><img src="https://img-blog.csdn.net/20160414102942186?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>查看hadoop的NameNode节点信息</p>
+<p>可以在浏览器上访问：<a href="http://192.168.61.192:50070/dfshealth.jsp" rel="nofollow">http://192.168.61.192:50070/dfshealth.jsp</a></p>
+<p>如下图：</p>
+<p><img src="https://img-blog.csdn.net/20160414103001992?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p> </p>
+<p>由于SecondaryNameNode部署在gdy194上。</p>
+<p>查看gdy194上的Hadoop的进程端口信息。</p>
+<p>[hduser@gdy192 ~]$ssh gdy194 'netstat -nlpt'</p>
+<p><img src="https://img-blog.csdn.net/20160414103016086?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>其中50090端口为hadoop的SecondaryNameNode的web对外端口</p>
+<p>可以使用：<a href="http://192.168.61.194:50090/status.jsp" rel="nofollow">http://192.168.61.194:50090/status.jsp</a></p>
+<p>来访问SecondaryNameNode的对外web端口。</p>
+<p><img src="https://img-blog.csdn.net/20160414103036766?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p> </p>
+<p>同样，由于DataNode和TaskTracker部署在gdy195上。</p>
+<p>在gdy192上查看gdy195上的端口信息</p>
+<p>[hduser@gdy192 ~]$ssh gdy195 'netstat -nlpt'</p>
+<p><img src="https://img-blog.csdn.net/20160414103052391?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>50060为hadoop的TaskTracker的节点信息</p>
+<p>50075为hadoop的DateNoe的节点信息</p>
+<p>分别通过以下地址可访问：</p>
+<p><a href="http://192.168.61.195:50075/" rel="nofollow">http://192.168.61.195:50075/</a></p>
+<p>http://192.168.61.195:50060/tasktracker.jsp</p>
+<p><img src="https://img-blog.csdn.net/20160414103106023?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p><img src="https://img-blog.csdn.net/20160414103119626?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></p>
+<p> </p>
+<p></p>
+<p>注意：在实际部署中以上web的访问端口前的ip地址为你实际部署的ip地址，这里我是按照我自己部署的ip地址列举出来的。</p>
+<p> </p>
+<p>在hadoop上做一次hadoop的单词统计</p>
+<p>使用机器gdy192</p>
+<p>在hadoop的DNSF文件系统上新建一个text文件夹</p>
+<p><img src="https://img-blog.csdn.net/20160414103136501?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>查看已经建立好的文件夹</p>
+<p>[hduser@gdy192 ~]$hadoop fs -ls /</p>
+<p><img src="https://img-blog.csdn.net/20160414103149689?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>上传一个系统文件到test文件夹下</p>
+<p>[hduser@gdy192 ~]$hadoop fs -put /etc/hosts /test</p>
+<p><img src="https://img-blog.csdn.net/20160414103201961?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>查看已经上传的文件</p>
+<p>[hduser@gdy192 ~]$hadoop fs -ls /test</p>
+<p><img src="https://img-blog.csdn.net/20160414103213487?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>对hadoop目录中的test所有文件做单词统计，统计结果输出在word文件夹下</p>
+<p>[hduser@gdy192 ~]$hadoop jar /usr/gd/hadoop/hadoop-examples-0.20.2-cdh3u4.jar wordcount /test /word</p>
+<p>在这个过程中可以通过</p>
+<p><a href="http://192.168.61.192:50030/jobtracker.jsp" rel="nofollow">http://192.168.61.192:50030/jobtracker.jsp</a>来查看作业进行的情况。</p>
+<p><img src="https://img-blog.csdn.net/20160414103225909?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>下图就是刚刚执行的作业完成后的显示</p>
+<p><img src="https://img-blog.csdn.net/20160414103240128?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>查看单词统计结果输出目录</p>
+<p>[hduser@gdy192 ~]$hadoop fs -ls /word</p>
+<p><img src="https://img-blog.csdn.net/20160414103252603?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>查看结果输出文件part-r-00000可以看到刚才对test目录下的文件做单词统计的统计结果</p>
+<p>[hduser@gdy192 ~]$hadoop fs -cat /word/part-r-00000</p>
+<p><img src="https://img-blog.csdn.net/20160414103303337?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>这就是刚才统计的的统计结果。</p>
+<p>到本文档位置hadoop的单机模式和hadoop的伪分布模式安装和部署就已经完成了。</p>
+<p>其实hadoop的单独安装后一般都会再安装hbase来原理hadoop。这样好方便存储数据，和管理。对于在hadoop的单机模式上怎么部署hbase和在hadoop的伪分布式模式下如何部署hbase。将在之后陆续公布。</p>
+<p> </p>
+<p> </p>
+<p> </p>
+<p> </p>
+            </div>
+                </div>

@@ -1,0 +1,412 @@
+---
+layout:     post
+title:      Hive基础指南
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：					https://blog.csdn.net/vinfly_li/article/details/79397119				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hive指南">Hive指南</h1>
+
+<p>标签（空格分隔）： Hive</p>
+
+<hr>
+
+<h2 id="hive基本介绍">HIVE基本介绍</h2>
+
+<p>Hive是由FaceBook开源的用于解决海量结构化日志的数据统计，后成为Apache Hive的一个开源项目，Hive是基于Hadoop的一个数据仓库工具，可以将结构化的数据文件映射成一张表，并提供类SQL（也成为HQL）查询功能，它的本质是将HQL转化为MapReduce程序，灵活性和扩展性比较好，支持自定义函数（UDF），自定义存储格式来进行数据处理与存储，但由于其时延较长，适合做离线数据处理。</p>
+
+
+
+<h2 id="hive体系结构">HIVE体系结构</h2>
+
+<p>Hive处理的数据存储在HDFS上，又使用mapreduce来分析数据底层的实现，最后执行的程序又运行在Yarn上，相当于整合了Hadoop的三大框架，所以说hive是hadoop的数据仓库。 <br>
+<img src="http://static.zybuluo.com/vin123456/hjmvyq7lm30zdan3cqtevg8d/image_1at3hf8sa1ldhk081jhp13nfgus9.png" alt="image_1at3hf8sa1ldhk081jhp13nfgus9.png-42kB" title=""></p>
+
+<ul>
+<li>用户接口: Client <br>
+CLI(Hive shell) 、JDBC/ODBC（Java访问Hive）、WEB UI（浏览器访问Hive）</li>
+<li>元数据：Metastore <br>
+元数据包括：表名、表所属的数据库（默认是default）、表的拥有者、列/分区字段、表的类型（是否为外部表）、表的数据所在目录等； <br>
+元数据默认存在Hive自带的derby数据库中，推荐使用MYSQL</li>
+<li>Hadoop <br>
+使用HDFS进行存储，使用MapReduce进行计算</li>
+<li><p>驱动器Driver <br>
+包含：解析器、编译器、优化器、执行器；</p>
+
+<ul><li>解析器：将SQL字符串转换成抽象语法树AST，这一步一般都用第三方工具库完成，比如antlr；对ATS进行语法分析、比如表是否存在、字段是否存在、SQL语义定义是否有误（比如select中被判定为聚合的字段在group by中是否有出现）；</li>
+<li>编译器：将AST编译生成逻辑执行计划；</li>
+<li>优化器：对逻辑执行计划进行优化；</li>
+<li>执行器：把逻辑执行计划转换成可以运行的物理计划，对Hive来说就是MR，或者TEZ、Spark；</li></ul></li>
+</ul>
+
+
+
+<h2 id="hive的特点">HIVE的特点</h2>
+
+<ul>
+<li>操作接口采用类SQL语法，提供快速开发的能力，容易上手</li>
+<li>避免了去写MapReduce、减少开发人员的学习成本</li>
+<li>统一的元数据管理，可与impala/spark等共享元数据</li>
+<li>易于扩展，HDFS+MapReduce可进行集群规模扩展，支持自定义函数</li>
+<li>数据的离线处理：比如日志分析、海量结构化数据离线分析</li>
+<li>Hive的执行延迟比较高、因此hihve常用于对实时性要求不高的场合</li>
+<li>Hive的优势在于处理大数据，对于处理小数据没有优势，因此Hive的执行延迟比较高</li>
+</ul>
+
+
+
+<h2 id="hive使用">HIVE使用</h2>
+
+<p><em>版本：hive0.13.1  hadoop2.5.0  mysql5.6</em></p>
+
+
+
+<h3 id="1安装mysql">1）安装mysql</h3>
+
+<p>选择集群中的一台机器安装mysql server 、mysql client <br>
+步骤：</p>
+
+<blockquote>
+  <p>1、 查看是否已安装mysql       # rpm -qa | grep mysql <br>
+  如果有、删除已经安装的系统自带的mysql  #rpm -e –nodeps 【name】 <br>
+  <img src="http://static.zybuluo.com/vin123456/brttp47bog3j9du6ni0frmsm/image_1at58kk2n15do1lii1smpc52t3b9.png" alt="image_1at58kk2n15do1lii1smpc52t3b9.png-59.2kB" title=""> <br>
+  2、 解压mysql安装包，赋执行权限 <br>
+  <img src="http://static.zybuluo.com/vin123456/zt954om48y0b7ighsx5pgdgj/image_1at58lrhl1re31rad137c178u90m12.png" alt="image_1at58lrhl1re31rad137c178u90m12.png-59.3kB" title=""> <br>
+  3、安装mysql server <br>
+  <img src="http://static.zybuluo.com/vin123456/cfts1vrmmgh1tj3xf8cglwbe/image_1at58mkt68dtck1lm1v0oabr1f.png" alt="image_1at58mkt68dtck1lm1v0oabr1f.png-80kB" title=""> <br>
+  4、查看随机的密码（安装时有提示） <br>
+  <img src="http://static.zybuluo.com/vin123456/9xf8psfbk4spriql0sraqdvw/image_1at58n7a7ts3crj1t5o1it41oho1s.png" alt="image_1at58n7a7ts3crj1t5o1it41oho1s.png-22.1kB" title=""> <br>
+  5、安装客户端 <br>
+  <img src="http://static.zybuluo.com/vin123456/mks0kz0a9eofsp345kgr5knp/image_1at58pbqa1b5g19hl628j5astq9.png" alt="image_1at58pbqa1b5g19hl628j5astq9.png-38.5kB" title=""> <br>
+  6、启动mysql <br>
+  <img src="http://static.zybuluo.com/vin123456/nhsxt7ba8bybt41d9nl6x6g6/image_1at58q1vulvfnnl1ornoa11jk1m.png" alt="image_1at58q1vulvfnnl1ornoa11jk1m.png-38.2kB" title=""> <br>
+  7、客户端登陆mysql <br>
+  <img src="http://static.zybuluo.com/vin123456/8p501jie9jg83jwodfay9hin/image_1at58qn60r32r0o8111sfafeg13.png" alt="image_1at58qn60r32r0o8111sfafeg13.png-83.7kB" title=""> <br>
+  8、更改密码并再次登录  <br>
+  <img src="http://static.zybuluo.com/vin123456/yr2ivgzlsagkuow3wrkrox58/image_1at58ro1q1ltq1n131amh1i2t1ur11g.png" alt="image_1at58ro1q1ltq1n131amh1i2t1ur11g.png-111kB" title="">  <br>
+  9、对user表进行修改，设置用户可以从其他机器登录，然后修改root的其他选项 <br>
+  相关命令：</p>
+</blockquote>
+
+
+
+<pre class="prettyprint"><code class=" hljs oxygene">mysql&gt; delete <span class="hljs-keyword">from</span> user <span class="hljs-keyword">where</span> User=<span class="hljs-string">'root'</span> <span class="hljs-keyword">and</span> Host=<span class="hljs-string">'hadoop001'</span>;
+Query OK, <span class="hljs-number">1</span> row affected (<span class="hljs-number">0.00</span> sec)
+
+mysql&gt; delete <span class="hljs-keyword">from</span> user <span class="hljs-keyword">where</span> User=<span class="hljs-string">'root'</span> <span class="hljs-keyword">and</span> Host=<span class="hljs-string">'127.0.0.1'</span>;
+Query OK, <span class="hljs-number">1</span> row affected (<span class="hljs-number">0.00</span> sec)
+
+mysql&gt; delete <span class="hljs-keyword">from</span> user <span class="hljs-keyword">where</span> User=<span class="hljs-string">'root'</span> <span class="hljs-keyword">and</span> Host=<span class="hljs-string">'::1'</span>;
+Query OK, <span class="hljs-number">1</span> row affected (<span class="hljs-number">0.00</span> sec)</code></pre>
+
+<p>最终表的内容： <br>
+ <img src="http://static.zybuluo.com/vin123456/6uj919nuh4ubk6kmbl80znc4/image_1at58tij215lit1b72t1ffbapk1t.png" alt="image_1at58tij215lit1b72t1ffbapk1t.png-35.7kB" title=""></p>
+
+
+
+<h3 id="2安装hive">2）安装Hive</h3>
+
+<blockquote>
+  <p>1、解压并更改名字 <br>
+  <img src="http://static.zybuluo.com/vin123456/8mirsfqjvkvpywzv58n20juq/image_1at58vn1bn7a7073kidji157u2a.png" alt="image_1at58vn1bn7a7073kidji157u2a.png-97.6kB" title=""> <br>
+  2、拷贝mysql驱动jar包，到Hive安装目录的lib下驱动包所在位置： <br>
+  <img src="http://static.zybuluo.com/vin123456/3lvc70urx0q9q2oo6cm63nxl/image_1at59119godv14jo8725b81ats2q.png" alt="image_1at59119godv14jo8725b81ats2q.png-73kB" title=""> <br>
+  3、配置conf下的hive-env.sh的hadoop、hive环境变量 <br>
+  <img src="http://static.zybuluo.com/vin123456/26nnq4fic45yo2ryrtitzcor/image_1at5923591vf71fim14md17705oh37.png" alt="image_1at5923591vf71fim14md17705oh37.png-55.3kB" title=""> <br>
+  4、配置hive-site.xml <br>
+  配置连接数据库的四要素</p>
+</blockquote>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionURL<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>jdbc:mysql://hadoop001：3306/metastore?createDatabaseIfNotExist=true<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>JDBC connect string for a JDBC metastore<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionDriverName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>com.mysql.jdbc.Driver<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>Driver class name for a JDBC metastore<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionUserName<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>root<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>username to use against metastore database<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span>
+
+    <span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>javax.jdo.option.ConnectionPassword<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>123456<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>password to use against metastore database<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span></code></pre>
+
+<p>配置metastore <br>
+<em>需先启动hadoop，创建该目录并赋权限</em></p>
+
+
+
+<pre class="prettyprint"><code class=" hljs xml"><span class="hljs-tag">&lt;<span class="hljs-title">property</span>&gt;</span>
+       <span class="hljs-tag">&lt;<span class="hljs-title">name</span>&gt;</span>hive.metastore.warehouse.dir<span class="hljs-tag">&lt;/<span class="hljs-title">name</span>&gt;</span>
+       <span class="hljs-tag">&lt;<span class="hljs-title">value</span>&gt;</span>/user/hive/warehouse<span class="hljs-tag">&lt;/<span class="hljs-title">value</span>&gt;</span>
+       <span class="hljs-tag">&lt;<span class="hljs-title">description</span>&gt;</span>location of default database for the warehouse<span class="hljs-tag">&lt;/<span class="hljs-title">description</span>&gt;</span>
+ <span class="hljs-tag">&lt;/<span class="hljs-title">property</span>&gt;</span></code></pre>
+
+
+
+<h3 id="3启动hive">3）启动Hive</h3>
+
+<p><img src="http://static.zybuluo.com/vin123456/jw03vy4eauhlmp54qm6jviv2/image_1at59mjkvnna1jbnctct3frv83k.png" alt="image_1at59mjkvnna1jbnctct3frv83k.png-41.4kB" title=""></p>
+
+
+
+<h3 id="4基本的ddldml语句">4）基本的DDL、DML语句</h3>
+
+<p>创建数据库： <br>
+<img src="http://static.zybuluo.com/vin123456/45s0n3auiemzq8c9o7n58avu/image_1at59oatv6bj131gosv1dagahm41.png" alt="image_1at59oatv6bj131gosv1dagahm41.png-40.9kB" title=""> <br>
+创建表 <br>
+<img src="http://static.zybuluo.com/vin123456/ye3niqyysh8hgmypaue69nk6/image_1at59p7k1jhe1co469q1p1b6eo4e.png" alt="image_1at59p7k1jhe1co469q1p1b6eo4e.png-36.7kB" title=""> <br>
+加载数据 <br>
+数据所在地址 <br>
+<img src="http://static.zybuluo.com/vin123456/6i5czudrhv4onbakntrlo1l3/image_1at59q9gk4mk7jj134odg2e4r.png" alt="image_1at59q9gk4mk7jj134odg2e4r.png-30.9kB" title=""> <br>
+加载方法： <br>
+<img src="http://static.zybuluo.com/vin123456/p9s4vjzexg79lfs18j8hfdms/image_1at59qks811vm1hmk1knc19k8fn558.png" alt="image_1at59qks811vm1hmk1knc19k8fn558.png-45.7kB" title=""> <br>
+查询语句 <br>
+<img src="http://static.zybuluo.com/vin123456/dmma1h5offrlta7lgbfcnsey/image_1at59r03lph31j6a17ai1100adm5l.png" alt="image_1at59r03lph31j6a17ai1100adm5l.png-36.8kB" title=""></p>
+
+
+
+<h2 id="hive详解">HIVE详解</h2>
+
+
+
+<h3 id="hive数据类型">Hive数据类型</h3>
+
+<p><img src="http://static.zybuluo.com/vin123456/u85fryi7eawg4wbd4xhmd22v/image_1at5j25bibqm1nr41a3a1nbe1bg662.png" alt="image_1at5j25bibqm1nr41a3a1nbe1bg662.png-103.6kB" title=""> <br>
+<img src="http://static.zybuluo.com/vin123456/q4z551yzr0ntt2uynnf0o3ox/image_1at5j2n1q4os7bl1as71r4913jr6f.png" alt="image_1at5j2n1q4os7bl1as71r4913jr6f.png-89kB" title=""></p>
+
+
+
+<h3 id="hive数据库操作">Hive数据库操作</h3>
+
+<p>在Hive命令行中，默认数据库为default <br>
+创建一个新的数据库：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs r">CREATE (DATABASE|SCHEMA) [IF NOT EXISTS] database_name
+  [COMMENT database_comment]
+  [LOCATION hdfs_path]
+  [WITH DBPROPERTIES (property_name=property_value, <span class="hljs-keyword">...</span>)];</code></pre>
+
+<p>删除数据库</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">DROP</span> (<span class="hljs-keyword">DATABASE</span>|<span class="hljs-keyword">SCHEMA</span>) [<span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span>] database_name [<span class="hljs-keyword">RESTRICT</span>|<span class="hljs-keyword">CASCADE</span>];</span></code></pre>
+
+<p>修改数据库</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">ALTER</span> (<span class="hljs-keyword">DATABASE</span>|<span class="hljs-keyword">SCHEMA</span>) database_name <span class="hljs-keyword">SET</span> DBPROPERTIES (property_name=property_value, ...);</span>   <span class="hljs-comment">-- (Note: SCHEMA added in Hive 0.14.0)</span>
+
+<span class="hljs-operator"><span class="hljs-keyword">ALTER</span> (<span class="hljs-keyword">DATABASE</span>|<span class="hljs-keyword">SCHEMA</span>) database_name <span class="hljs-keyword">SET</span> OWNER [<span class="hljs-keyword">USER</span>|ROLE] user_or_role;</span>   <span class="hljs-comment">-- (Note: Hive 0.13.0 and later; SCHEMA added in Hive 0.14.0)</span></code></pre>
+
+<p>查看数据库详细信息</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs axapta"><span class="hljs-keyword">desc</span> database extendes database_name;</code></pre>
+
+
+
+<h3 id="hive表的操作">Hive表的操作</h3>
+
+<ul>
+<li>创建表：</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs r">CREATE [TEMPORARY] [EXTERNAL] TABLE [IF NOT EXISTS] [db_name.]table_name   
+//*创建一个表，指定表的类型（临时表、外部表）、表的名称*
+  [(col_name data_type [COMMENT col_comment], <span class="hljs-keyword">...</span>)]
+//*表的列、包括列的名称、列的类型*
+  [COMMENT table_comment]
+//*表的说明*
+  [PARTITIONED BY (col_name data_type [COMMENT col_comment], <span class="hljs-keyword">...</span>)]
+//*分区表，指定分区的列的名称、类型、*
+   [ROW FORMAT row_format] 
+   [STORED AS file_format]
+     | STORED BY <span class="hljs-string">'storage.handler.class.name'</span> [WITH SERDEPROPERTIES (<span class="hljs-keyword">...</span>)]  
+//*指定数据文件中数据存储格式、每行分隔、数据文件类型*
+  [LOCATION hdfs_path]
+//*数据在HDFS上的存储位置*
+  [TBLPROPERTIES (property_name=property_value, <span class="hljs-keyword">...</span>)]   
+//*指定表的属性*
+  [AS select_statement];   
+//子查询</code></pre>
+
+<p>创建与指定表数据结构相同的表</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">CREATE</span> [<span class="hljs-keyword">TEMPORARY</span>] [<span class="hljs-keyword">EXTERNAL</span>] <span class="hljs-keyword">TABLE</span> [<span class="hljs-keyword">IF</span> <span class="hljs-keyword">NOT</span> <span class="hljs-keyword">EXISTS</span>] [db_name.]table_name
+  <span class="hljs-keyword">LIKE</span> existing_table_or_view_name
+  [LOCATION hdfs_path];</span></code></pre>
+
+<p>表中列的数据类型</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">data_<span class="hljs-built_in">type</span>
+  : primitive_<span class="hljs-built_in">type</span>
+  | array_<span class="hljs-built_in">type</span>
+  | map_<span class="hljs-built_in">type</span>
+  | struct_<span class="hljs-built_in">type</span>
+  | union_<span class="hljs-built_in">type</span> </code></pre>
+
+<p>基本数据类型primitive_type</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs 1c">primitive_type
+  : TINYINT
+  <span class="hljs-string">| SMALLINT</span>
+  <span class="hljs-string">| INT</span>
+  <span class="hljs-string">| BIGINT</span>
+  <span class="hljs-string">| BOOLEAN</span>
+  <span class="hljs-string">| FLOAT</span>
+  <span class="hljs-string">| DOUBLE</span>
+  <span class="hljs-string">| DOUBLE PRECISION </span>
+  <span class="hljs-string">| STRING</span>
+  <span class="hljs-string">| BINARY     </span>
+  <span class="hljs-string">| TIMESTAMP  </span>
+  <span class="hljs-string">| DECIMAL    </span>
+  <span class="hljs-string">| DECIMAL(precision, scale)  </span>
+  <span class="hljs-string">| DATE        </span>
+  <span class="hljs-string">| VARCHAR     </span>
+  <span class="hljs-string">| CHAR        </span></code></pre>
+
+<p>数组类型array_type</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">  : ARRAY &lt; data_<span class="hljs-built_in">type</span> &gt;</code></pre>
+
+<p>集合类型map_type</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs bash">  : MAP &lt; primitive_<span class="hljs-built_in">type</span>, data_<span class="hljs-built_in">type</span> &gt;</code></pre>
+
+<p>struct_type</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs r">  : STRUCT &lt; col_name : data_type [COMMENT col_comment], <span class="hljs-keyword">...</span>&gt;</code></pre>
+
+<p>union_type</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs r">   : UNIONTYPE &lt; data_type, data_type, <span class="hljs-keyword">...</span> &gt;  -- (Note: Available <span class="hljs-keyword">in</span> Hive <span class="hljs-number">0.7</span><span class="hljs-number">.0</span> and later)</code></pre>
+
+<p>row_format：每列和每行数据分隔符</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbnet">  : DELIMITED [FIELDS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-built_in">char</span> [ESCAPED <span class="hljs-keyword">BY</span> <span class="hljs-built_in">char</span>]] [COLLECTION ITEMS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-built_in">char</span>]
+        [MAP KEYS TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-built_in">char</span>] [LINES TERMINATED <span class="hljs-keyword">BY</span> <span class="hljs-built_in">char</span>]
+        [NULL DEFINED <span class="hljs-keyword">AS</span> <span class="hljs-built_in">char</span>]   -- (Note: Available <span class="hljs-keyword">in</span> Hive <span class="hljs-number">0.13</span> <span class="hljs-keyword">and</span> later)
+  | SERDE serde_name [<span class="hljs-keyword">WITH</span> SERDEPROPERTIES (property_name=property_value, property_name=property_value, ...)]</code></pre>
+
+<p>file_format:</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbnet">  : SEQUENCEFILE
+  | TEXTFILE    -- (<span class="hljs-keyword">Default</span>, depending <span class="hljs-keyword">on</span> hive.<span class="hljs-keyword">default</span>.fileformat configuration)
+  | RCFILE      -- (Note: Available <span class="hljs-keyword">in</span> Hive <span class="hljs-number">0.6</span><span class="hljs-number">.0</span> <span class="hljs-keyword">and</span> later)
+  | ORC         -- (Note: Available <span class="hljs-keyword">in</span> Hive <span class="hljs-number">0.11</span><span class="hljs-number">.0</span> <span class="hljs-keyword">and</span> later)
+  | PARQUET     -- (Note: Available <span class="hljs-keyword">in</span> Hive <span class="hljs-number">0.13</span><span class="hljs-number">.0</span> <span class="hljs-keyword">and</span> later)
+  | AVRO        -- (Note: Available <span class="hljs-keyword">in</span> Hive <span class="hljs-number">0.14</span><span class="hljs-number">.0</span> <span class="hljs-keyword">and</span> later)
+  | INPUTFORMAT input_format_classname OUTPUTFORMAT output_format_classname</code></pre>
+
+<ul>
+<li>删除表</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">DROP</span> <span class="hljs-keyword">TABLE</span> [<span class="hljs-keyword">IF</span> <span class="hljs-keyword">EXISTS</span>] table_name [PURGE];</span>     <span class="hljs-comment">-- (Note: PURGE available in Hive 0.14.0 and later)</span>
+/<span class="hljs-comment">/*如果是 内部表，删除表后就会删除元数据和表文件，如果是外部表，只会删除元数据*</span></code></pre>
+
+<ul>
+<li>修改表 <br>
+<ul><li>重命名表 <br>
+<code>ALTER TABLE table_name RENAME TO new_table_name;</code></li>
+<li>更改表的属性</li></ul></li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs r"> ALTER TABLE table_name SET TBLPROPERTIES table_properties;
+ 使用hdfs dfs -ls -R /user/vin命令得到下面
+ /user/vin/p1/p2/*.txt
+table_properties:
+  : (property_name = property_value, property_name = property_value, <span class="hljs-keyword">...</span> )</code></pre>
+
+<ul>
+<li>修改分区（添加、修改、删除）</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs r">//Add Partitions
+ ALTER TABLE table_name ADD [IF NOT EXISTS] PARTITION partition_spec 
+  [LOCATION <span class="hljs-string">'location1'</span>] partition_spec [LOCATION <span class="hljs-string">'location2'</span>] <span class="hljs-keyword">...</span>;
+
+partition_spec:
+  : (partition_column = partition_col_value, partition_column = partition_col_value, <span class="hljs-keyword">...</span>)
+
+//Rename Partition
+ALTER TABLE table_name PARTITION partition_spec RENAME TO PARTITION partition_spec;
+//Drop Partitions
+ALTER TABLE table_name DROP [IF EXISTS] PARTITION partition_spec[, PARTITION partition_spec, <span class="hljs-keyword">...</span>]
+  [IGNORE PROTECTION] [PURGE];            -- (Note: PURGE available <span class="hljs-keyword">in</span> Hive <span class="hljs-number">1.2</span><span class="hljs-number">.0</span> and later, IGNORE PROTECTION not available <span class="hljs-number">2.0</span><span class="hljs-number">.0</span> and later)</code></pre>
+
+<ul>
+<li>加载数据</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs lasso">hive<span class="hljs-subst">&gt;</span> LOAD <span class="hljs-built_in">DATA</span> <span class="hljs-built_in">LOCAL</span> INPATH <span class="hljs-string">'./examples/files/kv1.txt'</span> OVERWRITE <span class="hljs-keyword">INTO</span> TABLE pokes;
+hive<span class="hljs-subst">&gt;</span> LOAD <span class="hljs-built_in">DATA</span> INPATH <span class="hljs-string">'/user/myname/kv2.txt'</span> OVERWRITE <span class="hljs-keyword">INTO</span> TABLE invites PARTITION (ds<span class="hljs-subst">=</span><span class="hljs-string">'2008-08-15'</span>);
+ <span class="hljs-comment">//其中加local是从本地加载数据到hive表，否则从HDFS上加载，  OVERWRITE是是否覆盖表中原有数据</span></code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbnet">hive&gt; CREATE TABLE csv1_table(a <span class="hljs-built_in">string</span>, b <span class="hljs-built_in">string</span>)
+    &gt; ROW FORMAT SERDE <span class="hljs-comment">'org.apache.hadoop.hive.serde2.OpenCSVSerde'</span>
+    &gt; <span class="hljs-keyword">WITH</span> SERDEPROPERTIES (
+    &gt;    <span class="hljs-string">"separatorChar"</span> = <span class="hljs-string">","</span>,
+    &gt;    <span class="hljs-string">"quoteChar"</span>     = <span class="hljs-string">"'"</span>,
+    &gt;    <span class="hljs-string">"escapeChar"</span>    = <span class="hljs-string">"\\"</span>
+    &gt; )
+    &gt; STORED <span class="hljs-keyword">AS</span> TEXTFILE;</code></pre>
+
+
+
+<h2 id="喜欢我的文章请关注微信公众号dtspider">喜欢我的文章请关注微信公众号<em>DTSpider</em></h2>
+
+<p><img src="https://img-blog.csdn.net/20180228102316620?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdmluZmx5X2xp/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt="这里写图片描述" title=""></p>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

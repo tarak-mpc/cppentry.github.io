@@ -1,0 +1,636 @@
+---
+layout:     post
+title:      大数据系列之数据仓库Hive命令使用及JDBC连接
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/mengfanzhundsc/article/details/81300325				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="postBody">
+			<div id="cnblogs_post_body" class="blogpost-body"><h4>Hive系列博文，持续更新~~~</h4>
+<h4><a id="post_title_link_6684615" href="http://www.cnblogs.com/cnmenglang/p/6684615.html" rel="nofollow">大数据系列之数据仓库Hive原理</a></h4>
+<h4><a id="post_title_link_6661488" href="http://www.cnblogs.com/cnmenglang/p/6661488.html" rel="nofollow">大数据系列之数据仓库Hive安装</a></h4>
+<h4><a id="post_title_link_6683911" href="http://www.cnblogs.com/cnmenglang/p/6683911.html" rel="nofollow">大数据系列之数据仓库Hive中分区Partition如何使用</a></h4>
+<h4><a id="post_title_link_6683897" href="http://www.cnblogs.com/cnmenglang/p/6683897.html" rel="nofollow">大数据系列之数据仓库Hive命令使用及JDBC连接</a></h4>
+<p>本文介绍Hive的使用原理及命令行、Java JDBC对于Hive的使用。</p>
+<p>　　在Hadoop项目中，HDFS解决了文件分布式存储的问题，MapReduce解决了数据处理分布式计算问题，之前介绍过Hadoop生态中MapReduce（以下统称MR）的使用，<a id="post_title_link_6579940" href="http://www.cnblogs.com/cnmenglang/p/6579940.html" rel="nofollow">大数据系列之分布式计算批处理引擎MapReduce实践</a>。HBase解决了一种数据的存储和检索。那么要对存在HDFS上的文件或HBase中的表进行查询时，是要手工写一堆MapReduce类的。一方面，很麻烦，另一方面只能由懂MapReduce的程序员类编写。对于业务人员或数据科学家，非常不方便，这些人习惯了通过sql与rdbms打交道，因此如果有sql方式查询文件和数据就很有必要，这就是hive要满足的要求。</p>
+<p>　　比如说采用MR处理WordCount统计词频时，我们如果用hql语句进行处理如下：</p>
+<p>　　select word,count(*) as totalNum  from t_word group by word order by totalNum desc</p>
+<h2>关于Hive的典型应用场景:</h2>
+<h3>1.日志分析</h3>
+<h3>2.统计网站一个时间段的pv,uv;</h3>
+<h3>3.多维度数据分析;</h3>
+<h3>4.海量结构化数据离线分析；</h3>
+<h3>5.低成本进行数据分析（无须编写MR）.</h3>
+<h2><a href="http://www.cnblogs.com/cnmenglang/p/6683911.html" rel="nofollow">介绍Hive中分区-Partition的意义</a> <a href="http://www.cnblogs.com/cnmenglang/p/6683911.html" rel="nofollow"><br></a></h2>
+<h2>1.Hive的数据类型</h2>
+<h3> 1.1 基本数据类型：</h3>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409100322347-790255941.png" alt=""></p>
+<h3> 1.2 hive的集合类型：</h3>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409100328050-1610653275.png" alt=""></p>
+<h2>2.hive的命令练习:</h2>
+<p>连接hive:</p>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">beeline
+</span>!connect jdbc:hive2:<span style="color:#008000;">//</span><span style="color:#008000;">master:10000/dbmfz mfz 111111</span></pre>
+</div>
+<p> </p>
+<h3>2.1 基本数据类型命令使用　　</h3>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">#用户表创建
+create table </span><span style="color:#0000ff;">if</span><span style="color:#000000;"> not EXISTS user_dimension(
+uid String,
+name </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+gender </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+birth date,
+province </span><span style="color:#0000ff;">string</span><span style="color:#000000;">
+) row format delimited
+fields terminated by </span><span style="color:#800000;">'</span><span style="color:#800000;">,</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+
+describe user_dimension;
+show create table user_dimension;
+
+#品牌表创建
+create table </span><span style="color:#0000ff;">if</span><span style="color:#000000;"> not EXISTS brand_dimension(
+bid </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+category </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+brand </span><span style="color:#0000ff;">string</span><span style="color:#000000;">
+)row format delimited
+fields terminated by </span><span style="color:#800000;">'</span><span style="color:#800000;">,</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+
+#交易表创建
+create table </span><span style="color:#0000ff;">if</span><span style="color:#000000;"> not EXISTS record_dimension(
+rid </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+uid </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+bid </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+price </span><span style="color:#0000ff;">int</span><span style="color:#000000;">,
+source_province </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+target_province </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+site </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+express_number </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+express_company </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+trancation_date date
+)row format delimited
+fields terminated by </span><span style="color:#800000;">'</span><span style="color:#800000;">,</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+
+show tables;
+
+#创建数据
+user.DATA
+brand.DATA
+record.DATA
+
+#载入数据
+LOAD DATA LOCAL INPATH </span><span style="color:#800000;">'</span><span style="color:#800000;">/home/mfz/apache-hive-2.1.1-bin/hivedata/user.data</span><span style="color:#800000;">'</span><span style="color:#000000;"> OVERWRITE INTO TABLE user_dimension;
+LOAD DATA LOCAL INPATH </span><span style="color:#800000;">'</span><span style="color:#800000;">/home/mfz/apache-hive-2.1.1-bin/hivedata/brand.data</span><span style="color:#800000;">'</span><span style="color:#000000;"> OVERWRITE INTO TABLE brand_dimension;
+LOAD DATA LOCAL INPATH </span><span style="color:#800000;">'</span><span style="color:#800000;">/home/mfz/apache-hive-2.1.1-bin/hivedata/record.data</span><span style="color:#800000;">'</span><span style="color:#000000;"> OVERWRITE INTO TABLE record_dimension;
+#验证
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span><span style="color:#000000;"> user_dimension;
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span><span style="color:#000000;"> brand_dimension;
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span><span style="color:#000000;"> record_dimension;
+#载入HDFS上数据
+load data inpath </span><span style="color:#800000;">'</span><span style="color:#800000;">user.data_HDFS_PATH</span><span style="color:#800000;">'</span><span style="color:#000000;"> OVERWRITE INTO TABLE user_dimension;
+
+#查询
+</span><span style="color:#0000ff;">select</span> count(*) <span style="color:#0000ff;">from</span> record_dimension <span style="color:#0000ff;">where</span> trancation_date = <span style="color:#800000;">'</span><span style="color:#800000;">2017-09-01</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+</span>+-----+--+
+| c0  |
++-----+--+
+| <span style="color:#800080;">6</span>   |
++-----+--+<span style="color:#000000;">
+#不同年龄消费的情况
+</span><span style="color:#0000ff;">select</span> cast(datediff(CURRENT_DATE ,birth)/<span style="color:#800080;">365</span> <span style="color:#0000ff;">as</span> <span style="color:#0000ff;">int</span> ) <span style="color:#0000ff;">as</span> age,sum(price) <span style="color:#0000ff;">as</span><span style="color:#000000;"> totalPrice
+  </span><span style="color:#0000ff;">from</span><span style="color:#000000;"> record_dimension rd
+    JOIN user_dimension ud on rd.uid </span>=<span style="color:#000000;"> ud.uid
+      group by cast(datediff(CURRENT_DATE ,birth)</span>/<span style="color:#800080;">365</span> <span style="color:#0000ff;">as</span> <span style="color:#0000ff;">int</span><span style="color:#000000;">)
+        order by totalPrice DESC ;
+
+</span>+------+-------------+--+
+| age  | totalprice  |
++------+-------------+--+
+| <span style="color:#800080;">5</span>    | <span style="color:#800080;">944</span>         |
+| <span style="color:#800080;">25</span>   | <span style="color:#800080;">877</span>         |
+| <span style="color:#800080;">24</span>   | <span style="color:#800080;">429</span>         |
+| <span style="color:#800080;">28</span>   | <span style="color:#800080;">120</span>         |
++------+-------------+--+<span style="color:#000000;">
+
+#不同品牌被消费的情况
+</span><span style="color:#0000ff;">select</span> brand,sum(price) <span style="color:#0000ff;">as</span><span style="color:#000000;"> totalPrice
+  </span><span style="color:#0000ff;">from</span><span style="color:#000000;"> record_dimension rd
+    join brand_dimension bd on bd.bid </span>=<span style="color:#000000;"> rd.bid
+        group by bd.brand
+          order by totalPrice desc;
+</span>+------------+-------------+--+
+|   brand    | totalprice  |
++------------+-------------+--+
+| SAMSUNG    | <span style="color:#800080;">944</span>         |
+| OPPO       | <span style="color:#800080;">625</span>         |
+| WULIANGYE  | <span style="color:#800080;">429</span>         |
+| DELL       | <span style="color:#800080;">252</span>         |
+| NIKE       | <span style="color:#800080;">120</span>         |
++------------+-------------+--+<span style="color:#000000;">
+
+#统计2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span><span style="color:#000000;"> 当天各个品牌的交易笔数，按照倒序排序
+</span><span style="color:#0000ff;">select</span> brand,count(*) <span style="color:#0000ff;">as</span><span style="color:#000000;"> sumCount
+  </span><span style="color:#0000ff;">from</span><span style="color:#000000;"> record_dimension rd
+    join brand_dimension bd on bd.bid</span>=<span style="color:#000000;">rd.bid
+      </span><span style="color:#0000ff;">where</span> rd.trancation_date=<span style="color:#800000;">'</span><span style="color:#800000;">2017-09-01</span><span style="color:#800000;">'</span><span style="color:#000000;">
+      group by bd.brand
+        order by sumCount desc
+</span>+------------+-----------+--+
+|   brand    | sumcount  |
++------------+-----------+--+
+| SAMSUNG    | <span style="color:#800080;">2</span>         |
+| WULIANGYE  | <span style="color:#800080;">1</span>         |
+| OPPO       | <span style="color:#800080;">1</span>         |
+| NIKE       | <span style="color:#800080;">1</span>         |
+| DELL       | <span style="color:#800080;">1</span>         |
++------------+-----------+--+<span style="color:#000000;">
+
+#不同性别消费的商品类别情况
+</span><span style="color:#0000ff;">select</span> ud.gender <span style="color:#0000ff;">as</span> gender,bd.category shangping,sum(price) totalPrice,count(*<span style="color:#000000;">) FROM  record_dimension rd
+  join user_dimension ud on rd.uid </span>=<span style="color:#000000;"> ud.uid
+    join brand_dimension bd on rd.bid </span>=<span style="color:#000000;"> bd.bid
+      group by ud.gender,bd.category;
+
+</span>+---------+------------+-------------+-----+--+
+| gender  | shangping  | totalprice  | c3  |
++---------+------------+-------------+-----+--+
+| F       | telephone  | <span style="color:#800080;">944</span>         | <span style="color:#800080;">2</span>   |
+| M       | computer   | <span style="color:#800080;">252</span>         | <span style="color:#800080;">1</span>   |
+| M       | food       | <span style="color:#800080;">429</span>         | <span style="color:#800080;">1</span>   |
+| M       | sport      | <span style="color:#800080;">120</span>         | <span style="color:#800080;">1</span>   |
+| M       | telephone  | <span style="color:#800080;">625</span>         | <span style="color:#800080;">1</span>   |
++---------+------------+-------------+-----+--+</pre>
+</div>
+<h3>2.3. 集合数据类型的命令操作</h3>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">#data employees.txt
+
+create database practice2;
+show databases;
+use practice2;
+
+create table </span><span style="color:#0000ff;">if</span><span style="color:#000000;"> not EXISTS employees(
+ name </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+ salary </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+ subordinates array</span>&lt;String&gt;<span style="color:#000000;">,
+ deductions map</span>&lt;String,Float&gt;<span style="color:#000000;">,
+ address </span><span style="color:#0000ff;">struct</span>&lt;street:<span style="color:#0000ff;">string</span>,city:<span style="color:#0000ff;">string</span>,state:<span style="color:#0000ff;">string</span>,zip:<span style="color:#0000ff;">int</span>&gt;<span style="color:#000000;">
+)
+row format delimited
+fields terminated by </span><span style="color:#800000;">'</span><span style="color:#800000;">\001</span><span style="color:#800000;">'</span><span style="color:#000000;">
+collection items terminated by </span><span style="color:#800000;">'</span><span style="color:#800000;">\002</span><span style="color:#800000;">'</span><span style="color:#000000;">
+map keys terminated by </span><span style="color:#800000;">'</span><span style="color:#800000;">\003</span><span style="color:#800000;">'</span><span style="color:#000000;">
+lines terminated by </span><span style="color:#800000;">'</span><span style="color:#800000;">\n</span><span style="color:#800000;">'</span><span style="color:#000000;">
+stored </span><span style="color:#0000ff;">as</span><span style="color:#000000;"> textfile;
+
+
+describe employees;
+</span>+---------------+---------------------------------------------------------+----------+--+
+|   col_name    |                        data_type                        | comment  |
++---------------+---------------------------------------------------------+----------+--+
+| name          | <span style="color:#0000ff;">string</span>                                                  |          |
+| salary        | <span style="color:#0000ff;">string</span>                                                  |          |
+| subordinates  | array&lt;<span style="color:#0000ff;">string</span>&gt;                                           |          |
+| deductions    | map&lt;<span style="color:#0000ff;">string</span>,<span style="color:#0000ff;">float</span>&gt;                                       |          |
+| address       | <span style="color:#0000ff;">struct</span>&lt;street:<span style="color:#0000ff;">string</span>,city:<span style="color:#0000ff;">string</span>,state:<span style="color:#0000ff;">string</span>,zip:<span style="color:#0000ff;">int</span>&gt;  |          |
++---------------+---------------------------------------------------------+----------+--+<span style="color:#000000;">
+
+LOAD DATA LOCAL INPATH </span><span style="color:#800000;">'</span><span style="color:#800000;">/home/mfz/apache-hive-2.1.1-bin/hivedata/employees.txt</span><span style="color:#800000;">'</span><span style="color:#000000;"> OVERWRITE INTO TABLE employees;
+</span>+-------------------+-------------------+------------------------------+------------------------------------------------------------+
+------------------------------------------------------------------------------+--+
+|  employees.name   | employees.salary  |    employees.subordinates    |                    employees.deductions                    |<span style="color:#000000;">
+                              employees.address                               </span>|
++-------------------+-------------------+------------------------------+------------------------------------------------------------+
+------------------------------------------------------------------------------+--+
+| John Doe          | <span style="color:#800080;">100000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">Mary Smith</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Todd Jones</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Michigan Ave.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60600</span>}       |
+| Mary Smith        | <span style="color:#800080;">80000.0</span>           | [<span style="color:#800000;">"</span><span style="color:#800000;">Bill King</span><span style="color:#800000;">"</span>]                | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">100 Ontario St.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60601</span>}       |
+| Todd Jones        | <span style="color:#800080;">70000.0</span>           | []                           | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.15</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.03</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">200 Chicago Ave.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Oak Park</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60700</span>}     |
+| Bill King         | <span style="color:#800080;">60000.0</span>           | []                           | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.15</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.03</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">300 Obscure Dr.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Obscuria</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60100</span>}      |
+| Boss Man          | <span style="color:#800080;">200000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">John Doe</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Fred Finance</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
+| Fred Finance      | <span style="color:#800080;">150000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">Stacy Accountant</span><span style="color:#800000;">"</span>]         | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">2 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
+| Stacy Accountant  | <span style="color:#800080;">60000.0</span>           | []                           | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.15</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.03</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">300 Main St.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Naperville</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60563</span>}       |
++-------------------+-------------------+------------------------------+------------------------------------------------------------+
+------------------------------------------------------------------------------+--+
+
+<span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span> employees <span style="color:#0000ff;">where</span> deductions[<span style="color:#800000;">'</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">'</span>]&gt;<span style="color:#800080;">0.2</span><span style="color:#000000;">;
+</span>+-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+
+| employees.name  | employees.salary  |    employees.subordinates    |                    employees.deductions                    |<span style="color:#000000;">
+                            employees.address                               </span>|
++-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+
+| John Doe        | <span style="color:#800080;">100000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">Mary Smith</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Todd Jones</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Michigan Ave.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60600</span>}       |
+| Mary Smith      | <span style="color:#800080;">80000.0</span>           | [<span style="color:#800000;">"</span><span style="color:#800000;">Bill King</span><span style="color:#800000;">"</span>]                | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">100 Ontario St.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60601</span>}       |
+| Boss Man        | <span style="color:#800080;">200000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">John Doe</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Fred Finance</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
+| Fred Finance    | <span style="color:#800080;">150000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">Stacy Accountant</span><span style="color:#800000;">"</span>]         | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">2 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
++-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+<span style="color:#000000;">
+
+#查询第一位下属是John Doe的
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span> employees <span style="color:#0000ff;">where</span> subordinates[<span style="color:#800080;">0</span>] = <span style="color:#800000;">'</span><span style="color:#800000;">John Doe</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+</span>+-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+
+| employees.name  | employees.salary  |    employees.subordinates    |                    employees.deductions                    |<span style="color:#000000;">
+                            employees.address                               </span>|
++-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+
+| Boss Man        | <span style="color:#800080;">200000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">John Doe</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Fred Finance</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
++-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+<span style="color:#000000;">
+
+#查询经理 </span>--<span style="color:#000000;">下属人数大于0
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span> employees <span style="color:#0000ff;">where</span> size(subordinates)&gt;<span style="color:#800080;">0</span><span style="color:#000000;">;
+</span>+-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+
+| employees.name  | employees.salary  |    employees.subordinates    |                    employees.deductions                    |<span style="color:#000000;">
+                            employees.address                               </span>|
++-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+
+| John Doe        | <span style="color:#800080;">100000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">Mary Smith</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Todd Jones</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Michigan Ave.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60600</span>}       |
+| Mary Smith      | <span style="color:#800080;">80000.0</span>           | [<span style="color:#800000;">"</span><span style="color:#800000;">Bill King</span><span style="color:#800000;">"</span>]                | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">100 Ontario St.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60601</span>}       |
+| Boss Man        | <span style="color:#800080;">200000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">John Doe</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Fred Finance</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
+| Fred Finance    | <span style="color:#800080;">150000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">Stacy Accountant</span><span style="color:#800000;">"</span>]         | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;"> {
+</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">2 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
++-----------------+-------------------+------------------------------+------------------------------------------------------------+--
+----------------------------------------------------------------------------+--+<span style="color:#000000;">
+
+#查询地址状态在IL
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span> employees <span style="color:#0000ff;">where</span> address.state=<span style="color:#800000;">'</span><span style="color:#800000;">IL</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+</span>+-------------------+-------------------+------------------------------+------------------------------------------------------------+
+------------------------------------------------------------------------------+--+
+|  employees.name   | employees.salary  |    employees.subordinates    |                    employees.deductions                    |<span style="color:#000000;">
+                              employees.address                               </span>|
++-------------------+-------------------+------------------------------+------------------------------------------------------------+
+------------------------------------------------------------------------------+--+
+| John Doe          | <span style="color:#800080;">100000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">Mary Smith</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Todd Jones</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Michigan Ave.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60600</span>}       |
+| Mary Smith        | <span style="color:#800080;">80000.0</span>           | [<span style="color:#800000;">"</span><span style="color:#800000;">Bill King</span><span style="color:#800000;">"</span>]                | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">100 Ontario St.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60601</span>}       |
+| Todd Jones        | <span style="color:#800080;">70000.0</span>           | []                           | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.15</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.03</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">200 Chicago Ave.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Oak Park</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60700</span>}     |
+| Bill King         | <span style="color:#800080;">60000.0</span>           | []                           | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.15</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.03</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">300 Obscure Dr.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Obscuria</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60100</span>}      |
+| Boss Man          | <span style="color:#800080;">200000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">John Doe</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Fred Finance</span><span style="color:#800000;">"</span>]  | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">1 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
+| Fred Finance      | <span style="color:#800080;">150000.0</span>          | [<span style="color:#800000;">"</span><span style="color:#800000;">Stacy Accountant</span><span style="color:#800000;">"</span>]         | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.3</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.07</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">2 Pretentious Drive.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Chicago</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60500</span>}  |
+| Stacy Accountant  | <span style="color:#800080;">60000.0</span>           | []                           | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.15</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.03</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}  |<span style="color:#000000;">
+ {</span><span style="color:#800000;">"</span><span style="color:#800000;">street</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">300 Main St.</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">city</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">Naperville</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">state</span><span style="color:#800000;">"</span>:<span style="color:#800000;">"</span><span style="color:#800000;">IL</span><span style="color:#800000;">"</span>,<span style="color:#800000;">"</span><span style="color:#800000;">zip</span><span style="color:#800000;">"</span>:<span style="color:#800080;">60563</span>}       |
++-------------------+-------------------+------------------------------+------------------------------------------------------------+
+------------------------------------------------------------------------------+--+<span style="color:#000000;">
+
+#模糊查询city 头字符是Na
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span> employees <span style="color:#0000ff;">where</span> address.city like <span style="color:#800000;">'</span><span style="color:#800000;">Na%</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+</span>+-------------------+-------------------+-------------------------+------------------------------------------------------------+-----
+--------------------------------------------------------------------+--+
+|  employees.name   | employees.salary  | employees.subordinates  |                    employees.deductions                    |<span style="color:#000000;">
+                       employees.address                            </span>|
++-------------------+-------------------+-------------------------+------------------------------------------------------------+-----
+--------------------------------------------------------------------+--+
+| Stacy Accountant  | <span style="color:#800080;">60000.0</span>           | []                      | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.15</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.03</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}  | {<span style="color:#800000;">"</span><span style="color:#800000;">st</span>
+reet<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span><span style="color:#800080;">300</span> Main St.<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>city<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span>Naperville<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>state<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span>IL<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>zip<span style="color:#800000;">"</span><span style="color:#800000;">:60563}  |</span>
++-------------------+-------------------+-------------------------+------------------------------------------------------------+-----
+--------------------------------------------------------------------+--+<span style="color:#000000;">
+
+#正则查询
+ </span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span> employees <span style="color:#0000ff;">where</span> address.street rlike <span style="color:#800000;">'</span><span style="color:#800000;">^.*(Ontario|Chicago).*$</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+</span>+-----------------+-------------------+-------------------------+------------------------------------------------------------+-------
+--------------------------------------------------------------------+--+
+| employees.name  | employees.salary  | employees.subordinates  |                    employees.deductions                    |<span style="color:#000000;">
+                      employees.address                             </span>|
++-----------------+-------------------+-------------------------+------------------------------------------------------------+-------
+--------------------------------------------------------------------+--+
+| Mary Smith      | <span style="color:#800080;">80000.0</span>           | [<span style="color:#800000;">"</span><span style="color:#800000;">Bill King</span><span style="color:#800000;">"</span>]           | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.2</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.05</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}   | {<span style="color:#800000;">"</span><span style="color:#800000;">stre</span>
+et<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span><span style="color:#800080;">100</span> Ontario St.<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>city<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span>Chicago<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>state<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span>IL<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>zip<span style="color:#800000;">"</span><span style="color:#800000;">:60601}    |</span>
+| Todd Jones      | <span style="color:#800080;">70000.0</span>           | []                      | {<span style="color:#800000;">"</span><span style="color:#800000;">Federal Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.15</span>,<span style="color:#800000;">"</span><span style="color:#800000;">State Taxes</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.03</span>,<span style="color:#800000;">"</span><span style="color:#800000;">Insurance</span><span style="color:#800000;">"</span>:<span style="color:#800080;">0.1</span>}  | {<span style="color:#800000;">"</span><span style="color:#800000;">stre</span>
+et<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span><span style="color:#800080;">200</span> Chicago Ave.<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>city<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span>Oak Park<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>state<span style="color:#800000;">"</span><span style="color:#800000;">:</span><span style="color:#800000;">"</span>IL<span style="color:#800000;">"</span><span style="color:#800000;">,</span><span style="color:#800000;">"</span>zip<span style="color:#800000;">"</span><span style="color:#800000;">:60700}  |</span>
++-----------------+-------------------+-------------------------+------------------------------------------------------------+-------
+--------------------------------------------------------------------+--+</pre>
+</div>
+<p> </p>
+<h2>2.4 分区Partition的命令使用</h2>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">#stocks表创建
+CREATE TABLE </span><span style="color:#0000ff;">if</span><span style="color:#000000;"> not EXISTS stocks(
+ymd date,
+price_open FLOAT ,
+price_high FLOAT ,
+price_low FLOAT ,
+price_close </span><span style="color:#0000ff;">float</span><span style="color:#000000;">,
+volume </span><span style="color:#0000ff;">int</span><span style="color:#000000;">,
+price_adj_close FLOAT
+)partitioned by (exchanger </span><span style="color:#0000ff;">string</span>,symbol <span style="color:#0000ff;">string</span><span style="color:#000000;">)
+row format delimited fields terminated by </span><span style="color:#800000;">'</span><span style="color:#800000;">,</span><span style="color:#800000;">'</span><span style="color:#000000;">;
+
+#加载数据
+LOAD DATA LOCAL INPATH </span><span style="color:#800000;">'</span><span style="color:#800000;">/home/mfz/apache-hive-2.1.1-bin/hivedata/stocks.csv</span><span style="color:#800000;">'</span> OVERWRITE INTO TABLE stocks partition(exchanger=<span style="color:#800000;">"</span><span style="color:#800000;">NASDAQ</span><span style="color:#800000;">"</span>,symbol=<span style="color:#800000;">"</span><span style="color:#800000;">AAPL</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+
+#查询partition stocks
+show partitions stocks;
+</span>+-------------------------------+--+
+|           partition           |
++-------------------------------+--+
+| exchanger=NASDAQ/symbol=AAPL  |
++-------------------------------+--+<span style="color:#000000;">
+
+#建立多个分区加载不同的数据
+LOAD DATA LOCAL INPATH </span><span style="color:#800000;">'</span><span style="color:#800000;">/home/mfz/apache-hive-2.1.1-bin/hivedata/stocks.csv</span><span style="color:#800000;">'</span> OVERWRITE INTO TABLE stocks partition(exchanger=<span style="color:#800000;">"</span><span style="color:#800000;">NASDAQ</span><span style="color:#800000;">"</span>,symbol=<span style="color:#800000;">"</span><span style="color:#800000;">INTC</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+LOAD DATA LOCAL INPATH </span><span style="color:#800000;">'</span><span style="color:#800000;">/home/mfz/apache-hive-2.1.1-bin/hivedata/stocks.csv</span><span style="color:#800000;">'</span> OVERWRITE INTO TABLE stocks partition(exchanger=<span style="color:#800000;">"</span><span style="color:#800000;">NYSE</span><span style="color:#800000;">"</span>,symbol=<span style="color:#800000;">"</span><span style="color:#800000;">GE</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+LOAD DATA LOCAL INPATH </span><span style="color:#800000;">'</span><span style="color:#800000;">/home/mfz/apache-hive-2.1.1-bin/hivedata/stocks.csv</span><span style="color:#800000;">'</span> OVERWRITE INTO TABLE stocks partition(exchanger=<span style="color:#800000;">"</span><span style="color:#800000;">NYSE</span><span style="color:#800000;">"</span>,symbol=<span style="color:#800000;">"</span><span style="color:#800000;">IBM</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+
+#分页查询stocks分区是exchanger</span>=<span style="color:#800000;">'</span><span style="color:#800000;">NASDAQ</span><span style="color:#800000;">'</span> and symbol=<span style="color:#800000;">'</span><span style="color:#800000;">AAPL</span><span style="color:#800000;">'</span><span style="color:#000000;">的数据
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span> stocks <span style="color:#0000ff;">where</span> exchanger=<span style="color:#800000;">'</span><span style="color:#800000;">NASDAQ</span><span style="color:#800000;">'</span> and symbol=<span style="color:#800000;">'</span><span style="color:#800000;">AAPL</span><span style="color:#800000;">'</span> limit <span style="color:#800080;">10</span><span style="color:#000000;"> ;
+</span>+-------------+--------------------+--------------------+-------------------+---------------------+----------------+-----------------
+--------+-------------------+----------------+--+
+| stocks.ymd  | stocks.price_open  | stocks.price_high  | stocks.price_low  | stocks.price_close  | stocks.volume  |<span style="color:#000000;"> stocks.price_adj
+_close  </span>| stocks.exchanger  | stocks.symbol  |
++-------------+--------------------+--------------------+-------------------+---------------------+----------------+-----------------
+--------+-------------------+----------------+--+
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">02</span>-<span style="color:#800080;">08</span>  | <span style="color:#800080;">195.69</span>             | <span style="color:#800080;">197.88</span>             | <span style="color:#800080;">194.0</span>             | <span style="color:#800080;">194.12</span>              | <span style="color:#800080;">17036300</span>       | <span style="color:#800080;">194.12</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">02</span>-<span style="color:#800080;">05</span>  | <span style="color:#800080;">192.63</span>             | <span style="color:#800080;">196.0</span>              | <span style="color:#800080;">190.85</span>            | <span style="color:#800080;">195.46</span>              | <span style="color:#800080;">30344200</span>       | <span style="color:#800080;">195.46</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">02</span>-<span style="color:#800080;">04</span>  | <span style="color:#800080;">196.73</span>             | <span style="color:#800080;">198.37</span>             | <span style="color:#800080;">191.57</span>            | <span style="color:#800080;">192.05</span>              | <span style="color:#800080;">27022300</span>       | <span style="color:#800080;">192.05</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">02</span>-<span style="color:#800080;">03</span>  | <span style="color:#800080;">195.17</span>             | <span style="color:#800080;">200.2</span>              | <span style="color:#800080;">194.42</span>            | <span style="color:#800080;">199.23</span>              | <span style="color:#800080;">21951800</span>       | <span style="color:#800080;">199.23</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">02</span>-<span style="color:#800080;">02</span>  | <span style="color:#800080;">195.91</span>             | <span style="color:#800080;">196.32</span>             | <span style="color:#800080;">193.38</span>            | <span style="color:#800080;">195.86</span>              | <span style="color:#800080;">24928900</span>       | <span style="color:#800080;">195.86</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">02</span>-<span style="color:#800080;">01</span>  | <span style="color:#800080;">192.37</span>             | <span style="color:#800080;">196.0</span>              | <span style="color:#800080;">191.3</span>             | <span style="color:#800080;">194.73</span>              | <span style="color:#800080;">26717800</span>       | <span style="color:#800080;">194.73</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">01</span>-<span style="color:#800080;">29</span>  | <span style="color:#800080;">201.08</span>             | <span style="color:#800080;">202.2</span>              | <span style="color:#800080;">190.25</span>            | <span style="color:#800080;">192.06</span>              | <span style="color:#800080;">44448700</span>       | <span style="color:#800080;">192.06</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">01</span>-<span style="color:#800080;">28</span>  | <span style="color:#800080;">204.93</span>             | <span style="color:#800080;">205.5</span>              | <span style="color:#800080;">198.7</span>             | <span style="color:#800080;">199.29</span>              | <span style="color:#800080;">41874400</span>       | <span style="color:#800080;">199.29</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">01</span>-<span style="color:#800080;">27</span>  | <span style="color:#800080;">206.85</span>             | <span style="color:#800080;">210.58</span>             | <span style="color:#800080;">199.53</span>            | <span style="color:#800080;">207.88</span>              | <span style="color:#800080;">61478400</span>       | <span style="color:#800080;">207.88</span>
+        | NASDAQ            | AAPL           |
+| <span style="color:#800080;">2010</span>-<span style="color:#800080;">01</span>-<span style="color:#800080;">26</span>  | <span style="color:#800080;">205.95</span>             | <span style="color:#800080;">213.71</span>             | <span style="color:#800080;">202.58</span>            | <span style="color:#800080;">205.94</span>              | <span style="color:#800080;">66605200</span>       | <span style="color:#800080;">205.94</span>
+        | NASDAQ            | AAPL           |
++-------------+--------------------+--------------------+-------------------+---------------------+----------------+-----------------
+--------+-------------------+----------------+--+<span style="color:#000000;">
+
+#统计各分区中总数
+</span><span style="color:#0000ff;">select</span> exchanger,symbol,count(*) <span style="color:#0000ff;">from</span><span style="color:#000000;"> stocks group by exchanger,symbol;
+</span>+------------+---------+-------+--+
+| exchanger  | symbol  |  c2   |
++------------+---------+-------+--+
+| NASDAQ     | AAPL    | <span style="color:#800080;">6412</span>  |
+| NASDAQ     | INTC    | <span style="color:#800080;">6412</span>  |
+| NYSE       | GE      | <span style="color:#800080;">6412</span>  |
+| NYSE       | IBM     | <span style="color:#800080;">6412</span>  |
++------------+---------+-------+--+<span style="color:#000000;">
+
+#统计各分区中最大的最大消费金额
+</span><span style="color:#0000ff;">select</span> exchanger,symbol,max(price_high) <span style="color:#0000ff;">from</span><span style="color:#000000;"> stocks group by exchanger,symbol;
+</span>+------------+---------+---------+--+
+| exchanger  | symbol  |   c2    |
++------------+---------+---------+--+
+| NASDAQ     | AAPL    | <span style="color:#800080;">215.59</span>  |
+| NASDAQ     | INTC    | <span style="color:#800080;">215.59</span>  |
+| NYSE       | GE      | <span style="color:#800080;">215.59</span>  |
+| NYSE       | IBM     | <span style="color:#800080;">215.59</span>  |
++------------+---------+---------+--+</pre>
+</div>
+<p> </p>
+<h2>2.5 Hive ORCFile 的操作：</h2>
+<h1><a href="http://www.kuqin.com/shuoit/20160405/351448.html" rel="nofollow">更高的压缩比，更好的性能–使用ORC文件格式优化Hive</a></h1>
+<div class="cnblogs_code">
+<pre>create table <span style="color:#0000ff;">if</span><span style="color:#000000;"> not EXISTS record_orc(
+  rid </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+  uid </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+  bid </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+  price </span><span style="color:#0000ff;">int</span><span style="color:#000000;">,
+  source_province </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+  target_province </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+  site </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+  express_number </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+  express_company </span><span style="color:#0000ff;">string</span><span style="color:#000000;">,
+  trancation_date date
+)stored </span><span style="color:#0000ff;">as</span><span style="color:#000000;"> orc;
+
+show create table record_orc;
+</span>+---------------------------------------------------------------------+--+
+|                           createtab_stmt                            |
++---------------------------------------------------------------------+--+
+| CREATE TABLE `record_orc`(                                          |
+|   `rid` <span style="color:#0000ff;">string</span>,                                                     |
+|   `uid` <span style="color:#0000ff;">string</span>,                                                     |
+|   `bid` <span style="color:#0000ff;">string</span>,                                                     |
+|   `price` <span style="color:#0000ff;">int</span>,                                                      |
+|   `source_province` <span style="color:#0000ff;">string</span>,                                         |
+|   `target_province` <span style="color:#0000ff;">string</span>,                                         |
+|   `site` <span style="color:#0000ff;">string</span>,                                                    |
+|   `express_number` <span style="color:#0000ff;">string</span>,                                          |
+|   `express_company` <span style="color:#0000ff;">string</span>,                                         |
+|   `trancation_date` date)                                           |
+| ROW FORMAT SERDE                                                    |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">org.apache.hadoop.hive.ql.io.orc.OrcSerde</span><span style="color:#800000;">'</span>                       |
+| STORED AS INPUTFORMAT                                               |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">org.apache.hadoop.hive.ql.io.orc.OrcInputFormat</span><span style="color:#800000;">'</span>                 |
+| OUTPUTFORMAT                                                        |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat</span><span style="color:#800000;">'</span>                |
+| LOCATION                                                            |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">hdfs://master:9000/user/hive/warehouse/practice2.db/record_orc</span><span style="color:#800000;">'</span>  |
+| TBLPROPERTIES (                                                     |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">COLUMN_STATS_ACCURATE</span><span style="color:#800000;">'</span>=<span style="color:#800000;">'</span><span style="color:#800000;">{\"BASIC_STATS\":\"true\"}</span><span style="color:#800000;">'</span>,             |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">numFiles</span><span style="color:#800000;">'</span>=<span style="color:#800000;">'</span><span style="color:#800000;">0</span><span style="color:#800000;">'</span>,                                                   |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">numRows</span><span style="color:#800000;">'</span>=<span style="color:#800000;">'</span><span style="color:#800000;">0</span><span style="color:#800000;">'</span>,                                                    |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">rawDataSize</span><span style="color:#800000;">'</span>=<span style="color:#800000;">'</span><span style="color:#800000;">0</span><span style="color:#800000;">'</span>,                                                |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">totalSize</span><span style="color:#800000;">'</span>=<span style="color:#800000;">'</span><span style="color:#800000;">0</span><span style="color:#800000;">'</span>,                                                  |
+|   <span style="color:#800000;">'</span><span style="color:#800000;">transient_lastDdlTime</span><span style="color:#800000;">'</span>=<span style="color:#800000;">'</span><span style="color:#800000;">1491706697</span><span style="color:#800000;">'</span>)                             |
++---------------------------------------------------------------------+--+<span style="color:#000000;">
+
+#载入数据
+insert into table record_orc </span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span><span style="color:#000000;"> record_dimension;
+
+</span><span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span><span style="color:#000000;"> record_orc;
+</span>+-----------------+-----------------+-----------------+-------------------+-----------------------------+----------------------------
+-+------------------+----------------------------+-----------------------------+-----------------------------+--+
+| record_orc.rid  | record_orc.uid  | record_orc.bid  | record_orc.price  | record_orc.source_province  |<span style="color:#000000;"> record_orc.target_province
+ </span>| record_orc.site  | record_orc.express_number  | record_orc.express_company  | record_orc.trancation_date  |
++-----------------+-----------------+-----------------+-------------------+-----------------------------+----------------------------
+-+------------------+----------------------------+-----------------------------+-----------------------------+--+
+| <span style="color:#800080;">0000000000</span>      | <span style="color:#800080;">00000001</span>        | <span style="color:#800080;">00000002</span>        | <span style="color:#800080;">625</span>               | HeiLongJiang                |<span style="color:#000000;"> HuNan
+ </span>| TianMao          | <span style="color:#800080;">22432432532123421431</span>       | ShenTong                    | <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                  |
+| <span style="color:#800080;">0000000001</span>      | <span style="color:#800080;">00000001</span>        | <span style="color:#800080;">00000001</span>        | <span style="color:#800080;">252</span>               | GuangDong                   |<span style="color:#000000;"> HuNan
+ </span>| JingDong         | <span style="color:#800080;">73847329843</span>                | ZhongTong                   | <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                  |
+| <span style="color:#800080;">0000000002</span>      | <span style="color:#800080;">00000004</span>        | <span style="color:#800080;">00000003</span>        | <span style="color:#800080;">697</span>               | JiangSu                     |<span style="color:#000000;"> Huan
+ </span>| TianMaoChaoShi   | <span style="color:#800080;">2197298357438</span>              | Shunfeng                    | <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                  |
+| <span style="color:#800080;">0000000003</span>      | <span style="color:#800080;">00000004</span>        | <span style="color:#800080;">00000003</span>        | <span style="color:#800080;">247</span>               | TianJing                    |<span style="color:#000000;"> NeiMeiGu
+ </span>| JingDong         | <span style="color:#800080;">73298759327894</span>             | YunDa                       | <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                  |
+| <span style="color:#800080;">0000000004</span>      | <span style="color:#800080;">00000002</span>        | <span style="color:#800080;">00000004</span>        | <span style="color:#800080;">429</span>               | ShangHai                    |<span style="color:#000000;"> Ning
+ </span>| TianMao          | <span style="color:#800080;">438294820</span>                  | YunDa                       | <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                  |
+| <span style="color:#800080;">0000000005</span>      | <span style="color:#800080;">00000008</span>        | <span style="color:#800080;">00000005</span>        | <span style="color:#800080;">120</span>               | HuBei                       |<span style="color:#000000;"> Aomen
+ </span>| JuHU             | <span style="color:#800080;">5349523959</span>                 | ZhongTong                   | <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                  |
++-----------------+-----------------+-----------------+-------------------+-----------------------------+----------------------------
+-+------------------+----------------------------+-----------------------------+-----------------------------+--+
+
+<span style="color:#0000ff;">select</span> * <span style="color:#0000ff;">from</span><span style="color:#000000;"> record_dimension;
+</span>+-----------------------+-----------------------+-----------------------+-------------------------+----------------------------------
+-+-----------------------------------+------------------------+----------------------------------+-----------------------------------
++-----------------------------------+--+
+| record_dimension.rid  | record_dimension.uid  | record_dimension.bid  | record_dimension.price  |<span style="color:#000000;"> record_dimension.source_province
+ </span>| record_dimension.target_province  | record_dimension.site  | record_dimension.express_number  |<span style="color:#000000;"> record_dimension.express_company
+</span>| record_dimension.trancation_date  |
++-----------------------+-----------------------+-----------------------+-------------------------+----------------------------------
+-+-----------------------------------+------------------------+----------------------------------+-----------------------------------
++-----------------------------------+--+
+| <span style="color:#800080;">0000000000</span>            | <span style="color:#800080;">00000001</span>              | <span style="color:#800080;">00000002</span>              | <span style="color:#800080;">625</span>                     |<span style="color:#000000;"> HeiLongJiang
+ </span>| HuNan                             | TianMao                | <span style="color:#800080;">22432432532123421431</span>             |<span style="color:#000000;"> ShenTong
+</span>| <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                        |
+| <span style="color:#800080;">0000000001</span>            | <span style="color:#800080;">00000001</span>              | <span style="color:#800080;">00000001</span>              | <span style="color:#800080;">252</span>                     |<span style="color:#000000;"> GuangDong
+ </span>| HuNan                             | JingDong               | <span style="color:#800080;">73847329843</span>                      |<span style="color:#000000;"> ZhongTong
+</span>| <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                        |
+| <span style="color:#800080;">0000000002</span>            | <span style="color:#800080;">00000004</span>              | <span style="color:#800080;">00000003</span>              | <span style="color:#800080;">697</span>                     |<span style="color:#000000;"> JiangSu
+ </span>| Huan                              | TianMaoChaoShi         | <span style="color:#800080;">2197298357438</span>                    |<span style="color:#000000;"> Shunfeng
+</span>| <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                        |
+| <span style="color:#800080;">0000000003</span>            | <span style="color:#800080;">00000004</span>              | <span style="color:#800080;">00000003</span>              | <span style="color:#800080;">247</span>                     |<span style="color:#000000;"> TianJing
+ </span>| NeiMeiGu                          | JingDong               | <span style="color:#800080;">73298759327894</span>                   |<span style="color:#000000;"> YunDa
+</span>| <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                        |
+| <span style="color:#800080;">0000000004</span>            | <span style="color:#800080;">00000002</span>              | <span style="color:#800080;">00000004</span>              | <span style="color:#800080;">429</span>                     |<span style="color:#000000;"> ShangHai
+ </span>| Ning                              | TianMao                | <span style="color:#800080;">438294820</span>                        |<span style="color:#000000;"> YunDa
+</span>| <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                        |
+| <span style="color:#800080;">0000000005</span>            | <span style="color:#800080;">00000008</span>              | <span style="color:#800080;">00000005</span>              | <span style="color:#800080;">120</span>                     |<span style="color:#000000;"> HuBei
+ </span>| Aomen                             | JuHU                   | <span style="color:#800080;">5349523959</span>                       |<span style="color:#000000;"> ZhongTong
+</span>| <span style="color:#800080;">2017</span>-<span style="color:#800080;">09</span>-<span style="color:#800080;">01</span>                        |
++-----------------------+-----------------------+-----------------------+-------------------------+----------------------------------
+-+-----------------------------------+------------------------+----------------------------------+-----------------------------------
++-----------------------------------+--+</pre>
+</div>
+<p> </p>
+<p><br>从数据结果来看没有多大区别。那我们来看下hdfs上的存储文件：</p>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409111118566-1567970533.png" alt="" width="919" height="385"><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409111237878-1696232717.png" alt="" width="920" height="218"><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409111254832-2086897322.png" alt="" width="922" height="543"></p>
+<p> </p>
+<h2>3.介绍下基本的JDBC连接hiveServer2的示例</h2>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409102031222-314798007.png" alt="" width="356" height="543"></p>
+<div class="cnblogs_code">
+<pre><span style="color:#000000;">package com.m.hive;
+
+import java.sql.</span>*<span style="color:#000000;">;
+
+</span><span style="color:#008000;">/*</span><span style="color:#008000;">*
+ * @author mengfanzhu
+ * @Package com.m.hive
+ * @Description:
+ * @date 17/4/3 11:57
+ </span><span style="color:#008000;">*/</span>
+<span style="color:#0000ff;">public</span> <span style="color:#0000ff;">class</span><span style="color:#000000;"> HiveJdbc {
+    </span><span style="color:#0000ff;">private</span> <span style="color:#0000ff;">static</span> String driverName = <span style="color:#800000;">"</span><span style="color:#800000;">org.apache.hive.jdbc.HiveDriver</span><span style="color:#800000;">"</span>;<span style="color:#008000;">//</span><span style="color:#008000;">jdbc驱动路径</span>
+    <span style="color:#0000ff;">private</span> <span style="color:#0000ff;">static</span> String url = <span style="color:#800000;">"</span><span style="color:#800000;">jdbc:hive2://10.211.55.5:10000/dbmfz</span><span style="color:#800000;">"</span>;<span style="color:#008000;">//</span><span style="color:#008000;">hive库地址+库名</span>
+    <span style="color:#0000ff;">private</span> <span style="color:#0000ff;">static</span> String user = <span style="color:#800000;">"</span><span style="color:#800000;">mfz</span><span style="color:#800000;">"</span>;<span style="color:#008000;">//</span><span style="color:#008000;">用户名</span>
+    <span style="color:#0000ff;">private</span> <span style="color:#0000ff;">static</span> String password = <span style="color:#800000;">"</span><span style="color:#800000;">111111</span><span style="color:#800000;">"</span>;<span style="color:#008000;">//</span><span style="color:#008000;">密码</span>
+
+    <span style="color:#0000ff;">public</span> <span style="color:#0000ff;">static</span> <span style="color:#0000ff;">void</span><span style="color:#000000;"> main(String[] args) {
+        Connection conn </span>= <span style="color:#0000ff;">null</span><span style="color:#000000;">;
+        Statement stmt </span>= <span style="color:#0000ff;">null</span><span style="color:#000000;">;
+        ResultSet res </span>= <span style="color:#0000ff;">null</span><span style="color:#000000;">;
+        </span><span style="color:#0000ff;">try</span><span style="color:#000000;"> {
+            conn </span>=<span style="color:#000000;"> getConn();
+            System.</span><span style="color:#0000ff;">out</span><span style="color:#000000;">.println(conn);
+            stmt </span>=<span style="color:#000000;"> conn.createStatement();
+            stmt.execute(</span><span style="color:#800000;">"</span><span style="color:#800000;">drop table hivetest</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+            stmt.execute(</span><span style="color:#800000;">"</span><span style="color:#800000;">CREATE TABLE if not EXISTS hivetest(</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">ymd date,</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">price_open FLOAT ,</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">price_high FLOAT ,</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">price_low FLOAT ,</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">price_close float,</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">volume int,</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">price_adj_close FLOAT</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">)partitioned by (exchanger string,symbol string)</span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">row format delimited fields terminated by ','</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+            stmt.execute(</span><span style="color:#800000;">"</span><span style="color:#800000;">LOAD DATA LOCAL INPATH '/home/mfz/apache-hive-2.1.1-bin/hivedata/stocks.csv' </span><span style="color:#800000;">"</span> +
+                    <span style="color:#800000;">"</span><span style="color:#800000;">OVERWRITE INTO TABLE hivetest partition(exchanger=\"NASDAQ\",symbol=\"INTC\")</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+            res </span>= stmt.executeQuery(<span style="color:#800000;">"</span><span style="color:#800000;">select * from hivetest limit 10</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+            System.</span><span style="color:#0000ff;">out</span>.println(<span style="color:#800000;">"</span><span style="color:#800000;">执行 select * query 运行结果:</span><span style="color:#800000;">"</span><span style="color:#000000;">);
+            </span><span style="color:#0000ff;">while</span><span style="color:#000000;"> (res.next()) {
+                System.</span><span style="color:#0000ff;">out</span><span style="color:#000000;">.println(
+                        </span><span style="color:#800000;">"</span><span style="color:#800000;">日期:</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">1</span>)+
+                        <span style="color:#800000;">"</span><span style="color:#800000;">|price_open:</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">2</span>)+
+                        <span style="color:#800000;">"</span><span style="color:#800000;">|price_hign：</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">3</span>)+
+                        <span style="color:#800000;">"</span><span style="color:#800000;">|price_low：</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">4</span>)+
+                        <span style="color:#800000;">"</span><span style="color:#800000;">|price_close：</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">5</span>)+
+                        <span style="color:#800000;">"</span><span style="color:#800000;">|volume:</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">6</span>)+
+                        <span style="color:#800000;">"</span><span style="color:#800000;">|price_adj_close:</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">7</span>)+
+                        <span style="color:#800000;">"</span><span style="color:#800000;">|exchanger:</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">8</span>)+
+                        <span style="color:#800000;">"</span><span style="color:#800000;">|symbol:</span><span style="color:#800000;">"</span>+res.getString(<span style="color:#800080;">9</span><span style="color:#000000;">));
+            }
+
+        } </span><span style="color:#0000ff;">catch</span><span style="color:#000000;"> (ClassNotFoundException e) {
+            e.printStackTrace();
+            System.exit(</span><span style="color:#800080;">1</span><span style="color:#000000;">);
+        } </span><span style="color:#0000ff;">catch</span><span style="color:#000000;"> (SQLException e) {
+            e.printStackTrace();
+            System.exit(</span><span style="color:#800080;">1</span><span style="color:#000000;">);
+        }</span><span style="color:#0000ff;">finally</span><span style="color:#000000;"> {
+            </span><span style="color:#0000ff;">try</span><span style="color:#000000;">{
+                </span><span style="color:#0000ff;">if</span>(<span style="color:#0000ff;">null</span>!=<span style="color:#000000;">res){
+                    res.close();
+                }
+                </span><span style="color:#0000ff;">if</span>(<span style="color:#0000ff;">null</span>!=<span style="color:#000000;">stmt){
+                    stmt.close();
+                }
+                </span><span style="color:#0000ff;">if</span>(<span style="color:#0000ff;">null</span>!=<span style="color:#000000;">conn){
+                    conn.close();
+                }
+            }</span><span style="color:#0000ff;">catch</span><span style="color:#000000;"> (Exception e){
+                e.printStackTrace();
+            }
+
+        }
+    }
+
+    </span><span style="color:#0000ff;">private</span> <span style="color:#0000ff;">static</span><span style="color:#000000;"> Connection getConn() throws ClassNotFoundException,
+            SQLException {
+        Class.forName(driverName);
+        Connection conn </span>=<span style="color:#000000;"> DriverManager.getConnection(url, user, password);
+        </span><span style="color:#0000ff;">return</span><span style="color:#000000;"> conn;
+    }
+}</span></pre>
+</div>
+<p> </p>
+<p>运行结果</p>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409102120222-920587677.png" alt="" width="669" height="208"></p>
+<p> </p>
+<p>操作完成后我们在hdfs中可以见到我们之前操作过的文件。这个目录是我们之前在hive-site.xml中配置了此项</p>
+<div class="cnblogs_code">
+<pre>&lt;property&gt;
+        &lt;name&gt;hive.metastore.warehouse.dir&lt;/name&gt;
+        &lt;value&gt;/user/hive/warehouse&lt;/value&gt;
+        &lt;description&gt;locationofdefault databasefor thewarehouse&lt;/description&gt;
+&lt;/property&gt;</pre>
+</div>
+<p> </p>
+<p><img src="https://images2015.cnblogs.com/blog/941878/201704/941878-20170409102926863-1527902514.png" alt="" width="931" height="594"></p>
+<p>完~，项目示例见Github <a href="https://github.com/fzmeng/HiveExample" rel="nofollow">https://github.com/fzmeng/HiveExample</a><a href="https://github.com/fzmeng/HiveDemo" rel="nofollow"><br></a></p></div><div id="MySignature"></div>
+<div class="clear"></div>
+<div id="blog_post_info_block">
+<div id="BlogPostCategory"></div>
+<div id="EntryTag"></div>
+<div id="blog_post_info">
+</div>
+<div class="clear"></div>
+<div id="post_next_prev"></div>
+</div>
+
+
+		</div>            </div>
+                </div>

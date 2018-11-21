@@ -1,0 +1,325 @@
+---
+layout:     post
+title:      Spark sql执行流程
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div><div><div class="article"><div class="show-content"><div class="show-content-free"><p>在前面的文章<a href="https://www.jianshu.com/p/2358cc790049" rel="nofollow">《spark基础（上篇）》</a>和<a href="https://www.jianshu.com/p/fe54ec82d360" rel="nofollow">《spark基础（下篇）》</a>里面已经介绍了spark的一些基础知识，知道了spark sql是spark中一个主要的框架之一。本文我们通过源码，来介绍下spark sql的执行流程。<br>　　  Spark sql是spark内部最核心，也是社区最活跃的组件。Spark SQL支持在Spark中执行SQL,或者HiveQL的关系查询表达式。列式存储的类RDD（DataSet/DataFrame）数据类型以及对sql语句的支持使它更容易上手，同时，它对数据的抽取、清洗的特性，使它广泛的用于etl，甚至是机器学习领域。因此，saprk sql较其他spark组件，获得了更多的使用者。<br>　　下文，我们首先通过查看一个简单的sql的执行计划，对sql的执行流程有一个简单的认识，后面将通过对sql优化器catalyst的每个部分的介绍，来让大家更深入的了解sql后台的执行流程。由于此模板中代码较多，我们在此仅就执行流程中涉及到的主要代码进行介绍，方便大家更快地浏览spark sql的源码。本文中涉及到的源码都是最新版本spark 2.1.1的。</p><h1>1. catalyst整体执行流程介绍</h1><h2>1.1 catalyst整体执行流程</h2><p>说到spark sql不得不提的当然是Catalyst了。Catalyst是spark sql的核心，是一套针对spark sql 语句执行过程中的查询优化框架。因此要理解spark sql的执行流程，理解Catalyst的工作流程是理解spark sql的关键。而说到Catalyst，就必须得上下面这张图1了，这张图描述了spark sql执行的全流程。其中，长方形框内为catalyst的工作流程。</p><div class="image-package"><div class="image-container"><div class="image-container-fill"></div><div class="image-view"><img src="//upload-images.jianshu.io/upload_images/2119554-6cb9890d54a53ef4.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/546" alt=""></div></div><div class="image-caption">图1 spark sql 执行流程图</div></div><p>SQL语句首先通过Parser模块被解析为语法树，此棵树称为Unresolved Logical Plan；Unresolved Logical Plan通过Analyzer模块借助于Catalog中的表信息解析为Logical Plan；此时，Optimizer再通过各种基于规则的优化策略进行深入优化，得到Optimized Logical Plan；优化后的逻辑执行计划依然是逻辑的，并不能被Spark系统理解，此时需要将此逻辑执行计划转换为Physical Plan。</p><h2>1.2 一个简单sql语句的执行</h2><p>为了更好的对整个过程进行理解，下面通过一个简单的sql示例来查看采用catalyst框架执行sql的过程。示例代码如下：</p><pre class="hljs objectivec"><code class="objectivec">object TestSql {
+
+  <span class="hljs-keyword">case</span> <span class="hljs-keyword">class</span> Student(<span class="hljs-keyword">id</span>:Long,name:String,chinese:String,math:String,English:String,age:Int)
+  <span class="hljs-keyword">case</span> <span class="hljs-keyword">class</span> Score(sid:Long,weight1:String,weight2:String,weight3:String)
+  
+  def main(args: Array[String]): Unit = {
+  <span class="hljs-comment">//使用saprkSession初始化spark运行环境</span>
+  val spark=SparkSession.builder().appName(<span class="hljs-string">"Spark SQL basic example"</span>).config(<span class="hljs-string">"spark.some.config.option"</span>, <span class="hljs-string">"some-value"</span>).getOrCreate()
+  <span class="hljs-comment">//引入spark sql的隐式转换</span>
+   import sqlContext.implicits._
+  <span class="hljs-comment">//读取第一个文件的数据并转换成DataFrame</span>
+  val testP1 = spark.sparkContext.textFile(<span class="hljs-string">"/home/dev/testP1"</span>).map(_.split(<span class="hljs-string">" "</span>)).map(p=&gt;Student(p(<span class="hljs-number">0</span>).toLong,p(<span class="hljs-number">1</span>),p(<span class="hljs-number">2</span>),p(<span class="hljs-number">3</span>),p(<span class="hljs-number">4</span>),p(<span class="hljs-number">5</span>).trim.toInt)).toDF()
+  <span class="hljs-comment">//注册成表</span>
+    testP1.registerTempTable(<span class="hljs-string">"studentTable"</span>)
+  <span class="hljs-comment">//读取第二个文件的数据并转换成DataFrame</span>
+    val testp2 = spark.sparkContext.textFile(<span class="hljs-string">"/home/dev/testP2"</span>).map(_.split(<span class="hljs-string">" "</span>)).map(p=&gt;Score(p(<span class="hljs-number">0</span>).toLong,p(<span class="hljs-number">1</span>),p(<span class="hljs-number">2</span>),p(<span class="hljs-number">3</span>))).toDF()
+  <span class="hljs-comment">//注册成表</span>
+    testp2.registerTempTable(<span class="hljs-string">"scoreTable"</span>)
+  <span class="hljs-comment">//查看sql的逻辑执行计划</span>
+    val dataframe = spark.sql(<span class="hljs-string">"select sum(chineseScore) from "</span> +
+      <span class="hljs-string">"(select x.id,x.chinese+20+30 as chineseScore,x.math from studentTable x inner join  scoreTable y on x.id=y.sid)z"</span> +
+      <span class="hljs-string">" where z.chineseScore &lt;100"</span>).map(p=&gt;(p.getLong(<span class="hljs-number">0</span>))).collect.foreach(println)
+</code></pre><p>此例也是针对spark2.1.1版本的，程序的入口是SparkSession。由于此例超级简单，做过spark的人一眼就能看出，而且每行代码都带有中文注释，所以在这里，我们就不做具体的介绍了。<br>　　这里涉及到的sql查询就是最后一句，通过spark shell可以看到该sql查询的逻辑执行计划和物理执行计划。进入sparkshell后，输入一下代码即可显示此sql查询的执行计划。</p><pre class="hljs bash"><code class="bash">  spark.sql(<span class="hljs-string">"select sum(chineseScore) from "</span> +
+      <span class="hljs-string">"(select x.id,x.chinese+20+30 as chineseScore,x.math from  studentTable x inner join  scoreTable y on x.id=y.sid)z"</span> +
+      <span class="hljs-string">" where z.chineseScore &lt;100"</span>).explain(<span class="hljs-literal">true</span>)
+</code></pre><p>这里，是使用DataSet的explain函数实现逻辑执行计划和物理执行计划的打印，调用explain的源码如下：</p><pre><code class="language-php"><code class="php"><span class="hljs-comment">/**
+ * Prints the plans (logical and physical) to the console for debugging purposes.
+ *
+ * <span class="hljs-doctag">@group</span> basic
+ * <span class="hljs-doctag">@since</span> 1.6.0
+ */</span>
+def explain(extended: Boolean): Unit = {
+  val explain = ExplainCommand(queryExecution.logical, extended = extended)
+  sparkSession.sessionState.executePlan(explain).executedPlan.executeCollect().<span class="hljs-keyword">foreach</span> {
+    <span class="hljs-comment">// scalastyle:off println</span>
+    r =&gt; println(r.getString(<span class="hljs-number">0</span>))
+    <span class="hljs-comment">// scalastyle:on println</span>
+  }
+}
+</code></code></pre><p>显示在spark shell中的unresolved logical plan、resolved logical plan、optimized logical plan和physical plan如下图2所示：</p><div class="image-package"><div class="image-container"><div class="image-container-fill"></div><div class="image-view"><img src="//upload-images.jianshu.io/upload_images/2119554-58e0292dce321620.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/537" alt=""></div></div><div class="image-caption"></div></div><br><div class="image-package"><div class="image-container"><div class="image-container-fill"></div><div class="image-view"><img src="//upload-images.jianshu.io/upload_images/2119554-4a9384283ed60139.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/541" alt=""></div></div><div class="image-caption"></div></div><div class="image-package"><div class="image-container"><div class="image-container-fill"></div><div class="image-view"><img src="//upload-images.jianshu.io/upload_images/2119554-11c3d901ab460655.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/545" alt=""></div></div><div class="image-caption">图2 spark sql 执行计划</div></div><br><p>　　将上图2中的Parsed Logical Plan表示成树结构如下图3所示。Catalyst中的parser将图左中一个sql查询的字符串解析成图右的一个AST语法树，该语法树就称为Parsed Logical Plan。解析后的逻辑计划基本形成了执行计划的基础骨架，此逻辑执行计划被称为 unresolved Logical Plan，也就是说该逻辑计划是无法执行的，系统并不知道语法树中的每个词是神马意思，如图中的filter，join，以及studentTable等。</p><div class="image-package"><div class="image-container"><div class="image-container-fill"></div><div class="image-view"><img src="//upload-images.jianshu.io/upload_images/2119554-d15b294d121af0f7.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/554" alt=""></div></div><div class="image-caption">图3 Parsed Logical Plan树</div></div><br><p>　　将上图2中的Analyzed logical plan，即Resolved logical plan表示成树结构如下图4所示。Catalyst的analyzer将unresolved Logical Plan解析成resolved Logical Plan。Analyzer借助cataLog（下文介绍）中表的结构信息、函数信息等将此逻辑计划解析成可被识别的逻辑执行计划。</p><div class="image-package"><div class="image-container"><div class="image-container-fill"></div><div class="image-view"><img src="//upload-images.jianshu.io/upload_images/2119554-29449c451e171d36.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/528" alt=""></div></div><div class="image-caption">图4 Analyzed logical plan树</div></div><br><p>　　optimized logical plan与physical plan的树结构跟上面两种逻辑执行计划树结构的画法相似，下面就不在画了。从optimized logical plan可出，此次优化使用了Filter下推的策略，即将Filter下推到子查询中实现，继而减少后续数据的处理量。<br>　　前面我们展示了catalyst执行一段sql语句的大致流程，下面我们就从源代码的角度来分析catalyst的每个部分内部如何实现，以及它们之间是如何承接的。</p><h1>2. catalyst各个模块介绍</h1><p>本章我们通过分析上面的例子代码的调用过程来分析catalys各个部分的主要代码模块，spark sql的入口是最后一句，SparkSession类里的sql函数，传入一个sql字符串，返回一个dataframe对象。入口调用的代码如下：</p><pre><code class="language-ruby"><code class="ruby">code <span class="hljs-number">1</span>
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">sql</span><span class="hljs-params">(<span class="hljs-symbol">sqlText:</span> String)</span></span>: DataFrame = {
+  Dataset.ofRows(<span class="hljs-keyword">self</span>, sessionState.sqlParser.parsePlan(sqlText))
+}
+</code></code></pre><h2>2.1 Parser</h2><p>从入口代码可看出，首先调用sqlParser的parsePlan方法，将sql字符串解析成unresolved逻辑执行计划。parsePlan的具体实现在AbstractSqlParser类中。如下：</p><pre><code class="language-javascript"><code class="javascript">code <span class="hljs-number">2</span>
+<span class="hljs-comment">/** Creates LogicalPlan for a given SQL string. */</span>
+override def parsePlan(sqlText: <span class="hljs-built_in">String</span>): LogicalPlan = parse(sqlText) { parser =&gt;
+  astBuilder.visitSingleStatement(parser.singleStatement()) match {
+    <span class="hljs-keyword">case</span> plan: <span class="hljs-function"><span class="hljs-params">LogicalPlan</span> =&gt;</span> plan
+    <span class="hljs-keyword">case</span> <span class="hljs-function"><span class="hljs-params">_</span> =&gt;</span>
+      val position = Origin(None, None)
+      <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> ParseException(Option(sqlText), <span class="hljs-string">"Unsupported SQL statement"</span>, position, position)
+  }
+}
+</code></code></pre><p>由上段代码可看出，调用的主函数是parse，继续进入到parse中，代码如下：</p><pre><code class="language-javascript"><code class="javascript">code <span class="hljs-number">3</span>
+protected def parse[T](command: <span class="hljs-built_in">String</span>)(toResult: <span class="hljs-function"><span class="hljs-params">SqlBaseParser</span> =&gt;</span> T): T = {
+  logInfo(s<span class="hljs-string">"Parsing command: $command"</span>)
+
+  val lexer = <span class="hljs-keyword">new</span> SqlBaseLexer(<span class="hljs-keyword">new</span> ANTLRNoCaseStringStream(command))
+  lexer.removeErrorListeners()
+  lexer.addErrorListener(ParseErrorListener)
+
+  val tokenStream = <span class="hljs-keyword">new</span> CommonTokenStream(lexer)
+  val parser = <span class="hljs-keyword">new</span> SqlBaseParser(tokenStream)
+  parser.addParseListener(PostProcessor)
+  parser.removeErrorListeners()
+  parser.addErrorListener(ParseErrorListener)
+
+  <span class="hljs-keyword">try</span> {
+    <span class="hljs-keyword">try</span> {
+      <span class="hljs-comment">// first, try parsing with potentially faster SLL(Strong-LL) mode</span>
+      parser.getInterpreter.setPredictionMode(PredictionMode.SLL)
+      toResult(parser)
+    }
+  }
+}
+</code></code></pre><p>从parse函数可以看出，这里对于SQL语句的解析采用的是ANTLR 4，这里使用到了两个类：词法解析器SqlBaseLexer和语法解析器SqlBaseParser<br>SqlBaseLexer和SqlBaseParser均是使用ANTLR 4自动生成的Java类。这里，采用这两个解析器将SQL语句解析成了ANTLR 4的语法树结构ParseTree。之后，在parsePlan（见code 2）中，使用AstBuilder（AstBuilder.scala）将ANTLR 4语法树结构转换成catalyst表达式，即logical plan。<br>　　此时生成的逻辑执行计划成为unresolved logical plan。只是将sql串解析成类似语法树结构的执行计划，系统并不知道每个词所表示的意思，离真正能够执行还差很远。</p><h2>2.2 Analyzer</h2><p>parser生成逻辑执行计划后，使用analyzer将逻辑执行计划进行分析。我们回到Dataset的ofRows函数:</p><pre><code class="language-python"><code class="python">code <span class="hljs-number">4</span>
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">ofRows</span><span class="hljs-params">(sparkSession: SparkSession, logicalPlan: LogicalPlan)</span>:</span> DataFrame = {
+  val qe = sparkSession.sessionState.executePlan(logicalPlan)
+  qe.assertAnalyzed()
+  new Dataset[Row](sparkSession, qe, RowEncoder(qe.analyzed.schema))
+}
+</code></code></pre><p>这里首先创建了queryExecution类对象，QueryExecution中定义了sql执行过程中的关键步骤，是sql执行的关键类，返回一个dataframe类型的对象。QueryExecution类中的成员都是lazy的，被调用时才会执行。只有等到程序中出现action算子时，才会调用 queryExecution类中的executedPlan成员，原先生成的逻辑执行计划才会被优化器优化，并转换成物理执行计划真正的被系统调用执行。 　　　<br>　　QueryExecution类的主要成员如下所示。其中定义了解析器analyzer、优化器optimizer以及生成物理执行计划的sparkPlan。</p><pre><code class="language-javascript"><code class="javascript">code <span class="hljs-number">5</span>
+<span class="hljs-comment">//调用analyzer解析器</span>
+lazy val analyzed: LogicalPlan = {
+  SparkSession.setActiveSession(sparkSession)
+  sparkSession.sessionState.analyzer.execute(logical)
+}
+
+lazy val withCachedData: LogicalPlan = {
+  assertAnalyzed()
+  assertSupported()
+  sparkSession.sharedState.cacheManager.useCachedData(analyzed)
+}
+<span class="hljs-comment">//调用optimizer优化器</span>
+lazy val optimizedPlan: LogicalPlan = sparkSession.sessionState.optimizer.execute(withCachedData)
+
+<span class="hljs-comment">//将优化后的逻辑执行计划转换成物理执行计划</span>
+lazy val sparkPlan: SparkPlan = {
+  SparkSession.setActiveSession(sparkSession)
+  <span class="hljs-comment">// <span class="hljs-doctag">TODO:</span> We use next(), i.e. take the first plan returned by the planner, here for now,</span>
+  <span class="hljs-comment">//       but we will implement to choose the best plan.</span>
+  planner.plan(ReturnAnswer(optimizedPlan)).next()
+}
+
+<span class="hljs-comment">// executedPlan should not be used to initialize any SparkPlan. It should be</span>
+<span class="hljs-comment">// only used for execution.</span>
+lazy val executedPlan: SparkPlan = prepareForExecution(sparkPlan)
+
+<span class="hljs-comment">/**
+ * Prepares a planned [[SparkPlan]] for execution by inserting shuffle operations and internal
+ * row format conversions as needed.
+ */</span>
+protected def prepareForExecution(plan: SparkPlan): SparkPlan = {
+  preparations.foldLeft(plan) { <span class="hljs-keyword">case</span> <span class="hljs-function">(<span class="hljs-params">sp, rule</span>) =&gt;</span> rule.apply(sp) }
+}
+
+</code></code></pre><p>前文有介绍，analyzer的主要职责是将parser生成的unresolved logical plan解析生成logical plan。调用analyzer的代码在QueryExecution中，code 5中已经有贴出。此模块的主函数来自于analyzer的父类RuleExecutor。主函数execute实现在RuleExecutor类中，代码如下：</p><pre><code class="language-php"><code class="php">code <span class="hljs-number">6</span>
+  <span class="hljs-comment">/**
+   * Executes the batches of rules defined by the subclass. The batches are executed serially
+   * using the defined execution strategy. Within each batch, rules are also executed serially.
+   */</span>
+  def execute(plan: TreeType): TreeType = {
+    <span class="hljs-keyword">var</span> curPlan = plan
+
+    batches.<span class="hljs-keyword">foreach</span> { batch =&gt;
+      val batchStartPlan = curPlan
+      <span class="hljs-keyword">var</span> iteration = <span class="hljs-number">1</span>
+      <span class="hljs-keyword">var</span> lastPlan = curPlan
+      <span class="hljs-keyword">var</span> <span class="hljs-keyword">continue</span> = <span class="hljs-keyword">true</span>
+
+      <span class="hljs-comment">// Run until fix point (or the max number of iterations as specified in the strategy.</span>
+      <span class="hljs-keyword">while</span> (<span class="hljs-keyword">continue</span>) {
+        curPlan = batch.rules.foldLeft(curPlan) {
+          <span class="hljs-keyword">case</span> (plan, rule) =&gt;
+            val startTime = System.nanoTime()
+            val result = rule(plan)
+            val runTime = System.nanoTime() - startTime
+            RuleExecutor.timeMap.addAndGet(rule.ruleName, runTime)
+
+            <span class="hljs-keyword">if</span> (!result.fastEquals(plan)) {
+              logTrace(
+                s<span class="hljs-string">""</span><span class="hljs-string">"
+                  |=== Applying Rule ${rule.ruleName} ===
+                  |${sideBySide(plan.treeString, result.treeString).mkString("</span>\n<span class="hljs-string">")}
+                "</span><span class="hljs-string">""</span>.stripMargin)
+            }
+
+            result
+        }
+        iteration += <span class="hljs-number">1</span>
+}
+</code></code></pre><p>此函数实现了针对analyzer类中定义的每一个batch（类别），按照batch中定义的fix point(策略)和rule（规则）对Unresolved的逻辑计划进行解析。其中batch的结构如下：</p><pre><code class="language-cpp"><code class="cpp">code <span class="hljs-number">7</span>
+<span class="hljs-comment">/** A batch of rules. */</span>
+<span class="hljs-function"><span class="hljs-keyword">protected</span> <span class="hljs-keyword">case</span> class <span class="hljs-title">Batch</span><span class="hljs-params">(name: String, strategy: Strategy, rules: Rule[TreeType]*)</span>
+</span></code></code></pre><p>由于在analyzer的batchs中定义了多个规则，代码段很长，因此这里就不再贴出，有需要的请去spark的源码中找到Analyzer类查看。<br>　　在batchs里的这些batch中，Resolution是最常用的，从字面意思就可以看出其用途，就是将parser解析后的逻辑计划里的各个节点，转变成resolved节点。而其中ResolveRelations是比较好理解的一个rule（规则），这一步调用了catalog这个对象，Catalog对象里面维护了一个tableName,Logical Plan的HashMap结果。通过这个Catalog目录来寻找当前表的结构，从而从中解析出这个表的字段，如UnResolvedRelations 会得到一个tableWithQualifiers。（即表和字段）。catalog中缓存表名称和逻辑执行计划关系的代码如下：</p><pre><code class="language-cpp"><code class="cpp">code <span class="hljs-number">8</span>
+<span class="hljs-comment">/**
+ * A cache of qualified table names to table relation plans.
+ */</span>
+val tableRelationCache: Cache[QualifiedTableName, LogicalPlan] = {
+  val cacheSize = conf.tableRelationCacheSize
+  CacheBuilder.newBuilder().maximumSize(cacheSize).build[QualifiedTableName, LogicalPlan]()
+}
+</code></code></pre><h2>2.3 Optimizer</h2><p>optimizer是catalyst中关键的一个部分，提供对sql查询的一个优化。optimizer的主要职责是针对Analyzer的resolved logical plan，根据不同的batch优化策略)，来对执行计划树进行优化，优化逻辑计划节点(Logical Plan)以及表达式(Expression)，同时，此部分也是转换成物理执行计划的前置。optimizer的调用在QueryExecution类中，代码code 5中已经贴出。<br>　　其工作方式与上面讲的Analyzer类似，因为它们的主函数executor都是继承自RuleExecutor。因此，optimizer的主函数如上面的code 6代码，这里就不在贴出。optimizer的batchs（优化策略）定义如下：</p><pre><code class="language-cpp"><code class="cpp">code <span class="hljs-number">9</span>
+def batches: Seq[Batch] = {
+  <span class="hljs-comment">// Technically some of the rules in Finish Analysis are not optimizer rules and belong more</span>
+  <span class="hljs-comment">// in the analyzer, because they are needed for correctness (e.g. ComputeCurrentTime).</span>
+  <span class="hljs-comment">// However, because we also use the analyzer to canonicalized queries (for view definition),</span>
+  <span class="hljs-comment">// we do not eliminate subqueries or compute current time in the analyzer.</span>
+  Batch(<span class="hljs-string">"Finish Analysis"</span>, Once,
+    EliminateSubqueryAliases,
+    EliminateView,
+    ReplaceExpressions,
+    ComputeCurrentTime,
+    GetCurrentDatabase(sessionCatalog),
+    RewriteDistinctAggregates,
+    ReplaceDeduplicateWithAggregate) ::
+  <span class="hljs-comment">//////////////////////////////////////////////////////////////////////////////////////////</span>
+  <span class="hljs-comment">// Optimizer rules start here</span>
+  <span class="hljs-comment">//////////////////////////////////////////////////////////////////////////////////////////</span>
+  <span class="hljs-comment">// - Do the first call of CombineUnions before starting the major Optimizer rules,</span>
+  <span class="hljs-comment">//   since it can reduce the number of iteration and the other rules could add/move</span>
+  <span class="hljs-comment">//   extra operators between two adjacent Union operators.</span>
+  <span class="hljs-comment">// - Call CombineUnions again in Batch("Operator Optimizations"),</span>
+  <span class="hljs-comment">//   since the other rules might make two separate Unions operators adjacent.</span>
+  Batch(<span class="hljs-string">"Union"</span>, Once,
+    CombineUnions) ::
+  Batch(<span class="hljs-string">"Pullup Correlated Expressions"</span>, Once,
+    PullupCorrelatedPredicates) ::
+  Batch(<span class="hljs-string">"Subquery"</span>, Once,
+    OptimizeSubqueries) ::
+  Batch(<span class="hljs-string">"Replace Operators"</span>, fixedPoint,
+    ReplaceIntersectWithSemiJoin,
+    ReplaceExceptWithAntiJoin,
+    ReplaceDistinctWithAggregate) ::
+  Batch(<span class="hljs-string">"Aggregate"</span>, fixedPoint,
+    RemoveLiteralFromGroupExpressions,
+    RemoveRepetitionFromGroupExpressions) ::
+  Batch(<span class="hljs-string">"Operator Optimizations"</span>, fixedPoint,
+    <span class="hljs-comment">// Operator push down</span>
+    PushProjectionThroughUnion,
+    ReorderJoin,
+    EliminateOuterJoin,
+    PushPredicateThroughJoin,
+    PushDownPredicate,
+    LimitPushDown(conf),
+    ColumnPruning,
+    InferFiltersFromConstraints,
+    <span class="hljs-comment">// Operator combine</span>
+    CollapseRepartition,
+    CollapseProject,
+    CollapseWindow,
+    CombineFilters,
+    CombineLimits,
+    CombineUnions,
+    <span class="hljs-comment">// Constant folding and strength reduction</span>
+    NullPropagation(conf),
+    FoldablePropagation,
+    OptimizeIn(conf),
+    ConstantFolding,
+    ReorderAssociativeOperator,
+    LikeSimplification,
+    BooleanSimplification,
+    SimplifyConditionals,
+    RemoveDispensableExpressions,
+    SimplifyBinaryComparison,
+    PruneFilters,
+    EliminateSorts,
+    SimplifyCasts,
+    SimplifyCaseConversionExpressions,
+    RewriteCorrelatedScalarSubquery,
+    EliminateSerialization,
+    RemoveRedundantAliases,
+    RemoveRedundantProject,
+    SimplifyCreateStructOps,
+    SimplifyCreateArrayOps,
+    SimplifyCreateMapOps) ::
+  Batch(<span class="hljs-string">"Check Cartesian Products"</span>, Once,
+    CheckCartesianProducts(conf)) ::
+  Batch(<span class="hljs-string">"Join Reorder"</span>, Once,
+    CostBasedJoinReorder(conf)) ::
+  Batch(<span class="hljs-string">"Decimal Optimizations"</span>, fixedPoint,
+    DecimalAggregates(conf)) ::
+  Batch(<span class="hljs-string">"Typed Filter Optimization"</span>, fixedPoint,
+    CombineTypedFilters) ::
+  Batch(<span class="hljs-string">"LocalRelation"</span>, fixedPoint,
+    ConvertToLocalRelation,
+    PropagateEmptyRelation) ::
+  Batch(<span class="hljs-string">"OptimizeCodegen"</span>, Once,
+    OptimizeCodegen(conf)) ::
+  Batch(<span class="hljs-string">"RewriteSubquery"</span>, Once,
+    RewritePredicateSubquery,
+    CollapseProject) :: Nil
+}
+</code></code></pre><p>由此可以看出，Spark 2.1.1版本增加了更多的优化策略，因此如果要提高spark sql程序的性能，升级spark版本是非常必要的。<br>　　其中，"Operator Optimizations"，即操作优化是使用最多的，也是比较好理解的优化操作。"Operator Optimizations"中包括的规则有PushProjectionThroughUnion，ReorderJoin等。</p><p>PushProjectionThroughUnion策略是将左边子查询的Filter或者是projections移动到union的右边子查询中。例如针对下面代码</p><pre><code class="language-python"><code class="python">case <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">a</span>:</span>item1:String,item2:String,item3:String
+case <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">b</span>:</span>item1:String,item2:String
+
+select a.item1,b.item2 <span class="hljs-keyword">from</span> a where a.item1&gt;<span class="hljs-string">'example'</span>  <span class="hljs-keyword">from</span> a union all (select item1,item2 <span class="hljs-keyword">from</span> b )
+</code></code></pre><p>此时，通过PushProjectionThroughUnion规则后，查询优化器会将sql改为下面的sql，即将Filter右移到了union的右端。如下所示。</p><pre><code class="language-css"><code class="css"><span class="hljs-selector-tag">select</span> <span class="hljs-selector-tag">a</span><span class="hljs-selector-class">.item1</span>,<span class="hljs-selector-tag">b</span><span class="hljs-selector-class">.item2</span> <span class="hljs-selector-tag">from</span> <span class="hljs-selector-tag">a</span> <span class="hljs-selector-tag">where</span> <span class="hljs-selector-tag">a</span><span class="hljs-selector-class">.item1</span>&gt;’<span class="hljs-selector-tag">example</span>’  <span class="hljs-selector-tag">union</span> <span class="hljs-selector-tag">all</span> (<span class="hljs-selector-tag">select</span> <span class="hljs-selector-tag">item1</span>,<span class="hljs-selector-tag">item2</span> <span class="hljs-selector-tag">from</span> <span class="hljs-selector-tag">b</span> <span class="hljs-selector-tag">where</span> <span class="hljs-selector-tag">item1</span>&gt;’<span class="hljs-selector-tag">example</span>’)
+</code></code></pre><p>RorderJoin，顾名思义，就是对多个join操作进行重新排序。具体操作就是将一系列的带有join的子执行计划进行排序，尽可能地将带有条件过滤的子执行计划下推到执行树的最底层，这样能尽可能地减少join的数据量。<br>　　例如下面代码中是三个表做join操作，而过滤条件是针对表a的，但熟悉sql的人就会发现对a中字段item1的过滤可以挪到子查询中，这样可以减少join的时候数据量，如果满足此过滤条件的记录比较少，则可以大大地提高join的性能。</p><pre><code class="language-python"><code class="python">case <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">b</span>:</span>item1:String,item2:String
+select a.item1,d.item2 <span class="hljs-keyword">from</span> a where a.item1&gt; ‘example’ join (select b.item1,b.item2 <span class="hljs-keyword">from</span> b join c on b.item1=c.item1) d on a.item1= d.item1
+</code></code></pre><h2>2.4 SparkPlann</h2><p>optimizer将逻辑执行计划优化后，接着该SparkPlan登场了，SparkPlann将optimized logical plan转换成physical plans。执行代码如下：</p><pre><code class="language-cpp"><code class="cpp">code <span class="hljs-number">10</span>
+lazy val sparkPlan: SparkPlan = {
+  SparkSession.setActiveSession(sparkSession)
+  <span class="hljs-comment">// <span class="hljs-doctag">TODO:</span> We use next(), i.e. take the first plan returned by the planner, here for now,</span>
+  <span class="hljs-comment">//       but we will implement to choose the best plan.</span>
+  planner.plan(ReturnAnswer(optimizedPlan)).next()
+}
+</code></code></pre><p>其中，planner为SparkPlanner类的对象，对象的创建如下code 11所示。该对象中定义了一系列的执行策略，包括LeftSemiJoin 、HashJoin等等，这些策略用来指定实际查询时所做的操作。SparkPlanner中定义的策略如下code 12所示：</p><pre><code class="language-python"><code class="python">code <span class="hljs-number">11</span>
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">strategies</span>:</span> Seq[Strategy] =
+      extraStrategies ++ (
+      FileSourceStrategy ::
+      DataSourceStrategy ::
+      SpecialLimits ::
+      Aggregation ::
+      JoinSelection ::
+      InMemoryScans ::
+      BasicOperators :: Nil)
+
+</code></code></pre><pre><code class="language-cpp"><code class="cpp">code <span class="hljs-number">12</span>
+  <span class="hljs-comment">/**
+   * Planner that converts optimized logical plans to physical plans.
+   */</span>
+  def planner: SparkPlanner =
+    <span class="hljs-keyword">new</span> SparkPlanner(sparkContext, conf, experimentalMethods.extraStrategies)
+</code></code></pre><p>plan真正的处理函数如下的code 13所示。该函数的功能是整合所有的Strategy，_(plan)每个Strategy应用plan上，得到所有Strategies执行完后生成的所有Physical Plan的集合。</p><pre><code class="language-javascript"><code class="javascript">code <span class="hljs-number">13</span>
+  def plan(plan: LogicalPlan): Iterator[PhysicalPlan] = {
+    <span class="hljs-comment">// Obviously a lot to do here still...</span>
+
+    <span class="hljs-comment">// Collect physical plan candidates.</span>
+    val candidates = strategies.iterator.flatMap(_(plan))
+
+    <span class="hljs-comment">// The candidates may contain placeholders marked as [[planLater]],</span>
+    <span class="hljs-comment">// so try to replace them by their child plans.</span>
+    val plans = candidates.flatMap { candidate =&gt;
+      val placeholders = collectPlaceholders(candidate)
+
+      <span class="hljs-keyword">if</span> (placeholders.isEmpty) {
+        <span class="hljs-comment">// Take the candidate as is because it does not contain placeholders.</span>
+        Iterator(candidate)
+      } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// Plan the logical plan marked as [[planLater]] and replace the placeholders.</span>
+        placeholders.iterator.foldLeft(Iterator(candidate)) {
+          <span class="hljs-keyword">case</span> <span class="hljs-function">(<span class="hljs-params">candidatesWithPlaceholders, (placeholder, logicalPlan</span>)) =&gt;</span>
+            <span class="hljs-comment">// Plan the logical plan for the placeholder.</span>
+            val childPlans = <span class="hljs-keyword">this</span>.plan(logicalPlan)
+
+            candidatesWithPlaceholders.flatMap { candidateWithPlaceholders =&gt;
+              childPlans.map { childPlan =&gt;
+                <span class="hljs-comment">// Replace the placeholder by the child plan</span>
+                candidateWithPlaceholders.transformUp {
+                  <span class="hljs-keyword">case</span> p <span class="hljs-keyword">if</span> p == <span class="hljs-function"><span class="hljs-params">placeholder</span> =&gt;</span> childPlan
+                }
+              }
+            }
+        }
+}
+</code></code></pre><h1>3. spark2.x较spark1.x性能</h1><p>对源码的分析后，可以看出spark 2.0较 spark 1.x版本性能有较大提升，具体可从以下几个方面看出：<br>1.parser语法解析不同<br>　　spark 1.x版本使用的是scala的parser语法解析器，而spark 2.x版本使用的是ANTLR4，解析性能更好<br>2.spark 2.x的optimizer优化策略不同<br>　　spark 2.x为optimizer优化器提供了更加丰富的优化策略，从两个版本里optimizer类中的batchs中可以看出。<br>3．spark 2.x提供了第二代Tungsten引擎<br>　　Spark2.x移植了第二代Tungsten引擎，这一代引擎是建立在现代编译器和MPP数据库的基础上，并且应用到数据的处理中。主要的思想是将那些拖慢整个程序执行速度的代码放到一个单独的函数中，消除虚拟函数的调用，并使用寄存器来存放中间结果。这项技术被称作“whole-stage code generation.”<br>　　下面通过在单机上执行10亿条数据的aggregations and joins操作，来对比spark1.6和2.0的性能。其中，ns为纳秒，表格中的处理时间为单个线程处理单行数据所用时间。由此，可看出spark2.0的处理性能远远好于1.6。</p><div class="image-package"><div class="image-container"><div class="image-container-fill"></div><div class="image-view"><img src="//upload-images.jianshu.io/upload_images/2119554-b9ae9f3c22caf19c.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/456" alt=""></div></div><div class="image-caption">图5 spark性能对比</div></div><p>声明：<br>　　１.由于本人也是初次学习sql的源码，有什么理解错误，或者讲解不到位的地方请大家帮忙指出，以求大家一起进步。<br>　　２.性能对比第三点观点及图来自于一下链接：<br>　　<a href="https://link.jianshu.com?t=https://databricks.com/blog/2016/05/11/apache-spark-2-0-technical-preview-easier-faster-and-smarter.html" rel="nofollow">https://databricks.com/blog/2016/05/11/apache-spark-2-0-technical-preview-easier-faster-and-smarter.html</a></p>          </div>        </div>    </div>                          <div id="free-reward-panel" class="support-author"><p></p></div></div><br><br>作者：ZPPenny<br>链接：https://www.jianshu.com/p/0aa4b1caac2e<br>來源：简书<br>简书著作权归作者所有，任何形式的转载都请联系作者获得授权并注明出处。</div>            </div>
+                </div>

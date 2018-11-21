@@ -1,0 +1,300 @@
+---
+layout:     post
+title:      hive: 安装使用
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>要点如下：</p>
+
+<ol><li>如何安装hive, 使用hive   (hive +mysql )</li>
+	<li>hive中： 如何建表（数据类型, 字段修改）</li>
+	<li>hive中： 怎样向表中插入数据</li>
+	<li>hive 与mysql 的关系： mysql作为元数据存储容器</li>
+	<li>hive中： 有哪些查询语句，函数（wordcount, union, topk问题)</li>
+	<li>hive 交互的jdbc接口： hiveserver2( java api,  beeline命令行)</li>
+	<li>hive 支持事务的配置</li>
+</ol><p>(前提： hive中表的操作依赖于hdfs, 所以要先启动hdfs程序)</p>
+
+<hr><h3>第一步：hive安装，配置</h3>
+
+<p>安装hive:  hive + mysql     (hive的架构中，默认使用derby数据库， 只能开启一个会话，所以使用mysql替代)</p>
+
+<ol><li>安装mysql （设置登录密码， 修改远程登录权限）</li>
+	<li>解压hive安装包， 修改配置文件： conf/hive-site.xml</li>
+</ol><p><span style="color:#3399ea;"><u>mysql安装: shell脚本</u></span></p>
+
+<pre class="has">
+<code>#!/bin/bash
+#mysql 安装脚本
+sudo yum -y install wget;
+wget http://repo.mysql.com/mysql-community-release-el7-5.noarch.rpm
+sudo rpm -ivh mysql-community-release-el7-5.noarch.rpm
+sudo yum -y install mysql-server
+
+#更改配置
+sudo chown -R root:root /var/lib/mysql
+service mysqld restart
+
+#修改root密码 为root
+mysql -uroot -p -e '
+update mysql.user set password=password("root") where user="root";
+flush privileges;
+grant all privileges on *.* to "root"@"%" identified by "root";
+flush privileges;'</code></pre>
+
+<p><span style="color:#3399ea;"><u>hive安装: shell脚本</u></span></p>
+
+<p>（准备条件： ~/ 目录下====&gt;准备两个文件： mysql-connector-java-5.1.44.jar，   apache-hive-2.1.1-bin.tar.gz）</p>
+
+<p>以root身份执行以下脚本：</p>
+
+<pre class="has">
+<code>#!/bin/bash
+mkdir -p /soft
+tar -xzvf apache-hive-2.1.1-bin.tar.gz -C /soft/
+mv /soft/*hive*/  /soft/hive/
+
+#环境变量配置
+echo  -e 'export HIVE_HOME=/soft/hive \n  export PATH=$PATH:$HIVE_HOME/bin' &gt;&gt;/etc/profile
+source /etc/profile
+
+#修改配置文件
+cd /soft/hive/conf; 
+rename '.template' '' *.template
+
+cp hive-default.xml hive-site.xml
+sed -i 's@${system:user.name}@centos@g' hive-site.xml
+sed -i 's@${system:java.io.tmpdir}@/home/centos/hive@g' hive-site.xml
+
+#复制mysql驱动
+cp ~/mysql-connector-java-5.1.44.jar /soft/hive/lib/
+
+#在mysql中： 创建hive使用的数据库
+mysql -uroot -proot -e create database hive;
+#初始化：刚建立的hive元数据库
+schematool -initSchema -dbType mysql
+
+#验证是hive否安装成功
+hive version
+
+#修改hive-site.xml,配置自定义的mysql元数据库信息 ：驱动，用户名，密码, url,
+echo -e '
+&lt;property&gt;
+    &lt;name&gt;javax.jdo.option.ConnectionDriverName&lt;/name&gt;
+    &lt;value&gt;com.mysql.jdbc.Driver&lt;/value&gt;
+    &lt;description&gt;Driver class name for a JDBC metastore&lt;/description&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;javax.jdo.option.ConnectionPassword&lt;/name&gt;
+    &lt;value&gt;root&lt;/value&gt;
+    &lt;description&gt;password to use against metastore database&lt;/description&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt;
+    &lt;value&gt;jdbc:mysql://s101:3306/hive&lt;/value&gt;
+    &lt;description&gt;
+      JDBC connect string for a JDBC metastore.
+      To use SSL to encrypt/authenticate the connection, provide database-specific SSL flag in the connection URL.
+      For example, jdbc:postgresql://myhost/db?ssl=true for postgres database.
+    &lt;/description&gt;
+  &lt;/property&gt;
+  &lt;property&gt;
+    &lt;name&gt;javax.jdo.option.ConnectionUserName&lt;/name&gt;
+    &lt;value&gt;root&lt;/value&gt;
+    &lt;description&gt;Username to use against metastore database&lt;/description&gt;
+  &lt;/property&gt;
+' &gt;&gt; /soft/hive/conf/hive-site.xml
+
+#切换使用权限: 分给centos用户
+chown -R centos:centos /soft/ 
+
+#初始化mysql
+schematool -dbType mysql -initSchema</code></pre>
+
+<hr><h3>第二步： 编写hive脚本h1.sql      <span style="color:#3399ea;">---&gt;使用命令执行hive脚本: hive -f  h1.sql</span></h3>
+
+<pre class="has">
+<code>--编写hive sql脚本： 创建数据库, 表, 插入数据
+--1,建库
+create database big12;
+
+--2, 建表
+--==================
+use big12;
+create table emp2(
+     id int,
+     name string,
+
+     work_city array&lt;string&gt;,
+     sex_age struct&lt;sex:string,age:int&gt;,
+     dept_job map&lt;string,string&gt;
+
+)row format delimited
+     fields terminated by '|'
+     collection items terminated by ','
+     map keys terminated by ':'
+     lines terminated by '\n'
+     stored as textfile;
+
+--3，插入数据===方法1
+insert into emp2(
+id,name,
+work_city,sex_age,dept_job)
+
+select '1','user1',
+array('天津','廊坊'),
+named_struct('sex','男','age',20),
+map('test','emp', 'sail','emp');
+
+--3，插入数据===方法2：load 文件
+--准备好文件 ~/emp.txt: 内容如下-----------
+--1|张三|北京，上海|男,30|product:开发工程师
+--2|李四|广州,南京|男,23|product:领导,test:领导
+--3|小丽|重庆,西安|女,37|test:领导,sail:干部
+----------------------------------------
+load data local inpath 'emp2.txt' into table emp2;</code></pre>
+
+<hr><p> </p>
+
+<h3>第三步： 查看mysql----中存储的hive元数据信息,  hdfs存储真实数据</h3>
+
+<p><img alt="" class="has" height="186" src="https://img-blog.csdn.net/20180807110502629?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="252">   </p>
+
+<p>其中的hive就是 上面的hive-site.xml定义的---hive使用的数据库，存储元数据信息，可以具体查看内容：</p>
+
+<p>use hive;  show tables; ---------&gt;有：VERSION,  DBS（存hive数据库信息）,  TBLS（存hive表信息）等表</p>
+
+<p><img alt="" class="has" height="137" src="https://img-blog.csdn.net/20180807112052513?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="521"></p>
+
+<p><img alt="" class="has" height="153" src="https://img-blog.csdn.net/2018080711212714?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1057"><img alt="" class="has" height="315" src="https://img-blog.csdn.net/2018080711235041?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="987"></p>
+
+<p><img alt="" class="has" height="267" src="https://img-blog.csdn.net/20180807135116298?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1200"></p>
+
+<hr><p> </p>
+
+<h3>第四步： 使用hive---执行mapreduce任务： wordcount, topK</h3>
+
+<pre class="has">
+<code>--单词统计hive sql脚本:  wordcount:  建表, 插入数据， 执行sql语句
+--1,建表
+create table wc(line string) 
+row format delimited 
+lines terminated by '\n'
+stored as textfile;
+
+--2,插入数据: 如下数据---wc.txt 
+--create table stu(
+--name string,
+--age int)
+--fields terminated by '|'
+--collection items terminated by ','
+--map keys terminated by ':'
+--lines terminated by '\n'
+--stored as textfile ;
+
+load data local inpath 'wc.txt' into table wc;
+
+--3，执行sql语句： 单词统计
+select word , count(*) count 
+from (select explode(split(line,' ')) word from wc)  tmp
+group by word
+order by count desc;</code></pre>
+
+<p><img alt="" class="has" height="544" src="https://img-blog.csdn.net/20180807114657627?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="929"></p>
+
+<p>top 10 问题： 编写以下sql 脚本(top10.sql) ，  进入hive, 运行脚本：  source  top10.sql </p>
+
+<pre class="has">
+<code>--top 10 问题（sql脚本）: 求频数最高的前10个密码-----------
+----原数据如下(500M)： 
+id,           username,  pwd,        email,   name2
+--11768479    lkuj      1162592404  q1162592404
+--11768480    13165     911001      auqia6
+--11768481    鹤舞       intong      qintongfei
+--11768482    侠客	be64b9caf12d1c69cf5a8f0fb541c5d8	
+--13665116  233229@qq.com a13712731328
+--.....
+--1. 建表
+create table top10(id int, name1 string, pwd string, email string, name2 string)
+row format delimited
+fields terminated by '\t'
+stored as textfile;
+
+--2,插入数据
+load data local inpath 'user_pwd.txt' into table top10;
+
+--3,sql语句
+select pwd ,count(*) count from top10
+group by pwd
+order by count desc
+limit 10;                                                                                                                                                           </code></pre>
+
+<hr><h3>第五步： beeline  ----&gt; hive和java的交互， hive 运行shell命令</h3>
+
+<p>1，开启beeline: 启动sql服务</p>
+
+<p>2, 创建maven项目， 导入依赖</p>
+
+<p>3，编写java:  实现jdbc通信</p>
+
+<pre class="has">
+<code> @Test
+    public void t1() throws  Exception{
+       //  Class.forName("org.apache.hive.jdbc.HiveDriver");
+         //建立连接
+        Connection con = DriverManager.getConnection("jdbc:hive2://s101:10000/big12");
+
+        //查询
+        Statement stm = con.createStatement();
+        ResultSet res = stm.executeQuery("select * from stu");
+
+        while (res.next()){
+            System.out.println(res.getString(1)+", "+res.getString(2));
+        }
+
+        //关闭资源
+        res.close();
+        con.close();
+    }
+
+    //插入数据
+    @Test
+    public void t2() throws  Exception{
+
+        Connection con = DriverManager.getConnection("jdbc:hive2://s101:10000/big12");
+        Statement stm = con.createStatement();
+
+        //插入
+        stm.executeUpdate("insert into per values (3,'测试',23)");
+        con.close();
+        stm.close();
+    }
+</code></pre>
+
+<p><img alt="" class="has" height="97" src="https://img-blog.csdn.net/20180807134600966?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="281"></p>
+
+<hr><h3> hive事务支持配置（1，建事务表   2，配置事务支持）</h3>
+
+<pre class="has">
+<code>create table tx
+(id int, msg string) 
+clustered by (day string) into 3 buckets 
+stored as orc TBLPROPERTIES ('transactional'='true');
+</code></pre>
+
+<p> 查询表内容： select * from tx ;  报错如下（因为没有配置事务支持）</p>
+
+<p><img alt="" class="has" height="21" src="https://img-blog.csdn.net/20180908161009971?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2V5ZW9mZWFnbGU=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" width="1200"></p>
+
+<p>解决办法：添加事务支持配置（shell 窗口输入以下内容）</p>
+
+<pre class="has">
+<code>SET hive.support.concurrency = true;
+SET hive.enforce.bucketing = true;
+SET hive.exec.dynamic.partition.mode = nonstrict;
+SET hive.txn.manager = org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
+SET hive.compactor.initiator.on = true; </code></pre>
+
+<p> </p>            </div>
+                </div>

@@ -1,0 +1,120 @@
+---
+layout:     post
+title:      hive导入数据到表
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <p>转自：<a href="https://www.cnblogs.com/ggjucheng/archive/2013/01/04/2844673.html" rel="nofollow">hive数据操作(翻译自Hive wiki+实例讲解)</a></p>
+
+<p>hive有两种数据修改方式</p>
+
+<h1><strong>从文件加载到hive表</strong></h1>
+
+<p>加载数据到表时，hive不会做任何转换。加载操作是纯粹的复制/移动操作，移动数据文件到相应的hive表。</p>
+
+<p><strong>语法</strong></p>
+
+<pre class="has">
+<code class="language-sql">LOAD DATA [LOCAL] INPATH 'filepath' [OVERWRITE] INTO TABLE tablename [PARTITION (partcol1=val1, partcol2=val2 ...)]
+</code></pre>
+
+<pre>
+<strong>实例</strong></pre>
+
+<p>假设hive的warehouse目录是/user/hadoop/warehouse,这里有一个login表</p>
+
+<pre class="has">
+<code class="language-sql">CREATE TABLE login (
+  uid  BIGINT,
+  ip  STRING
+)
+PARTITIONED BY (dt STRING)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE;</code></pre>
+
+<p>对应有一个用户登录日志文件，文件内容如下:</p>
+
+<pre class="has">
+<code>888,8.8.8.8
+999,9.9.9.9</code></pre>
+
+<p>注意,列与列之间是用','号隔开,第一列是uid，第二列是用户ip。</p>
+
+<p>接着加载数据</p>
+
+<p> </p>
+
+<pre class="has">
+<code class="language-sql">LOAD DATA LOCAL INPATH '/data/login/20130101.csv' OVERWRITE INTO TABLE login PARTITION (dt='20130101');
+</code></pre>
+
+<pre>
+这表示从本地磁盘，把文件 '/data/login/20130101.csv' 拷贝到表login，分区dt为'20130101'的目录(在HDFS)下.加载成功后，20130101.csv会放置在 hdfs://namenode:9000/user/hadoop/warehouse/login/dt=20130101/20130101.csv。</pre>
+
+<p>OVERWRITE表示目标表(或分区)在数据加载前会删除，然后替换为新的数据。如果不指定OVERWRITE，则会追加数据到目标表(或分区)下，如果文件名和目标目录的文件冲突，会自动改名。</p>
+
+<p>LOCAL如果不指定，就是从HDFS的'/data/login/20130101.csv'移动数据到表login，分区分区dt为'20130101'的目录下。即是，原来的HDFS文件'/data/login/20130101.csv'是被移动到hdfs://namenode:9000/user/hadoop/warehouse/login/dt=20130101/20130101.csv。</p>
+
+<p>注意：加载的文件名不能是一个子目录，hive做一些最简单的检查，以确保正在加载的文件和目标表匹配。目前，它会检查，如果该表存储为sequencefile格式 - 正在加载的文件是反序列化。</p>
+
+<p> </p>
+
+<h1><strong>从查询插入数据到hive表</strong></h1>
+
+<p><strong>标准语法</strong></p>
+
+<pre class="has">
+<code class="language-sql">INSERT OVERWRITE TABLE tablename1 [PARTITION (partcol1=val1, partcol2=val2 ...) [IF NOT EXISTS]] select_statement1 FROM from_statement;
+INSERT INTO TABLE tablename1 [PARTITION (partcol1=val1, partcol2=val2 ...)] select_statement1 FROM from_statement;</code></pre>
+
+<p>示例:</p>
+
+<pre class="has">
+<code class="language-sql">INSERT OVERWRITE TABLE login_user select distinct uid FROM login_log; --从登录日志表查询登录用户，插入到表login_user中，如果login_user已有数据,则覆盖，否则创建
+
+INSERT OVERWRITE TABLE login_user PARTITION (dt='20130101')  select distinct uid FROM login_log where dt='20130101'; --从20130101的登录日志表查询当天的登录用户，插入到表login_user中，如果login_user已有分区dt='20130101',则覆盖，否则创建
+
+
+INSERT INTO TABLE login_user select distinct uid FROM login_log; --从登录日志表查询登录用户，插入到表login_user中,如果login_user已有数据,则追加，否则创建
+
+INSERT INTO TABLE login_user PARTITION (dt='20130101') select distinct uid FROM login_log where dt='20130101'; --从20130101的登录日志表查询当天的登录用户，插入到表login_user中,如果login_user已有分区dt='20130101',则追加，否则创建</code></pre>
+
+<p> </p>
+
+<p><strong>扩展语法</strong></p>
+
+<p>多个插入</p>
+
+<pre class="has">
+<code class="language-sql">FROM from_statement
+INSERT OVERWRITE TABLE tablename1 [PARTITION (partcol1=val1, partcol2=val2 ...) [IF NOT EXISTS]] select_statement1
+[INSERT OVERWRITE TABLE tablename2 [PARTITION ... [IF NOT EXISTS]] select_statement2] 
+[INSERT INTO TABLE tablename2 [PARTITION ...] select_statement2] ...;
+
+FROM from_statement
+INSERT INTO TABLE tablename1 [PARTITION (partcol1=val1, partcol2=val2 ...)] select_statement1
+[INSERT INTO TABLE tablename2 [PARTITION ...] select_statement2] 
+[INSERT OVERWRITE TABLE tablename2 [PARTITION ... [IF NOT EXISTS]] select_statement2] ...;</code></pre>
+
+<pre>
+ </pre>
+
+<p>一次查询，把结果集插入到多个表或分区。实际中，感觉用的比较少，这里不做示例。</p>
+
+<p> </p>
+
+<p>动态分区插入</p>
+
+<pre class="has">
+<code class="language-sql">INSERT OVERWRITE TABLE tablename PARTITION (partcol1[=val1], partcol2[=val2] ...) select_statement FROM from_statement;
+
+INSERT INTO TABLE tablename PARTITION (partcol1[=val1], partcol2[=val2] ...) select_statement FROM from_statement;</code></pre>
+
+<p>标准语法已经包含了动态分区插入了，这里不另外介绍。</p>
+
+<p> </p>
+
+<p>参考 <a href="https://cwiki.apache.org/confluence/display/Hive/LanguageManual+DML" rel="nofollow">https://cwiki.apache.org/confluence/display/Hive/LanguageManual+DML</a></p>            </div>
+                </div>

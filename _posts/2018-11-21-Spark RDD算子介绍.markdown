@@ -1,0 +1,121 @@
+---
+layout:     post
+title:      Spark RDD算子介绍
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>Spark学习笔记总结</p>
+<h1>01. Spark基础</h1>
+<h2>1. 介绍</h2>
+<p>Spark可以用于批处理、交互式查询（Spark SQL）、实时流处理（Spark Streaming）、机器学习（Spark MLlib）和图计算（GraphX）。<br>
+Spark是MapReduce的替代方案，而且兼容HDFS、Hive，可融入Hadoop的生态系统，以弥补MapReduce的不足。</p>
+<h2>2. Spark-Shell</h2>
+<ol><li>spark-shell是Spark自带的交互式Shell程序，用户可以在该命令行下用scala编写spark程序。 </li><li>直接启动spark-shell，实质是spark的local模式，在master:8080中并未显示客户端连接。 </li><li>集群模式：<br>
+/usr/local/spark/bin/spark-shell \<br>
+--master spark://172.23.27.19:7077 \<br>
+--executor-memory 2g \<br>
+--total-executor-cores 2 </li><li>spark-shell中编写wordcount<br>
+sc.textFile("hdfs://172.23.27.19:9000/wrd/wc/srcdata/").flatMap(<em>.split(" ")).map((</em>,1)).reduceByKey(<em>+</em>).sortBy(_._2,false).collect
+</li></ol><h2>3. RDD介绍与属性</h2>
+<h5>1. 介绍</h5>
+<p>RDD（Resilient Distributed Dataset）叫做分布式数据集，是Spark中最基本的数据抽象，它代表一个不可变（创建了内容不可变）、可分区、里面的元素可并行计算的集合。</p>
+<h5>2. 属性：</h5>
+<p><img src="http://i.imgur.com/nkfed8Z.png" alt="nkfed8Z.png"></p>
+<ol><li>由多个分区组成。对于RDD来说，每个分片都会被一个计算任务处理，并决定并行计算的粒度。 </li><li>一个计算函数用于每个分区。Spark中RDD的计算是以分片为单位的，每个RDD都会实现compute函数以达到这个目的。 </li><li>RDD之间的依赖关系。RDD的每次转换都会生成一个新的RDD，所以RDD之间就会形成类似于流水线一样的前后依赖关系。数据丢失时，根据依赖重新计算丢失的分区而不是整个分区。
+</li><li>一个Partitioner，即RDD的分片函数。默认是HashPartition </li><li>分区数据的最佳位置去计算。就是将计算任务分配到其所要处理数据块的存储位置。数据本地化。 </li></ol><h5>3. 创建方式：</h5>
+<ol><li>可通过并行化scala集合创建RDD<br>
+val rdd1 = sc.parallelize(Array(1,2,3,4,5,6,7,8)) </li><li>通过HDFS支持的文件系统创建，RDD里没有真的数据，只是记录了元数据<br>
+val rdd2 = sc.textFile("hdfs://172.23.27.19:9000/wrd/wc/srcdata/") </li></ol><p>查看该rdd的分区数量<br>
+rdd1.partitions.length</p>
+<h2>3. 基础的transformation和action</h2>
+<p>RDD中两种算子：<br>
+transformation转换，是延迟加载的</p>
+<p>常用的transformation：<br>
+（1）map、flatMap、filter<br>
+（2）intersection求交集、union求并集：注意类型要一致<br>
+distinct:去重<br>
+（3）join：类型为(K,V)和(K,W)的RDD上调用，返回一个相同key对应的所有元素对在一起的(K,(V,W))的RDD<br>
+（4）groupByKey:在一个(K,V)的RDD上调用，返回一个(K, Iterator[V])的RDD<br>
+但是效率reduceByKey较高，因为有一个本地combiner的过程。<br>
+（5）cartesian笛卡尔积</p>
+<p>常用的action<br>
+（1）collect()、count()<br>
+（2）reduce：通过func函数聚集RDD中的所有元素<br>
+（3）take(n):取前n个；top(2)：排序取前两个<br>
+（4）takeOrdered(n)，排完序后取前n个</p>
+<h2>4. 较难的transformation和action</h2>
+<p>参考《http://homepage.cs.latrobe.edu.au/zhe/ZhenHeSparkRDDAPIExamples.html》</p>
+<p>（1）mapPartitions(func)和<br>
+mapPartitions(func)：<br>
+独立地在RDD的每一个分片上运行，但是返回值；foreachPartition(func)也常用，不需要返回值</p>
+<p>mapPartitionsWithIndex(func)：<br>
+可以看到分区的编号，以及该分区数据。<br>
+类似于mapPartitions，但func带有一个整数参数表示分片的索引值，func的函数类型必须是<br>
+(Int, Interator[T]) =&gt; Iterator[U]</p>
+<pre><code>val rdd1 = sc.parallelize(List(1,2,3,4,5,6,7,8,9), 2)
+val func = (index: Int, iter: Iterator[(Int)]) =&gt; {iter.toList.map(x =&gt; "[partID:" +  index + ", val: " + x + "]").iterator}
+rdd1.mapPartitionsWithIndex(func).collect</code></pre>
+<p>（2）aggregate<br>
+action操作,<br>
+第一个参数是初始值,<br>
+第二个参数:是2个函数[每个函数都是2个参数(第一个参数:先对个个分区进行的操作, 第二个:对个个分区合并后的结果再进行合并), 输出一个参数]</p>
+<p>例子：</p>
+<pre><code>rdd1.aggregate(0)(_+_, _+_)
+//前一个是对每一个分区进行的操作，第二个是对各分区结果进行的结果
+
+rdd1.aggregate(5)(math.max(_, _), _ + _)
+//结果：5 + (5+9) = 19
+
+val rdd3 = sc.parallelize(List("12","23","345","4567"),2)
+rdd3.aggregate("")((x,y) =&gt; math.max(x.length, y.length).toString, (x,y) =&gt; x + y)
+//结果：24或者42
+
+val rdd4 = sc.parallelize(List("12","23","345",""),2)
+rdd4.aggregate("")((x,y) =&gt; math.min(x.length, y.length).toString, (x,y) =&gt; x + y)
+//结果01或者10</code></pre>
+<p>（3）aggregateByKey<br>
+将key值相同的，先局部操作，再整体操作。。和reduceByKey内部实现差不多</p>
+<pre><code>val pairRDD = sc.parallelize(List( ("cat",2), ("cat", 5), ("mouse", 4),("cat", 12), ("dog", 12), ("mouse", 2)), 2)
+pairRDD.aggregateByKey(0)(math.max(_, _), _ + _).collect
+//结果：Array((dog,12), (cat,17), (mouse,6))</code></pre>
+<p>PS：<br>
+和reduceByKey(<em>+</em>)调用的都是同一个方法，只是aggregateByKey要底层一些，可以先局部再整体操作。</p>
+<p>（4）combineByKey<br>
+和reduceByKey是相同的效果，是reduceByKey的底层。<br>
+第一个参数x:原封不动取出来, 第二个参数:是函数, 局部运算, 第三个:是函数, 对局部运算后的结果再做运算<br>
+每个分区中每个key中value中的第一个值,</p>
+<pre><code>val rdd1 = sc.textFile("hdfs://master:9000/wordcount/input/").flatMap(_.split(" ")).map((_, 1))
+val rdd2 = rdd1.combineByKey(x =&gt; x, (a: Int, b: Int) =&gt; a + b, (m: Int, n: Int) =&gt; m + n)
+rdd2.collect</code></pre>
+<p>第一个参数的含义：<br>
+每个分区中相同的key中value中的第一个值<br>
+如：<br>
+(hello,1)(hello,1)(good,1)--&gt;(hello(1,1),good(1))--&gt;x就相当于hello的第一个1, good中的1</p>
+<pre><code>val rdd3 = rdd1.combineByKey(x =&gt; x + 10, (a: Int, b: Int) =&gt; a + b, (m: Int, n: Int) =&gt; m + n)
+rdd3.collect
+//每个会多加3个10
+
+val rdd4 = sc.parallelize(List("dog","cat","gnu","salmon","rabbit","turkey","wolf","bear","bee"), 3)
+val rdd5 = sc.parallelize(List(1,1,2,2,2,1,2,2,2), 3)
+val rdd6 = rdd5.zip(rdd4)
+val rdd7 = rdd6.combineByKey(List(_), (x: List[String], y: String) =&gt; x :+ y, (m: List[String], n: List[String]) =&gt; m ++ n)
+//将key相同的数据，放入一个集合中</code></pre>
+<p>（5）collectAsMap<br>
+Action<br>
+Map(b -&gt; 2, a -&gt; 1)//将Array的元祖转换成Map，以后可以通过key取值</p>
+<pre><code>val rdd = sc.parallelize(List(("a", 1), ("b", 2)))
+rdd.collectAsMap
+//可以下一步使用</code></pre>
+<p>（6）countByKey<br>
+根据key计算key的数量<br>
+Action</p>
+<pre><code>val rdd1 = sc.parallelize(List(("a", 1), ("b", 2), ("b", 2), ("c", 2), ("c", 1)))
+rdd1.countByKey
+rdd1.countByValue//将("a", 1)当做一个元素，统计其出现的次数</code></pre>
+<p>（7）flatMapValues<br>
+对每一个value进行操作后压平<br>
+</p>
+            </div>
+                </div>

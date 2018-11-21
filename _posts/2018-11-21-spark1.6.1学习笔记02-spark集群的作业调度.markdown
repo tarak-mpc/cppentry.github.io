@@ -1,0 +1,79 @@
+---
+layout:     post
+title:      spark1.6.1学习笔记02-spark集群的作业调度
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h2>1、spark应用之间的调度</h2>
+<p>每个spark应用拥有一个独立的executor虚拟机集合，这些executor只会执行该spark应用的tasks。</p>
+<p>spark提供了多种集群资源分配方式：</p>
+<p>（1）最简易的方式是静态资源分配。此模式给每个spark应用分配一个静态的最大资源量，在spark应用的整个生命周期中都会保有这些资源。spark standalone、YARN和coase-graned Mesos集群都提供这种资源分配模式。</p>
+<p>（2）其次的方式是Mesos提供的基于cpu内核数的动态共享方式。此种方式下，每个spark应用拥有一个固定的独立的内存（使用spark.executor.memory指定），但当某个应用没有执行任务时，其他的应用可以使用该应用的内核执行任务。使用该模式需要使用一个mesos://的URL，并将spark.mesos.coarse设为false。</p>
+<p>目前所有的模式都不提供应用间的内存共享功能。</p>
+<h3>动态资源分配</h3>
+<p>spark提供基于工作量的动态资源分配。该特性默认是被禁止的，但在所有coarse-grained的集群管理器（standalone mode，YARN mode和Mesos coarse-grained mode）中都可用。</p>
+<p>使用该特性需要满足两个条件：</p>
+<p>（1）设置spark.dynamicAllocation.enabled为true；</p>
+<p>（2）需要在每个worker node启动一个external shuffle service，并将spark.shuffle.service.enabled设置为true。这个external shuffle service作用是让executors在被移除时不删掉shuffle文件。启动该服务的方式因集群管理器的不同而异。</p>
+<p>在standalone中只需将spark.shuffle.service.enabled设置为true；</p>
+<p>Mesos coarse-grained模式中需在每个slave节点执行<code>$SPARK_HOME/sbin/start-mesos-shuffle-service.sh</code>，且要将spark.shuffle.service.enabled设置为true。可以用Marathon来实现这个操作。</p>
+<p>YARN中在每个NodeManager启动shuffle服务的方式如下</p>
+<p>&lt;1&gt;使用YARN profile编译Spark，如果使用已经打包的程序可跳过这一步。</p>
+<p>&lt;2&gt;找到spark-&lt;version&gt;-yarn-shuffle.jar文件，如果你自己编译spark那么它需要被放置在$SPARK_HOME/network/yarn/target/scala-&lt;version&gt;中；如果你是使用部署包，那么它需要放置在lib中。</p>
+<p>&lt;3&gt;将这个jar包添加到NodeManager的classpath。</p>
+<p>&lt;4&gt;在每个节点的yarn-site.xml中，设置yarn.nodemanager.aux-services为spark_shuffle，设置org.apache.spark.network.yarn.YarnShuffleService为yarn.nodemanager.aux-services.spark_shuffle.class。</p>
+<p>&lt;5&gt;重启所有的NodeManager。<br></p>
+<h3>资源分配原则</h3>
+<h4>请求资源原则</h4>
+<p>当存在积压的任务需要被分配时，spark应用会向集群管理器请求资源。</p>
+<p>当任务积压一定时间t1（由参数<code>spark.dynamicAllocation.schedulerBacklogTimeout</code>配置）后，spark应用开始请求资源。</p>
+<p>接着以后会每隔一个时间段t2（由参数<code>spark.dynamicAllocation.sustainedSchedulerBacklogTimeout</code>配置）后，spark应用会判断是否还存在任务积压。若仍存在，则需要继续请求资源。</p>
+<p>spark应用每次请求资源按照指数增长，例如第一次请求增加1个executor，第二次会是2个executor，接着是4个、8个。。。<br></p>
+<h4>移除资源原则</h4>
+<p>当某spark应用存在空闲的executor，且时长超过一定时间t3（由<code>spark.dynamicAllocation.executorIdleTimeout</code>指定）。</p>
+<h3>优雅地解除executor</h3>
+<p>在不使用动态资源分配的时候，spark的executor仅仅会在“出错”或者“它关联的spark应用退出”的时候才会退出。</p>
+<p>在进行动态资源分配时，executor在退出时spark应用依然在运行中。因此spark需要优雅地在executor退出前保存好它的相关运行状态（以便于以后能重新启动该executor）。<br></p>
+<p>本操作对于shuffle特别重要。shuffle操作中，spark executor先将map的结果写到本地硬盘，然后executor会作为一个服务器向其他需要这些数据的executor提供抓取服务。当存在流浪者任务（某个任务的执行时长远远长于其他任务）时，动态分配会在shuffle操作结束前移除executor，这会导致被移除的executor的shuffle文件需要被重新计算（因为这些文件随着executor的移除，对于执行流浪者任务的executor已经不可达了）。</p>
+<p>解决此问题的方法是使用一个外部的shuffle服务，该功能在spark1.2推出。这个服务是一个运行在集群中每个节点的且独立于spark应用和它们的executor的长期运行的进程。该服务被开启后，shuffle文件便可以从这个服务中获取。此时，某executor的shuffle文件将会在executor的生命周期之外依然可达。</p>
+<p>除了shuffle文件，executor也会在硬盘或内存中缓存数据。若executor被移除，它所缓存的数据将不可达。在spark1.2中尚未解决这个问题。在以后版本中，缓存的数据将会存储在一个堆外内存。</p>
+<h2>2、spark应用内部的调度<br></h2>
+<p>job是指一个spark action和其他任务为完成该action所需要执行的任务。在spark应用中，不同线程提交的job将会并发的执行。spark的作业调度是线程安全的，而且支持多请求的应用。</p>
+<p>默认情况下spark job调度遵循先进先出。每个job被分解成很多stages（例如map和reduce操作），第一个job的优先级高于第二个，依次类推。如果job队列中的头几个job不需要使用整个集群，接下来的jobs可以立即开始执行。</p>
+<p>从spark 0.8开始支持在jobs之间配置公平的共享的调度（<span style="color:#FF6666;">fair sharing</span>）。此模式下spark会用“round-robin”方式分配任务，这样所有的job会共享集群的资源。这意味着在大job运行时提交的小job也会立即分配到资源，并很快应答。该模式特别适用于多用户设置。</p>
+<p>开启公平调度，只需设置spark.scheduler.mode为FAIR：</p>
+<p></p><pre><code class="language-java">val conf = new SparkConf().setMaster(...).setAppName(...)
+conf.set("spark.scheduler.mode", "FAIR")
+val sc = new SparkContext(conf)</code></pre>
+<h2>3、公平调度池（Fair Scheduling Pools）</h2>
+<p>公平调度支持将job分类为不同的池，并对不同的池设置不同的调度选项。这样可以让高优先级的池执行重要的job。另一种用法是将不同用户的job进行分类，对所有用户公平的优先级，无论它们谁提交的job多谁提交的job少。此方式灵感来自于hadoop fair scheduler。</p>
+<p>新提交的job会进入默认池，但是可以通过在SparkContext中设置本地属性spark.scheduler.pool参数来指定所提交的调度池。</p>
+<p></p><pre><code class="language-java">// Assuming sc is your SparkContext variable
+sc.setLocalProperty("spark.scheduler.pool", "pool1")</code></pre>此后所有该线程提交的job将会使用这个调度池。<br>
+取消线程池设置的方式是：
+<p></p><pre><code class="language-java">sc.setLocalProperty("spark.scheduler.pool", null)</code></pre>
+<h2>4、调度池的默认属性<br></h2>
+<p>默认情况下，每个线程池平等的共享集群（默认池中的job也是平等的共享该池的资源），但在剩余的每个调度池中，job是先进先出的。</p>
+<h2>5、调度池配置</h2>
+<p>调度池支持三个参数：</p>
+<p>1、schedulingMode。可以是FIFO或FAIR。</p>
+<p>2、weight。控制调度池在分享集群资源时的权重。默认情况下每个调度池的weight是1。若指定某个池的weight为2，那么它将获得两倍于其他调度池的资源。<br></p>
+<p>3、minShare。用来指定最小共享资源数（CPU内核数）。公平调度总是会先尝试为每个调度池提供最小共享资源数指定的资源，接着才将剩余的资源按照权重weight进行分配。minShare的默认值是0。</p>
+<p>调度池属性可以通过XML文件设置，类似于$SPARK_HOME/conf/fairscheduler.xml.template。接着在SparkContext中设置一个spark.scheduler.allocation.file属性：</p>
+<p></p><pre><code class="language-java">conf.set("spark.scheduler.allocation.file", "/path/to/file")</code></pre>XML文档的格式如下：
+<p></p><pre><code class="language-html">&lt;?xml version="1.0"?&gt;
+&lt;allocations&gt;
+  &lt;pool name="production"&gt;
+    &lt;schedulingMode&gt;FAIR&lt;/schedulingMode&gt;
+    &lt;weight&gt;1&lt;/weight&gt;
+    &lt;minShare&gt;2&lt;/minShare&gt;
+  &lt;/pool&gt;
+  &lt;pool name="test"&gt;
+    &lt;schedulingMode&gt;FIFO&lt;/schedulingMode&gt;
+    &lt;weight&gt;2&lt;/weight&gt;
+    &lt;minShare&gt;3&lt;/minShare&gt;
+  &lt;/pool&gt;
+&lt;/allocations&gt;</code></pre><br>            </div>
+                </div>

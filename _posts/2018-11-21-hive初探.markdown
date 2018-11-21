@@ -1,0 +1,180 @@
+---
+layout:     post
+title:      hive初探
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="hive">Hive</h1>
+
+
+
+<h1 id="hive构成原理">Hive构成原理</h1>
+
+<p><img src="http://images.cnitblog.com/blog/306623/201306/02191203-0ca56f3a577f4a9d872099fa357c9189.png" alt="" title="">   </p>
+
+<p><img src="http://www.yiibai.com/uploads/allimg/141228/1-14122R10152108.jpg" alt="" title=""></p>
+
+
+
+<h2 id="服务端组件">服务端组件：</h2>
+
+<ul>
+<li><p>Driver组件：该组件包括Complier、Optimizer和Executor，它的作用是将我们写的HiveQL（类SQL）语句进行解析、编译优化，生成执行计划，然后调用底层的mapreduce计算框架。</p></li>
+<li><p>Metastore组件：元数据服务组件，这个组件存储hive的元数据，<strong>hive的元数据存储在关系数据库里，hive支持的关系数据库有derby、mysql。</strong>元数据对于hive十分重要，因此hive支持把metastore服务独立出来，安装到远程的服务器集群里，从而解耦hive服务和metastore服务，保证hive运行的健壮性，这个方面的知识，我会在后面的metastore小节里做详细的讲解。</p></li>
+<li><p>Thrift服务：thrift是facebook开发的一个软件框架，它用来进行可扩展且跨语言的服务的开发，hive集成了该服务，能让不同的编程语言调用hive的接口。</p></li>
+</ul>
+
+
+
+<h2 id="客户端组件">客户端组件：</h2>
+
+<ul>
+<li><p>CLI：command line interface，命令行接口。</p></li>
+<li><p>Thrift客户端：上面的架构图里没有写上Thrift客户端，但是hive架构的许多客户端接口是建立在thrift客户端之上，包括JDBC和ODBC接口。</p></li>
+<li><p>WEBGUI：hive客户端提供了一种通过网页的方式访问hive所提供的服务。这个接口对应hive的hwi组件（hive web interface），使用前要启动hwi服务。  </p></li>
+</ul>
+
+<blockquote>
+  <p>Hive的metastore组件是hive元数据集中存放地。Metastore组件包括两个部分：metastore服务和后台数据的存储。后台数据存储的介质就是关系数据库，例如hive默认的嵌入式磁盘数据库derby，还有mysql数据库。Metastore服务是建立在后台数据存储介质之上，并且可以和hive服务进行交互的服务组件，默认情况下，metastore服务和hive服务是安装在一起的，运行在同一个进程当中。我也可以把metastore服务从hive服务里剥离出来，metastore独立安装在一个集群里，hive远程调用metastore服务，这样我们可以把元数据这一层放到防火墙之后，客户端访问hive服务，就可以连接到元数据这一层，从而提供了更好的管理性和安全保障。使用远程的metastore服务，可以让metastore服务和hive服务运行在不同的进程里，这样也保证了hive的稳定性，提升了hive服务的效率。        </p>
+</blockquote>
+
+<p><img src="http://images.cnitblog.com/blog/306623/201306/02191643-020a03e8fb3e4223a83e7b4d51ced410.png" alt="" title=""> </p>
+
+
+
+<h1 id="hive相关操作">Hive相关操作</h1>
+
+
+
+<h2 id="1-文件写数据">1. 文件写数据</h2>
+
+<ol>
+<li><p>通过.hive文件在Hive建立相应的表</p>
+
+<pre><code>create table t_usr_detail(  
+    program_name string,
+    grade double,
+    contenttype string,
+    start_time string,
+    play_time double,
+    series int,
+    usr_id bigint)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t';     
+</code></pre>
+
+<p><code>hive -f creat.hive</code></p></li>
+<li><p>将文本文件导入对应的表</p></li>
+</ol>
+
+<p>当文件是本地文件时</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">load</span> data <span class="hljs-keyword">local</span> inpath <span class="hljs-string">"/root/homed/line.csv"</span> <span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> t_usr_detail;</span> </code></pre>
+
+<p>当文件在hdfs上时</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs sql"><span class="hljs-operator"><span class="hljs-keyword">load</span> data inpath <span class="hljs-string">"/root/homed/line.csv"</span> <span class="hljs-keyword">into</span> <span class="hljs-keyword">table</span> t_usr_detail;</span> </code></pre>
+
+<p>因为建表时规定了分隔符为制表’\t’,因此，待导入的数据格式为</p>
+
+<blockquote>
+  <ul>
+  <li>剧场  0.67    1100    2017-08-11 13:30:58 38  3   50003433</li>
+  <li>剧场  0.38    1100    2017-08-11 13:47:31 21  3   50003433</li>
+  <li>大连经济报道  0.33    1104    2017-08-11 13:49:07 46  23  50003433</li>
+  <li>大连购物    0.02    1001    2017-08-11 14:33:18 1   10  50003433</li>
+  <li>别让爱你的人等太久   0.57    1100    2017-08-11 14:37:25 23  35  50003433</li>
+  <li>广告  1   1100    2017-08-11 15:00:42 14  31  50003433</li>
+  <li>别让爱你的人等太久   1   1100    2017-08-11 15:14:47 41  35  50003433</li>
+  </ul>
+</blockquote>
+
+<p>3 . 查看表</p>
+
+<pre><code>desc t_usr_detail;   
+select * from t_usr_detail limit 10;   
+</code></pre>
+
+<p><a href="http://blog.csdn.net/lifuxiangcaohui/article/details/40588929" rel="nofollow" title="更多创建Hive表的方法" target="_blank">更多创建Hive表的方法</a></p>
+
+
+
+<h2 id="2-spark读hive">2. spark读Hive</h2>
+
+<ol>
+<li>如果要处理现有的表，需要将文件hive-site.xml添加到Spark的类路径中，即spark目录下的conf目录</li>
+<li><p>使用spark-shell读取表数据</p>
+
+<pre><code>import org.apache.spark.sql.hive.HiveContext  
+val hiveCtx = new HiveContext(sc)
+val rows = hiveCtx.sql("SELECT * from t_usr_detail limit 10")
+</code></pre>
+
+<p>返回的是DataFrame格式，在spark中，DataFrame格式具有很多方法以及各种内置函数</p></li>
+<li><p>观察数据</p>
+
+<pre><code>rows.show
+</code></pre></li>
+</ol>
+
+
+
+<h2 id="3-spark写hive">3. spark写Hive</h2>
+
+<p>将spark生成的rdd存入hive中需要先将其转换为datafram，通过样例类可以方便转换。 <br>
+将生成的df存入hive表中有两种方法</p>
+
+<ol>
+<li><p>通过hiveConcext的sql语句</p>
+
+<pre><code>val sqlContext = new HiveContext(sc)            
+val uninoDF = unionRDD1.toDF()
+//uninoDF.write.saveAsTable("t_user_info")
+uninoDF.registerTempTable("t_user_tmp")
+sqlContext.sql("INSERT INTO TABLE t_user_log_info partition(day='"+date+"') select * from t_user_tmp")
+</code></pre></li>
+<li><p>通过DF的写方法</p>
+
+<pre><code>uninoDF.write.mode("append").saveAsTable("t_user_info_b")
+</code></pre></li>
+</ol>
+
+<p>通过<code>desc formatted table_name;</code>其实可以看到，两种插入方法在<code>STORED AS INPUTFORMAT</code>和<code>OUTPUTFORMAT</code>上是完全不同的。但是从我的结果来看，使用第二种方法很多字段都是NULL，应该就出来输入输出的序列化方法上。第二种方法在spark的hive.metastore版本与hive自身的metastore版本不同时会报错，需要指定hive.metastore版本。并且第一种方法不能指定分区，所以优先选择第二种。 </p>
+
+
+
+<h2 id="4-hive下查看数据表信息的方法">4. <strong>Hive下查看数据表信息的方法</strong></h2>
+
+<p>方法1：查看表的字段信息 <br>
+<code>desc table_name;</code></p>
+
+<p>方法2：查看表的字段信息及元数据存储路径 <br>
+<code>desc extended table_name;</code></p>
+
+<p>方法3：查看表的字段信息及元数据存储路径 <br>
+<code>desc formatted table_name;</code></p>
+
+<p>方法4：查看建表语句及其他详细信息的方法 <br>
+<code>show create table table_name;</code></p>
+
+<h1 id="5-修改hive的hive-sitexml文件得到正确的元数据库">5. <strong>修改Hive的hive-site.xml文件得到正确的元数据库</strong></h1>
+
+<ol>
+<li>打开hive-site.xml后，首先查找:/mysql，得到数据库地址</li>
+<li> <br>
+<code>&lt;property&gt; <br>
+        &lt;name&gt;javax.jdo.option.ConnectionURL&lt;/name&gt; <br>
+        &lt;value&gt;jdbc:mysql://192.168.36.100:3306/hive?createDatabaseIfNotExist=true&lt;/value&gt; <br>
+        &lt;description&gt;JDBC connect string for a JDBC metastore&lt;/description&gt; <br>
+    &lt;/property&gt;</code></li>
+<li>查找:/ConnectionPassword 修改登录密码</li>
+<li>再查找:/ConnectionUserName 修改登录用户</li>
+</ol>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

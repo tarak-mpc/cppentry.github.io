@@ -1,0 +1,262 @@
+---
+layout:     post
+title:      spark编程模型（一）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<h1 id="spark编程模型一">spark编程模型（一）</h1>
+
+<ul>
+<li><p><strong>Spark重要概念</strong></p></li>
+<li><p><strong>弹性分布式数据集（RDD）基础</strong></p></li>
+</ul>
+
+<hr>
+
+
+
+<h2 id="spark重要概念">Spark重要概念</h2>
+
+<ol>
+<li>Spark运行模式 <br>
+目前最为常用的Spark运行模式有：  <br>
+local：本地线程方式运行，主要用于开发调试Spark应用程序  <br>
+Standalone：利用Spark自带的资源管理与调度器运行Spark集群，采用Master/Slave结构，为解决单点故障，可以采用ZooKeeper实现高可靠（High Availability，HA)  <br>
+Apache Mesos ：运行在著名的Mesos资源管理框架基础之上，该集群运行模式将资源管理交给Mesos，Spark只负责进行任务调度和计算  <br>
+Hadoop YARN : 集群运行在Yarn资源管理器上，资源管理交给Yarn，Spark只负责进行任务调度和计算  <br>
+Spark运行模式中Hadoop YARN的集群运行方式最为常用，本课程中的第一节便是采用Hadoop YARN的方式进行Spark集群搭建。如此Spark便与Hadoop生态圈完美搭配，组成强大的集群，可谓无所不能。</li>
+<li>Spark组件（Components） <br>
+一个完整的Spark应用程序，如前一节当中SparkWordCount程序，在提交集群运行时，它涉及到如下图所示的组件： <br>
+<img src="https://img-blog.csdn.net/20170303154215966?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbTBfMzc2OTI0Mzg=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast" alt="这里写图片描述" title=""> <br>
+各Spark应用程序以相互独立的进程集合运行于集群之上，由SparkContext对象进行协调，SparkContext对象可以视为Spark应用程序的入口，被称为driver program，SparkContext可以与不同种类的集群资源管理器(Cluster Manager），例如Hadoop Yarn、Mesos等 进行通信，从而分配到程序运行所需的资源，获取到集群运行所需的资源后，SparkContext将得到集群中其它工作节点（Worker Node） 上对应的Executors （不同的Spark应用程序有不同的Executor，它们之间也是独立的进程，Executor为应用程序提供分布式计算及数据存储功能），之后SparkContext将应用程序代码分发到各Executors，最后将任务（Task）分配给executors执行。</li>
+<li>相关术语 <br>
+Application（Spark应用程序）：运行于Spark上的用户程序，由集群上的一个driver program（包含SparkContext对象）和多个executor线程组成 <br>
+Application jar（Spark应用程序JAR包）：Jar包中包含了用户Spark应用程序，如果Jar包要提交到集群中运行，不需要将其它的Spark依赖包打包进行，在运行时 <br>
+Driver program：包含main方法的程序，负责创建SparkContext对象 <br>
+Cluster manage：集群资源管理器，例如Mesos，Hadoop Yarn <br>
+Deploy mode：部署模式，用于区别driver program的运行方式:集群模式(cluter mode)，driver在集群内部启动；客户端模式（client mode），driver进程从集群外部启动 <br>
+Worker node：工作节点， 集群中可以运行Spark应用程序的节点 <br>
+Executor    ：Worker node上的进程，该进程用于执行具体的Spark应用程序任务，负责任务间的数据维护（数据在内存中或磁盘上)。不同的Spark应用程序有不同的Executor <br>
+Task：   运行于Executor中的任务单元，Spark应用程序最终被划分为经过优化后的多个任务的集合（在下一节中将详细阐述） <br>
+Job：由多个任务构建的并行计算任务，具体为Spark中的action操作，如collect,save等) <br>
+Stage：每个job将被拆分为更小的task集合，这些任务集合被称为stage，各stage相互独立（类似于MapReduce中的map stage和reduce stage），由于它由多个task集合构成，因此也称为TaskSet</li>
+</ol>
+
+<h2 id="rdd基础">RDD基础</h2>
+
+<ul>
+<li>RDD用于支持在并行计算时能够高效地利用中间结果，支持更简单的编程模型，同时也具有像MapReduce等并行计算框架的高容错性、能够高效地进行调度及可扩展性。RDD的容错通过记录RDD转换操作的lineage关系来进行，lineage记录了RDD的家族关系，当出现错误的时候，直接通过lineage进行恢复。RDD最合数据挖掘, 机器学习及图计算，因此这些应用涉及到大家的迭代计算，基于内存能够极大地提升其在分布式环境下的执行效率；RDD不适用于诸如分布式爬虫等需要频繁更新共享状态的任务。下面给出的是在spark-shell中如何查看RDD的Lineage</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs livecodeserver">//textFile读取hdfs根目录下的README.md文件，然后筛选出所有包括Spark的行
+scala&gt; val rdd2=sc.textFile(<span class="hljs-string">"/README.md"</span>).<span class="hljs-built_in">filter</span>(<span class="hljs-built_in">line</span> =&gt; <span class="hljs-built_in">line</span>.<span class="hljs-operator">contains</span>(<span class="hljs-string">"Spark"</span>))
+rdd2: org.apache.spark.rdd.RDD[String] = MapPartitionsRDD[<span class="hljs-number">2</span>] <span class="hljs-keyword">at</span> <span class="hljs-built_in">filter</span> <span class="hljs-keyword">at</span> &lt;console&gt;:<span class="hljs-number">21</span><span class="hljs-comment">
+//toDebugString方法会打印出RDD的家族关系</span><span class="hljs-comment">
+//可以看到textFile方法会生成两个RDD，分别是HadoopRDD</span><span class="hljs-comment">
+//MapPartitionsRDD，而filter同时也会生成新的MapPartitionsRDD</span>
+scala&gt; rdd2.toDebugString
+<span class="hljs-number">15</span>/<span class="hljs-number">09</span>/<span class="hljs-number">20</span> <span class="hljs-number">01</span>:<span class="hljs-number">35</span>:<span class="hljs-number">27</span> INFO mapred.FileInputFormat: Total input paths <span class="hljs-built_in">to</span> <span class="hljs-built_in">process</span> : <span class="hljs-number">1</span>
+res0: String = 
+(<span class="hljs-number">2</span>) MapPartitionsRDD[<span class="hljs-number">2</span>] <span class="hljs-keyword">at</span> <span class="hljs-built_in">filter</span> <span class="hljs-keyword">at</span> &lt;console&gt;:<span class="hljs-number">21</span> []
+ |  MapPartitionsRDD[<span class="hljs-number">1</span>] <span class="hljs-keyword">at</span> textFile <span class="hljs-keyword">at</span> &lt;console&gt;:<span class="hljs-number">21</span> []
+ |  /README.md HadoopRDD[<span class="hljs-number">0</span>] <span class="hljs-keyword">at</span> textFile <span class="hljs-keyword">at</span> &lt;console&gt;:<span class="hljs-number">21</span> []</code></pre>
+
+<ul>
+<li>RDD抽象 <br>
+RDD在Spark中是一个只读的（val类型）、经过分区的记录集合。RDD在Spark中只有两种创建方式：（1）从存储系统中创建；（2）从其它RDD中创建。从存储中创建有多种方式，可以是本地文件系统，也可以是分布式文件系统，还可以是内存中的数据。 下面的代码演示的是从HDFS中创建RDD</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; sc<span class="hljs-preprocessor">.textFile</span>(<span class="hljs-string">"/README.md"</span>)
+<span class="hljs-label">res1:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[String] = MapPartitionsRDD[<span class="hljs-number">4</span>] at textFile at &lt;console&gt;:<span class="hljs-number">22</span></code></pre>
+
+<p>下面的代码演示的是从内存中创建RDD</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs haskell">//内存中定义了一个数组
+<span class="hljs-title">scala</span>&gt; val <span class="hljs-typedef"><span class="hljs-keyword">data</span> = <span class="hljs-type">Array</span><span class="hljs-container">(1, 2, 3, 4, 5)</span></span>
+<span class="hljs-typedef"><span class="hljs-keyword">data</span>: <span class="hljs-type">Array</span>[<span class="hljs-type">Int</span>] = <span class="hljs-type">Array</span><span class="hljs-container">(1, 2, 3, 4, 5)</span></span>
+//通过parallelize方法创建<span class="hljs-type">ParallelCollectionRDD</span>
+<span class="hljs-title">scala</span>&gt; val distData = sc.parallelize(<span class="hljs-typedef"><span class="hljs-keyword">data</span>)</span>
+<span class="hljs-title">distData</span>: org.apache.spark.rdd.<span class="hljs-type">RDD</span>[<span class="hljs-type">Int</span>] = <span class="hljs-type">ParallelCollectionRDD</span>[<span class="hljs-number">5</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">23</span></code></pre>
+
+<p>下面的代码演示的是从其它RDD创建新的RDD</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">//filter函数将distData RDD转换成新的RDD
+scala&gt; val distDataFiletered=distData<span class="hljs-preprocessor">.filter</span>(e=&gt;e&gt;<span class="hljs-number">2</span>)
+<span class="hljs-label">distDataFiletered:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Int] = MapPartitionsRDD[<span class="hljs-number">6</span>] at filter at &lt;console&gt;:<span class="hljs-number">25</span>
+//触发action操作（后面我们会讲)，查看过滤后的内容
+//注意collect只适合数据量较少时使用
+scala&gt; distDataFiltered<span class="hljs-preprocessor">.collect</span>
+<span class="hljs-label">res3:</span> Array[Int] = Array(<span class="hljs-number">3</span>, <span class="hljs-number">4</span>, <span class="hljs-number">5</span>)</code></pre>
+
+<ul>
+<li>RDD编程模型 <br>
+在前面的例子中，我们已经接触过到如何利用RDD进行编程，前面我们提到的</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs fsharp"><span class="hljs-comment">//filter函数将distData RDD转换成新的RDD</span>
+scala&gt; <span class="hljs-keyword">val</span> distDataFiletered=distData.filter(e=&gt;e&gt;<span class="hljs-number">2</span>)
+<span class="hljs-comment">//触发action操作（后面我们会讲)，查看过滤后的内容</span>
+<span class="hljs-comment">//注意collect只适合数据量较少时使用</span>
+scala&gt; distDataFiltered.collect</code></pre>
+
+<p>这段代码它已经给我们解释了RDD编程模型的核心思想：“filter函数将distData RDD转换成新的RDD”，“触发action操作”。也就是说RDD的操作包括Transformations（转换)、Actions两种。</p>
+
+<p>transformations操作会将一个RDD转换成一个新的RDD，需要特别注意的是所有的transformation都是lazy的，如果对scala中的lazy了解的人都知道，transformation之后它不会立马执行，而只是会记住对相应数据集的transformation，而到真正被使用的时候才会执行，例如distData.filter(e=&gt;e&gt;2) transformation后，它不会立即执行，而是等到distDataFiltered.collect方法执行时才被执行。</p>
+
+<ul>
+<li>常见的Transformations <br>
+map</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs markdown">/**
+   * Return a new RDD by applying a function to all elements of this RDD.
+   */
+  def map[<span class="hljs-link_label">U: ClassTag</span>](<span class="hljs-link_url">f: T =&gt; U</span>): RDD[U]</code></pre>
+
+<p>使用实例</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs php">scala&gt; val rdd1=sc.parallelize(<span class="hljs-keyword">Array</span>(<span class="hljs-number">1</span>,<span class="hljs-number">2</span>,<span class="hljs-number">3</span>,<span class="hljs-number">4</span>)).map(x=&gt;<span class="hljs-number">2</span>*x).collect
+rdd1: <span class="hljs-keyword">Array</span>[Int] = <span class="hljs-keyword">Array</span>(<span class="hljs-number">2</span>, <span class="hljs-number">4</span>, <span class="hljs-number">6</span>, <span class="hljs-number">8</span>)</code></pre>
+
+<p>filter </p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python">/**
+   * Return a new RDD containing only the elements that satisfy a predicate.
+   */
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">filter</span><span class="hljs-params">(f: T =&gt; Boolean)</span>:</span> RDD[T]</code></pre>
+
+<p>使用实例</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbscript">scala&gt; val rdd1=sc.parallelize(<span class="hljs-built_in">Array</span>(<span class="hljs-number">1</span>,<span class="hljs-number">2</span>,<span class="hljs-number">3</span>,<span class="hljs-number">4</span>)).<span class="hljs-built_in">filter</span>(x=&gt;x&gt;<span class="hljs-number">1</span>).collect
+rdd1: <span class="hljs-built_in">Array</span>[<span class="hljs-built_in">Int</span>] = <span class="hljs-built_in">Array</span>(<span class="hljs-number">2</span>, <span class="hljs-number">3</span>, <span class="hljs-number">4</span>)</code></pre>
+
+<p>flatMap </p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python">/**
+   *  Return a new RDD by first applying a function to all elements of this
+   *  RDD, <span class="hljs-keyword">and</span> then flattening the results.
+   */
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">flatMap</span>[<span class="hljs-title">U</span>:</span> ClassTag](f: T =&gt; TraversableOnce[U]): RDD[U] </code></pre>
+
+<p>使用实例</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt;  val data =Array(Array(<span class="hljs-number">1</span>, <span class="hljs-number">2</span>, <span class="hljs-number">3</span>, <span class="hljs-number">4</span>, <span class="hljs-number">5</span>),Array(<span class="hljs-number">4</span>,<span class="hljs-number">5</span>,<span class="hljs-number">6</span>))
+<span class="hljs-label">data:</span> Array[Array[Int]] = Array(Array(<span class="hljs-number">1</span>, <span class="hljs-number">2</span>, <span class="hljs-number">3</span>, <span class="hljs-number">4</span>, <span class="hljs-number">5</span>), Array(<span class="hljs-number">4</span>, <span class="hljs-number">5</span>, <span class="hljs-number">6</span>))
+
+scala&gt; val rdd1=sc<span class="hljs-preprocessor">.parallelize</span>(data)
+<span class="hljs-label">rdd1:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Array[Int]] = ParallelCollectionRDD[<span class="hljs-number">2</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">23</span>
+
+scala&gt; val rdd2=rdd1<span class="hljs-preprocessor">.flatMap</span>(<span class="hljs-built_in">x</span>=&gt;<span class="hljs-built_in">x</span><span class="hljs-preprocessor">.map</span>(<span class="hljs-built_in">y</span>=&gt;<span class="hljs-built_in">y</span>))
+<span class="hljs-label">rdd2:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Int] = MapPartitionsRDD[<span class="hljs-number">3</span>] at flatMap at &lt;console&gt;:<span class="hljs-number">25</span>
+
+scala&gt; rdd2<span class="hljs-preprocessor">.collect</span>
+<span class="hljs-label">res0:</span> Array[Int] = Array(<span class="hljs-number">1</span>, <span class="hljs-number">2</span>, <span class="hljs-number">3</span>, <span class="hljs-number">4</span>, <span class="hljs-number">5</span>, <span class="hljs-number">4</span>, <span class="hljs-number">5</span>, <span class="hljs-number">6</span>)</code></pre>
+
+<p>mapPartitions(func)  <br>
+本mapPartitions例子来源于：(<a href="https://www.zybuluo.com/jewes/note/35032" rel="nofollow">https://www.zybuluo.com/jewes/note/35032</a>) <br>
+mapPartitions是map的一个变种。map的输入函数是应用于RDD中每个元素，而mapPartitions的输入函数是应用于每个分区，也就是把每个分区中的内容作为整体来处理的。它的函数定义为：</p>
+
+<p>def mapPartitions[U: ClassTag](f: Iterator[T] =&gt; Iterator[U], preservesPartitioning: Boolean = false): RDD[U]</p>
+
+<p>f即为输入函数，它处理每个分区里面的内容。每个分区中的内容将以Iterator[T]传递给输入函数f，f的输出结果是Iterator[U]。最终的RDD由所有分区经过输入函数处理后的结果合并起来的。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python">scala&gt; val a = sc.parallelize(<span class="hljs-number">1</span> to <span class="hljs-number">9</span>, <span class="hljs-number">3</span>)
+scala&gt; <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">myfunc</span>[<span class="hljs-title">T</span>]<span class="hljs-params">(iter: Iterator[T])</span> :</span> Iterator[(T, T)] = {
+    var res = List[(T, T)]() 
+    var pre = iter.next 
+    <span class="hljs-keyword">while</span> (iter.hasNext) {
+        val cur = iter.next; 
+        res .::= (pre, cur)
+        pre = cur;
+    } 
+    res.iterator
+}
+scala&gt; a.mapPartitions(myfunc).collect
+res0: Array[(Int, Int)] = Array((<span class="hljs-number">2</span>,<span class="hljs-number">3</span>), (<span class="hljs-number">1</span>,<span class="hljs-number">2</span>), (<span class="hljs-number">5</span>,<span class="hljs-number">6</span>), (<span class="hljs-number">4</span>,<span class="hljs-number">5</span>), (<span class="hljs-number">8</span>,<span class="hljs-number">9</span>), (<span class="hljs-number">7</span>,<span class="hljs-number">8</span>))</code></pre>
+
+<p>上述例子中的函数myfunc是把分区中一个元素和它的下一个元素组成一个Tuple。因为分区中最后一个元素没有下一个元素了，所以(3,4)和(6,7)不在结果中。  <br>
+mapPartitions还有些变种，比如mapPartitionsWithContext，它能把处理过程中的一些状态信息传递给用户指定的输入函数。还有mapPartitionsWithIndex，它能把分区的index传递给用户指定的输入函数。 <br>
+mapPartitionsWithIndex <br>
+mapPartitionsWithIndex函数是mapPartitions函数的一个变种，它的函数参数如下：</p>
+
+<p>def mapPartitionsWithIndex[U: ClassTag](  <br>
+f: (Int, Iterator[T]) =&gt; Iterator[U],  <br>
+preservesPartitioning: Boolean = false): RDD[U]</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python">scala&gt; val a = sc.parallelize(<span class="hljs-number">1</span> to <span class="hljs-number">9</span>, <span class="hljs-number">3</span>)
+//函数带分区索引，返回的集合第一个元素为分区索引
+scala&gt; <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">myfunc</span>[<span class="hljs-title">T</span>]<span class="hljs-params">(index:T,iter: Iterator[T])</span> :</span> Iterator[(T,T,T)] = {
+    var res = List[(T,T, T)]() 
+    var pre = iter.next 
+    <span class="hljs-keyword">while</span> (iter.hasNext) {
+        val cur = iter.next
+        res .::= (index,pre, cur) 
+        pre = cur
+    } 
+    res.iterator
+}
+scala&gt; a.mapPartitionsWithIndex(myfunc).collect
+res11: Array[(Int, Int, Int)] = Array((<span class="hljs-number">0</span>,<span class="hljs-number">2</span>,<span class="hljs-number">3</span>), (<span class="hljs-number">0</span>,<span class="hljs-number">1</span>,<span class="hljs-number">2</span>), (<span class="hljs-number">1</span>,<span class="hljs-number">5</span>,<span class="hljs-number">6</span>), (<span class="hljs-number">1</span>,<span class="hljs-number">4</span>,<span class="hljs-number">5</span>), (<span class="hljs-number">2</span>,<span class="hljs-number">8</span>,<span class="hljs-number">9</span>), (<span class="hljs-number">2</span>,<span class="hljs-number">7</span>,<span class="hljs-number">8</span>))</code></pre>
+
+<p>sample </p>
+
+
+
+<pre class="prettyprint"><code class=" hljs python">/**
+   * Return a sampled subset of this RDD.
+   *
+   * <span class="hljs-decorator">@param withReplacement can elements be sampled multiple times (replaced when sampled out)</span>
+   * <span class="hljs-decorator">@param fraction expected size of the sample as a fraction of this RDD's size</span>
+   *  without replacement: probability that each element <span class="hljs-keyword">is</span> chosen; fraction must be [<span class="hljs-number">0</span>, <span class="hljs-number">1</span>]
+   *  <span class="hljs-keyword">with</span> replacement: expected number of times each element <span class="hljs-keyword">is</span> chosen; fraction must be &gt;= <span class="hljs-number">0</span>
+   * <span class="hljs-decorator">@param seed seed for the random number generator</span>
+   */
+  <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">sample</span><span class="hljs-params">(
+      withReplacement: Boolean,
+      fraction: Double,
+      seed: Long = Utils.random.nextLong)</span>:</span> RDD[T] </code></pre>
+
+<p>使用示例：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">scala&gt; val a = sc<span class="hljs-preprocessor">.parallelize</span>(<span class="hljs-number">1</span> to <span class="hljs-number">9</span>, <span class="hljs-number">3</span>)
+<span class="hljs-label">a:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Int] = ParallelCollectionRDD[<span class="hljs-number">12</span>] at parallelize at &lt;console&gt;:<span class="hljs-number">21</span>
+
+scala&gt; val smapledA=a<span class="hljs-preprocessor">.sample</span>(true,<span class="hljs-number">0.5</span>)
+<span class="hljs-label">smapledA:</span> org<span class="hljs-preprocessor">.apache</span><span class="hljs-preprocessor">.spark</span><span class="hljs-preprocessor">.rdd</span><span class="hljs-preprocessor">.RDD</span>[Int] = PartitionwiseSampledRDD[<span class="hljs-number">13</span>] at sample at &lt;console&gt;:<span class="hljs-number">23</span>
+scala&gt; smapledA<span class="hljs-preprocessor">.collect</span>
+<span class="hljs-label">res12:</span> Array[Int] = Array(<span class="hljs-number">3</span>, <span class="hljs-number">3</span>, <span class="hljs-number">3</span>, <span class="hljs-number">5</span>, <span class="hljs-number">6</span>, <span class="hljs-number">8</span>, <span class="hljs-number">8</span>)
+
+scala&gt; val smapledA2=a<span class="hljs-preprocessor">.sample</span>(false,<span class="hljs-number">0.5</span>)<span class="hljs-preprocessor">.collect</span>
+<span class="hljs-label">smapledA2:</span> Array[Int] = Array(<span class="hljs-number">1</span>, <span class="hljs-number">4</span>)</code></pre>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

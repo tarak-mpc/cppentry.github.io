@@ -1,0 +1,237 @@
+---
+layout:     post
+title:      hive学习笔记
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <pre class="has">
+<code class="language-sql">/*hive 学习笔记*/
+
+/*--------------------------------------------------------------------2018.7.22-------------------------------------------------------------------------------*/
+
+/*hive基础知识：
+    hadoop组成部分：
+        mapreduce：一种计算模型，该模型将大型数据处理任务分解成很多个，可以在服务器集群上并行执行的任务。这些任务的计算结果可以合并在一起来计算最终的结果。                
+        分布式文件系统HDFS
+    HiveQL/HQL:hive查询语言，用来查询存储在hadoop集群中的数据，将大多数的查询转换为MapReduce任务。
+    hive不是一个完整的数据库，不支持记录级别的更新、插入或者删除操作，但是用户可以通过查询生成新表或者将查询结果导入到文件中；hive不支持OLTP（联机事务处理）
+        所需的关键功能，而更接近成为一个OLTP（联机分析技术）工具。*/
+
+/*hive基本数据类型：
+    TINYINT 1byte 有符号整数
+    SAMLLINT 2byte 有符号整数
+    INT 4byte 有符号整数
+    BIGINT 8byte 有符号整数
+    BOOLEAN 布尔类型，true或者false
+    FLOAT 单精度浮点数
+    DOUBLE 双精度浮点数
+    STRING 字符序列，可以指定字符集。可以使用单引号或者双引号
+    TIMESTAMP 整数，浮点数或者字符串
+    BINARY 字节数组*/    
+
+/*hive集合数据类型：
+    STRUCT 和C语言中的struct或者对象类似，都可以通过“点”符号访问元素内容。例如，如果某个列的数据类型是struct{first string，last string}，那么第1个元素可以通过
+            字段名.first来引用
+    MAP map是一组键-值对元祖集合，使用数组表示法（例如['key']）可以访问元素。例如，如果某个列的数据类型是map，其中键-&gt;值对是'first'-&gt;'john'和'last'-&gt;'doe'，那么
+        可以通过字段名['last']获取最后1个元素
+    ARRAY 数组是一组具有相同类型的名称的变量的集合。这些变量称为数组的元素，每个数组元素都有一个编号，编号从0开始。例如，数组值为['john','doe']，那么第2个元素可
+        以通过数组名[1]进行引用*/
+/*eg:hive使用这些数据类型的表结构声明语句，这是一张虚构的人力资源应用程序中的员工表*/
+hive&gt; CREATE TABLE employees(
+      name STRING,
+      salary FLOAT,
+      subordinates ARRAY&lt;STRING&gt;,
+      deductions MAP&lt;STRING,FLOAT&gt;,
+      address STRUCT&lt;street:STRING,city:STRING,state:STRING,zip:INT&gt;
+      );
+
+/*hive中默认的按记录和字段分割符：
+    \n 对于文本文件来说，每行都是一条记录，因此换行符可以分隔记录
+    ^A(ctrl+A) 用于分隔字段（列）。在create table语句中可以使用八进制编码\001表示
+    ^B(ctrl+B) 用于分隔array或者struct中的元素，或者用于map中键-值对之间的分隔。在create table语句中可以使用八进制编码\002表示
+    ^C(ctrl+C) 用于map中键和值之间的分隔。在create table语句中可以使用八进制编码\003表示*/
+/*eg:文本编辑器中的内容（Emacs）
+john doe^A100000.0^Aamary smith^Btodd johns^Afederal taxes^C.2^Bstate taxes^C.05^Binsurance^C.1^A1 michigan ave.^Bchicago^Bil^B60600
+文本文件分解出来的结果：
+john doe对应name字段，表示用户名
+100000.0对应salary字段，表示薪水
+amary smith^Btodd johns对应subordinates字段，表示下属是amary smith和todd johns
+federal taxes^C.2^Bstate taxes^C.05^Binsurance^C.1对应deductions字段，表示扣除的金额，其中20%用于上缴国税，5%用于上缴州税，还有10%用于上缴保险费
+1 michigan ave.^Bchicago^Bil^B60600对应address字段，表示住址是“芝加哥第一密歇根大道60600号”
+重点：表结构声明中要明确指定分割符*/
+hive&gt; CREATE TABLE EMPLOYEES(
+      name STRING,
+      salary FLOAT,
+      subordinates ARRAY&lt;STRING&gt;,
+      deductions MAP&lt;STRING,FLOAT&gt;,
+      address STRUCT&lt;STREET:STRING,CITY:STRING,STATE:STRING,ZIP:INT&gt;
+      )
+      ROW FORMAT DELIMITED
+      FIELDS TERMINATED BY '\001'
+      COLLECTION ITEMS TERMINATED BY '\002'
+      MAP KEYS TERMINATED BY '003'
+      LINES TERMINATED BY '\N'
+      STORED AS TEXTFILE;
+
+/*hive创建数据库*/
+hive&gt; CREATE DATABASE financials;
+/*如果数据库financials已经存在的话，那么将抛出一个错误信息。使用如下语句可以避免在这种情况下抛出错误信息*/
+hive&gt; CREATE DATABASE IF NOT EXISTS financials;
+/*查看hive中所包含的数据库*/
+hive&gt; SHOW DATABASES;
+/*如果数据库非常多的话，可以使用正则表达式匹配来筛选出需要的数据库名*/
+hive&gt; SHOW DATABASES LIKE 'h.*';/*以h开头，其他字符结尾的数据库名*/
+/*设置数据库的存储位置*/
+hive&gt; CREATE DATABASE financials
+      LOCATION '/my/preferred/directory';
+/*为数据库增加注释信息，使用DESCRIBE DATABASE &lt;database&gt;查看该信息 */
+hive&gt; CREATE DATABASE financials
+      COMMENT 'holds all financial tables';
+hive&gt; DESCRIBE DATABASE financials;
+/*为数据库增加一些和其相关的键-值对属性信息，尽管目前仅有的功能就是提供了一种可以通过DESCTIBE DATABASE EXTENDED &lt;database&gt;语句显示这些信息的方式*/
+hive&gt; CREATE DATABASE financials
+      WITH DBPROPERTIES ('creator'='mark moneybags','date'='2012-01-02');
+hive&gt; DESCRIBE DATABASE EXTENDED financials;
+/*将某个数据库设置为用户当前的工作数据库*/
+hive&gt; USE financials
+/*设置一个属性值来在提示符里面显示当前所在的数据库*/
+hive&gt; set hive.cli.print.current.db=true;
+hive (financials)&gt; USE default;
+hive (default)&gt; set hive.cli.print.current.db=false;
+hive&gt; ...
+
+/*hive删除数据库*/
+hive&gt; DROP DATABASE IF EXISTS financials;
+/*hive不允许用户删除一个包含有表的数据库的。用户要么先删除数据库中的表，然后在删除数据库；要么在删除命令的最后面加上关键字CASCADE，这样可以使hive自行先删除数据
+库里的表*/
+hive&gt; DROP DATABASE IF EXISTS financials CASCADE;
+
+/*hive修改数据库*/
+/*用户通过ALTER DATABASE命令为某个数据库的DBPROPERTIES设置键-值对属性，来描述这个数据库的属性信息。数据库的其他元素信息都是不可更改的，包括数据库名和数据库所在
+的目录位置，无法删除或重置数据库属性*/
+hive&gt; ALTER DATABASE financials SET DBPROPERTIES('edited-by'='joe dba');
+
+/*hive创建表*/
+CREATE TABLE IF NOT EXISTS mydb.employees(/*当用户当前所处的数据库并非是目标数据库，那么用户可以在表名前增加一个数据库名来进行指定，如mydb*/
+name STRING COMMENT 'employee name',
+salary FLOAT COMMENT 'employee salary',
+subordinates ARRAY&lt;STRING&gt; COMMENT 'name if subordinates',
+deductions MAP&lt;STRING,FLOAT&gt; COMMENT 'keys are deductions names,values ate percentages',
+address STRUCT&lt;street:STRING,city:STRING,state:STRING,zip:INT&gt; COMMENT 'home address')
+COMMENT 'description of the table'
+TBLPROPERTIES ('creator'='me','create_at'='2012-01-02 10:00:00',...)
+LOCATION '/user/hive/warehouse/mydb.db/employees';
+/*用户可以拷贝一张已经存在的表的表模式，而无需拷贝数据*/
+CREATE TABLE IF NOT EXISTS mydb.employees2
+LIKE mydb.employees;/*只接受可选的LOCATION语句，其他属性不可能重新定义*/
+/*hive列举出所有的表*/
+hive&gt; USE mydb;
+hive&gt; SHOW TABLES;
+/*列举指定数据库下的所有表*/
+hive&gt; SHOW TABLES IN mydb;
+/*表名过多，使用正则表达式筛选出所需要的表名*/
+hive&gt; SHOW TABLES LIKE 'empl.*';/*注：IN database_name语句和对表名使用正则表达式两个功能尚不支持同时使用*/
+/*查看表的详细信息*/
+hive&gt; DESCRIBE EXTENDED mydb.employees;/*使用FORMATTED关键字代替EXTENDED关键字的话，可以提供更加冗长的和可读的输出信息*/
+/*查看某一个列的信息，只需在表名后增加这个字段的名称即可，使用EXTENDED也不会增加更多的输出信息*/
+hive&gt; DESCRIBE mydb.employees.salary;
+
+/*hive外部表*/
+/*创建一个外部表，其可以读取所有位于/data/stocks目录下的以逗号分隔的数据。因为表是外部的，所以hive并非认为其完全拥有这份数据。因此删除该表并不会删除掉这份数据
+不过描述表的元数据信息会被删除掉*/
+CREATE EXTERNAL TABLE IF NOT EXISTS stocks(
+exchange STRING,
+symbol STRING,
+ymd STRING,
+price_open FLOAT,
+price_high FLOAT,
+price_low FLOAT,
+price_close FLOAT,
+volume INT,
+price_adj_close FLOAT)
+ROW FORMAT DELIMITED
+FIELDS TERMINATER BY ','
+LOCATION '/data/stocks';/*关键字EXTERNAL告诉hive这个表是外部的，LOCATION告诉hive数据位于哪个路径下*/
+
+/*hive分区表*/
+/*分区字段一旦创建好，便于普通字段一样。先按照国家，再按照州来进行分区*/
+CREATE TABLE employees(
+name STRING,
+salary FLOAT,
+subordinates ARRAY&lt;STRING&gt;,
+deductions MAP&lt;STRING,FLOAT&gt;,
+address STRUCT&lt;street STRING,city:STRING,state:STRING,zip:INT&gt;)
+PARTITIONED BY (country STRING,state STRING);/*分区字段state与address中的state不同，不会产生模糊，因为需要通过address.state才能调用address中这个元素的值*/
+/*查找出在美国伊利诺斯州的所有雇员*/
+SELECT * FROM employees WHERE country='US' AND state='IL';
+/*如果表中的数据以及分区个数都非常大的话，执行这样一个包含有所有分区的查询可能会触发一个巨大的mapReduce任务。一个高度建议的安全措施就是将hive设置为'strict（严
+格）'格式，这样如果对分区表进行查询而where字句没有加分区过滤的话，将会禁止提交这个任务。用户也可以按照下面的语句将属性值设置为'nostrict（非严格）'格式*/
+hive&gt; set hive.mapred.mode=strict;
+hive&gt; SELECT e.name,e.salary FROM employees e LIMIT 100;/*报错*/
+hive&gt; set hive.mapred.mode=nonstrict;
+hive&gt; SELECT e.name,e.salary FROM employees e LIMIT 100;/*成功*/
+/*查看表中的分区*/
+hive&gt; SHOW PARTITIONS employees;
+/*查看某个特定分区键的分区的话，用户可以在这个命令上增加一个指定了一个或者多个特定分区字段值的PARTITION字句，进行过滤查询*/
+hive&gt; SHOW PARTITIONS employees PARTITION(country='US');
+hive&gt; SHOW PARTITIONS employees PARTITION(country='US',state='IL');
+/*管理表中用户可以通过载入数据的方式创建分区。如下例语句，在从一个本地目录（$HOME/california-employees）载入数据到表中的时候，将会创建一个US和CA分区。用户需要
+为每个分区字段指定一个值*/
+LOAD DATA LOCAL INPATH '${env:HOME}/california-employees'
+INTO TABLE employees
+PARTITION (country='US',state='CA');
+/*外部分区表*/
+CREATE EXTERNAL TABLE IF NOT EXISTS log_message(
+hms INT,
+severity STRING,
+server STRING,
+process_id INT,
+message STRING)
+PARTITIONED BY (year INT,month INT,day INT)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t';
+/*ALTER TABLE可以单独增加分区*/
+ALTER TABLE log_message ADD PARTITION(year=2012,month=1,day=2)
+LOCATION 'hdfs://master_server/data/log_message/2012/01/02';
+
+/*额外的CREATE TABLE字句以更详细的描述数据期望是按照什么样子存储的*/
+CREATE EXTERNAL TABLE IF NOT EXISTS stocks(
+exchange STRING,
+symbol STRING,
+ymd STRING,
+price_open FLOAT,
+price_high FLOAT,
+price_low FLOAT,
+price_close FLOAT,
+volume INT,
+price_adj_close FLOAT)
+CLUSTERED BY (exchange,symbol)
+SORTED BY (ymd ASC)
+INTO 96 BUCKETS
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+LOCATION '/data/stocks';
+
+/*删除表*/
+DROP TABLE IF EXISTS employees;
+
+/*修改表*/
+/*表重命名，将表log_message重命名为logmsgs*/
+ALTER TABLE log_message RENAME log_msgs;
+/*增加、修改和删除表分区*/
+ALTER TABLE log_message ADD IF NOT EXISTS
+PARTITION(year=2011,month=1,day=1) LOCATION '/logs/2011/01/01'
+PARTITION(year=2011,month=1,day=2) LOCATION '/logs/2011/01/02'
+PARTITION(year=2011,month=1,day=3) LOCATION '/logs/2011/01/03';
+/*用户还可以通过高效的移动位置来修改某个分区的路径*/
+ALTER TABLE log_message PARTITION(year=2011,month=12,day=2)SET LOCATION 's3n://ourbucket/logs/2011.1/02';
+/*删除某个分区*/
+ALTER TABLE log_message DROP IF EXISTS PARTITION(year=2011,month=12,day=2);
+/*修改列信息,修改列名*/
+ALTER TABLE log_message
+CHANGE COLUMN hms hours_minutes_seconds INT
+COMMENT 'the hours,minutes,and seconds part of the timestamp'
+AFTER seerity;/*用户想将这个字段移动到第1个位置，只需要使用FIRST来代替AFTER other column子句即可*/</code></pre>
+
+<p>未完，待更新</p>            </div>
+                </div>

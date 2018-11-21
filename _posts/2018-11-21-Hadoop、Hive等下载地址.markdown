@@ -1,0 +1,13 @@
+---
+layout:     post
+title:      Hadoop、Hive等下载地址
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <div class="iteye-blog-content-contain" style="font-size:14px;">
+<p>Hadoop、Hive等下载地址<br>由于经常需要找Hadoop、Hive等软件的下载地址，这里就汇总一下，方便以后查找。</p>
+<p>Apache Hadoop下载地址：<a href="http://mirror.bit.edu.cn/apache/hadoop/common/" rel="nofollow">http://mirror.bit.edu.cn/apache/hadoop/common/</a><br>CDH Hadoop下载地址：<a href="http://archive.cloudera.com/cdh5/cdh/5/" rel="nofollow">http://archive.cloudera.com/cdh5/cdh/5/</a><br>Hive下载地址：<a href="http://apache.dataguru.cn/hive/" rel="nofollow">http://apache.dataguru.cn/hive/</a><br>Hbase下载地址：<a href="http://mirror.bit.edu.cn/apache/hbase/" rel="nofollow">http://mirror.bit.edu.cn/apache/hbase/</a><br>Zookeeper下载地址：<a href="http://mirrors.hust.edu.cn/apache/zookeeper/" rel="nofollow">http://mirrors.hust.edu.cn/apache/zookeeper/</a><br>Flume下载地址：<a href="https://repository.cloudera.com/content/repositories/releases/com/cloudera/flume-distribution/" rel="nofollow">https://repository.cloudera.com/content/repositories/releases/com/cloudera/flume-distribution/</a><br>Flume ng下载地址：<a href="http://flume.apache.org/download.html" rel="nofollow">http://flume.apache.org/download.html</a></p>
+<p>文档地址：<br>Apache Hadoop文档：<a href="http://hadoop.apache.org/docs/r2.2.0/" rel="nofollow">http://hadoop.apache.org/docs/r2.2.0/</a><br>CDH Hadoop文档：<a href="http://archive.cloudera.com/cdh/3/hadoop-0.20.2-cdh3u6/" rel="nofollow">http://archive.cloudera.com/cdh/3/hadoop-0.20.2-cdh3u6/</a><br>Hive文档：<a href="http://hive.apache.org/index.html" rel="nofollow">http://hive.apache.org/index.html</a><br>Hbase文档：<a href="https://hbase.apache.org/" rel="nofollow">https://hbase.apache.org/</a><br>Zookeeper文档：<a href="http://zookeeper.apache.org/doc/r3.4.5/" rel="nofollow">http://zookeeper.apache.org/doc/r3.4.5/</a><br>Flume文档：<a href="http://archive.cloudera.com/cdh/3/flume/" rel="nofollow">http://archive.cloudera.com/cdh/3/flume/</a><br>Flume ng文档：<a href="http://flume.apache.org/index.html" rel="nofollow">http://flume.apache.org/index.html</a></p>
+</div>            </div>
+                </div>

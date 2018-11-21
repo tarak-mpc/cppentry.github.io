@@ -1,0 +1,248 @@
+---
+layout:     post
+title:      ubuntu12.04 hadoop单机模式和伪分布模式搭建
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p><span style="font-size:18px;"><strong>一、单机模式</strong></span></p>
+<p><span style="font-size:18px;"><strong><span style="font-size:12px;"> 1、创建hadoop用户</span></strong></span></p>
+<p><span style="font-size:18px;"><span style="font-size:12px;">在终端下输入：</span></span></p>
+<p><span style="font-size:18px;"><strong><span style="font-size:12px;"><br></span></strong><span style="font-size:12px;"></span></span></p>
+<pre><code class="language-cpp">zk@zk-pc:~$sudo addgroup hadoop
+zk@zk-pc:~$sudo adduser -ingroup hadoop hadoop</code></pre><strong><span style="font-size:12px;"><br></span></strong>
+<p></p>
+<p>这样就完成了hadoop用户的创建，接下来在终端输入以完成用户权限的更改：</p>
+<p><br></p>
+<pre><code class="language-cpp">zk@zk-pc:~$sudo gedit /etc/sudoers</code></pre><br>
+找到文件的“root   ALL=(ALL:ALL)   ALL”这行，在其下行添加：<pre><code class="language-cpp">hadoop  ALL=(ALL:ALL) ALL</code></pre>
+<p><span style="font-size:12px;"><strong><br></strong></span></p>
+<p><span style="font-size:12px;"><strong> 2、安装jdk</strong></span></p>
+<p>终端下输入：</p>
+<p></p>
+<pre><code class="language-cpp">zk@zk-pc:~$sudo apt-get install openjdk-6-jre</code></pre><br>
+完成后可以在终端输入java -version来查看安装成功与否。
+<p></p>
+<p><span style="font-size:12px;"><strong>3、安装ssh</strong></span></p>
+<p>在终端下输入以下内容完成ssh的安装：</p>
+<p></p>
+<pre><code class="language-cpp">zk@zk-pc:~$sudo apt-get install openssh-server </code></pre><br>
+完成安装后启动ssh：
+<p></p>
+<p></p>
+<pre><code class="language-cpp">zk@zk-pc:~$sudo /etc/init.d/ssh start </code></pre>
+<p></p>
+<p>进入hadoop用户：<span style="font-family:monospace;"><br></span></p>
+<p></p>
+<pre><code class="language-cpp">zk@zk-pc:~$su - hadoop
+
+通过如下命令可以查看ssh是否正常启动：
+
+ hadoop@zk-pc:~$ps -e | grep ssh
+
+
+作为一个安全通信协议，使用时需要密码，因此我们要设置成免密码登录，生成私钥和公钥：
+
+hadoop@zk-pc:~$ssh-keygen -t rsa -P ""
+
+中间点击回车跳过，然后再在终端输入如下内容，将公钥追加到authorized_keys中（authorized_keys用于保存所有允许以当前用户身份登录到ssh客户端用户的公钥内容）：
+
+hadoop@zk-pc:~$cat ~/.ssh/id_rsa.pub &gt;&gt; ~/.ssh/authorized_keys
+
+现在可以登入ssh确认以后登录时不用输入密码：
+
+hadoop@zk-pc:~$ssh localhost
+
+
+退出：
+
+hadoop@zk-pc:~$exit
+
+4、安装hadoop1.0.4
+
+下载hadoop1.0.4源文件：http://mirrors.tuna.tsinghua.edu.cn/apache/hadoop/common/hadoop-1.0.4/
+
+下载hadoop-1.0.4.tar.gz文件，放到/usr/local/hadoop目录
+
+zk@zk-pc:~$sudo tar xzf hadoop-1.0.2.tar.gz  
+
+zk@zk-pc:~$sudo mv hadoop-1.0.2 /usr/local/hadoop
+
+要确保所有的操作都是在用户hadoop下完成的：
+
+zk@zk-pc:~$sudo chown -R hadoop:hadoop /usr/local/hadoop
+
+5、设定hadoop-env.sh路径
+
+进入hadoop路径，打开文件hadoop-env.sh：
+
+hadoop@zk-pc:~cd /usr/local/hadoop
+
+hadoop@zk-pc:~sudo gedit conf/hadoop-env.sh
+
+添加如下内容：
+
+            export JAVA_HOME=/usr/lib/jvm/java-6-openjdk #视你本机的java安装路径决定
+            export HADOOP_HOME=/usr/local/hadoop
+            export PATH=$PATH:/usr/local/hadoop/bin
+
+
+完成更改后保存关闭，并使更改生效：
+
+hadoop@zk-pc:~source /usr/local/hadoop/conf/hadoop-env.sh
+
+
+至此，单机模式配置成功，终端下输入如下内容以查看安装成功与否：
+
+hadoop@zk-pc:~hadoop version
+
+
+6、运行hadoop自带例子以验证成功安装
+
+在hadoop目录下新建input文件夹：
+
+hadoop@zk-pc:/usr/local/hadoop$mkdir input
+
+
+将conf中的所有文件拷贝到input文件夹中：
+
+hadoop@zk-pc:/usr/local/hadoop$cp conf/* input
+
+运行WordCount程序，并将结果保存到output中：
+
+hadoop@zk-pc:/usr/local/hadoop$bin/hadoop jar hadoop-examples-1.0.4.jar wordcount input output
+
+查看结果：
+
+hadoop@zk-pc:/usr/local/hadoop$cat output/*
+
+你会看到conf所有文件的单词和频数都被统计出来。
+
+二、伪分布模式
+
+1、设定*-site.xml
+
+这里需要设定3个文件：core-site.xml,hdfs-site.xml,mapred-site.xml，都在/usr/local/hadoop/conf目录下
+core-site.xml:  Hadoop Core的配置项，例如HDFS和MapReduce常用的I/O设置等。
+hdfs-site.xml:  Hadoop 守护进程的配置项，包括namenode，辅助namenode和datanode等。
+mapred-site.xml： MapReduce 守护进程的配置项，包括jobtracker和tasktracker。    首先在hadoop目录下新建几个文件夹：
+
+hadoop@zk-pc:/usr/local/hadoop$ mkdir tmp  
+
+hadoop@zk-pc:/usr/local/hadoop$ mkdir hdfs  
+
+hadoop@zk-pc:/usr/local/hadoop$ mkdir hdfs/name  
+
+hadoop@zk-pc:/usr/local/hadoop$ mkdir hdfs/data  #（要保证data文件夹的权限是755）
+
+接下来编辑那三个文件：
+core-site.xml:
+
+    &lt;configuration&gt;  
+        &lt;property&gt;  
+            &lt;name&gt;fs.default.name&lt;/name&gt;  
+            &lt;value&gt;hdfs://localhost:9000&lt;/value&gt;  
+        &lt;/property&gt;  
+        &lt;property&gt;  
+            &lt;name&gt;hadoop.tmp.dir&lt;/name&gt;  
+            &lt;value&gt;/usr/local/hadoop/tmp&lt;/value&gt;  
+        &lt;/property&gt;  
+    &lt;/configuration&gt;  
+
+
+hdfs-site.xml:
+
+    &lt;configuration&gt;  
+        &lt;property&gt;  
+            &lt;name&gt;dfs.replication&lt;/name&gt;  
+            &lt;value&gt;1&lt;/value&gt;  
+        &lt;/property&gt;  
+        &lt;property&gt;  
+            &lt;name&gt;dfs.name.dir&lt;/name&gt;  
+            &lt;value&gt;/usr/local/hadoop/hdfs/name&lt;/value&gt;  
+        &lt;/property&gt;  
+        &lt;property&gt;  
+            &lt;name&gt;dfs.data.dir&lt;/name&gt;  
+            &lt;value&gt;/usr/local/hadoop/hdfs/data&lt;/value&gt;  
+        &lt;/property&gt;  
+    &lt;/configuration&gt;  
+
+
+mapred-site.xml:
+
+&lt;configuration&gt;  
+    &lt;property&gt;  
+        &lt;name&gt;mapred.job.tracker&lt;/name&gt;  
+        &lt;value&gt;localhost:9001&lt;/value&gt;  
+    &lt;/property&gt;  
+&lt;/configuration&gt;
+
+
+2、格式化HDFS
+
+通过以上步骤，我们已经设定好Hadoop单机测试到环境，接着就是启动Hadoop到相关服务，格式化namenode,secondarynamenode,tasktracker:
+
+hadoop@zk-pc:/usr/local/hadoop$source /usr/local/hadoop/conf/hadoop-env.sh  
+hadoop@zk-pc:/usr/local/hadoop$hadoop namenode -format
+
+3、配置ID
+
+查看hdfs/name/current/VERSION文件里面的namespaceID的值，然后将hdfs/data/current/VERSION的值改成相同值。（可以避免datanode或namenode无法启动）
+
+4、启动hadoop
+
+hadoop@zk-pc:/usr/local/hadoop$bin/start-all.sh
+
+用Java的jps命令列出所有守护进程来验证安装成功:
+
+hadoop@zk-pc:/usr/local/hadoop$jps
+519 NameNode
+1385 TaskTracker
+767 DataNode
+1631 Jps
+1027 SecondaryNameNode
+1125 JobTracker
+
+可以看到有如上六个进程。
+
+5、检查运行状态
+
+所有的设置已完成，Hadoop也启动了，现在可以通过下面的操作来查看服务是否正常，在Hadoop中用于监控集群健康状态的Web界面：
+http://localhost:50030/     - Hadoop 管理介面
+http://localhost:50060/     - Hadoop Task Tracker 状态
+http://localhost:50070/     - Hadoop DFS 状态
+
+6、运行wordcount验证安装成功
+
+   至此，hadoop的伪分布模式已经安装成功，于是，再次在伪分布模式下运行一下hadoop自带的例子WordCount来感受以下MapReduce过程：
+
+这时注意程序是在文件系统dfs运行的，创建的文件也都基于文件系统。
+
+首先在dfs中创建input目录：
+
+hadoop@zk-pc:/usr/local/hadoop$bin/hadoop dfs -mkdir input
+
+
+将conf中的文件拷贝到dfs中的input：
+
+hadoop@zk-pc:/usr/local/hadoop$hadoop dfs -copyFromLocal conf/* input  
+
+在伪分布式模式下运行WordCount：
+
+hadoop@zk-pc:/usr/local/hadoop$hadoop jar hadoop-examples-1.0.4.jar wordcount input output
+
+显示输出结果:
+
+hadoop@zk-pc:/usr/local/hadoop$hadoop dfs -cat output/*  
+
+当Hadoop结束时，可以通过stop-all.sh脚本来关闭Hadoop的守护进程:
+
+hadoop@zk-pc:/usr/local/hadoop$bin/stop-all.sh
+
+
+结语：这样就在ubuntu12.04上搭建成功了hadoop。</code></pre><br><br><span style="font-family:monospace;"></span>
+<p></p>
+<p></p>
+            </div>
+                </div>

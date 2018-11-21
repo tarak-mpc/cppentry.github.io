@@ -1,0 +1,64 @@
+---
+layout:     post
+title:      hive并发调用的运行方式
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<h1 style="font-size:28px;line-height:56px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+<strong>前言</strong></h1>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+使用hive，我们很多情况下会并发调用hive程序，将sql任务转换成mapreuce提交到hadoop集群中，而在本人使用hive的过程中，发现并发调用hive有几个问题,在这个和大家分享下.</p>
+<h1 style="font-size:28px;line-height:56px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+<strong>正文</strong></h1>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+默认安装hive，hive是使用derby内存数据库保存hive的元数据，这样是不可以并发调用hive的，需要配置为使用mysql保存hive的元数据。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+ </p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+运行hive，可以有以下访问方式:</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+<strong>1.hiveserver</strong>:hive以thrift服务的服务器形式运行，允许不同的语言编写客户端进行访问，通过thrift，jdbc，odbc连接器和hive服务器与hive通信，这种方式很适合java编程人员通过jdbc接口去访问hive，但是在实践中，发现并发调用时，很容易出现hiveserver无故宕机，没有jvm的dump文件，hiveserver的程序也毫无输出。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+<strong>2.metastore</strong>:</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+<strong>2.1.内嵌metastore</strong>:默认情况下,metastore和hive是运行在同一个进程里,这种方式经过测试，在并发中是最稳定的，使用这种方式，暂时没有出现问题。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+<strong>2.2.远程metastore</strong>:通过配置hive.metastore.local为false,让metastore作为一个单独的进程运行,hive客户端都要连接远程metastore才能执行任务，但是在实践中，一样很容易出现远程metastore无故宕机，同样没有jvm的dump文件，远程metastore程序也毫无输出。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+ </p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+如果你是多个机器安装了hive，多个机器共享同一个mysql元数据，那么默认情况下，在并发调用时，会偶尔发生hive报DELETEME找不到的错误，异常可以参考<a href="http://mail-archives.apache.org/mod_mbox/hive-user/201107.mbox/%3C4F6B25AFFFCAFE44B6259A412D5F9B1033183876@ExchMBX104.netflix.com%3E" rel="nofollow" style="color:#000080;text-decoration:none;">http://mail-archives.apache.org/mod_mbox/hive-user/201107.mbox/%3C4F6B25AFFFCAFE44B6259A412D5F9B1033183876@ExchMBX104.netflix.com%3E</a></p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+这个错误是hive使用的datanucleus框架的bug，在hive中会去取schme name和catalog,是第三方的库datanucleus在操作，可以看到它创建DELETEME123213一些随机数字的表，然后删掉。。目的就为了去获取schme name和catalog。而多个机器在并发过程中，datanucleus发现有DELETEME表，会删除，这个会导致创建了DELETEME的hive进程在访问mysql过程中报错。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+要解决这个问题，需要做以下配置:</p>
+<div class="cnblogs_code" style="border:1px solid rgb(204,204,204);overflow:auto;font-family:'Courier New' !important;background-color:rgb(245,245,245);">
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5 !important;"><a title="复制代码" style="color:#000080;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+<pre style="font-family:'Courier New' !important;">&lt;property&gt; 
+  &lt;name&gt;datanucleus.fixedDatastore&lt;/name&gt;          
+  &lt;value&gt;true&lt;/value&gt; 
+&lt;/property&gt;
+&lt;property&gt;
+ &lt;name&gt;datanucleus.autoCreateSchema&lt;/name&gt;
+ &lt;value&gt;false&lt;/value&gt;
+&lt;/property&gt;</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy" style="line-height:1.5 !important;"><a title="复制代码" style="color:#000080;border:none !important;"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码" style="border:none !important;"></a></span></div>
+</div>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+但是要注意:这个配置需要在让hive在第一次初始化好后，才能启动，因为第一次会自动创建元数据。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+但是，这个配置会导致hive不会自动创建元数据，而第一次初始化时，不是全部的元数据会建好的，所以这个配置需要折中平衡，建议是没有并发调用不启动这个配置，如果有并发调用启动，但是最好配置两种hive实例，一种不启动这个配置，作为日常的建表维护，一种作为定时任务，并发调用hive。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+hive的并发调用，是很容易遇到问题的，要小心处理。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+ </p>
+<h1 style="font-size:28px;line-height:56px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+<strong>总结</strong></h1>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+个人经验，如果需要并发调用hive，首先要配置hive的元数据为mysql数据库,最好是通过内嵌metastore的方式去调用hive,通过执行 $HIVE_HOME/bin/hive -S -e "&lt;hive sql&gt;",再从管道获取hive的输出，是本人觉得最稳定安全的方式。</p>
+<p style="font-size:13px;line-height:19.5px;font-family:Verdana, Geneva, Arial, Helvetica, sans-serif;">
+备注:执行sql做分析计算，以local的shell方式调用是没啥问题，但是在load data的时候，并发调用依然有问题，hive stats设置为mysql依然无果，只能将load data的代码以synchroize的方式调用，规避并发的问题。</p>
+            </div>
+                </div>

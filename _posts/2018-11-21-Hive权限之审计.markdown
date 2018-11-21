@@ -1,0 +1,205 @@
+---
+layout:     post
+title:      Hive权限之审计
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>由于在生产环境中大量使用hive，而hive的权限又较弱，如果可以记录所有hive操作，在增强安全性的同时，还能够统计hive表的使用频率；同时如果能够记录hql的开始和结束时间，则能够找出系统中花费时间较多的job，针对性的进行优化，因此跟踪hive的使用轨迹，增强安全的同时也能方便问题定位。如何记录用户操作了？Hive Hook为我们提供的方便的开放接口。</p>
+<p>我们对hive的使用主要有两种使用场景，一是平时直接在命令行下执行的hql操作，此时执行hql的实体就是OS的登录用户；另外一种是从webapp获取的业务数据需求人员创建定时报表的hql脚本，此时执行hql的真正实体其实是报表创建者，系统仅仅是代理执行而已，此时记录用户的行为则需要重写<span style="color:#0D0D0D;">hive.security.authenticator.manager</span><span style="color:#0D0D0D;">。</span></p>
+<p><span style="color:#0D0D0D;"> </span></p>
+<p>Hive默认使用<span style="color:rgb(51,51,51);">HadoopDefaultAuthenticator</span>获取执行hql的用户，使用其返回的用户进行权限验证。为了使hive能够以代理的模式去执行，我们需要提供自己的authenticator，返回真正的hql执行者，以下配置可设置authenticator：</p>
+<p><span style="color:#0D0D0D;">&lt;property&gt;</span></p>
+<p><span style="color:#0D0D0D;"> &lt;name&gt;hive.security.authenticator.manager&lt;/name&gt;</span></p>
+<p><span style="color:#0D0D0D;"> &lt;value&gt;com.pplive.bip.hive.auth.Authenticator&lt;/value&gt;</span></p>
+<p><span style="color:#0D0D0D;">  &lt;description&gt;bip user authenticator&lt;/description&gt;</span></p>
+<p><span style="color:#0D0D0D;">&lt;/property&gt;</span></p>
+<p>只有管理员可以开启代理模式，可以使用以下方式传递代理用户：</p>
+<p>Hive -d bip.user=xxx 或 hive --define bip.user=xxx</p>
+<p> </p>
+<p>重写authenticator代码示例：</p>
+<p align="left"> <strong><span style="color:#7F0055;">public</span> <span style="color:#7F0055;">
+class</span></strong>Authenticator <strong><span style="color:#7F0055;">implements</span></strong> HiveAuthenticationProvider {</p>
+<p align="left"> </p>
+<p align="left"> <strong><span style="color:#7F0055;">private</span> <span style="color:#7F0055;">
+final</span><span style="color:#7F0055;">static</span></strong>String <em><span style="color:#0000C0;">BIP_USER</span></em>=<span style="color:#2A00FF;">"bip.user"</span>;</p>
+<p align="left"> <strong><span style="color:#7F0055;">private</span></strong>String<span style="color:#0000C0;">userName</span>;</p>
+<p align="left"> <strong><span style="color:#7F0055;">private</span></strong>String<span style="color:#0000C0;">bipUser</span>;</p>
+<p align="left"> <strong><span style="color:#7F0055;">private</span></strong>List&lt;String&gt;<span style="color:#0000C0;">groupNames</span>;</p>
+<p align="left"> </p>
+<p align="left"> <strong><span style="color:#7F0055;">private</span></strong>Configuration<span style="color:#0000C0;">conf</span>;</p>
+<p align="left"> <span style="color:#646464;">@Override</span></p>
+<p align="left"> <strong><span style="color:#7F0055;">public</span></strong>List&lt;String&gt; getGroupNames() {</p>
+<p align="left">   <strong><span style="color:#7F0055;">return</span></strong><span style="color:#0000C0;">groupNames</span>;</p>
+<p align="left"> }</p>
+<p align="left"> <span style="color:#646464;">@Override</span></p>
+<p align="left"> <strong><span style="color:#7F0055;">public</span></strong><span style="background:#C0C0C0;">String</span>getUserName() {          </p>
+<p align="left">   <strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">bipUser</span> = SessionState.<em>get</em>().getHiveVariables().get(<em><span style="color:#0000C0;">BIP_USER</span></em>);</p>
+<p align="left">   <strong><span style="color:#7F0055;">if</span></strong>(<strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">bipUser</span> !=<strong><span style="color:#7F0055;">null</span></strong> &amp;&amp;!<strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">bipUser</span>.isEmpty())
+ {</p>
+<p align="left">    <strong><span style="color:#7F0055;">if</span></strong>( AdminManager.<em>isAdmin</em>(<strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">userName</span>)) {</p>
+<p align="left">        <strong><span style="color:#7F0055;background:#C0C0C0;">return</span><span style="color:#7F0055;background:#C0C0C0;">this</span></strong><span style="background:#C0C0C0;">.</span><span style="color:#0000C0;background:#C0C0C0;">bipUser</span><span style="background:#C0C0C0;">;</span></p>
+<p align="left">    } <strong><span style="color:#7F0055;">else</span></strong> {</p>
+<p align="left">        <strong><span style="color:#7F0055;background:#C0C0C0;">throw</span><span style="color:#7F0055;">new</span></strong>RuntimeException(<span style="color:#2A00FF;">"bip.user is set while youare not admin"</span>);</p>
+<p align="left">    }        </p>
+<p align="left">   } <strong><span style="color:#7F0055;">else</span></strong>{</p>
+<p align="left">    <strong><span style="color:#7F0055;background:#C0C0C0;">return</span><span style="color:#7F0055;background:#C0C0C0;">this</span></strong><span style="background:#C0C0C0;">.</span><span style="color:#0000C0;background:#C0C0C0;">userName</span><span style="background:#C0C0C0;">;</span></p>
+<p align="left">   }</p>
+<p align="left"> }</p>
+<p align="left"> <span style="color:#646464;">@Override</span></p>
+<p align="left"> <strong><span style="color:#7F0055;">public</span><span style="color:#7F0055;">void</span></strong>setConf(Configuration conf) {</p>
+<p align="left">   <strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">conf</span> = conf;</p>
+<p align="left">   UserGroupInformation ugi = <strong><span style="color:#7F0055;">null</span></strong>;</p>
+<p align="left">   <strong><span style="color:#7F0055;">try</span></strong>{</p>
+<p align="left">     ugi = ShimLoader.<em>getHadoopShims</em>().getUGIForConf(conf);</p>
+<p align="left"><span style="color:#3F7F5F;">//     UserGroupInformation.createProxyUser(user, realUser);</span></p>
+<p align="left">   } <strong><span style="color:#7F0055;">catch</span></strong>(Exception e) {</p>
+<p align="left">     <strong><span style="color:#7F0055;">throw</span><span style="color:#7F0055;">new</span></strong>RuntimeException(e);</p>
+<p align="left">   }</p>
+<p align="left">   <strong><span style="color:#7F0055;">if</span></strong>(ugi == <strong>
+<span style="color:#7F0055;">null</span></strong>){</p>
+<p align="left">     <strong><span style="color:#7F0055;">throw</span><span style="color:#7F0055;">new</span></strong>RuntimeException(</p>
+<p align="left">          <span style="color:#2A00FF;">"Can not initialize PPLive Authenticator."</span>);</p>
+<p align="left">   }</p>
+<p align="left">   <strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">userName</span> = ugi.getUserName();</p>
+<p align="left">   <strong><span style="color:#7F0055;">if</span></strong>(ugi.getGroupNames() !=<strong><span style="color:#7F0055;">null</span></strong>) {</p>
+<p align="left">     <strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">groupNames</span> = Arrays.<em>asList</em>(ugi.getGroupNames());</p>
+<p align="left">   }           </p>
+<p align="left"> }</p>
+<p align="left"> </p>
+<p align="left"> <strong><span style="color:#7F0055;">public</span></strong>String getProxy() {</p>
+<p align="left">      <strong><span style="color:#7F0055;">return</span>  <span style="color:#7F0055;">
+this</span></strong>.<span style="color:#0000C0;">userName</span>;</p>
+<p>  }</p>
+<p>Hive提供的SemanticHook可以方便我们记录hql语义分析前后的状态，Execute Hook可以记录hql翻译成job提交执行前后的状态， Driver Hook可以记录包括整个编译执行过程前后的状态。</p>
+<p>SemanticHook记录语义分析后的行为：</p>
+<p align="left">    <strong><span style="color:#7F0055;">public</span> <span style="color:#7F0055;">
+void</span></strong>postAnalyze(HiveSemanticAnalyzerHookContext context,</p>
+<p align="left">            List&lt;Task&lt;?<strong><span style="color:#7F0055;">extends</span></strong>Serializable&gt;&gt; rootTasks)</p>
+<p align="left">            <strong><span style="color:#7F0055;">throws</span></strong> SemanticException {</p>
+<p align="left">        Hivehive = <strong><span style="color:#7F0055;">null</span></strong>;</p>
+<p align="left">        <strong><span style="color:#7F0055;">try</span></strong> {</p>
+<p align="left">            hive= context.getHive();</p>
+<p align="left">        }<strong><span style="color:#7F0055;">catch</span></strong>(HiveException e) {</p>
+<p align="left">            e.printStackTrace();</p>
+<p align="left">            <strong><span style="color:#7F0055;">throw</span> <span style="color:#7F0055;">
+new</span></strong> RuntimeException(e);</p>
+<p align="left">        }</p>
+<p align="left">        Set&lt;ReadEntity&gt;inputs = context.getInputs();</p>
+<p align="left">        Set&lt;WriteEntity&gt;outputs = context.getOutputs();</p>
+<p align="left">        </p>
+<p align="left">        Set&lt;String&gt;readTables = <strong><span style="color:#7F0055;">new</span></strong>HashSet&lt;String&gt;();</p>
+<p align="left">        <strong><span style="color:#7F0055;">for</span></strong>(ReadEntity input :inputs) {</p>
+<p align="left">             Table table = input.getT();</p>
+<p align="left">            <strong><span style="color:#7F0055;">if</span></strong>(table!=<strong><span style="color:#7F0055;">null</span></strong>) {</p>
+<p align="left">                readTables.add(table.getTableName());</p>
+<p align="left">            }</p>
+<p align="left">        }  </p>
+<p align="left">        Set&lt;String&gt;writeTables = <strong><span style="color:#7F0055;">new</span></strong>HashSet&lt;String&gt;();</p>
+<p align="left">        <strong><span style="color:#7F0055;">for</span></strong>(WriteEntity output :outputs) {</p>
+<p align="left">             Table table = output.getT();</p>
+<p align="left">            <strong><span style="color:#7F0055;">if</span></strong>(table!=<strong><span style="color:#7F0055;">null</span></strong>) {</p>
+<p align="left">                writeTables.add(table.getTableName());</p>
+<p align="left">            }</p>
+<p align="left">        }</p>
+<p align="left">        HiveAuthenticationProviderauthenticationProvider = SessionState.<em>get</em>().getAuthenticator();                                     </p>
+<p align="left">        <strong><span style="color:#7F0055;">if</span></strong>(authenticationProvider<strong><span style="color:#7F0055;">instanceof</span></strong> Authenticator) {</p>
+<p align="left">            Authenticatorauthenticator = (Authenticator)authenticationProvider;       <span style="color:#3F7F5F;">//<u>ip</u></span></p>
+<p align="left">            <strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">logger</span>.info(String.<em>format</em>(<span style="color:#2A00FF;">"phase=SA&amp;executor=%s&amp;proxy=%s&amp;db=%s&amp;cmd=%s&amp;readTables=%s&amp;writeTables=%s"</span>,
+ authenticator.getUserName(),</p>
+<p align="left">                            authenticator.getProxy(), hive.getCurrentDatabase(),context.getCommand(),readTables.toString(),writeTables.toString()));</p>
+<p align="left">        }    </p>
+<p align="left">        StringuserName = SessionState.<em>get</em>().getAuthenticator().getUserName();</p>
+<p align="left">        <span style="color:#0000C0;">logger</span>.debug(String.<em>format</em>(<span style="color:#2A00FF;">"%s execute %s, read tables:%s, writetables:%s"</span>, userName, context.getCommand(),readTables, writeTables));  </p>
+<p>    }</p>
+<p>Execute Hook记录job状态：</p>
+<p align="left"><strong><span style="color:#7F0055;">public</span> <span style="color:#7F0055;">
+class</span></strong>ExecuteHook <strong><span style="color:#7F0055;">implements</span></strong> ExecuteWithHookContext {</p>
+<p align="left">    Logger<span style="color:#0000C0;">logger</span>= Logger.<em>getLogger</em>(DriverRunHook.<strong><span style="color:#7F0055;">class</span></strong>);</p>
+<p align="left">    <strong><span style="color:#7F0055;">private</span></strong>HiveAuthenticationProvider<span style="color:#0000C0;">authenticationProvider</span> =
+<strong><span style="color:#7F0055;">null</span></strong>;</p>
+<p align="left">    <strong><span style="color:#7F0055;">private</span> <span style="color:#7F0055;">
+static</span> <span style="color:#7F0055;">final</span></strong> String <em><span style="color:#0000C0;">JOB_START_TIME</span></em>=<span style="color:#2A00FF;">"PRE_EXEC_HOOK"</span>;</p>
+<p align="left">    <strong><span style="color:#7F0055;">private</span> <span style="color:#7F0055;">
+static</span></strong> SimpleDateFormat <em><span style="color:#0000C0;">dateFormat</span></em> =<strong><span style="color:#7F0055;">new</span></strong> SimpleDateFormat(<span style="color:#2A00FF;">"yyyy-MM-dd HH:mm:ss"</span>);</p>
+<p align="left">    <span style="color:#646464;">@Override</span></p>
+<p align="left">    <strong><span style="color:#7F0055;">public</span> <span style="color:#7F0055;">
+void</span></strong> run(HookContexthookContext) <strong><span style="color:#7F0055;">throws</span></strong>Exception {</p>
+<p align="left">        QueryPlanqueryPlan = hookContext.getQueryPlan();</p>
+<p align="left">        StringqueryId = queryPlan.getQueryId();</p>
+<p align="left">        StringqueryStr = queryPlan.getQueryStr();</p>
+<p align="left">        <strong><span style="color:#7F0055;">if</span></strong>(<span style="color:#0000C0;">authenticationProvider</span>==<strong><span style="color:#7F0055;">null</span></strong>){</p>
+<p align="left">            <span style="color:#0000C0;">authenticationProvider</span>= SessionState.<em>get</em>().getAuthenticator();</p>
+<p align="left">        }   </p>
+<p align="left">        Stringresult = <strong><span style="color:#7F0055;">null</span></strong>;</p>
+<p align="left">        <strong><span style="color:#7F0055;">switch</span></strong>(hookContext.getHookType()){</p>
+<p align="left">        <span style="color:#3F7F5F;">//hive.exec.pre.hooks</span></p>
+<p align="left">        <strong><span style="color:#7F0055;">case</span></strong> <em>
+<span style="color:#0000C0;background:#C0C0C0;">PRE_EXEC_HOOK</span></em>:</p>
+<p align="left">            hookContext.getConf().setLong(<em><span style="color:#0000C0;">JOB_START_TIME</span></em>,System.<em>currentTimeMillis</em>());</p>
+<p align="left">            <strong><span style="color:#7F0055;">break</span></strong>;</p>
+<p align="left">        <span style="color:#3F7F5F;">//hive.exec.post.hooks</span></p>
+<p align="left">        <strong><span style="color:#7F0055;">case</span></strong> <em>
+<span style="color:#0000C0;">POST_EXEC_HOOK</span></em>:</p>
+<p align="left">            result= <span style="color:#2A00FF;">"Success"</span>;</p>
+<p align="left">            <strong><span style="color:#7F0055;">break</span></strong>;</p>
+<p align="left">        <span style="color:#3F7F5F;">//hive.exec.failure.hooks</span></p>
+<p align="left">        <strong><span style="color:#7F0055;">case</span></strong> <em>
+<span style="color:#0000C0;">ON_FAILURE_HOOK</span></em>:</p>
+<p align="left">            result= <span style="color:#2A00FF;">"Failure"</span>;</p>
+<p align="left">            <strong><span style="color:#7F0055;">break</span></strong>;</p>
+<p align="left">        <strong><span style="color:#7F0055;">default</span></strong>:</p>
+<p align="left">            <strong><span style="color:#7F0055;">break</span></strong>;</p>
+<p align="left">        }    </p>
+<p align="left">        <strong><span style="color:#7F0055;">if</span></strong>(hookContext.getHookType()!= HookContext.HookType.<em><span style="color:#0000C0;background:#C0C0C0;">PRE_EXEC_HOOK</span></em>&amp;&amp;<span style="color:#0000C0;">authenticationProvider</span>
+<strong><span style="color:#7F0055;">instanceof</span></strong>Authenticator) {</p>
+<p align="left">            <strong><span style="color:#7F0055;">long</span></strong> jobEndTime = System.<em>currentTimeMillis</em>();</p>
+<p align="left">            HiveConfconf = hookContext.getConf();</p>
+<p align="left">            <strong><span style="color:#7F0055;">long</span></strong> jobStartTime =conf.getLong(<em><span style="color:#0000C0;">JOB_START_TIME</span></em>, jobEndTime);</p>
+<p align="left">            <strong><span style="color:#7F0055;">long</span></strong> timeTaken =(jobEndTime-jobStartTime)/1000;</p>
+<p align="left">            Authenticatorauthenticator = (Authenticator)<span style="color:#0000C0;">authenticationProvider</span>;       <span style="color:#3F7F5F;">//<u>ip</u></span></p>
+<p align="left">                         <span style="color:rgb(127,0,85);"><strong>this</strong></span>.<span style="color:rgb(0,0,192);">logger</span>.info(String.<em>format</em>(<span style="color:rgb(42,0,255);">"phase=EXEC&amp;result=%s&amp;executor=%s&amp;proxy=%s&amp;db=%s&amp;queryId=%s&amp;queryStr=%s&amp;jobName=%s&amp;jobStartTime=%s&amp;jobEndTime=%s&amp;timeTaken=%d"</span>,
+ result,authenticator.getUserName(),authenticator.getProxy(),</p>
+<p align="left">                    Hive.<em>get</em>().getCurrentDatabase(),queryId, queryStr,conf.getVar(HiveConf.ConfVars.<em><span style="color:#0000C0;">HADOOPJOBNAME</span></em>),<em><span style="color:#0000C0;">dateFormat</span></em>.format(<strong><span style="color:#7F0055;">new</span></strong>
+ Date(jobStartTime)),</p>
+<p align="left">                    <em><span style="color:#0000C0;">dateFormat</span></em>.format(<strong><span style="color:#7F0055;">new</span></strong>Date(jobEndTime)),timeTaken));</p>
+<p align="left">        }       </p>
+<p align="left">    }</p>
+<p>}</p>
+<p>DriverHook记录整个过程执行时间：</p>
+<p align="left"><strong><span style="color:#7F0055;">public</span> <span style="color:#7F0055;">
+class</span></strong>DriverRunHook <strong><span style="color:#7F0055;">implements</span></strong> HiveDriverRunHook{</p>
+<p align="left">    Logger<span style="color:#0000C0;">logger</span>= Logger.<em>getLogger</em>(DriverRunHook.<strong><span style="color:#7F0055;">class</span></strong>);</p>
+<p align="left">    <strong><span style="color:#7F0055;">private</span></strong>HiveAuthenticationProvider<span style="color:#0000C0;">authenticationProvider</span> =
+<strong><span style="color:#7F0055;">null</span></strong>;</p>
+<p align="left">    <strong><span style="color:#7F0055;">private</span> <span style="color:#7F0055;">
+static</span></strong> SimpleDateFormat <em><span style="color:#0000C0;">dateFormat</span></em> =<strong><span style="color:#7F0055;">new</span></strong> SimpleDateFormat(<span style="color:#2A00FF;">"yyyy-MM-dd HH:mm:ss"</span>);</p>
+<p align="left">    <strong><span style="color:#7F0055;">private</span> <span style="color:#7F0055;">
+long</span></strong> <span style="color:#0000C0;background:#FFFF00;">startTime</span> = 0;</p>
+<p align="left">    <span style="color:#646464;">@Override</span></p>
+<p align="left">    <strong><span style="color:#7F0055;">public</span> <span style="color:#7F0055;">
+void</span></strong>preDriverRun(HiveDriverRunHookContext hookContext)</p>
+<p align="left">            <strong><span style="color:#7F0055;">throws</span></strong> Exception {</p>
+<p align="left">        <strong><span style="color:#7F0055;">if</span></strong>(<span style="color:#0000C0;">authenticationProvider</span>==<strong><span style="color:#7F0055;">null</span></strong>){</p>
+<p align="left">            <span style="color:#0000C0;">authenticationProvider</span>= SessionState.<em>get</em>().getAuthenticator();</p>
+<p align="left">        }    </p>
+<p align="left">        <span style="color:rgb(0,0,192);background:#FFFF00;">startTime</span> = System.<em>currentTimeMillis</em>();</p>
+<p align="left">    }</p>
+<p align="left">    <span style="color:#646464;">@Override</span></p>
+<p align="left">    <strong><span style="color:#7F0055;">public</span> <span style="color:#7F0055;">
+void</span></strong>postDriverRun(HiveDriverRunHookContext hookContext)</p>
+<p align="left">            <strong><span style="color:#7F0055;">throws</span></strong> Exception {     </p>
+<p align="left">        <strong><span style="color:#7F0055;">if</span></strong>(<span style="color:#0000C0;">authenticationProvider</span><strong><span style="color:#7F0055;">instanceof</span></strong>Authenticator) {</p>
+<p align="left">            <strong><span style="color:#7F0055;">long</span></strong> endTime = System.<em>currentTimeMillis</em>();</p>
+<p align="left">            <strong><span style="color:#7F0055;">long</span></strong> timeTaken = (endTime-<span style="color:#0000C0;background:#C0C0C0;">startTime</span>)/1000;</p>
+<p align="left">            Authenticatorauthenticator = (Authenticator)<span style="color:#0000C0;">authenticationProvider</span>;       <span style="color:#3F7F5F;">//<u>ip</u></span></p>
+<p align="left">            <strong><span style="color:#7F0055;">this</span></strong>.<span style="color:#0000C0;">logger</span>.info(String.<em>format</em>(<span style="color:#2A00FF;">"phase=DriverRun&amp;executor=%s&amp;proxy=%s&amp;db=%s&amp;cmd=%s&amp;startTime=%s&amp;endTime=%s&amp;timeTaken=%d"</span>,
+ authenticator.getUserName(),authenticator.getProxy(),</p>
+<p align="left">                    Hive.<em>get</em>().getCurrentDatabase(),hookContext.getCommand(),<em><span style="color:#0000C0;">dateFormat</span></em>.format(<strong><span style="color:#7F0055;">new</span></strong>Date(<span style="color:#0000C0;background:#C0C0C0;">startTime</span>)),<em><span style="color:#0000C0;">dateFormat</span></em>.format(<strong><span style="color:#7F0055;">new</span></strong>
+ Date(endTime)),timeTaken));</p>
+<p align="left">        }       </p>
+<p align="left">    }</p>
+<p>}</p>
+            </div>
+                </div>

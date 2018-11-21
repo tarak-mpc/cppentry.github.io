@@ -1,0 +1,107 @@
+---
+layout:     post
+title:      Hive学习之路 （二十）Hive 执行过程实例分析
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<div id="topics">
+    <div class="post">
+        <h1 class="postTitle" id="hive学习之路-二十hive-执行过程实例分析">
+            <a id="cb_post_title_url" class="postTitle2" href="https://www.cnblogs.com/qingyunzong/p/8847651.html" rel="nofollow">Hive学习之路 （二十）Hive 执行过程实例分析</a>
+        </h1>
+        <div class="clear"></div>
+        <div class="postBody">
+            <div id="cnblogs_post_body" class="blogpost-body"><h2 id="一hive-执行过程概述">一、Hive 执行过程概述</h2>
+<h3 id="1概述">1、概述</h3>
+<p>（1） Hive 将 HQL 转换成一组操作符（Operator），比如 GroupByOperator, JoinOperator 等</p>
+<p>（2）操作符 Operator 是 Hive 的最小处理单元</p>
+<p>（3）每个操作符代表一个 HDFS 操作或者 MapReduce 作业</p>
+<p>（4）Hive 通过 ExecMapper 和 ExecReducer 执行 MapReduce 程序，执行模式有本地模式和分 布式两种模式</p>
+<p><img src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180415144838165-35453427.png" alt=""></p>
+<h3 id="2hive-操作符列表">2、Hive 操作符列表</h3>
+<p><img src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180415144858715-1662976456.png" alt=""></p>
+<h3 id="3hive-编译器的工作职责">3、Hive 编译器的工作职责</h3>
+<p>（1）Parser：将 HQL 语句转换成抽象语法树（AST：Abstract Syntax Tree）</p>
+<p>（2）Semantic Analyzer：将抽象语法树转换成查询块</p>
+<p>（3）Logic Plan Generator：将查询块转换成逻辑查询计划</p>
+<p>（4）Logic Optimizer：重写逻辑查询计划，优化逻辑执行计划</p>
+<p>（5）Physical Plan Gernerator：将逻辑计划转化成物理计划（MapReduce Jobs）</p>
+<p>（6）Physical Optimizer：选择最佳的 Join 策略，优化物理执行计划</p>
+<h3 id="4优化器类型">4、优化器类型</h3>
+<p><img src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180415145116276-990825971.png" alt="" width="767" height="286"></p>
+<p>上表中带①符号的，优化目的都是尽量将任务合并到一个 Job 中，以减少 Job 数量，带②的 优化目的是尽量减少 shuffle 数据量</p>
+<h2 id="二join">二、join</h2>
+<h3 id="1对于-join-操作">1、对于 join 操作</h3>
+<div class="cnblogs_code">
+<pre><span>SELECT</span> pv.pageid, u.age <span>FROM</span> page_view pv <span>JOIN</span> <span>user</span> u <span>ON</span> pv.userid <span>=</span> u.userid;</pre>
+</div>
+
+<p> </p>
+
+<h3 id="2实现过程">2、实现过程</h3>
+
+<blockquote>
+<p> <strong><span>Map</span></strong>：</p>
+<p>　　1、以 JOIN ON 条件中的列作为 Key，如果有多个列，则 Key 是这些列的组合</p>
+<p>　　2、以 JOIN 之后所关心的列作为 Value，当有多个列时，Value 是这些列的组合。在 Value 中还会包含表的 Tag 信息，用于标明此 Value 对应于哪个表</p>
+<p>　　3、按照 Key 进行排序</p>
+<p><strong><span>Shuffle</span></strong>：</p>
+<p>　　1、根据 Key 的值进行 Hash，并将 Key/Value 对按照 Hash 值推至不同对 Reduce 中</p>
+<p><strong><span>Reduce</span></strong>：</p>
+<p>　　1、 Reducer 根据 Key 值进行 Join 操作，并且通过 Tag 来识别不同的表中的数据</p>
+</blockquote>
+
+<h3 id="3具体实现过程">3、具体实现过程</h3>
+
+<p><img src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180415145350148-1004247692.png" alt=""></p>
+
+<p><img src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180415145404099-741231817.png" alt=""></p>
+
+<h2 id="三group-by">三、Group By</h2>
+
+<h3 id="1对于-group-by操作">1、对于 group by操作</h3>
+
+<div class="cnblogs_code">
+<pre><span>SELECT</span> pageid, age, <span>count</span>(<span>1</span>) <span>FROM</span> pv_users <span>GROUP</span> <span>BY</span> pageid, age; </pre>
+</div>
+
+<h3 id="2实现过程-1">2、实现过程</h3>
+
+<p><img src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180415145530734-1261579451.png" alt=""></p>
+
+<p><img src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180415145542017-1372728782.png" alt=""></p>
+
+<h2 id="四distinct">四、Distinct</h2>
+
+<h3 id="1对于-distinct的操作">1、对于 distinct的操作</h3>
+
+<p>按照 age 分组，然后统计每个分组里面的不重复的 pageid 有多少个</p>
+
+<div class="cnblogs_code">
+<pre><span>SELECT</span> age, <span>count</span>(<span>distinct</span> pageid) <span>FROM</span> pv_users <span>GROUP</span> <span>BY</span> age;</pre>
+</div>
+
+<h3 id="2实现过程-2">2、实现过程</h3>
+
+<p><img src="https://images2018.cnblogs.com/blog/1228818/201804/1228818-20180415145718259-315447256.png" alt=""></p>
+
+<h3 id="3详细过程解释">3、详细过程解释</h3>
+
+<p>该 SQL 语句会按照 age 和 pageid 预先分组，进行 distinct 操作。然后会再按 照 age 进行分组，再进行一次 distinct 操作</p>
+
+<p></p><p> </p></div><div id="MySignature"></div>
+
+<div class="clear"></div>
+<div id="blog_post_info_block">
+<div id="BlogPostCategory"></div>
+<div id="EntryTag"></div>
+<div id="blog_post_info">
+</div>
+
+<div class="clear"></div>
+<div id="post_next_prev"></div>
+</div></div></div></div>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

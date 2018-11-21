@@ -1,0 +1,124 @@
+---
+layout:     post
+title:      Hive知识点四(sql优化)
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/wuliu_forever/article/details/52603878				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<p>1、Hive执行(HQL、Job、Map、Reduce)、Hive表优化、Hive SQL优化、Hive Job优化、Hive Map优化、Hive Shuffle优化、Hive Reduce 优化、Hive权限关联。<br></p>
+<p>2、查询操作优化</p>
+<p>      2.1、 join优化</p>
+<p>                hive.optimize.skewjoin=true;如果是join过程出现倾斜应该设置为true</p>
+<p>                set hive.skewjoin.key=100000;这个是join的键对应的记录条数超过这个值则会进行优化</p>
+<p>                mapjoin  set hive.auto.convert.join = true;  hive.mapjoin.smalltable.filesize默认值是25mb；select /*+mapjoin(A)*/ f.a,f.b from A t join B f on (f.a=t.a);.</p>
+<p>      2.2、优化前:  select m.cid,u.id from order m join customer u on m.cid=u.id where m.dt = '2016-09-21';</p>
+<p>               优化后:  select m.cid,u.id from (select cid from order where dt='2016-09-21') m join customer u on m.cid-u.id;<br></p>
+<p>                mapjoin的使用场景:  1、关联操作中有一张表非常小；2、不等值的链接操作；</p>
+<p>      2.3、count distinct优化</p>
+<p>                优化前: select count(distinct id ) from tablename;</p>
+<p>                优化后: select count(1) from (select distinct id from tablename) tmp;</p>
+<p>                               select count(1) from (select id from tablename group by id) tmp;<br></p>
+<p>               <span style="color:#FF0000;">set mapred.reduce.tasks=3;</span></p>
+               select count(1) from (select distinct city from info ) tmp;<br><p>       2.4、Reduce优化</p>
+<p>                set mapred.reduce.tasks=10;直接设置；</p>
+<p>                hive.exec.reducers.max默认:999;</p>
+<p>                hive.exec.reducers.bytes.per.reducer 默认:1G; <br></p>
+<p>       2.5、优化前:  select a sum(b),count(distinct c),count(distinct d) from test group by a;</p>
+<p>                 优化后:  select a sum(b) as b,count(c) as c,count(d) as d from(</p>
+<p>                                select a,0 as b,c,null as d from test group by a,c</p>
+<p>                                union all</p>
+<p>                                select a,0 as b, null as c,d from test group by a,d</p>
+<p>                                union all <br></p>
+<p>                                select a,b,null as c,null as d from test <br></p>
+<p>                               )temp1 group by a;</p>
+<p>       2.6、Group by优化</p>
+<p>                 hive.groupby.skewwindata = true;如果是group by过程出现倾斜应该设置为true</p>
+<p>                 set hive.groupby.mapaggr.checkinterval=100000;这个是group的键对应的记录条数超过这个值则会进行优化</p>
+<p>       2.7、bucket join</p>
+<p>                 两个表以相同方式划分分桶</p>
+<p>                 两个表的桶个数是倍数关系</p>
+<p>                 create table order(cid int,price float) clustered by(cid) into 32 buckets;</p>
+<p>                 create table customer(id int,first string) clustered by(id) into 32 buckets;<br></p>
+<p>                 select price from order t join customer s on t.cid = s.id;<br></p>
+<p>3、Hive优化目标</p>
+<p>      在有限的资源下，执行效率高</p>
+<p>     常见问题：数据倾斜、map数设置、Reduce数设置等</p>
+<p>4、查看执行计划</p>
+<p>       explain [extended] hql;</p>
+<p>5、表优化</p>
+<p>       5.1、分区</p>
+<p>                 5.1.1、静态分区</p>
+<p>                 5.1.2、动态分区</p>
+<p>                              set hive.exec.dynamic.partition=true;</p>
+<p>                              set hive.exec.dynamic.partition.mode=nonstrict;</p>
+<p>       5.2、分桶</p>
+<p>                 set hive.enforce.bucketing=true;</p>
+<p>                 set hive.enfore.sorting = true;</p>
+<p>       5.3、数据(相同数据尽量聚集在一起)</p>
+<p>6、Hive Job优化 <br></p>
+<p>     6.1、 job合并输入小文件</p>
+<p>      set hive.input.format = org.apache.hadoop.hive.ql.io.CombineHiveInputFormat</p>
+<p>      合并文件数由mapred.max.split.size限制的大小决定</p>
+<p>      job合并输出小文件</p>
+<p>     set hive.merge.smallfiles.avgsize=256000000;当输出文件平均大小小于该值，启动新job合并文件</p>
+<p>     set hive.merge.size.per.task = 64000000;合并之后的文件大小</p>
+<p>     6.2、并发执行</p>
+<p>           每个查询被hive转化成多个阶段，有些阶段关联性不大，则可以并行化执行，减少执行时间</p>
+<p>           set hive.exec.parallel=true;</p>
+<p>           set hive.exec.parallel.thread.number=8;</p>
+<p>   6.3、本地化执行</p>
+<p>           set hive.exec.mode.local.auto = true;</p>
+<p>           当一个job满足如下条件才能真正使用本地模式 ： 1、job的输入数据大小必须小于参数 hive.exec.mode.local.auto.inputbytes.max（默认128mb）；</p>
+<p>           2、job的map数必须小于参数 hive.exec.mode.local.auto.tasks.max(默认4)；3、job的Reduce数必须为0或者1；<br></p>
+<p>  6.4、JVM重利用</p>
+<p>            set mapred.job.reuse.jvm.num.tasks=20;</p>
+<p>            jvm重利用可以是job长时间保留slot，且到作业结束，这在对于有较多任务和较多小文件的任务是非常有意义的，减少执行时间。当然这个值不能设置过大，因为有些作业会有reduce任务，如果reduce任务没有完成，则map任务占用的slot不能释放，其他的作业可能就不要等待。</p>
+<p>  6.5、压缩数据</p>
+<p>            中间压缩就是处理hive查询的多个job之间的数据中间压缩，最好选择一个节省cpu耗时的压缩方式</p>
+<p>            set hive.exec.compress.intermediate=true;</p>
+<p>            set hive.intermediate.compression,codec=org.apache.hadoop.io.compress.SnappyCodec;</p>
+<p>            set hive.intermediate.compression.type=BLOCK;</p>
+<p>            hive查询最终的输出也可以压缩</p>
+<p>             set hive.exec.compress.output = true;</p>
+<p>             set mapred.output.compression.codec=org.apache.hadoop.io.compress.GzipCodec;</p>
+<p>             set mapred.output.compression.type=BLOCK;</p>
+<p>  7、Hive Map优化</p>
+<p>        set mapred.map.tasks=10;无效</p>
+<p>        7.1、默认map个数 default_num = total_size/block_size;</p>
+<p>        7.2、期望大小 goal_num = mapred.map.tasks;</p>
+<p>        7.3、设置处理的文件大小</p>
+<p>                 split_size = max(mapred.min.split.size,block_size);</p>
+<p>                 split_num = total_size/split_szie;</p>
+<p>         7.4、计算的map个数</p>
+<p>                  compute_map_num = min(split_num,max(default_num, goal_num));</p>
+<p>         7.5、map端聚合 set hive.map.aggr=true; <br></p>
+<p>                   推测执行mapred.map.tasks.speculative.execution</p>
+<p>         经过以上的分析，在设置map个数的时候，可以简单的总结为以下几点:</p>
+<p>                  （1）、如果想增加map个数，则设置mapred.map.tasks为一个较大的值。</p>
+<p>                  （2）、如果想减小map个数，则设置mapred.map.split.size为一个较大的值</p>
+<p>                   情况1、输入文件size巨大，但不是小文件 增大mapred.min.split.size的值</p>
+<p>                   情况2、输入文件数量巨大，且都是小文件，就是单个文件的size小于blocksize。这种情况通过增大mapred.min.split.size不可行，需要使用</p>
+<p>                                 CombineFileInputFormat将多个input path合并成一个InputSplit送给mapper处理，从而减少mapper的数量。<br></p>
+<p>  8、Hive reduce优化</p>
+<p>        8.1、需要reduce操作的查询</p>
+<p>                 聚合函数 sum,count,distinct...</p>
+<p>                 高级查询 group by ,join,distribute by ,cluster by...</p>
+<p>                                  order by 比较特殊，只需要一个reduce</p>
+<p>        8.2、推测执行</p>
+<p>                  mapred.reduce.tasks.speculative.execution</p>
+<p>                  hive.mapred.reduce.tasks.speculative.execution</p>
+<p>        8.3、set mapred.reduce.tasks=10；直接设置</p>
+<p>                   hive.exec.reducers.max 默认:999</p>
+<p>                   hive.exec.reducers.bytes.per.reducer 默认:1G</p>
+<p>        8.4、计算公式</p>
+<p>                  numRTasks = min[maxReducers,input.size/perReducer]</p>
+<p>                  maxReducers = hive.exec.reducers.max</p>
+<p>                  perReducer = hvie.exec.reducers.bytes.per.reducer<br></p>
+<p>           <br></p>
+<h3>  <img src="https://img-blog.csdn.net/20160921084956361?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""><br></h3>
+<h3>        <br></h3>
+            </div>
+                </div>

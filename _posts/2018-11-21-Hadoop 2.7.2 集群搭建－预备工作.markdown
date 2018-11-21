@@ -1,0 +1,267 @@
+---
+layout:     post
+title:      Hadoop 2.7.2 集群搭建－预备工作
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/u010048823/article/details/51908817				</div>
+								            <div id="content_views" class="markdown_views prism-atom-one-dark">
+							<!-- flowchart 箭头图标 勿删 -->
+							<svg xmlns="http://www.w3.org/2000/svg" style="display: none;"><path stroke-linecap="round" d="M5,0 0,2.5 5,5z" id="raphael-marker-block" style="-webkit-tap-highlight-color: rgba(0, 0, 0, 0);"></path></svg>
+							<blockquote>
+  <p>版本信息：Centos7 + Hadoop 2.7.2</p>
+</blockquote>
+
+<p>Hadoop + Spark 集群搭建系列文章，建议按顺序参考：</p>
+
+<blockquote>
+  <p><a href="http://blog.csdn.net/u010048823/article/details/51931012" rel="nofollow">Hadoop &amp; Spark 集群搭建 理念思想</a></p>
+  
+  <p><a href="#" rel="nofollow">Hadoop 2.7.2 集群搭建－预备工作</a> (不用点了，就是本文)</p>
+  
+  <p><a href="http://blog.csdn.net/u010048823/article/details/51913608" rel="nofollow">Hadoop 2.7.2 集群搭建</a></p>
+  
+  <p><a href="http://blog.csdn.net/u010048823/article/details/51925977" rel="nofollow">Spark 1.6.2 + Hadoop 2.7.2 集群搭建</a></p>
+</blockquote>
+
+<hr>
+
+<h1 id="一般设置">一般设置</h1>
+
+<p>Hadoop集群最好所有节点创建专门的用户组，使用相同的用户名，且所有节点上安装的Hadoop及相关目录，最好要保持完全一致的目录结构，这样规范而不容易出错。经过简单设置好，集群拓扑结构为3台Centos7电脑：</p>
+
+<blockquote>
+  <p>master：1台，主机名master，用户名liuyao <br>
+  slave：2台，主机名分别是slave1和slave2，用户名liuyao</p>
+</blockquote>
+
+<hr>
+
+<h1 id="jdk配置">JDK配置</h1>
+
+<p>Centos7自带jdk，环境变量位置使用<code>which java</code>不好找，可以试试<code>locate dt.jar</code>：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm">[liuyao@master ~]$ java -version
+openjdk version <span class="hljs-string">"1.8.0_91"</span>
+OpenJDK Runtime Environment (build <span class="hljs-number">1.8</span><span class="hljs-number">.0</span>_91-b14)
+OpenJDK <span class="hljs-number">64</span>-Bit Server VM (build <span class="hljs-number">25.91</span>-b14, mixed mode)
+[liuyao@master ~]$ which java
+/usr/bin/java
+[liuyao@master ~]$ locate dt<span class="hljs-preprocessor">.jar</span>
+/usr/lib/jvm/java-<span class="hljs-number">1.6</span><span class="hljs-number">.0</span>-openjdk-<span class="hljs-number">1.6</span><span class="hljs-number">.0</span><span class="hljs-number">.38</span><span class="hljs-preprocessor">.x</span>86_64/lib/dt<span class="hljs-preprocessor">.jar</span>
+/usr/lib/jvm/java-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span>-openjdk-<span class="hljs-number">1.7</span><span class="hljs-number">.0</span><span class="hljs-number">.101</span>-<span class="hljs-number">2.6</span><span class="hljs-number">.6</span><span class="hljs-number">.1</span><span class="hljs-preprocessor">.el</span>7_2<span class="hljs-preprocessor">.x</span>86_64/lib/dt<span class="hljs-preprocessor">.jar</span>
+/usr/lib/jvm/java-<span class="hljs-number">1.8</span><span class="hljs-number">.0</span>-openjdk-<span class="hljs-number">1.8</span><span class="hljs-number">.0</span><span class="hljs-number">.91</span>-<span class="hljs-number">0.</span>b14<span class="hljs-preprocessor">.el</span>7_2<span class="hljs-preprocessor">.x</span>86_64/lib/dt<span class="hljs-preprocessor">.jar</span>
+/usr/share/java/tomcat/jasper-jdt<span class="hljs-preprocessor">.jar</span></code></pre>
+
+<p>设置jdk环境变量，在/etc/profile添加：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">export <span class="hljs-constant">JAVA_HOME</span>=<span class="hljs-regexp">/usr/lib</span><span class="hljs-regexp">/jvm/java</span>-<span class="hljs-number">1.8</span>.<span class="hljs-number">0</span>-openjdk-<span class="hljs-number">1.8</span>.<span class="hljs-number">0</span>.<span class="hljs-number">91</span>-<span class="hljs-number">0</span>.b14.el7_2.x86_64</code></pre>
+
+<p>建议此时在各节点的 /etc/hadoop/hadoop-env.sh 文件里把<code>export JAVA_HOME=${JAVA_HOME}</code>也改成上面那个代码（注意，各节点的JAVA_HOME可能还不一样），因为后面启动 hadoop 时很可能会警告： JAVA_HOME is not set。</p>
+
+<hr>
+
+<h1 id="ssh配置">SSH配置</h1>
+
+<p>Hadoop各主机（守护进程）之间通信需要使用SSH，SSH登录分为口令登录和公钥登录(无密钥登录)。</p>
+
+
+
+<h2 id="hosts文件配置">hosts文件配置</h2>
+
+<p>为了方便，使SSH时不必输入IP，则可以选择在 /etc/hosts 文件里添加节点名及其IP，添加后的效果如下：</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-number">101.</span><span class="hljs-built_in">X</span><span class="hljs-preprocessor">.XX</span><span class="hljs-preprocessor">.XX</span>0 master
+<span class="hljs-number">101.</span><span class="hljs-built_in">X</span><span class="hljs-preprocessor">.XX</span><span class="hljs-preprocessor">.XX</span>1 slave1
+<span class="hljs-number">101.</span><span class="hljs-built_in">X</span><span class="hljs-preprocessor">.XX</span><span class="hljs-preprocessor">.XX</span>2 slave2</code></pre>
+
+<p>修改之后，下文类似<code>ssh liuyao@101.X.XX.XX1</code>都可以改成<code>ssh slave1</code>即可，一是slave1已在hosts里配置好IP，二是两主机用户名都一样，可省略。不过下文为说明问题，用户名和IP都保留。</p>
+
+
+
+<h2 id="口令登录">口令登录</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs vbnet">[liuyao@master .ssh]$ ssh liuyao@<span class="hljs-number">101.</span>X.XX.XX1
+The authenticity <span class="hljs-keyword">of</span> host <span class="hljs-comment">'101.X.XX.XX1 (101.X.XX.XX1)' can't be established.</span>
+ECDSA <span class="hljs-keyword">key</span> fingerprint <span class="hljs-keyword">is</span> <span class="hljs-number">16</span>:b0:c9:da:<span class="hljs-number">66</span>:<span class="hljs-number">17</span>:c9:<span class="hljs-number">93</span>:<span class="hljs-number">2</span>e:<span class="hljs-number">4</span>d:<span class="hljs-number">7</span>c:dd:<span class="hljs-number">13</span>:<span class="hljs-number">18</span>:bd:<span class="hljs-number">9</span>e.
+Are you sure you want <span class="hljs-keyword">to</span> <span class="hljs-keyword">continue</span> connecting (yes/no)? yes
+Warning: Permanently added <span class="hljs-comment">'101.X.XX.XX1' (ECDSA) to the list of known hosts.</span>
+liuyao@<span class="hljs-number">101.</span>X.XX.XX1<span class="hljs-comment">'s password: </span>
+Last login: Thu Jul <span class="hljs-number">14</span> <span class="hljs-number">15</span>:<span class="hljs-number">32</span>:<span class="hljs-number">31</span> <span class="hljs-number">2016</span> <span class="hljs-keyword">from</span> localhost
+[liuyao@slave1 ~]$ </code></pre>
+
+<p>主机A第一次ssh到某个主机B时，无法确认主机B的真实性，只知道它的公钥指纹，系统警告是否继续连接？确认连接后，主机B及其公钥信息会添加到主机A的~/.ssh/known_hosts文件里，下次连接就跳过警告。</p>
+
+
+
+<h2 id="公钥登录">公钥登录</h2>
+
+<blockquote>
+  <p>公钥登录即为无密码登录</p>
+</blockquote>
+
+<p>使用<code>ssh-keygen -t -p -f</code>生成rsa类型的密钥，口令为空，放置在~/.ssh/处，私钥为id_rsa，公钥为id_rsa.pub</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>ssh-keygen -t rsa -<span class="hljs-constant">P</span> <span class="hljs-string">''</span> -f ~<span class="hljs-regexp">/.ssh/id</span>_rsa</code></pre>
+
+<p>无密码SSH方法1：使用<code>ssh-copy-id user@hostB</code> 把当前主机A的公钥共享给主机B(此处为localhost），主机B收到后生成~/.ssh/authorized_keys文件，里面有主机A的公钥。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>ssh-copy-id localhost</code></pre>
+
+<p>无密码SSH方法2: 手动生成相关文件并追加内容</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>cat ~<span class="hljs-regexp">/.ssh/id</span>_rsa.pub &gt;&gt; ~<span class="hljs-regexp">/.ssh/authorized</span>_keys</code></pre>
+
+<p>输入下面指令进行检测，若无需密码，则配置成功</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>ssh localhost
+<span class="hljs-constant">Last</span> <span class="hljs-symbol">login:</span> <span class="hljs-constant">Thu</span> <span class="hljs-constant">Jul</span> <span class="hljs-number">14</span> <span class="hljs-number">14</span><span class="hljs-symbol">:</span><span class="hljs-number">30</span><span class="hljs-symbol">:</span><span class="hljs-number">54</span> <span class="hljs-number">2016</span>
+[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span></code></pre>
+
+<p>若不成功，要需要修改相关配置文件并重启服务sshd</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>sudo vi /etc/ssh/sshd_config 
+<span class="hljs-comment"># 去掉/etc/ssh/sshd_config文件里下面三行前面的注释</span>
+<span class="hljs-constant">RSAAuthentication</span> yes
+<span class="hljs-constant">PubkeyAuthentication</span> yes
+<span class="hljs-constant">AuthorizedKeysFile</span> .ssh/authorized_keys
+[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>service sshd restart</code></pre>
+
+<blockquote>
+  <p>注意：以上以liuyao普通用户举例说明实现公钥登录的方法，root还没实现公钥登录，若Hadoop安装配置需要以root用户来操作（比如Hadoop安装在/usr/local/或/opt/目录下，有时就需要root来操作），则还需要为root用户实现公钥登录。本人为了省事，所有Hadoop和Spark以及相关配置都安装配置在<code>/home/liuyao/00Hadoop/</code>里，包括namenode和datanode的本地文件目录，这样可以使绝大多数操作都不需要root权限，也就不需要再为root用户实现公钥登录了。</p>
+</blockquote>
+
+
+
+<h2 id="文件说明">文件说明</h2>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>cd ~<span class="hljs-regexp">/.ssh/</span>
+[liuyao<span class="hljs-variable">@master</span> .ssh]<span class="hljs-variable">$ </span>ls
+[liuyao<span class="hljs-variable">@master</span> .ssh]<span class="hljs-variable">$
+</span><span class="hljs-comment"># 经过口令登录和公钥登录之后……</span>
+[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>cd ~<span class="hljs-regexp">/.ssh/</span>
+[liuyao<span class="hljs-variable">@master</span> .ssh]<span class="hljs-variable">$ </span>ls
+authorized_keys  id_rsa  id_rsa.pub  known_hosts</code></pre>
+
+<p>注意：初始时是没有这4个文件的，经过以上口令登录和公钥登录等操作后才一一生成。</p>
+
+
+
+<h3 id="idrsa和idrsapub">id_rsa和id_rsa.pub</h3>
+
+<p>当前主机用户的私钥和公钥，用ssh-keygen生成，其中公钥用来发给别的主机可实现无密码SSH连通。</p>
+
+
+
+<h3 id="authorizedkeys">authorized_keys</h3>
+
+<p><strong>当前主机为被登录者，文件存放登录者公钥</strong>：公钥登录（无密码登录）时，remote client A–SSH–&gt;localhost B，A的公钥。当A要SSH到B时，B随机生成字符串给A，A使用自己的私钥加密字符串返回给B，B使用A的公钥解密后与之前的随机字符串匹配，匹配成功即为登录成功。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs applescript"><span class="hljs-comment"># slave2主机ssh到master主机，进行公钥登录设置,slave2的公钥发给master主机authorized_keys文件里</span>
+[liuyao@slave2 .ssh]$ ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span> liuyao@<span class="hljs-number">101.</span>X.XX.XX0
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: attempting <span class="hljs-keyword">to</span> <span class="hljs-command">log</span> <span class="hljs-keyword">in</span> <span class="hljs-keyword">with</span> <span class="hljs-keyword">the</span> new key(s), <span class="hljs-keyword">to</span> filter out any <span class="hljs-keyword">that</span> are already installed
+/usr/bin/ssh-<span class="hljs-keyword">copy</span>-<span class="hljs-property">id</span>: INFO: <span class="hljs-number">1</span> key(s) remain <span class="hljs-keyword">to</span> be installed <span class="hljs-comment">-- if you are prompted now it is to install the new keys</span>
+liuyao@<span class="hljs-number">101.</span>X.XX.XX0's password: 
+
+Number <span class="hljs-keyword">of</span> key(s) added: <span class="hljs-number">1</span>
+Now <span class="hljs-keyword">try</span> logging <span class="hljs-keyword">into</span> <span class="hljs-keyword">the</span> machine, <span class="hljs-keyword">with</span>:   <span class="hljs-string">"ssh 'liuyao@101.X.XX.XX0'"</span>
+<span class="hljs-keyword">and</span> check <span class="hljs-keyword">to</span> make sure <span class="hljs-keyword">that</span> only <span class="hljs-keyword">the</span> key(s) you wanted were added.
+
+[liuyao@slave2 .ssh]$ ssh liuyao@<span class="hljs-number">101.</span>X.XX.XX0
+Last login: Thu Jul <span class="hljs-number">14</span> <span class="hljs-number">18</span>:<span class="hljs-number">36</span>:<span class="hljs-number">39</span> <span class="hljs-number">2016</span> <span class="hljs-keyword">from</span> <span class="hljs-number">101.</span>X.XX.XX2
+[liuyao@master ~]$ </code></pre>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby"><span class="hljs-comment"># 主机master的authorized_keys文件里有localhost和两个slave主机的公钥信息</span>
+[liuyao<span class="hljs-variable">@master</span> .ssh]<span class="hljs-variable">$ </span>cat authorized_keys 
+ssh-rsa …… liuyao<span class="hljs-variable">@localhost</span>.localmain
+ssh-rsa …… liuyao<span class="hljs-variable">@slave1</span>
+ssh-rsa …… liuyao<span class="hljs-variable">@slave2</span></code></pre>
+
+
+
+<h3 id="knownhosts">known_hosts</h3>
+
+<p><strong>当前主机为登录者，文件存放被登录者公钥</strong>：口令登录时，localhost A–SSH–&gt;remote host B，B的公钥。当A要SSH到B时，A用B的公钥来加密密码传输给B，B收到加密的密码后用自己的私钥解密，密码正确即为登录成功。</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs avrasm"><span class="hljs-preprocessor"># 当前主机的known_hosts文件里有添加的3个主机及其公钥信息：localhost、101.X.XX.XX1和101.X.XX.XX2</span>
+[liuyao@master <span class="hljs-preprocessor">.ssh</span>]$ cat known_hosts 
+localhost ecdsa-sha2-nistp256 ……
+<span class="hljs-number">101.</span><span class="hljs-built_in">X</span><span class="hljs-preprocessor">.XX</span><span class="hljs-preprocessor">.XX</span>1 ecdsa-sha2-nistp256 ……
+<span class="hljs-number">101.</span><span class="hljs-built_in">X</span><span class="hljs-preprocessor">.XX</span><span class="hljs-preprocessor">.XX</span>2 ecdsa-sha2-nistp256 ……</code></pre>
+
+<blockquote>
+  <p>注意！注意！以上设置需要<strong>在集群各节点</strong>里配置（配置内容和方法一样，可以采用复制配置文件的方法），以下Hadoop安装和配置<strong>先只在master</strong>里进行，后面有需要的时候再配置slaves里的Hadoop（其实是直接把master的hadoop文件夹复制过去）。</p>
+</blockquote>
+
+<hr>
+
+<h1 id="hadoop安装和环境设置">Hadoop安装和环境设置</h1>
+
+<p>在<a href="http://hadoop.apache.org/" rel="nofollow">Hadoop官网</a>上下载稳定版的Hadoop 2.7.2，解压后放置在/home/liuyao/00Hadoop下，教材和网上会选择放在/usr/local/或/opt/下，我之所以选择放在liuyao用户目录上，是因为：</p>
+
+<ul>
+<li>这样不需要拥有root权限即可进行某些关键操作</li>
+<li>各节点之前互相SSH通信都可以使用liuyao这一普通用户</li>
+</ul>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>cd /home/liuyao/<span class="hljs-number">03</span>Software/<span class="hljs-number">04</span>BigData/
+[liuyao<span class="hljs-variable">@master</span> <span class="hljs-number">04</span>BigData]<span class="hljs-variable">$ </span>tar xzf hadoop-<span class="hljs-number">2.7</span>.<span class="hljs-number">2</span>.tar.gz --directory=<span class="hljs-regexp">/home/liuyao</span><span class="hljs-regexp">/00Hadoop/</span></code></pre>
+
+<p>配置Hadoop环境变量</p>
+
+<blockquote>
+  <p>注意：这个步骤需要在集群各节点里都配置！</p>
+</blockquote>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[root<span class="hljs-variable">@master</span> hadoop-<span class="hljs-number">2.7</span>.<span class="hljs-number">2</span>]<span class="hljs-variable">$ </span>vi /etc/profile
+<span class="hljs-comment"># 在文件中添加以下两行</span>
+export <span class="hljs-constant">HADOOP_INSTALL</span>=<span class="hljs-regexp">/home/liuyao</span><span class="hljs-regexp">/00Hadoop/hadoop</span>-<span class="hljs-number">2.7</span>.<span class="hljs-number">2</span>
+export <span class="hljs-constant">PATH</span>=<span class="hljs-variable">$PATH</span><span class="hljs-symbol">:</span><span class="hljs-variable">${</span><span class="hljs-constant">HADOOP_INSTALL</span>}/<span class="hljs-symbol">bin:</span><span class="hljs-variable">${</span><span class="hljs-constant">HADOOP_INSTALL</span>}/sbin</code></pre>
+
+<p>输入以下命令判断Hadoop是否工作</p>
+
+
+
+<pre class="prettyprint"><code class=" hljs ruby">[liuyao<span class="hljs-variable">@master</span> ~]<span class="hljs-variable">$ </span>hadoop version
+<span class="hljs-constant">Hadoop</span> <span class="hljs-number">2.7</span>.<span class="hljs-number">2</span>
+……</code></pre>
+
+
+
+<h1 id="参考">参考</h1>
+
+<blockquote>
+  <p><a href="http://www.ruanyifeng.com/blog/2011/12/ssh_remote_login.html" rel="nofollow">http://www.ruanyifeng.com/blog/2011/12/ssh_remote_login.html</a></p>
+</blockquote>            </div>
+						<link href="https://csdnimg.cn/release/phoenix/mdeditor/markdown_views-9e5741c4b9.css" rel="stylesheet">
+                </div>

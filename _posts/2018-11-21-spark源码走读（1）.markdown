@@ -1,0 +1,126 @@
+---
+layout:     post
+title:      spark源码走读（1）
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								<div class="article-copyright">
+					版权声明：本文为博主原创文章，未经博主允许不得转载。					https://blog.csdn.net/rongyongfeikai2/article/details/50548005				</div>
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+/usr/local/jdk1.7/bin/java -cp /usr/local/spark/lib/postgresql-9.4-1201.jdbc41.jar:/usr/local/spark/sbin/../conf/:/usr/local/spark/lib/spark-assembly-1.5.2-hadoop2.6.0.jar:/usr/local/spark/lib/datanucleus-core-3.2.10.jar:/usr/local/spark/lib/datanucleus-rdbms-3.2.9.jar:/usr/local/spark/lib/datanucleus-api-jdo-3.2.6.jar:/usr/local/hadoop/etc/hadoop/
+ -Dspark.cores.max=2 -Xms1g -Xmx1g -XX:MaxPermSize=256m org.apache.spark.deploy.SparkSubmit --master yarn-client --class org.apache.spark.sql.hive.thriftserver.HiveThriftServer2 spark-internal<br><br>
+此次阅读主要关注点在于Thriftserver Application在yarn上的提交(最终8088 WebUI展示的Application名字应该叫做SparkSQL)。<br><br>
+org.apache.spark.deploy.SparkSubmit的main方法<br>
+def main(args: Array[String]): Unit = {<br>
+    //用传递的参数初始化一个SparkSubmitAguments对象<br>
+    //参数包括<br>
+    //--master yarn-client --class org.apache.spark.sql.hive.thriftserver.HiveThriftServer2 spark-internal val appArgs = new SparkSubmitArguments(args)<br>
+    if (appArgs.verbose) {<br>
+      printStream.println(appArgs)<br>
+    }<br>
+    //如果action没有赋值，则默认为SUBMIT；否则，则为得到的action的值<br>
+    //明显目前是没有赋值的，所以进入submit(appArgs)方法<br>
+    appArgs.action match {<br>
+      case SparkSubmitAction.SUBMIT =&gt; submit(appArgs)<br>
+      case SparkSubmitAction.KILL =&gt; kill(appArgs)<br>
+      case SparkSubmitAction.REQUEST_STATUS =&gt; requestStatus(appArgs)<br>
+    }<br>
+}<br><br>
+进入submit函数体(第145行)<br>
+private[spark] def submit(args: SparkSubmitArguments): Unit = {<br>
+    //prepareSubmitEnvironment返回一个四元组，包含（子进程参数、子进程类路径列表、系统参数map、子进程主类）<br>
+    //1.根据master参数确定提交的方式，我们的master参数的值是yarn-client，根据yarn确定了Application运行在yarn上<br>
+    //2.根据yarn-client的client，知道了deploy的方式是client方式<br>
+    //3.如果是client方式，则a.得到mainclass的值（此处应为org.apache.spark.sql.hive.thriftserver.HiveThriftServer2 //b.得到所有jar,按逗号split<br>
+    val (childArgs, childClasspath, sysProps, childMainClass) = prepareSubmitEnvironment(args)<br><br>
+    def doRunMain(): Unit = {<br>
+      if (args.proxyUser != null) {<br>
+        val proxyUser = UserGroupInformation.createProxyUser(args.proxyUser,<br>
+          UserGroupInformation.getCurrentUser())<br>
+        try {<br>
+          proxyUser.doAs(new PrivilegedExceptionAction[Unit]() {<br>
+            override def run(): Unit = {<br>
+              runMain(childArgs, childClasspath, sysProps, childMainClass, args.verbose)<br>
+            }<br>
+          })<br>
+        } catch {<br>
+          case e: Exception =&gt;<br>
+            // Hadoop's AuthorizationException suppresses the exception's stack trace, which<br>
+            // makes the message printed to the output by the JVM not very helpful. Instead,<br>
+            // detect exceptions with empty stack traces here, and treat them differently.<br>
+            if (e.getStackTrace().length == 0) {<br>
+              printStream.println(s"ERROR: ${e.getClass().getName()}: ${e.getMessage()}")<br>
+              exitFn()<br>
+            } else {<br>
+              throw e<br>
+            }<br>
+        }<br>
+      } else {<br>
+        //利用反射执行相应主类的main方法，并且将参数传入<br>
+        runMain(childArgs, childClasspath, sysProps, childMainClass, args.verbose)<br>
+      }<br>
+    }<br><br>
+     // In standalone cluster mode, there are two submission gateways:<br>
+     //   (1) The traditional Akka gateway using o.a.s.deploy.Client as a wrapper<br>
+     //   (2) The new REST-based gateway introduced in Spark 1.3<br>
+     // The latter is the default behavior as of Spark 1.3, but Spark submit will fail over<br>
+     // to use the legacy gateway if the master endpoint turns out to be not a REST server.<br>
+    if (args.isStandaloneCluster &amp;&amp; args.useRest) {<br>
+      try {<br>
+        printStream.println("Running Spark using the REST application submission protocol.")<br>
+        doRunMain()<br>
+      } catch {<br>
+        // Fail over to use the legacy submission gateway<br>
+        case e: SubmitRestConnectionException =&gt;<br>
+          printWarning(s"Master endpoint ${args.master} was not a REST server. " +<br>
+            "Falling back to legacy submission gateway instead.")<br>
+          args.useRest = false<br>
+          submit(args)<br>
+      }<br>
+    // In all other modes, just run the main class as prepared<br>
+    } else {<br>
+      //看清楚没，其实这个doRunMain方法就是上面定义的内部方法def doRunMain():Unit<br>
+      doRunMain()<br>
+    }<br>
+}<br><br>
+进入org.apache.spark.sql.hive.thriftserver.HiveThriftServer2的main方法（第51行）<br>
+（代码有点难找，其实在spark-parent_2.10/spark-1.3.0/sql/hivethriftserver下）<br>
+def main(args: Array[String]) {<br>
+    //org.apache.hive.service.ServerOptionsProcessor<br>
+    //这个类在hive源码的service/src/java/org.hive.server下<br>
+    val optionsProcessor = new ServerOptionsProcessor("HiveThriftServer2")<br>
+    if (!optionsProcessor.process(args)) {<br>
+      System.exit(-1)<br>
+    }<br><br>
+    logInfo("Starting SparkContext")<br>
+    //初始化sparkcontext和hivecontext<br>
+    SparkSQLEnv.init()<br><br>
+    Runtime.getRuntime.addShutdownHook(<br>
+      new Thread() {<br>
+        override def run() {<br>
+          SparkSQLEnv.stop()<br>
+        }<br>
+      }<br>
+    )<br><br>
+    try {<br>
+      //HiveThriftServer2其实是org.apache.hive.service.server.HiveServer2的子类<br>
+      //将类中的cliService赋值为sparkSqlCliService，HIVE_SERVER2_TRANSPORT_MODE默认为binary(TCP)<br>
+      val server = new HiveThriftServer2(SparkSQLEnv.hiveContext)<br>
+      server.init(SparkSQLEnv.hiveContext.hiveconf)<br>
+      //start时，由于其实是遍历servicelist然后start，所以其实执行了sparkSqlCliService.start()<br>
+      //但值得注意的是，SparkSQLCLIService是org.apache.hive.service.cli.CLIService的子类<br>
+      //start方法主要是new了一个HiveMetaStoreClient的对象，它接收了hiveconf作为构造函数参数<br>
+      server.start()<br>
+      logInfo("HiveThriftServer2 started")<br>
+      //启动listener监听<br>
+      SparkSQLEnv.sparkContext.addSparkListener(new HiveThriftServer2Listener(server))<br>
+    } catch {<br>
+      case e: Exception =&gt;<br>
+        logError("Error starting HiveThriftServer2", e)<br>
+        System.exit(-1)<br>
+    }<br>
+}<br><br>
+综上可以知道，启动了spark下的thriftserver之后，其实最终是用到了hive中的HiveServer2、HiveMetaStoreClient。
+            </div>
+                </div>

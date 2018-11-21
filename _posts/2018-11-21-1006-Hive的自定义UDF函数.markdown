@@ -1,0 +1,102 @@
+---
+layout:     post
+title:      1006-Hive的自定义UDF函数
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                
+<div><span>hive可以任意定义一个函数，然后该函数放到hive的classpath下，在进入hive中，使用该命令操作</span>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';">场景：设中国移动的用户在商城上下单，下单记录的主要字段包括</span></div>
+<div><span style="font-family:'仿宋';">订单号     手机号码               商品编码          商品数量          渠道</span></div>
+<div><span style="font-family:'仿宋';">10000     18810637891     bm0001          1                      0001  </span></div>
+<div><span style="font-family:'仿宋';">10001     18710637891     bm0002          2                      0002</span></div>
+<div><span style="font-family:'仿宋';">10002     18710637891     bm0001          1                      0001</span></div>
+<div><span style="font-family:'仿宋';">10003     18610637891     bm0002          2                      0003</span></div>
+<div><span style="font-family:'仿宋';">10004     18610637891     bm0002          5                      0001</span></div>
+<div><span style="font-family:'仿宋';">10005     18610637891     bm0004          2                      0005</span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';">已知：如何根据手机号得知该用户对应的省份。假设规则如下（即：手机号前三位和省份的对应的关系）</span></div>
+<div><span style="font-family:'仿宋';">188     北京（bj）</span></div>
+<div><span style="font-family:'仿宋';">187     上海（sh）</span></div>
+<div><span style="font-family:'仿宋';">186     河北（hb）</span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';">对上面的记录在手机号的后面加上省份字段，然后把其余字段输出并上传hdfs上</span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';">解决方案：</span></div>
+<div><span style="font-family:'仿宋';">1、下单记录日志存放在日志文件jforder.log中</span></div>
+<div><span style="font-family:'仿宋';">[hadoop@cloud01 sbin]$ hadoop fs -mkdir /external<br>
+[hadoop@cloud01 sbin]$ hadoop fs -mkdir /external/hive</span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';">hive&gt; create external table  jf_order (orderNo string ,mobileNo string,wareCode string,amount int ,channel string)<br>
+    &gt; row format delimited<br>
+    &gt; fields terminated by '\t'<br>
+    &gt; location '/external/hive';</span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';">[hadoop@cloud01 ~]$ more jforder.log<br>
+10000     18810637891     bm0001     1     0001 <br>
+10001     18710637891     bm0002     2     0002<br>
+10002     18710637891     bm0001     1     0001<br>
+10003     18610637891     bm0002     2     0003<br>
+10004     18610637891     bm0002     5     0001<br>
+10005     18610637891     bm0004     2     0005<br>
+[hadoop@cloud01 ~]$ hadoop fs -put jforder.log /external/hive</span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';">2、编写hive的函数areaFunction，作用根据手机号获取对应的用户省份</span></div>
+<div>
+<div align="left"><span style="font-family:'仿宋';color:#3F5FBF;"><br></span></div>
+<div><span style="font-family:'仿宋';">3、启动eclipse，编写udf函数</span></div>
+<div align="left">
+<div align="left">
+<div align="left"><span style="font-family:'仿宋';color:#3F5FBF;">/**</span></div>
+<div align="left"><span style="font-family:'仿宋';"><span style="color:#3F5FBF;"> *</span><span> </span><span style="color:#7F9FBF;"><strong>@function</strong></span><span style="color:#3F5FBF;">： 定义省份转换函数，加载hive的<span> </span><u>classpath</u>下，可以直接使用</span></span></div>
+<div align="left"><span style="font-family:'仿宋';"><span style="color:#3F5FBF;"> *</span><span> </span><span style="color:#7F9FBF;"><strong>@author</strong></span><span> </span><span style="color:#3F5FBF;"><u>shenfl</u></span></span></div>
+<div align="left"><span style="font-family:'仿宋';"><span style="color:#3F5FBF;"> *</span><span> </span><span style="color:#7F9FBF;"><strong>@version</strong></span><span style="color:#3F5FBF;">:1.0</span></span></div>
+<div align="left"><span style="font-family:'仿宋';"><span style="color:#3F5FBF;"> *</span><span> </span><span style="color:#7F9FBF;"><strong>@date</strong></span><span style="color:#3F5FBF;">： 2015</span><span> </span><span style="color:#7F7F9F;">-</span><span style="color:#3F5FBF;">5</span><span style="color:#7F7F9F;">-</span><span> </span><span style="color:#3F5FBF;">31</span></span></div>
+<div align="left"><span style="font-family:'仿宋';color:#3F5FBF;"> *</span></div>
+<div align="left"><span style="font-family:'仿宋';color:#3F5FBF;"> */</span></div>
+<div align="left"><span style="font-family:'仿宋';"><span style="color:#7F0055;"><strong>public</strong></span><span> </span><span style="color:#7F0055;"><strong>class</strong></span><span> </span>AreaFunction<span> </span><span style="color:#7F0055;"><strong>extends</strong></span><span> </span>UDF
+ {</span></div>
+<div align="left"><span style="font-family:'仿宋';">     </span></div>
+<div align="left"><span style="font-family:'仿宋';">     <span style="color:#3F7F5F;">/*定义静态变量*/</span></span></div>
+<div align="left"><span style="font-family:'仿宋';">     <span style="color:#7F0055;"><strong>public</strong></span><span> </span><span style="color:#7F0055;"><strong>static</strong></span><span> </span>Map&lt;<span style="background-color:rgb(212,212,212);">String</span>,<span> </span><span style="background-color:rgb(212,212,212);">String</span>&gt;<span> </span><span style="color:#0000C0;"><em>map</em></span><span> </span>=<span> </span><span style="color:#7F0055;"><strong>new</strong></span><span> </span>HashMap&lt;<span style="background-color:rgb(212,212,212);">String</span>,<span style="background-color:rgb(212,212,212);">String</span><span> </span>&gt;();</span></div>
+<div align="left"><span style="font-family:'仿宋';">     /*可扩展数据数据库获取*/</span></div>
+<div align="left"><span style="font-family:'仿宋';">     <span style="color:#7F0055;"><strong>static</strong></span>{</span></div>
+<div align="left"><span style="font-family:'仿宋';">          <span> </span><span style="color:#0000C0;"><em>map</em></span><span> </span>.put(<span style="color:#2A00FF;">"188"</span><span> </span>,<span style="color:#2A00FF;">"北京"</span><span> </span>);</span></div>
+<div align="left"><span style="font-family:'仿宋';">          <span> </span><span style="color:#0000C0;"><em>map</em></span><span> </span>.put(<span style="color:#2A00FF;">"187"</span><span> </span>,<span> </span><span style="color:#2A00FF;">"上海"</span><span> </span>);</span></div>
+<div align="left"><span style="font-family:'仿宋';">          <span> </span><span style="color:#0000C0;"><em>map</em></span><span> </span>.put(<span style="color:#2A00FF;">"186"</span><span> </span>,<span style="color:#2A00FF;">"河北"</span><span> </span>);</span></div>
+<div align="left"><span style="font-family:'仿宋';">     }</span></div>
+<div align="left"><span style="font-family:'仿宋';">     <span style="color:#7F0055;"><strong>public</strong></span><span> </span><span style="background-color:rgb(212,212,212);">String</span><span> </span>evaluate(<span style="background-color:rgb(212,212,212);">String</span><span> </span><span style="color:#6A3E3E;">mobileNumber</span><span> </span>){</span></div>
+<div align="left"><span style="font-family:'仿宋';">          <span> </span><span style="color:#7F0055;"><strong>return</strong></span><span> </span><span style="color:#6A3E3E;">mobileNumber</span><span> </span>+<span> </span><span style="color:#2A00FF;">"\t"</span><span> </span>+<span> </span><span style="color:#0000C0;"><em>map</em></span><span> </span>.get(<span style="color:#6A3E3E;">mobileNumber</span><span> </span>.substring(0,
+ 3));</span></div>
+<div align="left"><span style="font-family:'仿宋';">     }</span></div>
+<div align="left"><span style="font-family:'仿宋';">     </span></div>
+<div align="left"><span style="font-family:'仿宋';">     <span style="color:#7F0055;"><strong>public</strong></span><span> </span><span style="color:#7F0055;"><strong>static</strong></span><span> </span><span style="color:#7F0055;"><strong>void</strong></span><span> </span>main(<span style="background-color:rgb(212,212,212);">String</span><span> </span>[]<span> </span><span style="color:#6A3E3E;">args</span><span> </span>)
+ {</span></div>
+<div align="left"><span style="font-family:'仿宋';">          AreaFunction<span> </span><span style="color:#6A3E3E;">area</span><span> </span>=<span> </span><span style="color:#7F0055;"><strong>new</strong></span><span> </span>AreaFunction();</span></div>
+<div align="left"><span style="font-family:'仿宋';">          <span> </span><span style="background-color:rgb(212,212,212);">String</span><span> </span><span style="color:#6A3E3E;">mobileNumber</span><span> </span>=<span> </span><span style="color:#2A00FF;">"18810635789"</span><span> </span>;</span></div>
+<div align="left"><span style="font-family:'仿宋';">          <span> </span><span style="background-color:rgb(212,212,212);">String</span><span> </span><span style="color:#6A3E3E;">rs</span><span> </span>=<span> </span><span style="color:#6A3E3E;">area</span>.evaluate(<span> </span><span style="color:#6A3E3E;">mobileNumber</span><span> </span>);</span></div>
+<div align="left"><span style="font-family:'仿宋';">          System.<span> </span><span style="color:#0000C0;"><strong><em>out</em></strong></span><span> </span>.println(<span style="color:#6A3E3E;">rs</span><span> </span>);</span></div>
+<div align="left"><span style="font-family:'仿宋';">     }</span></div>
+<div align="left"><span style="font-family:'仿宋';">}</span></div>
+</div>
+</div>
+</div>
+<div><span style="font-family:'仿宋';">4、上传编写的函数，把编写好的函数放到hive的classpath下</span></div>
+<div><span style="font-family:'仿宋';">hive&gt;add jar /home/hadoop/hiveudf.jar;</span></div>
+<div><span style="font-family:'仿宋';">hive&gt;create temporary function area2 as 'com.hive.AreaFunction';</span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><span style="font-family:'仿宋';">5、验证</span></div>
+<div><span style="font-family:'仿宋';">hive&gt; select orderNo ,area2(mobileno),wareCode,amount ,channel from jf_order;<br><br></span></div>
+<div><span style="font-family:'仿宋';">6、强化后的结果存储到hdfs上</span></div>
+<div><span style="font-family:'仿宋';">hive&gt; insert overwrite directory  '/hiveout'  select orderNo ,area2(mobileno),wareCode,amount ,channel from jf_order;<br></span></div>
+<div><span style="font-family:'仿宋';"><br></span></div>
+<div><br></div>
+<br></div>
+            </div>
+                </div>

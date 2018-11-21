@@ -1,0 +1,105 @@
+---
+layout:     post
+title:      hadoop整理
+---
+<div id="article_content" class="article_content clearfix csdn-tracking-statistics" data-pid="blog" data-mod="popu_307" data-dsm="post">
+								            <link rel="stylesheet" href="https://csdnimg.cn/release/phoenix/template/css/ck_htmledit_views-f76675cdea.css">
+						<div class="htmledit_views" id="content_views">
+                <h2>hadoop核心模块</h2>
+
+<p> </p>
+
+<ul><li>hadoop Common:hadoop常用的工具类，由原来的Hadoop core部分更名而来</li>
+	<li>Hadoop Distributed File System(HDFS):分布式文件系统，提供对应用程序数据的高吞吐量，高伸缩性，高容错性访问。Hadoop体系中数据存储管理的基础</li>
+	<li>Hadoop YARN:任务调度和集群资源管理</li>
+	<li>Hadoop MapReduce:基于YARN的大型数据集并行处理系统</li>
+</ul><h2>HDFS</h2>
+
+<p><br>
+java语言开发为分布式计算存储提供了底层支持<br>
+可以部署在多种廉价机器上，以集群处理数量积达到大型主机处理性能<br>
+&gt; hdfs设计目标</p>
+
+<ul><li>硬件故障时常态：hdfs将有成百上千的服务器组成，故障检测和自动快速回复是hdfs的核心架构目标</li>
+	<li>hdfs主要以流式读取数据，适合批量处理，注重数据访问的高吞吐量</li>
+	<li>hdfs文件大小是GB到TB级别，hdfs被调整成支持大文件</li>
+	<li>hdfs访问模式是一次写入多次读取。一个文件一旦创建，写入，关闭之后就不需要修改了。这个假设简化了数据一致性问题，使高吞吐量的数据访问成为可能。</li>
+	<li>移动计算的代价比移动数据的代价低。就近数据计算，海量级别更明显</li>
+	<li>在异构的硬件和软件平台上的可移植性</li>
+</ul><h2>HDFS重要性</h2>
+
+<p> </p>
+
+<ul><li>分布式的文件系统</li>
+	<li>master/slave架构</li>
+	<li>分块存储（默认128M）</li>
+	<li>名字空间（可以在hdfs上进行名字的创建，删除，移动或者重命名文件），namenode负责维护文件系统的名字空间</li>
+	<li>namenode元数据管理（元数据：目录结构+文件分块位置信息）Namenode 负责维护整个hdfs 文件系统的目录树结构，以及每一个文件所对应的 block 块信息（block 的id，及所在的 datanode 服务器）。</li>
+	<li>Datanode数据存储</li>
+	<li>副本机制</li>
+	<li>一次写入，多次读出</li>
+</ul><h2>HDFS的基本原理</h2>
+
+<p><br>
+&gt; namenode</p>
+
+<ul><li>namenode是hdfs的核心，也称为master</li>
+	<li>namenode仅存储hdfs的元数据，并跟踪整个集群中的文件。</li>
+	<li>namenode知道hdfs中任何给定文件的块列表及其位置，使用这个信息namenode知道如何从块中构建文件，</li>
+	<li>namenode并不持久化存储每个文件中各个块所在的datanode的位置信息，这些信息会在系统启动时从数据节点重建namenode关闭hdfs/hadoop集群无法访问。</li>
+	<li>namenode是hadoop集群中的单点故障，namenode所在机器通常会分配大量内存（RAM）</li>
+</ul><p>&gt; datanode</p>
+
+<ul><li>- datanode负责将实际数据存储在hdfs中,称为slave</li>
+	<li>- namenode与datanode保持不断通信，datanode启动或者关闭都会向namenode汇报</li>
+	<li>- namenode所在机器应配备大量硬盘空间，默认3s（dfs.heartbeat.interval配置项配置）发送一次心跳。没反馈namenode认为datanode失效</li>
+	<li>- block汇报时间间隔默认6h( dfs.blockreport.intervalMsec)</li>
+</ul><h2>hdfs的工作机制</h2>
+
+<p><br>
+namenode负责管理整个文件系统元数据<br>
+datanode负责管理具体文件数据块存储<br>
+secondary namenode协助namenode进行元数据备份（相当于快照功能）</p>
+
+<h2><br>
+hdfs的读写流程</h2>
+
+<p><br>
+&gt; 写流程<br>
+1. client 发起文件上传请求，通过 RPC 与 NameNode 建立通讯，NameNode检查目标文件是否已存在，父目录是否存在，返回是否可以上传；<br>
+2. client 请求第一个 block 该传输到哪些 DataNode 服务器上;<br>
+3. NameNode 根据配置文件中指定的备份数量及机架感知原理进行文件分配，返回可用的 DataNode 的地址如：A，B，C；<br>
+4. client 请求 3 台 DataNode 中的一台 A 上传数据（本质上是一个 RPC 调用，建立 pipeline），A收到请求会继续调用 B，然后 B 调用 C，将整个pipeline 建立完成，后逐级返回 client；<br>
+5. client 开始往 A 上传第一个 block（先从磁盘读取数据放到一个本地内存缓存），以 packet 为单位（默认 64K），A 收到一个 packet 就会传给 B，B 传给 C；A 每传一个packet会放入一个应答队列等待应答 <br>
+6. 数据被分割成一个个 packet 数据包在 pipeline 上依次传输，在pipeline 反方向上，逐个发送 ack（命令正确应答），最终由 pipeline中第一个 DataNode 节点 A 将 pipeline ack 发送给 client;<br>
+7. 当一个 block 传输完成之后，client 再次请求 NameNode 上传第二个block 到服务器</p>
+
+<p>&gt; 读流程</p>
+
+<p>1. Client 向 NameNode 发起 RPC 请求，来确定请求文件 block 所在的位置；<br>
+2. NameNode会视情况返回文件的部分或者全部block列表，对于每个block，NameNode 都会返回含有该 block 副本的 DataNode 地址；<br>
+3. 这些返回的 DN 地址，会按照集群拓扑结构得出 DataNode 与客户端的距离，然后进行排序，排序两个规则：网络拓扑结构中距离 Client 近的排靠前；心跳机制中超时汇报的 DN 状态为 STALE，这样的排靠后；<br>
+4. Client 选取排序靠前的 DataNode 来读取 block，如果客户端本身就是DataNode,那么将从本地直接获取数据；<br>
+5. 底层上本质是建立 Socket Stream（FSDataInputStream），重复的调用父类 DataInputStream 的 read 方法，直到这个块上的数据读取完毕；<br>
+6. 当读完列表的 block 后，若文件读取还没有结束，客户端会继续向NameNode 获取下一批的 block 列表；<br>
+7. 读取完一个 block 都会进行 checksum 验证，如果读取 DataNode 时出现错误，客户端会通知NameNode，然后再从下一个拥有该 block 副本的DataNode 继续读。<br>
+8. read 方法是并行的读取 block 信息，不是一块一块的读取；NameNode 只是返回Client请求包含块的DataNode地址，并不是返回请求块的数据；<br>
+9. 最终读取来所有的 block 会合并成一个完整的最终文件。</p>
+
+<h2>拓展</h2>
+
+<h3><br>
+hdfs相关</h3>
+
+<blockquote>
+<p>- 列出本地文件系统的目录：hadoop fs -ls file:///<br>
+- 查看HDFS的基本统计信息:hadoop dfsadmin -report</p>
+
+<p>进入安全模式，需要超级管理员<br>
+- hadoop dfsadmin -safemode leave 退出安全模式<br>
+- hadoop dfsadmin -safemode enter 进入安全模式</p>
+
+<p>集群拓扑图（机架感知topology.data）<br>
+hdfs  dfsadmin  -printTopology</p>
+</blockquote>            </div>
+                </div>
